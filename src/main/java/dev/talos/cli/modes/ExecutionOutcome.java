@@ -29,8 +29,10 @@ import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.EmbeddedStaticVerificationResultParser;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.TaskVerificationEvidence;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
+import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -49,6 +51,7 @@ record ExecutionOutcome(
         CompletionStatus completionStatus,
         GroundingStatus groundingStatus,
         VerificationStatus verificationStatus,
+        VerificationReport verificationReport,
         TaskOutcome taskOutcome,
         boolean mutationRequested,
         boolean toolLoopRan,
@@ -329,18 +332,26 @@ record ExecutionOutcome(
             current = EvidenceContainmentAnswerGuard.missingEvidencePrefix(current);
         }
 
+        shaped = EmbeddedStaticVerificationResultParser.removePositivePassMarkers(current);
+        boolean embeddedPositiveVerificationSanitized = !Objects.equals(current, shaped);
+        current = shaped;
+
         TaskVerificationResult embeddedVerification = EmbeddedStaticVerificationResultParser.parse(current);
-        boolean usingEmbeddedVerification = embeddedVerification.status() != TaskVerificationStatus.NOT_RUN;
-        TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
+        TaskVerificationEvidence embeddedEvidence = TaskVerificationEvidence.embeddedAssistant(embeddedVerification);
+        boolean usingEmbeddedVerification = embeddedEvidence.compatibilityResult().status()
+                != TaskVerificationStatus.NOT_RUN;
+        TaskVerificationEvidence taskVerificationEvidence = workspace != null && shouldVerifyPostApply(
                 contract, completionStatus, loopResult, extraMutationSuccesses)
-                ? StaticTaskVerifier.verify(
+                ? StaticTaskVerifier.verifyWithEvidence(
                         workspace,
                         contract,
                         loopResult,
                         extraMutationSuccesses)
                 : usingEmbeddedVerification
-                ? embeddedVerification
-                : TaskVerificationResult.notRun("Post-apply verification was not applicable.");
+                ? embeddedEvidence
+                : TaskVerificationEvidence.notRun("Post-apply verification was not applicable.");
+        TaskVerificationResult taskVerification = taskVerificationEvidence.compatibilityResult();
+        VerificationReport verificationReport = taskVerificationEvidence.report();
         VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
         if (verificationStatus == VerificationStatus.FAILED) {
             if (usingEmbeddedVerification) {
@@ -356,7 +367,10 @@ record ExecutionOutcome(
             current = StaticVerificationAnswerRenderer.unavailableAnnotation(taskVerification) + current;
         } else if (verificationStatus == VerificationStatus.READBACK_ONLY) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(taskVerification, loopResult)
+                current = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(
+                        taskVerification,
+                        loopResult,
+                        verificationReport)
                         + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
                         + current;
             }
@@ -394,6 +408,7 @@ record ExecutionOutcome(
                 finalDecision.taskCompletionStatus(),
                 MutationOutcome.from(contract, loopResult, extraMutationSuccesses),
                 taskVerification,
+                verificationReport,
                 TaskOutcomeWarningBuilder.toolLoopWarnings(
                         new TaskOutcomeWarningBuilder.ToolLoopFacts(
                                 deniedMutation,
@@ -426,17 +441,23 @@ record ExecutionOutcome(
             LocalTurnTraceCapture.recordProtocolSanitized(
                     "mutating tool protocol blocked by read-only task contract");
         }
+        if (embeddedPositiveVerificationSanitized) {
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    "assistant-authored static verification pass marker was removed before outcome classification");
+        }
         TaskOutcomeTraceRecorder.record(
                 completionStatus == null ? "" : completionStatus.name(),
                 verificationStatus == null ? "" : verificationStatus.name(),
                 taskOutcome,
-                taskVerification);
+                taskVerification,
+                verificationReport);
 
         return new ExecutionOutcome(
                 current,
                 completionStatus,
                 groundingStatus,
                 verificationStatus,
+                verificationReport,
                 taskOutcome,
                 mutationRequested,
                 true,
@@ -569,8 +590,13 @@ record ExecutionOutcome(
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             shaped = EvidenceContainmentAnswerGuard.missingEvidencePrefix(shaped);
         }
+        String noToolPositiveVerificationSanitized =
+                EmbeddedStaticVerificationResultParser.removePositivePassMarkers(shaped);
+        boolean embeddedPositiveVerificationSanitized = !Objects.equals(shaped, noToolPositiveVerificationSanitized);
+        shaped = noToolPositiveVerificationSanitized;
         advisoryOnly = completionStatus == CompletionStatus.ADVISORY_ONLY;
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
+        VerificationReport verificationReport = VerificationReport.empty();
         List<TruthWarning> warnings = TaskOutcomeWarningBuilder.noToolWarnings(
                 new TaskOutcomeWarningBuilder.NoToolFacts(
                         noToolMutationReplaced,
@@ -584,6 +610,7 @@ record ExecutionOutcome(
                 decision.taskCompletionStatus(),
                 MutationOutcome.from(contract, null, 0),
                 verification,
+                verificationReport,
                 warnings,
                 List.of()
         );
@@ -591,17 +618,23 @@ record ExecutionOutcome(
             LocalTurnTraceCapture.recordProtocolSanitized(
                     "malformed tool protocol debris was replaced with a no-action notice");
         }
+        if (embeddedPositiveVerificationSanitized) {
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    "assistant-authored static verification pass marker was removed before outcome classification");
+        }
         TaskOutcomeTraceRecorder.record(
                 completionStatus == null ? "" : completionStatus.name(),
                 VerificationStatus.NOT_RUN.name(),
                 taskOutcome,
-                verification);
+                verification,
+                verificationReport);
 
         return new ExecutionOutcome(
                 shaped,
                 completionStatus,
                 ungrounded ? GroundingStatus.UNGROUNDED : GroundingStatus.UNKNOWN,
                 VerificationStatus.NOT_RUN,
+                verificationReport,
                 taskOutcome,
                 mutationRequested,
                 false,

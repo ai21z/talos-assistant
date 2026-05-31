@@ -2,6 +2,7 @@ package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.verification.TaskVerificationResult;
+import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolAliasPolicy;
 
@@ -38,15 +39,37 @@ public final class StaticVerificationAnswerRenderer {
             TaskVerificationResult result,
             ToolCallLoop.LoopResult loopResult
     ) {
+        return readbackOnlyAnnotation(result, loopResult, VerificationReport.empty());
+    }
+
+    public static String readbackOnlyAnnotation(
+            TaskVerificationResult result,
+            ToolCallLoop.LoopResult loopResult,
+            VerificationReport report
+    ) {
         String readbackKind = hasSuccessfulWorkspaceOperation(loopResult)
                 ? "Workspace operation/readback"
                 : "File write/readback";
         String verifierReason = hasUnsatisfiedTaskSpecificVerification(result)
                 ? "Task-specific verification did not satisfy the requested claim, "
                 : "No task-specific verifier was applicable, ";
-        return "[" + readbackKind + " passed. " + verifierReason
-                + "so task completion was not verified. "
-                + verificationSummary(result) + "]\n\n";
+        StringBuilder out = new StringBuilder();
+        out.append("[").append(readbackKind).append(" passed. ").append(verifierReason)
+                .append("so task completion was not verified. ")
+                .append(verificationSummary(result))
+                .append("]\n\n");
+        List<String> details = report == null ? List.of() : report.unsatisfiedRequiredDetails();
+        if (!details.isEmpty()) {
+            out.append("Unsatisfied verification detail:");
+            for (String detail : details.subList(0, Math.min(5, details.size()))) {
+                out.append("\n- ").append(singleLine(detail));
+            }
+            if (details.size() > 5) {
+                out.append("\n- ... ").append(details.size() - 5).append(" more");
+            }
+            out.append("\n\n");
+        }
+        return out.toString();
     }
 
     public static String failedAnnotation(TaskVerificationResult result) {

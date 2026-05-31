@@ -195,15 +195,31 @@ public record LocalTurnTrace(
         }
     }
 
-    public record VerificationSummary(String status, String summary, List<String> problems) {
+    public record VerificationSummary(
+            String status,
+            String summary,
+            List<String> problems,
+            int requiredClaimCount,
+            int unsatisfiedRequiredClaimCount,
+            List<String> authoritativeProofKinds,
+            List<String> limitations
+    ) {
+        public VerificationSummary(String status, String summary, List<String> problems) {
+            this(status, summary, problems, 0, 0, List.of(), List.of());
+        }
+
         public VerificationSummary {
             status = safe(status);
             summary = safe(summary);
             problems = problems == null ? List.of() : List.copyOf(problems);
+            requiredClaimCount = Math.max(0, requiredClaimCount);
+            unsatisfiedRequiredClaimCount = Math.max(0, unsatisfiedRequiredClaimCount);
+            authoritativeProofKinds = authoritativeProofKinds == null ? List.of() : List.copyOf(authoritativeProofKinds);
+            limitations = limitations == null ? List.of() : List.copyOf(limitations);
         }
 
         static VerificationSummary empty() {
-            return new VerificationSummary("", "", List.of());
+            return new VerificationSummary("", "", List.of(), 0, 0, List.of(), List.of());
         }
     }
 
@@ -394,6 +410,26 @@ public record LocalTurnTrace(
 
         public Builder verification(String status, String summary, List<String> problems) {
             this.verification = new VerificationSummary(status, summary, problems);
+            return this;
+        }
+
+        public Builder verification(
+                String status,
+                String summary,
+                List<String> problems,
+                int requiredClaimCount,
+                int unsatisfiedRequiredClaimCount,
+                List<String> authoritativeProofKinds,
+                List<String> limitations
+        ) {
+            this.verification = new VerificationSummary(
+                    status,
+                    summary,
+                    problems,
+                    requiredClaimCount,
+                    unsatisfiedRequiredClaimCount,
+                    authoritativeProofKinds,
+                    limitations);
             return this;
         }
 

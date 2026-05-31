@@ -281,6 +281,22 @@ public final class ExplainLastTurnCommand implements Command {
             for (String problem : trace.verification().problems()) {
                 sb.append("    - ").append(problem).append('\n');
             }
+            if (trace.verification().requiredClaimCount() > 0
+                    || trace.verification().unsatisfiedRequiredClaimCount() > 0) {
+                sb.append("    Claims: required=")
+                        .append(trace.verification().requiredClaimCount())
+                        .append(" unsatisfied=")
+                        .append(trace.verification().unsatisfiedRequiredClaimCount())
+                        .append('\n');
+            }
+            if (!trace.verification().authoritativeProofKinds().isEmpty()) {
+                sb.append("    Authoritative proof: ")
+                        .append(String.join(", ", trace.verification().authoritativeProofKinds()))
+                        .append('\n');
+            }
+            for (String limitation : trace.verification().limitations()) {
+                sb.append("    limitation: ").append(limitation).append('\n');
+            }
         }
         if (trace.outcome() != null && !trace.outcome().status().isBlank()) {
             sb.append("  Outcome: ").append(trace.outcome().status());

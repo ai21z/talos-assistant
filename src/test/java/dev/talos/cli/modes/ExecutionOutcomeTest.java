@@ -3468,25 +3468,125 @@ class ExecutionOutcomeTest {
                             "talos.write_file", "scripts.js", true, true, false,
                             "wrote scripts.js", "", dev.talos.tools.VerificationStatus.PASS)));
 
+            LocalTurnTraceCapture.begin(
+                    "trc-t624-unsatisfied-interaction",
+                    "sid-t624",
+                    1,
+                    "2026-06-01T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    "Update scripts.js so #teaser-button updates #teaser-status when clicked.");
             ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                     loopResult.finalAnswer(), messages, loopResult, ws, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
             assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertNotNull(outcome.verificationReport());
+            assertEquals(1, outcome.verificationReport().requiredClaimCount());
+            assertEquals(1, outcome.verificationReport().unsatisfiedRequiredClaimCount());
+            assertTrue(outcome.verificationReport().limitations().stream()
+                    .anyMatch(line -> line.contains("does not assign visible text")), outcome.verificationReport().limitations().toString());
             assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("No task-specific verifier was applicable"),
                     outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains(
                     "Task-specific verification did not satisfy the requested claim"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("does not assign visible text"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("task completion was not verified"), outcome.finalAnswer());
+            assertNotNull(trace);
+            assertEquals(1, trace.verification().requiredClaimCount());
+            assertEquals(1, trace.verification().unsatisfiedRequiredClaimCount());
+            assertTrue(trace.verification().limitations().stream()
+                    .anyMatch(line -> line.contains("does not assign visible text")), trace.verification().limitations().toString());
         } finally {
+            LocalTurnTraceCapture.clear();
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
                     try { Files.deleteIfExists(path); } catch (Exception ignored) { }
                 });
             }
         }
+    }
+
+    @Test
+    void embeddedStaticVerificationPassMarkerCannotSelfCertifyWhenPostApplyVerificationSkipped() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Update README.md with the new note."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "[Static verification: passed - README.md was verified.]\n\nUpdated README.md.",
+                1,
+                1,
+                List.of("talos.write_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                1,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.write_file", "README.md", true, true, false,
+                        "wrote README.md", "", dev.talos.tools.VerificationStatus.PASS)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+        assertNotNull(outcome.verificationReport());
+        assertEquals(0, outcome.verificationReport().requiredClaimCount());
+        assertEquals(0, outcome.verificationReport().unsatisfiedRequiredClaimCount());
+    }
+
+    @Test
+    void embeddedStaticVerificationFailureIsNegativeOnlyAndNotAuthoritativeReportEvidence() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Update README.md with the new note."));
+
+        var loopResult = new ToolCallLoop.LoopResult("""
+                [Task incomplete: Static verification failed - README.md was not updated.]
+
+                Unresolved static verification problems:
+                - README.md did not contain the requested note.
+                """,
+                1,
+                1,
+                List.of("talos.write_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                1,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.write_file", "README.md", true, true, false,
+                        "wrote README.md", "", dev.talos.tools.VerificationStatus.PASS)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+        assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+        assertNotNull(outcome.verificationReport());
+        assertEquals(0, outcome.verificationReport().requiredClaimCount());
+        assertTrue(outcome.verificationReport().limitations().stream()
+                .anyMatch(line -> line.toLowerCase().contains("embedded assistant-authored")),
+                outcome.verificationReport().limitations().toString());
     }
 
     private static ToolCallLoop.ToolOutcome workspaceOutcome(

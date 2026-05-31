@@ -64,14 +64,23 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        return verify(
+        return verifyWithEvidence(
                 workspace,
                 TaskContractResolver.fromUserRequest(userRequest),
                 loopResult,
-                extraMutationSuccesses);
+                extraMutationSuccesses).compatibilityResult();
     }
 
     public static TaskVerificationResult verify(
+            Path workspace,
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
+        return verifyWithEvidence(workspace, contract, loopResult, extraMutationSuccesses).compatibilityResult();
+    }
+
+    public static TaskVerificationEvidence verifyWithEvidence(
             Path workspace,
             TaskContract contract,
             ToolCallLoop.LoopResult loopResult,
@@ -86,10 +95,10 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        return verifyInternal(workspace, contract, loopResult, extraMutationSuccesses, false);
+        return verifyInternal(workspace, contract, loopResult, extraMutationSuccesses, false).compatibilityResult();
     }
 
-    private static TaskVerificationResult verifyInternal(
+    private static TaskVerificationEvidence verifyInternal(
             Path workspace,
             TaskContract contract,
             ToolCallLoop.LoopResult loopResult,
@@ -97,7 +106,9 @@ public final class StaticTaskVerifier {
             boolean recordExpectationTrace
     ) {
         if (loopResult == null) {
-            return TaskVerificationResult.notRun("No tool-loop result was available.");
+            return TaskVerificationEvidence.postApply(
+                    TaskVerificationResult.notRun("No tool-loop result was available."),
+                    VerificationReport.empty());
         }
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
@@ -107,19 +118,25 @@ public final class StaticTaskVerifier {
                 .toList();
         int totalMutationSuccesses = successfulMutations.size() + Math.max(0, extraMutationSuccesses);
         if (totalMutationSuccesses <= 0) {
-            return TaskVerificationResult.notRun("No successful mutation was available to verify.");
+            return TaskVerificationEvidence.postApply(
+                    TaskVerificationResult.notRun("No successful mutation was available to verify."),
+                    VerificationReport.empty());
         }
         if (workspace == null) {
-            return TaskVerificationResult.unavailable(
-                    "Workspace path was unavailable for post-apply verification.",
-                    List.of(),
-                    List.of("workspace path missing"));
+            return TaskVerificationEvidence.postApply(
+                    TaskVerificationResult.unavailable(
+                            "Workspace path was unavailable for post-apply verification.",
+                            List.of(),
+                            List.of("workspace path missing")),
+                    VerificationReport.empty());
         }
         if (successfulMutations.isEmpty()) {
-            return TaskVerificationResult.unavailable(
-                    "A mutation succeeded outside the structured tool-outcome path, so target files could not be verified.",
-                    List.of(),
-                    List.of("structured mutation targets unavailable"));
+            return TaskVerificationEvidence.postApply(
+                    TaskVerificationResult.unavailable(
+                            "A mutation succeeded outside the structured tool-outcome path, so target files could not be verified.",
+                            List.of(),
+                            List.of("structured mutation targets unavailable")),
+                    VerificationReport.empty());
         }
 
         Path root = workspace.toAbsolutePath().normalize();
@@ -179,7 +196,7 @@ public final class StaticTaskVerifier {
             claimReport = verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems);
         }
 
-        return TaskVerificationOutcomeSelector.select(
+        TaskVerificationResult compatibilityResult = TaskVerificationOutcomeSelector.select(
                 facts,
                 problems,
                 mutatedPaths.size(),
@@ -188,6 +205,7 @@ public final class StaticTaskVerifier {
                 exactEditVerification,
                 sourceDerivedVerification,
                 claimReport);
+        return TaskVerificationEvidence.postApply(compatibilityResult, claimReport);
     }
 
     private static void verifyPrimaryWebMutationCoverage(

@@ -1,8 +1,9 @@
-# [T624-open-high] First-class VerificationReport in ExecutionOutcome
+# [T624-done-high] First-class VerificationReport in ExecutionOutcome
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-01
+Closed: 2026-06-01
 Branch: v0.9.0-beta-dev
 Predecessor: T623
 
@@ -219,6 +220,34 @@ Commands:
 .\gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.cli.modes.OutcomeDominancePolicyTest" --no-daemon
 .\gradlew.bat check --no-daemon
 ```
+
+Completed evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest.staticWebCoherenceDoesNotVerifyRequestedButtonStatusInteractionNoOp" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.embeddedStaticVerificationPassMarkerCannotSelfCertifyWhenPostApplyVerificationSkipped" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.embeddedStaticVerificationFailureIsNegativeOnlyAndNotAuthoritativeReportEvidence" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.verification.EmbeddedStaticVerificationResultParserTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.embeddedStaticVerificationPassMarkerCannotSelfCertifyWhenPostApplyVerificationSkipped" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.embeddedStaticVerificationFailureIsNegativeOnlyAndNotAuthoritativeReportEvidence" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.verification.*" --tests "dev.talos.runtime.outcome.StaticVerificationAnswerRendererTest" --tests "dev.talos.runtime.trace.*" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.cli.modes.OutcomeDominancePolicyTest" --no-daemon
+.\gradlew.bat check --no-daemon
+```
+
+Implementation result:
+
+- Added `TaskVerificationEvidence` as the result carrier for legacy
+  `TaskVerificationResult` plus first-class `VerificationReport`.
+- `StaticTaskVerifier.verifyWithEvidence(...)` now preserves the claim-scoped
+  report instead of terminating it at compatibility projection.
+- `ExecutionOutcome`, `TaskOutcome`, final-answer rendering, and local trace
+  recording now receive the rich report.
+- Trace verification summaries include required claim count, unsatisfied
+  required claim count, authoritative proof kinds, and limitations.
+- Unsatisfied static-web interaction claims now surface the concrete limitation
+  line in the final answer and trace evidence while remaining
+  `READBACK_ONLY` / `COMPLETED_UNVERIFIED`.
+- Embedded assistant-authored positive static verification markers are stripped
+  before outcome classification and cannot survive as verifier proof.
+- Embedded assistant-authored failure markers remain a negative/downgrade path
+  but are represented as advisory/negative-only evidence with no required
+  authoritative claim.
 
 ## Known Risks
 

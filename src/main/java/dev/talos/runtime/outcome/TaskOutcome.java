@@ -2,6 +2,7 @@ package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.runtime.verification.TaskVerificationResult;
 
 import java.util.List;
@@ -12,9 +13,28 @@ public record TaskOutcome(
         TaskCompletionStatus completionStatus,
         MutationOutcome mutationOutcome,
         TaskVerificationResult verificationResult,
+        VerificationReport verificationReport,
         List<TruthWarning> warnings,
         List<ToolCallLoop.ToolOutcome> toolOutcomes
 ) {
+    public TaskOutcome(
+            TaskContract contract,
+            TaskCompletionStatus completionStatus,
+            MutationOutcome mutationOutcome,
+            TaskVerificationResult verificationResult,
+            List<TruthWarning> warnings,
+            List<ToolCallLoop.ToolOutcome> toolOutcomes
+    ) {
+        this(
+                contract,
+                completionStatus,
+                mutationOutcome,
+                verificationResult,
+                VerificationReport.empty(),
+                warnings,
+                toolOutcomes);
+    }
+
     public TaskOutcome {
         contract = contract == null ? TaskContract.unknown("") : contract;
         completionStatus = completionStatus == null
@@ -26,6 +46,7 @@ public record TaskOutcome(
         verificationResult = verificationResult == null
                 ? TaskVerificationResult.notRun("Verification was not run.")
                 : verificationResult;
+        verificationReport = verificationReport == null ? VerificationReport.empty() : verificationReport;
         warnings = warnings == null ? List.of() : List.copyOf(warnings);
         toolOutcomes = toolOutcomes == null ? List.of() : List.copyOf(toolOutcomes);
     }

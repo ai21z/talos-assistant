@@ -3,6 +3,7 @@ package dev.talos.runtime.trace;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.verification.TaskVerificationResult;
+import dev.talos.runtime.verification.VerificationReport;
 
 /** Records task outcome evidence into the active local turn trace. */
 public final class TaskOutcomeTraceRecorder {
@@ -14,11 +15,22 @@ public final class TaskOutcomeTraceRecorder {
             TaskOutcome taskOutcome,
             TaskVerificationResult verification
     ) {
+        record(completionStatus, verificationStatus, taskOutcome, verification, VerificationReport.empty());
+    }
+
+    public static void record(
+            String completionStatus,
+            String verificationStatus,
+            TaskOutcome taskOutcome,
+            TaskVerificationResult verification,
+            VerificationReport verificationReport
+    ) {
         if (verification != null) {
             LocalTurnTraceCapture.recordVerification(
                     verification.status().name(),
                     verification.summary(),
-                    verification.problems());
+                    verification.problems(),
+                    verificationReport);
         }
         if (taskOutcome != null) {
             taskOutcome.warnings().forEach(warning ->
