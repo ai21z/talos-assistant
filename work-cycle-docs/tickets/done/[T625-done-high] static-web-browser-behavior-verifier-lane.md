@@ -1,8 +1,9 @@
-# [T625-open-high] Static-web browser behavior verifier lane
+# [T625-done-high] Static-web browser behavior verifier lane
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-01
+Closed: 2026-06-01
 Branch: v0.9.0-beta-dev
 Predecessor: T623
 
@@ -188,6 +189,39 @@ Commands:
 .\gradlew.bat test --tests "dev.talos.runtime.verification.*" --no-daemon
 .\gradlew.bat check --no-daemon
 ```
+
+Completed evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticWebBrowserBehaviorVerifierTest" --tests "dev.talos.runtime.verification.VerificationOutcomeGateTest.browserBehaviorCanSatisfySameRequiredClaimEvenWhenStaticGuardIsUnverified" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.requestedButtonStatusInteractionNoOpDoesNotPassStaticVerification" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.requestedButtonStatusInteractionCarriesBrowserBehaviorProofWhenRuntimePasses" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.verification.VerificationOutcomeGateTest.browserBehaviorUnavailableControlsSameClaimEvenWhenStaticGuardPassed" --tests "dev.talos.runtime.verification.VerificationOutcomeGateTest.browserBehaviorCanSatisfySameRequiredClaimEvenWhenStaticGuardIsUnverified" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.verification.*" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.staticWebCoherenceDoesNotVerifyRequestedButtonStatusInteractionNoOp" --tests "dev.talos.runtime.outcome.StaticVerificationAnswerRendererTest" --tests "dev.talos.runtime.trace.*" --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.cli.modes.OutcomeDominancePolicyTest" --tests "dev.talos.runtime.verification.*" --no-daemon
+.\gradlew.bat check --no-daemon
+```
+
+Implementation result:
+
+- Added an in-process HtmlUnit browser behavior verifier for simple static-web
+  click/update interaction claims.
+- The runner is constrained to workspace-local `file:` resources and blocks
+  non-workspace URL requests.
+- Browser evidence is emitted as `ProofKind.BROWSER_BEHAVIOR` with
+  `EvidenceAuthority.AUTHORITATIVE` only after the DOM/event assertion changes
+  the requested output target text.
+- The `.textC;` no-op now fails under runtime behavior verification instead of
+  merely remaining readback-only.
+- Browser unavailable is represented as `UNAVAILABLE`, not as verified static
+  evidence.
+- Claim aggregation now treats browser behavior as the controlling proof for
+  the same interaction claim when a browser result exists: browser pass can
+  satisfy the claim, while browser failure/unavailability cannot be masked by
+  static evidence.
+- HtmlUnit external script execution is conservative in this first lane: if the
+  loaded page does not produce the interaction, the verifier executes the linked
+  workspace JavaScript inside the loaded page context and records that
+  limitation. This proves DOM/event behavior but does not claim full visual or
+  external browser parity.
 
 ## Known Risks
 

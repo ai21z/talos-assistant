@@ -3482,24 +3482,26 @@ class ExecutionOutcomeTest {
                     loopResult.finalAnswer(), messages, loopResult, ws, 0);
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
-            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
             assertNotNull(outcome.verificationReport());
             assertEquals(1, outcome.verificationReport().requiredClaimCount());
             assertEquals(1, outcome.verificationReport().unsatisfiedRequiredClaimCount());
+            assertTrue(outcome.verificationReport().problems().stream()
+                    .anyMatch(line -> line.contains("did not change")), outcome.verificationReport().problems().toString());
             assertTrue(outcome.verificationReport().limitations().stream()
                     .anyMatch(line -> line.contains("does not assign visible text")), outcome.verificationReport().limitations().toString());
             assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("No task-specific verifier was applicable"),
                     outcome.finalAnswer());
-            assertTrue(outcome.finalAnswer().contains(
-                    "Task-specific verification did not satisfy the requested claim"), outcome.finalAnswer());
-            assertTrue(outcome.finalAnswer().contains("does not assign visible text"), outcome.finalAnswer());
-            assertTrue(outcome.finalAnswer().contains("task completion was not verified"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("did not change"), outcome.finalAnswer());
             assertNotNull(trace);
             assertEquals(1, trace.verification().requiredClaimCount());
             assertEquals(1, trace.verification().unsatisfiedRequiredClaimCount());
+            assertTrue(trace.verification().problems().stream()
+                    .anyMatch(line -> line.contains("did not change")), trace.verification().problems().toString());
             assertTrue(trace.verification().limitations().stream()
                     .anyMatch(line -> line.contains("does not assign visible text")), trace.verification().limitations().toString());
         } finally {
