@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
@@ -125,7 +126,7 @@ final class StaticWebContinuationPlanner {
 
     private static boolean shouldContinueAfterDirectoryOnlyMutation(LoopState state) {
         if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
         if (!StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return false;
         if (staticWebVerificationAlreadyPasses(state)) return false;
@@ -161,7 +162,7 @@ final class StaticWebContinuationPlanner {
     private static List<ChatMessage> staticWebCreationContinuationMessages(LoopState state) {
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask == null || userTask.isBlank()) {
-            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
         }
         String directorySummary = successfulDirectoryMutationSummary(state);
@@ -195,7 +196,7 @@ final class StaticWebContinuationPlanner {
     ) {
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask == null || userTask.isBlank()) {
-            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
         }
         TaskVerificationResult verification = continuation == null ? null : continuation.verification();
@@ -284,7 +285,7 @@ final class StaticWebContinuationPlanner {
 
     private static Optional<VerificationContinuation> verificationContinuation(LoopState state) {
         if (state == null || state.workspace == null) return Optional.empty();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) {
             return Optional.empty();
         }
@@ -521,7 +522,7 @@ final class StaticWebContinuationPlanner {
 
     private static TaskVerificationResult staticWebVerification(LoopState state) {
         if (state == null || state.workspace == null) return TaskVerificationResult.notRun("");
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.verificationRequired()) {
             return TaskVerificationResult.notRun("");
         }
@@ -548,6 +549,13 @@ final class StaticWebContinuationPlanner {
                 contract,
                 snapshot,
                 0);
+    }
+
+    private static TaskContract taskContract(LoopState state) {
+        if (state == null) return null;
+        return WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(state.messages),
+                state.workspace);
     }
 
     private static List<ToolSpec> safeTools(List<ToolSpec> baseTools) {

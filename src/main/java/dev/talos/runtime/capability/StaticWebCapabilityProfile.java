@@ -191,7 +191,7 @@ public final class StaticWebCapabilityProfile {
         }
         if (contract.type() == TaskType.FILE_CREATE
                 || lower.contains("build")
-                || lower.contains("create")
+                || containsPositiveCreateIntent(lower)
                 || lower.contains("generate")
                 || lower.contains("scaffold")
                 || lower.contains("set up")
@@ -229,7 +229,7 @@ public final class StaticWebCapabilityProfile {
         String lower = contract.originalUserRequest().toLowerCase(Locale.ROOT);
         boolean createLike = contract.type() == TaskType.FILE_CREATE
                 || lower.contains("build")
-                || lower.contains("create")
+                || containsPositiveCreateIntent(lower)
                 || lower.contains("generate")
                 || lower.contains("scaffold")
                 || lower.contains("set up")
@@ -374,6 +374,37 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("guide")
                 || lower.contains("instructions");
         return explicitTextOutput && explanatoryDocument && mentionsWebSurface(lower);
+    }
+
+    private static boolean containsPositiveCreateIntent(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        int start = 0;
+        while (start < lower.length()) {
+            int index = lower.indexOf("create", start);
+            if (index < 0) return false;
+            int before = index - 1;
+            int after = index + "create".length();
+            boolean leftBoundary = before < 0 || !Character.isLetterOrDigit(lower.charAt(before));
+            boolean rightBoundary = after >= lower.length() || !Character.isLetterOrDigit(lower.charAt(after));
+            if (leftBoundary && rightBoundary && !hasImmediateCreateNegation(lower, index)) {
+                return true;
+            }
+            start = after;
+        }
+        return false;
+    }
+
+    private static boolean hasImmediateCreateNegation(String lower, int createIndex) {
+        int from = Math.max(0, createIndex - 24);
+        String prefix = lower.substring(from, createIndex).stripTrailing();
+        return prefix.endsWith("do not")
+                || prefix.endsWith("don't")
+                || prefix.endsWith("dont")
+                || prefix.endsWith("not")
+                || prefix.endsWith("without")
+                || prefix.endsWith("avoid")
+                || prefix.endsWith("never")
+                || prefix.endsWith("no");
     }
 
     private static boolean mutatesHtmlSurface(Set<String> mutatedPaths) {
