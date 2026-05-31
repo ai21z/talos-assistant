@@ -1,6 +1,7 @@
 package dev.talos.runtime.verification;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 public record VerificationReport(
@@ -35,6 +36,46 @@ public record VerificationReport(
 
     public boolean hasRequiredClaims() {
         return claimResults.stream().anyMatch(ClaimResult::required);
+    }
+
+    public int requiredClaimCount() {
+        return (int) claimResults.stream()
+                .filter(ClaimResult::required)
+                .count();
+    }
+
+    public int unsatisfiedRequiredClaimCount() {
+        return (int) claimResults.stream()
+                .filter(ClaimResult::required)
+                .filter(result -> !result.satisfied())
+                .count();
+    }
+
+    public List<String> authoritativeProofKinds() {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        claimResults.stream()
+                .filter(result -> result.authority() == EvidenceAuthority.AUTHORITATIVE)
+                .filter(result -> result.verdict() == VerificationVerdict.VERIFIED)
+                .map(result -> result.proofKind().name())
+                .forEach(out::add);
+        verifierResults.stream()
+                .filter(result -> result.authority() == EvidenceAuthority.AUTHORITATIVE)
+                .filter(result -> result.verdict() == VerificationVerdict.VERIFIED)
+                .map(result -> result.proofKind().name())
+                .forEach(out::add);
+        return List.copyOf(out);
+    }
+
+    public List<String> unsatisfiedRequiredDetails() {
+        List<String> out = new ArrayList<>();
+        claimResults.stream()
+                .filter(ClaimResult::required)
+                .filter(result -> !result.satisfied())
+                .forEach(result -> {
+                    out.addAll(result.problems());
+                    out.addAll(result.limitations());
+                });
+        return List.copyOf(out);
     }
 
     public boolean requiredClaimsSatisfied() {

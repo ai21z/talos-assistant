@@ -3,6 +3,7 @@ package dev.talos.runtime.trace;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
+import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
 import dev.talos.tools.ToolAliasPolicy;
@@ -369,6 +370,17 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         VerificationTraceRecorder.record(bag.builder, status, summary, problems);
+    }
+
+    public static void recordVerification(
+            String status,
+            String summary,
+            List<String> problems,
+            VerificationReport report
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        VerificationTraceRecorder.record(bag.builder, status, summary, problems, report);
     }
 
     public static void recordExpectationVerified(

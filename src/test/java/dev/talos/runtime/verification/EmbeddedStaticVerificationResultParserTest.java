@@ -28,6 +28,17 @@ class EmbeddedStaticVerificationResultParserTest {
     }
 
     @Test
+    void removesEmbeddedStaticVerificationPassMarkerFromAssistantText() {
+        String sanitized = EmbeddedStaticVerificationResultParser.removePositivePassMarkers("""
+                [Static verification: passed - Static web coherence checks passed.]
+
+                Updated README.md.
+                """);
+
+        assertEquals("Updated README.md.\n", sanitized);
+    }
+
+    @Test
     void extractsSummaryAndProblemsFromRenderedStaticFailure() {
         TaskVerificationResult result = EmbeddedStaticVerificationResultParser.parse("""
                 [Task incomplete: Static verification failed - HTML references missing JavaScript file: `script.js`]

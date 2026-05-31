@@ -1,13 +1,24 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.verification.ClaimResult;
+import dev.talos.runtime.verification.EvidenceAuthority;
+import dev.talos.runtime.verification.EvidenceCoverage;
+import dev.talos.runtime.verification.ProofKind;
+import dev.talos.runtime.verification.TargetBinding;
 import dev.talos.runtime.verification.TaskVerificationResult;
+import dev.talos.runtime.verification.VerificationClaim;
+import dev.talos.runtime.verification.VerificationObligation;
+import dev.talos.runtime.verification.VerificationReport;
+import dev.talos.runtime.verification.VerificationVerdict;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StaticVerificationAnswerRendererTest {
     @Test
@@ -63,6 +74,27 @@ class StaticVerificationAnswerRendererTest {
                         + "Required interaction verification was not satisfied.]\n\n",
                 StaticVerificationAnswerRenderer.readbackOnlyAnnotation(result, loopResult(
                         mutatingOutcome("talos.write_file", "scripts.js", "Wrote scripts.js"))));
+    }
+
+    @Test
+    void readbackOnlyAnnotationCanRenderUnsatisfiedRequiredClaimDetails() {
+        TaskVerificationResult result = TaskVerificationResult.readbackOnly(
+                "Static interaction #teaser-button -> #teaser-status. "
+                        + "Required interaction verification was not satisfied.",
+                List.of("readback"));
+        VerificationReport report = VerificationReport.ofClaim(claimResult(
+                VerificationVerdict.UNVERIFIED,
+                List.of(),
+                List.of("scripts.js: click handler for `#teaser-button` does not assign visible text "
+                        + "to requested output `#teaser-status` with `textContent` or `innerText`.")));
+
+        String rendered = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(
+                result,
+                loopResult(mutatingOutcome("talos.write_file", "scripts.js", "Wrote scripts.js")),
+                report);
+
+        assertTrue(rendered.contains("Unsatisfied verification detail:"), rendered);
+        assertTrue(rendered.contains("does not assign visible text"), rendered);
     }
 
     @Test
@@ -216,5 +248,34 @@ class StaticVerificationAnswerRendererTest {
                 0,
                 0,
                 List.of(outcomes));
+    }
+
+    private static ClaimResult claimResult(
+            VerificationVerdict verdict,
+            List<String> problems,
+            List<String> limitations
+    ) {
+        TargetBinding binding = new TargetBinding("#teaser-button", "#teaser-status", "click");
+        VerificationClaim claim = new VerificationClaim(
+                "static-web-interaction:#teaser-button->#teaser-status",
+                "Static interaction #teaser-button -> #teaser-status.",
+                ProofKind.STATIC_INTERACTION_GUARD,
+                binding,
+                true);
+        VerificationObligation obligation = new VerificationObligation(
+                claim,
+                Set.of(ProofKind.STATIC_INTERACTION_GUARD),
+                EvidenceAuthority.AUTHORITATIVE,
+                binding);
+        return new ClaimResult(
+                claim,
+                obligation,
+                verdict,
+                ProofKind.STATIC_INTERACTION_GUARD,
+                EvidenceAuthority.AUTHORITATIVE,
+                EvidenceCoverage.SCOPED,
+                List.of(),
+                problems,
+                limitations);
     }
 }
