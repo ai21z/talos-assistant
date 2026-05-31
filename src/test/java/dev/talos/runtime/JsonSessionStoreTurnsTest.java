@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -125,6 +126,90 @@ class JsonSessionStoreTurnsTest {
         assertEquals(List.of("talos.read_file", "talos.write_file"), loaded.policyTrace().nativeTools());
         assertEquals(List.of("approval denied by user for talos.write_file"), loaded.policyTrace().blocks());
         assertEquals("approval denied by user for talos.write_file", loaded.toolCalls().get(0).reason());
+    }
+
+    @Test
+    void policyTraceRolefulTargetsRoundTrip(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "session-policy-roleful";
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                dev.talos.runtime.task.TaskContractResolver.fromUserRequest(
+                        "Rewrite styles.css so index.html still works."),
+                "APPLY",
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of("talos.write_file", "talos.edit_file"));
+
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-04-18T10:00:00Z"),
+                250,
+                "rewrite styles",
+                "No file changed.",
+                List.of(),
+                0,
+                0,
+                0,
+                "",
+                "ok",
+                trace));
+
+        TurnRecord loaded = store.loadTurns(sid).getFirst();
+
+        assertEquals(List.of("styles.css"), loaded.policyTrace().expectedTargets());
+        assertTrue(loaded.policyTrace().rolefulTargets().stream()
+                .anyMatch(target -> "styles.css".equals(target.path())
+                        && "MUST_MUTATE".equals(target.role())));
+        assertTrue(loaded.policyTrace().rolefulTargets().stream()
+                .anyMatch(target -> "index.html".equals(target.path())
+                        && "VERIFY_ONLY".equals(target.role())));
+    }
+
+    @Test
+    void legacyPolicyTraceWithoutRolefulTargetsStillLoads(@TempDir Path dir) throws Exception {
+        String sid = "session-legacy-policy";
+        Files.writeString(dir.resolve(sid + ".turns.jsonl"), """
+                {"turnNumber":1,"timestamp":"2026-04-18T10:00:00Z","durationMs":10,"userInput":"q","assistantText":"a","approvalsRequired":0,"approvalsGranted":0,"approvalsDenied":0,"retrievalTraceSummary":"","status":"ok","traceId":"trc-legacy","policyTrace":{"taskType":"FILE_EDIT","mutationAllowed":true,"verificationRequired":true,"expectedTargets":["styles.css"],"forbiddenTargets":[],"initialPhase":"APPLY","finalPhase":"APPLY","nativeTools":["talos.write_file"],"promptTools":["talos.write_file"],"blocks":[],"classificationReason":"legacy"},"toolCalls":[]}
+                """);
+        JsonSessionStore store = new JsonSessionStore(dir);
+
+        TurnRecord loaded = store.loadTurns(sid).getFirst();
+
+        assertEquals(List.of("styles.css"), loaded.policyTrace().expectedTargets());
+        assertTrue(loaded.policyTrace().rolefulTargets().isEmpty());
+    }
+
+    @Test
+    void legacyLocalTraceWithoutRolefulTargetsStillLoads(@TempDir Path dir) throws Exception {
+        String sid = "session-legacy-trace";
+        Path traceDir = dir.resolve("traces").resolve(sid);
+        Files.createDirectories(traceDir);
+        Files.writeString(traceDir.resolve("000001-trc-legacy.json"), """
+                {
+                  "schemaVersion": 2,
+                  "traceId": "trc-legacy",
+                  "sessionId": "session-legacy-trace",
+                  "turnNumber": 1,
+                  "timestamp": "2026-04-18T10:00:00Z",
+                  "workspaceHash": "hash",
+                  "mode": "auto",
+                  "model": {"backend": "test", "model": "model"},
+                  "taskContract": {
+                    "type": "FILE_EDIT",
+                    "mutationAllowed": true,
+                    "verificationRequired": true,
+                    "mutationRequested": true,
+                    "expectedTargets": ["styles.css"],
+                    "forbiddenTargets": [],
+                    "classificationReason": "legacy"
+                  }
+                }
+                """);
+        JsonSessionStore store = new JsonSessionStore(dir);
+
+        var loaded = store.loadTrace(sid, "trc-legacy").orElseThrow();
+
+        assertEquals(List.of("styles.css"), loaded.taskContract().expectedTargets());
+        assertTrue(loaded.taskContract().rolefulTargets().isEmpty());
     }
 
     @Test

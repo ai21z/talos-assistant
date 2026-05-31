@@ -2,6 +2,8 @@ package dev.talos.cli.prompt;
 
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
+import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TargetRef;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
@@ -30,6 +32,7 @@ public final class PromptDebugInspector {
         }
 
         TaskContract contract = TaskContractResolver.fromMessages(snapshot.messages());
+        TaskIntent intent = TaskContractResolver.intentFromMessages(snapshot.messages());
         String frame = currentTurnFrame(snapshot.messages());
         String expectedCoverage = expectedTargetCoverage(contract, frame);
         String exactCoverage = exactLiteralCoverage(frame);
@@ -57,6 +60,7 @@ public final class PromptDebugInspector {
                 .append(", mutationAllowed=").append(contract.mutationAllowed())
                 .append(", verificationRequired=").append(contract.verificationRequired()).append('\n');
         out.append("- ").append(targetLabel(contract)).append(": ").append(joinOrNone(contract)).append('\n');
+        out.append("- Target roles: ").append(targetRoles(intent)).append('\n');
         out.append("- ").append(targetCoverageLabel(contract)).append(": ").append(expectedCoverage).append('\n');
         out.append("- Exact-literal coverage: ").append(exactCoverage).append("\n\n");
         appendContextLedger(out);
@@ -177,6 +181,16 @@ public final class PromptDebugInspector {
                 .sorted(Comparator
                         .comparingInt((String target) -> targetIndex(request, target))
                         .thenComparing(Comparator.naturalOrder()))
+                .collect(Collectors.joining(", "));
+    }
+
+    private static String targetRoles(TaskIntent intent) {
+        if (intent == null || intent.targets().targets().isEmpty()) return "(none)";
+        return intent.targets().targets().stream()
+                .sorted(Comparator
+                        .comparing((TargetRef target) -> target.path())
+                        .thenComparing(target -> target.role().name()))
+                .map(target -> target.path() + " = " + target.role().name())
                 .collect(Collectors.joining(", "));
     }
 
