@@ -547,6 +547,30 @@ class UnifiedAssistantModeTest {
                         && content.contains("index.html, scripts.js, styles.css")));
     }
 
+    @Test
+    void promptFrameUsesWorkspaceReconciledStaticWebTargets(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('existing');\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { margin: 0; }\n");
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Create a modern synthwave website here with CSS styling and JavaScript interaction.",
+                workspace,
+                context("I will update the required site files."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+        String frame = render.messages().stream()
+                .map(message -> message.content() == null ? "" : message.content())
+                .filter(content -> content.startsWith("[CurrentTurnCapability]"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(frame.contains("requiredTargets: index.html, scripts.js, styles.css"), frame);
+        assertFalse(frame.contains("requiredTargets: index.html, script.js, style.css"), frame);
+    }
+
     private static Context context(String response) {
         return context(response, new SessionMemory());
     }

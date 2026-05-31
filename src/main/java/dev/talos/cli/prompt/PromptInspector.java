@@ -9,6 +9,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -39,7 +40,9 @@ public final class PromptInspector {
                 ? DEFAULT_INPUT_PLACEHOLDER
                 : userInput;
         TaskContract contract = "unified".equals(resolvedMode)
-                ? TaskContractResolver.fromUserRequest(input)
+                ? WorkspaceTargetReconciler.reconcile(
+                        TaskContractResolver.fromUserRequest(input),
+                        workspace)
                 : TaskContract.unknown(input);
         boolean smallTalk = "unified".equals(resolvedMode)
                 && contract.type() == TaskType.SMALL_TALK;
@@ -111,7 +114,9 @@ public final class PromptInspector {
             int historyMessages,
             List<ChatMessage> messages
     ) {
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(messages),
+                workspace);
         List<String> effectiveTools = effectiveToolNames(resolvePromptMode(resolvedMode), contract, ctx);
         return new PromptRender(
                 normalizeMode(requestedMode),
