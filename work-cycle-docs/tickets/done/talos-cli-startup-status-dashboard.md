@@ -4,7 +4,7 @@ Priority: high
 Status: done
 Architecture references:
 - work-cycle-docs/tickets/new-work.md
-- docs/new-architecture/30-cli-ui-output-architecture-audit.md
+- docs/architecture/30-cli-ui-output-architecture-audit.md
 - local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md
 
 ## Why This Ticket Exists

@@ -123,7 +123,7 @@ public final class LlmClient implements AutoCloseable {
     // Rationale: the harness (ExecutorScenarioRunner) needs to drive
     // AssistantTurnExecutor.execute() deterministically with a known
     // model-output sequence, without an interface extraction or a
-    // speculative abstraction. See docs/new-architecture/
+    // speculative abstraction. See docs/architecture/
     // talos-harness-main-plan.md §8 N4 and §10 discussion item 2 for
     // the design decision (option (a): minimal factory).
     private volatile java.util.List<String> scriptedResponses = null;

@@ -5,7 +5,7 @@ Priority: medium
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/done/talos-streaming-bare-tool-json-display-hygiene.md`
-- `docs/new-architecture/29-v1-scenario-pack.md`
+- `docs/architecture/29-v1-scenario-pack.md`
 - `work-cycle-docs/work-test-cycle.md`
 
 ## Why This Ticket Exists

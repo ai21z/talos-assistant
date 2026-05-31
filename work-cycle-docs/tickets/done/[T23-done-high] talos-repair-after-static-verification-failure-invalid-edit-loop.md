@@ -4,8 +4,8 @@ Priority: high
 Status: done
 Architecture references:
 - work-cycle-docs/new-work.md
-- docs/new-architecture/talos-harness-source-of-truth.md
-- docs/new-architecture/talos-harness-plan.md
+- docs/architecture/talos-harness-source-of-truth.md
+- docs/architecture/talos-harness-plan.md
 - work-cycle-docs/tickets/done/[T12-done-high] talos-pre-approval-mutating-required-args.md
 - work-cycle-docs/tickets/done/[T16-done-high] talos-web-app-static-verifier-v0.md
 - work-cycle-docs/tickets/done/[T21-done-high] talos-post-denial-retry-must-reissue-action.md

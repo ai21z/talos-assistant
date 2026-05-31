@@ -4,8 +4,8 @@ Priority: high
 Status: done
 Architecture references:
 - work-cycle-docs/tickets/new-work.md
-- docs/new-architecture/talos-harness-source-of-truth.md
-- docs/new-architecture/talos-harness-plan.md
+- docs/architecture/talos-harness-source-of-truth.md
+- docs/architecture/talos-harness-plan.md
 - local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md
 - work-cycle-docs/work-test-cycle.md
 - work-cycle-docs/work-test-cycle-step-by-step.md
@@ -48,11 +48,11 @@ Out of scope:
 
 ## Proposed Work
 
-Create `docs/new-architecture/30-cli-ui-output-architecture-audit.md`.
+Create `docs/architecture/30-cli-ui-output-architecture-audit.md`.
 
 ## Likely Files / Areas
 
-- `docs/new-architecture/30-cli-ui-output-architecture-audit.md`
+- `docs/architecture/30-cli-ui-output-architecture-audit.md`
 
 ## Test / Verification Plan
 

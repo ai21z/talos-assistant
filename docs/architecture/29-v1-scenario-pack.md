@@ -43,7 +43,7 @@ Current local evidence checked:
 - `work-cycle-docs/tickets/done/talos-minimal-execution-phase-policy.md`
 - `work-cycle-docs/tickets/done/talos-static-task-verifier.md`
 - `local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 
 External/source calibration checked:
 

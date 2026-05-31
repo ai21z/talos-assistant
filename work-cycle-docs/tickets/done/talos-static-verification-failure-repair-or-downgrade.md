@@ -4,8 +4,8 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
-- `docs/new-architecture/talos-harness-plan.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-plan.md`
 - `work-cycle-docs/tickets/done/talos-static-task-verifier.md`
 - `work-cycle-docs/tickets/done/talos-minimal-task-outcome.md`
 

@@ -5,7 +5,7 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/29-v1-scenario-pack.md`
+- `docs/architecture/29-v1-scenario-pack.md`
 - `work-cycle-docs/tickets/done/talos-post-edit-truthfulness-and-analysis.md`
 - `work-cycle-docs/tickets/done/talos-streaming-no-tool-explicit-mutation-and-selector-grounding.md`
 

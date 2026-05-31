@@ -5,8 +5,8 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-plan.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-plan.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 Related runtime-history tickets:
 - `work-cycle-docs/tickets/done/talos-post-edit-truthfulness-and-analysis.md`
 - `work-cycle-docs/tickets/done/talos-streaming-no-tool-explicit-mutation-and-selector-grounding.md`

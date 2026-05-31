@@ -5,7 +5,7 @@ Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `work-cycle-docs/tickets/done/talos-prompt-inspector.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 Related tickets:
 - `work-cycle-docs/tickets/done/talos-task-contract-build-mutation-intent.md`
 - `work-cycle-docs/tickets/done/talos-native-tool-surface-contract-alignment.md`
