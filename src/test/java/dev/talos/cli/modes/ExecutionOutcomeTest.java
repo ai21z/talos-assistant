@@ -682,7 +682,14 @@ class ExecutionOutcomeTest {
                 assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
                 assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
                 assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
-                assertTrue(outcome.finalAnswer().startsWith("[Action obligation failed:"), outcome.finalAnswer());
+                assertTrue(outcome.finalAnswer().startsWith(
+                        "[Truth check: Talos applied mutation(s) before this action-obligation block.]"),
+                        outcome.finalAnswer());
+                assertTrue(outcome.finalAnswer().contains(
+                        "Changed target(s) before the block: index.html, styles.css, scripts.js."),
+                        outcome.finalAnswer());
+                assertTrue(outcome.finalAnswer().contains("[Action obligation failed:"),
+                        outcome.finalAnswer());
                 assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
                 assertNotNull(trace);
                 assertNotNull(trace.outcome());
@@ -698,6 +705,106 @@ class ExecutionOutcomeTest {
                 });
             }
         }
+    }
+
+    @Test
+    void blockedActionObligationAfterSuccessfulMutationDisclosesChangedTarget() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Rewrite styles.css so index.html still works. Do not edit scripts.js."));
+
+        String answer = """
+                [Action obligation failed: expected-target progress was not satisfied.]
+
+                Remaining target(s): scripts.js.
+                The model attempted talos.write_file(styles.css) instead.
+                No approval was requested and no additional file was changed.
+                """;
+        var loopResult = new ToolCallLoop.LoopResult(
+                answer,
+                2,
+                1,
+                List.of("talos.write_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                1,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        "Pending action obligation EXPECTED_TARGETS_REMAINING was ignored after a progress reprompt."),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.write_file",
+                        "styles.css",
+                        true,
+                        true,
+                        false,
+                        "wrote styles.css",
+                        "",
+                        dev.talos.tools.VerificationStatus.PASS)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+        assertTrue(outcome.finalAnswer().contains("Changed target(s) before the block: styles.css."),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("No approval was requested"),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("no additional file was changed"),
+                outcome.finalAnswer());
+    }
+
+    @Test
+    void preMutationActionObligationBlockKeepsNoFileChangedWording() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit styles.css."));
+
+        String answer = """
+                [Action obligation failed: expected-target progress was not satisfied.]
+
+                Remaining target(s): styles.css.
+                The model returned prose instead of the required write/edit tool call.
+                No approval was requested and no additional file was changed.
+                """;
+        var loopResult = new ToolCallLoop.LoopResult(
+                answer,
+                1,
+                0,
+                List.of(),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        "Pending action obligation EXPECTED_TARGETS_REMAINING was ignored after a progress reprompt."),
+                List.of());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("No approval was requested"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("no additional file was changed"),
+                outcome.finalAnswer());
     }
 
     @Test
