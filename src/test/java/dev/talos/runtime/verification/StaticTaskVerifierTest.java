@@ -1208,7 +1208,151 @@ class StaticTaskVerifierTest {
 
         assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
         assertFalse(result.problems().stream()
-                        .anyMatch(p -> p.contains("rough-brief.txt: expected target was not successfully mutated")),
+                .anyMatch(p -> p.contains("rough-brief.txt: expected target was not successfully mutated")),
+                result.problems().toString());
+    }
+
+    @Test
+    void scopedCssRewriteDoesNotFailOnUnrelatedMissingJavaScriptLink() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><main class="hero"><button class="cta-button">Join</button></main></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { margin: 0; font-family: system-ui, sans-serif; }
+                .hero { padding: 4rem; }
+                .cta-button { border: 0; padding: 1rem; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('existing interaction');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite styles.css so index.html still works. Do not edit index.html. Do not edit scripts.js.",
+                loopResult(List.of(successfulWrite("styles.css", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("HTML does not link JavaScript file")),
+                result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("Contextual static-web finding outside this turn")
+                                && f.contains("HTML does not link JavaScript file: `scripts.js`")),
+                result.facts().toString());
+    }
+
+    @Test
+    void scopedCssRewriteStillFailsWhenCssTargetIsEmpty() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><main class="hero"><button class="cta-button">Join</button></main></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "");
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('existing interaction');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite styles.css so index.html still works. Do not edit index.html. Do not edit scripts.js.",
+                loopResult(List.of(successfulWrite("styles.css", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("styles.css") && p.contains("empty")),
+                result.problems().toString());
+    }
+
+    @Test
+    void scopedCssRewriteStillFailsWhenHtmlDoesNotLinkCssTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head></head>
+                  <body><main class="hero"><button class="cta-button">Join</button></main></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { margin: 0; font-family: system-ui, sans-serif; }
+                .hero { padding: 4rem; }
+                .cta-button { border: 0; padding: 1rem; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('existing interaction');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite styles.css so index.html still works. Do not edit index.html. Do not edit scripts.js.",
+                loopResult(List.of(successfulWrite("styles.css", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("HTML does not link CSS file: `styles.css`")),
+                result.problems().toString());
+    }
+
+    @Test
+    void scopedJavaScriptRewriteStillFailsWhenHtmlDoesNotLinkJavaScriptTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><main><button id="join-list">Join</button><p id="status"></p></main></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "body { font-family: system-ui, sans-serif; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('join-list').addEventListener('click', () => {
+                  document.getElementById('status').textContent = 'Joined';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite scripts.js so index.html actually works with styles.css. "
+                        + "Do not edit index.html. Do not edit styles.css.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("HTML does not link JavaScript file: `scripts.js`")),
+                result.problems().toString());
+    }
+
+    @Test
+    void fullStaticWebCreateStillFailsWhenHtmlDoesNotLinkJavaScriptTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><main><button id="join-list">Join</button><p id="status"></p></main></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "body { font-family: system-ui, sans-serif; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('join-list').addEventListener('click', () => {
+                  document.getElementById('status').textContent = 'Joined';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a modern static website with index.html, styles.css, and scripts.js.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("HTML does not link JavaScript file: `scripts.js`")),
                 result.problems().toString());
     }
 
