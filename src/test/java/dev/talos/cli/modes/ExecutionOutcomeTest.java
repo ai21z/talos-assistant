@@ -1922,6 +1922,63 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void postApplyScopedCssVerificationDoesNotOverclaimFullWebCoherence() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-scoped-css-verify-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body><main class="hero"><button class="cta-button">Join</button></main></body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), """
+                    body { margin: 0; font-family: system-ui, sans-serif; }
+                    .hero { padding: 4rem; }
+                    .cta-button { border: 0; padding: 1rem; }
+                    """);
+            Files.writeString(ws.resolve("scripts.js"), "console.log('existing interaction');\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Rewrite styles.css so index.html still works. Do not edit index.html. Do not edit scripts.js."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated styles.css.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "styles.css", true, true, false,
+                            "wrote styles.css", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated styles.css.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed - "
+                    + "Scoped static web checks passed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Contextual static-web finding outside this turn"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("HTML does not link JavaScript file: `scripts.js`"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Static web coherence checks passed"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void postApplyBroadWebAppFailureIsClassifiedAsFailedVerification() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-webapp-verify-fail-");
         try {

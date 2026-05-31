@@ -16,7 +16,22 @@ public final class StaticVerificationAnswerRenderer {
     private StaticVerificationAnswerRenderer() {}
 
     public static String passedAnnotation(TaskVerificationResult result) {
-        return "[Static verification: passed - " + verificationSummary(result) + "]\n\n";
+        StringBuilder out = new StringBuilder();
+        out.append("[Static verification: passed - ")
+                .append(verificationSummary(result))
+                .append("]\n\n");
+        List<String> contextualFacts = contextualStaticWebFacts(result);
+        if (!contextualFacts.isEmpty()) {
+            out.append("Contextual static-web findings outside this turn:");
+            for (String fact : contextualFacts.subList(0, Math.min(5, contextualFacts.size()))) {
+                out.append("\n- ").append(singleLine(fact));
+            }
+            if (contextualFacts.size() > 5) {
+                out.append("\n- ... ").append(contextualFacts.size() - 5).append(" more");
+            }
+            out.append("\n\n");
+        }
+        return out.toString();
     }
 
     public static String readbackOnlyAnnotation(
@@ -170,6 +185,14 @@ public final class StaticVerificationAnswerRenderer {
         }
         String summary = result.summary().replace('\n', ' ').replace('\r', ' ').strip();
         return summary.length() <= 240 ? summary : summary.substring(0, 237) + "...";
+    }
+
+    private static List<String> contextualStaticWebFacts(TaskVerificationResult result) {
+        if (result == null || result.facts() == null || result.facts().isEmpty()) return List.of();
+        return result.facts().stream()
+                .filter(fact -> fact != null
+                        && fact.startsWith("Contextual static-web finding outside this turn: "))
+                .toList();
     }
 
     private static String singleLine(String value) {
