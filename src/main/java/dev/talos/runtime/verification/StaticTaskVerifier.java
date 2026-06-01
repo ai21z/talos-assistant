@@ -179,24 +179,12 @@ public final class StaticTaskVerifier {
                 ExactEditReplacementVerifier.verify(root, successfulMutations);
         facts.addAll(exactEditVerification.facts());
         problems.addAll(exactEditVerification.problems());
+        TaskSpecificVerifierRegistry.Result taskSpecificVerification =
+                TaskSpecificVerifierRegistry.verify(root, contract, profile, mutatedPaths, facts, problems);
+        webCoherenceRequired = taskSpecificVerification.webCoherenceRequired();
         SourceDerivedArtifactVerifier.Result sourceDerivedVerification =
-                SourceDerivedArtifactVerifier.verify(contract, root);
-        facts.addAll(sourceDerivedVerification.facts());
-        problems.addAll(sourceDerivedVerification.problems());
-
-        if (webCoherenceRequired) {
-            String profileFact = StaticWebCapabilityProfile.profileFact(profile);
-            if (!profileFact.isBlank()) facts.add(profileFact);
-        }
-        if (StaticWebCapabilityProfile.requiresSeparateAssetMutations(profile)) {
-            verifyPrimaryWebMutationCoverage(mutatedPaths, facts, problems);
-        }
-        VerificationReport claimReport = sourceDerivedVerification.report();
-        if (webCoherenceRequired) {
-            claimReport = VerificationReport.merge(
-                    claimReport,
-                    verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems));
-        }
+                taskSpecificVerification.sourceDerivedVerification();
+        VerificationReport claimReport = taskSpecificVerification.report();
 
         TaskVerificationResult compatibilityResult = TaskVerificationOutcomeSelector.select(
                 facts,
@@ -210,7 +198,7 @@ public final class StaticTaskVerifier {
         return TaskVerificationEvidence.postApply(compatibilityResult, claimReport);
     }
 
-    private static void verifyPrimaryWebMutationCoverage(
+    static void verifyPrimaryWebMutationCoverage(
             Set<String> mutatedPaths,
             List<String> facts,
             List<String> problems
@@ -232,7 +220,7 @@ public final class StaticTaskVerifier {
         }
     }
 
-    private static VerificationReport verifySmallWebWorkspace(
+    static VerificationReport verifySmallWebWorkspace(
             Path root,
             TaskContract contract,
             CapabilityProfile profile,

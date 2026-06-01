@@ -6,6 +6,7 @@ import dev.talos.core.extract.DocumentExtractionResult;
 import dev.talos.core.extract.DocumentExtractionService;
 import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.ingest.FileCapabilityPolicy;
+import dev.talos.runtime.capability.SourceDerivedCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 
 import java.nio.file.Files;
@@ -42,12 +43,9 @@ final class SourceDerivedArtifactVerifier {
 
     static Result verify(TaskContract contract, Path root) {
         if (contract == null || root == null) return Result.notRequired();
-        if (contract.sourceEvidenceTargets().isEmpty() || contract.expectedTargets().isEmpty()) {
-            return Result.notRequired();
-        }
-        String request = contract.originalUserRequest() == null ? "" : contract.originalUserRequest();
-        if (!request.toLowerCase(Locale.ROOT).contains("summariz")) return Result.notRequired();
+        if (!SourceDerivedCapabilityProfile.isApplicable(contract)) return Result.notRequired();
 
+        String request = contract.originalUserRequest();
         List<String> facts = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         String targetPath = firstPath(contract.expectedTargets());

@@ -1414,6 +1414,67 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void staticWebProfileDispatchDoesNotRunSourceDerivedLaneForWebSurface() throws Exception {
+        Files.writeString(workspace.resolve("brief.txt"), """
+                Brief records aurora zephyr lattice, crimson harbor routing, and obsidian relay capacity.
+                """);
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <meta charset="utf-8">
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="landing">
+                      <h1>Working Site</h1>
+                      <button id="join-list">Join list</button>
+                      <p id="status">Ready</p>
+                    </main>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { font-family: system-ui, sans-serif; }
+                .landing { max-width: 42rem; margin: 3rem auto; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('join-list').addEventListener('click', () => {
+                  document.getElementById('status').textContent = 'Joined';
+                });
+                """);
+
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("index.html", "styles.css", "scripts.js"),
+                Set.of("brief.txt"),
+                Set.of(),
+                "Summarize brief.txt into index.html, styles.css, and scripts.js as a working website.",
+                "test-web-source-derived-dispatch");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                contract,
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("source-derived summary")),
+                result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("Static Web capability profile selected")),
+                result.facts().toString());
+    }
+
+    @Test
     void sourceDerivedVerifierDoesNotUseAggregateOverlapToMaskMissingSource() throws Exception {
         Files.writeString(workspace.resolve("alpha.txt"), """
                 Alpha source records glacier matrix routing, cobalt ledger entries,

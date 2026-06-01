@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocumentExtractionVerificationMapperTest {
@@ -37,6 +38,8 @@ class DocumentExtractionVerificationMapperTest {
         for (DocumentExtractionStatus status : DocumentExtractionStatus.values()) {
             assertEquals(expected.get(status), DocumentExtractionVerificationMapper.toVerdict(status), status.name());
         }
+        assertFalse(expected.containsValue(VerificationVerdict.UNVERIFIED),
+                "Document extraction statuses must map to explicit run/unsupported/unavailable/failure states.");
     }
 
     @Test

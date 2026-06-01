@@ -74,6 +74,7 @@ class CapabilityProfileRegistryTest {
 
         CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
 
+        assertTrue(SourceDerivedCapabilityProfile.isApplicable(contract));
         assertFalse(profile.staticWeb());
         assertEquals("source-derived", profile.id());
         assertEquals(ArtifactKind.SOURCE_DERIVED_FILE, profile.artifactKind());
@@ -93,15 +94,33 @@ class CapabilityProfileRegistryTest {
                 Set.of("index.html", "styles.css", "scripts.js"),
                 Set.of("brief.txt"),
                 Set.of(),
-                "Create index.html, styles.css, and scripts.js from brief.txt.",
+                "Summarize brief.txt into index.html, styles.css, and scripts.js as a working website.",
                 "test-web-from-brief");
 
         CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
 
+        assertTrue(SourceDerivedCapabilityProfile.isApplicable(contract));
         assertTrue(profile.staticWeb());
         assertEquals("static-web", profile.id());
         assertEquals(ArtifactKind.STATIC_WEB, profile.artifactKind());
         assertEquals(VerifierProfile.STATIC_WEB, profile.verifierProfile());
+    }
+
+    @Test
+    void sourceDerivedApplicabilityRejectsNonSummarySourceEvidenceTasks() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("summary.md"),
+                Set.of("brief.txt"),
+                Set.of(),
+                "Create summary.md using brief.txt.",
+                "test-source-derived-no-summary");
+
+        assertFalse(SourceDerivedCapabilityProfile.isApplicable(contract));
+        assertEquals(VerifierProfile.NONE, CapabilityProfileRegistry.select(contract).verifierProfile());
     }
 
     @Test
