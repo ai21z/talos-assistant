@@ -6,6 +6,7 @@ import dev.talos.runtime.Result;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.CfgUtil;
+import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.core.extract.DocumentExtractionPreflight;
 import dev.talos.runtime.XmlCompatTelemetry;
@@ -14,7 +15,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 
 public final class StatusCommand implements Command {
     private final ModeController modes;
@@ -86,9 +86,9 @@ public final class StatusCommand implements Command {
             if (en instanceof Boolean b) vectors = b;
         }
 
-        var oll = CfgUtil.map(cfg.data.get("ollama"));
-        String host = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
-        String embedModel = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
+        var runtime = EngineRuntimeConfig.from(cfg);
+        String host = runtime.hostLabel();
+        String embedModel = runtime.embeddingLabel();
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
         sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");

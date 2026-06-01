@@ -137,6 +137,33 @@ class InfraCommandsTest {
             assertTrue(text.contains("Image OCR"), text);
             assertTrue(text.contains("not configured"), text);
         }
+
+        @Test void verbose_uses_engine_runtime_host_and_embedding_labels() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                    "transport", "engine",
+                    "default_backend", "llama_cpp",
+                    "model", "qwen2.5-coder:14b")));
+            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                    "llama_cpp", new LinkedHashMap<>(Map.of(
+                            "mode", "managed",
+                            "host", "http://127.0.0.1",
+                            "port", 18116,
+                            "model", "qwen2.5-coder:14b")))));
+            cfg.data.put("embed", new LinkedHashMap<>(Map.of(
+                    "provider", "disabled",
+                    "model", "none")));
+            cfg.data.put("rag", new LinkedHashMap<>(Map.of(
+                    "vectors", new LinkedHashMap<>(Map.of("enabled", Boolean.FALSE)))));
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
+
+            assertTrue(text.contains("Host      http://127.0.0.1:18116"), text);
+            assertTrue(text.contains("Embed     disabled/none"), text);
+            assertFalse(text.contains("Host      http://127.0.0.1:11434"), text);
+            assertFalse(text.contains("Embed     bge-m3"), text);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
