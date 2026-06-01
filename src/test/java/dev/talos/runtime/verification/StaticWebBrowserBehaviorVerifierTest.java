@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StaticWebBrowserBehaviorVerifierTest {
     @TempDir
     Path workspace;
+    @TempDir
+    Path outsideWorkspace;
 
     @Test
     void clickUpdatingOutputTextProducesAuthoritativeBrowserBehaviorProof() throws Exception {
@@ -34,6 +36,10 @@ class StaticWebBrowserBehaviorVerifierTest {
         assertEquals(0, report.unsatisfiedRequiredClaimCount());
         assertTrue(report.authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()));
         assertTrue(report.facts().stream().anyMatch(fact -> fact.contains("Browser behavior verified")),
+                report.facts().toString());
+        assertTrue(report.facts().stream().anyMatch(fact -> fact.contains("requested workspace resources")
+                        && fact.contains("index.html")
+                        && fact.contains("scripts.js")),
                 report.facts().toString());
     }
 
@@ -77,6 +83,42 @@ class StaticWebBrowserBehaviorVerifierTest {
                 report.limitations().toString());
         assertTrue(report.problems().stream().anyMatch(problem -> problem.contains("did not change")),
                 report.problems().toString());
+    }
+
+    @Test
+    void absoluteFileScriptOutsideWorkspaceIsBlockedByBrowserRunner() throws Exception {
+        Path outsideScript = outsideWorkspace.resolve("outside.js");
+        Files.writeString(outsideScript, """
+                document.getElementById('teaser-status').textContent = 'outside script loaded';
+                """);
+        writeWebFixture("""
+                <!doctype html>
+                <html>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="%s"></script>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """.formatted(outsideScript.toUri()), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'workspace click';
+                });
+                """);
+
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                selectors());
+
+        assertFalse(report.requiredClaimsSatisfied(), report.toString());
+        assertTrue(report.hasRequiredFailure(), report.toString());
+        assertTrue(report.problems().stream().anyMatch(problem ->
+                        problem.contains("Script load failed for file://<redacted>")
+                                && problem.contains("Blocked non-workspace browser request")),
+                report.problems().toString());
+        assertFalse(report.toString().contains(outsideScript.getFileName().toString()), report.toString());
     }
 
     @Test
@@ -125,7 +167,7 @@ class StaticWebBrowserBehaviorVerifierTest {
     }
 
     private void writeWebFixture(String script) throws Exception {
-        Files.writeString(workspace.resolve("index.html"), """
+        writeWebFixture("""
                 <!doctype html>
                 <html>
                   <head><link rel="stylesheet" href="styles.css"></head>
@@ -135,7 +177,13 @@ class StaticWebBrowserBehaviorVerifierTest {
                     <script src="scripts.js"></script>
                   </body>
                 </html>
-                """);
+                """, script);
+    }
+
+    private void writeWebFixture(String html, String script) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                %s
+                """.formatted(html.strip()));
         Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
         Files.writeString(workspace.resolve("scripts.js"), script);
     }

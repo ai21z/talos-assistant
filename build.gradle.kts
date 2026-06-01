@@ -168,6 +168,12 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     jvmArgs("--add-modules", "jdk.incubator.vector")
+    extensions.configure(org.gradle.testing.jacoco.plugins.JacocoTaskExtension::class) {
+        excludes = listOf(
+            "org.htmlunit.*",
+            "org.htmlunit.cssparser.*"
+        )
+    }
 }
 
 /* ---------- Java toolchain ---------- */

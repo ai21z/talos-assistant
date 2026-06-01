@@ -1,20 +1,25 @@
 package dev.talos.runtime.verification;
 
 import org.htmlunit.BrowserVersion;
+import org.htmlunit.HttpHeader;
 import org.htmlunit.WebClient;
-import org.htmlunit.WebConnection;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
+import org.htmlunit.WebResponseData;
 import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.javascript.JavaScriptErrorListener;
 import org.htmlunit.ScriptException;
+import org.htmlunit.util.NameValuePair;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +27,8 @@ import java.util.Set;
 
 /** Browser/runtime verifier for simple static-web click/update interaction claims. */
 final class StaticWebBrowserBehaviorVerifier {
+    private static final String LOCAL_HOST = "talos.local";
+
     private StaticWebBrowserBehaviorVerifier() {}
 
     interface BrowserRunner {
@@ -128,21 +135,21 @@ final class StaticWebBrowserBehaviorVerifier {
                 return BrowserRunResult.unavailable("Browser behavior verifier rejected a page outside the workspace.");
             }
             List<String> scriptErrors = new ArrayList<>();
-            try (WebClient client = new WebClient(BrowserVersion.CHROME)) {
+            List<String> workspaceRequests = new ArrayList<>();
+            try (WebClient client = new WorkspaceOnlyWebClient(safeRoot, workspaceRequests)) {
                 client.getOptions().setJavaScriptEnabled(true);
-                client.getOptions().setCssEnabled(true);
+                client.getOptions().setCssEnabled(false);
                 client.getOptions().setDownloadImages(false);
                 client.getOptions().setThrowExceptionOnScriptError(false);
                 client.getOptions().setThrowExceptionOnFailingStatusCode(false);
-                client.setWebConnection(new WorkspaceOnlyWebConnection(client.getWebConnection(), safeRoot));
                 client.setJavaScriptErrorListener(new CapturingJavaScriptErrorListener(scriptErrors));
 
-                HtmlPage page = client.getPage(htmlPath.toUri().toURL());
+                HtmlPage page = client.getPage(localPageUrl(htmlFile));
                 client.waitForBackgroundJavaScript(JAVASCRIPT_WAIT_MS);
                 page.getElementById(id(binding.triggerSelector()));
                 page.getElementById(id(binding.outputSelector()));
                 String before = visibleText(page, id(binding.outputSelector()));
-                dispatchClick(page, id(binding.triggerSelector()));
+                click(page, id(binding.triggerSelector()));
                 client.waitForBackgroundJavaScript(JAVASCRIPT_WAIT_MS);
                 String after = visibleText(page, id(binding.outputSelector()));
                 List<String> facts = new ArrayList<>();
@@ -151,6 +158,10 @@ final class StaticWebBrowserBehaviorVerifier {
                 facts.add("Browser behavior runner loaded `" + htmlFile + "` from the workspace.");
                 facts.add("Browser behavior runner clicked `" + binding.triggerSelector()
                         + "` and observed `" + binding.outputSelector() + "`.");
+                if (!workspaceRequests.isEmpty()) {
+                    facts.add("Browser behavior runner requested workspace resources: "
+                            + String.join(", ", workspaceRequests) + ".");
+                }
                 if (!changed(before, after) && linkedJavaScript != null && !linkedJavaScript.isBlank()) {
                     String beforeFallbackEval = visibleText(page, id(binding.outputSelector()));
                     FallbackClickObservation fallback = executeWorkspaceJavaScriptAndClick(
@@ -205,46 +216,98 @@ final class StaticWebBrowserBehaviorVerifier {
                         "Browser behavior verifier could not execute the static page: " + safeMessage(e));
             }
         }
+
+        private static URL localPageUrl(String htmlFile) throws MalformedURLException {
+            try {
+                return new URI("http", LOCAL_HOST, "/" + normalizeWebPath(htmlFile), null).toURL();
+            } catch (URISyntaxException e) {
+                throw new MalformedURLException("Invalid workspace page path: " + safeMessage(e));
+            }
+        }
+
+        private static String normalizeWebPath(String path) {
+            return path == null ? "" : path.replace('\\', '/');
+        }
     }
 
-    private static final class WorkspaceOnlyWebConnection implements WebConnection {
-        private final WebConnection delegate;
+    private static final class WorkspaceOnlyWebClient extends WebClient {
         private final Path root;
+        private final List<String> workspaceRequests;
 
-        WorkspaceOnlyWebConnection(WebConnection delegate, Path root) {
-            this.delegate = delegate;
+        WorkspaceOnlyWebClient(Path root, List<String> workspaceRequests) {
+            super(BrowserVersion.CHROME);
             this.root = root;
+            this.workspaceRequests = workspaceRequests == null ? new ArrayList<>() : workspaceRequests;
         }
 
         @Override
-        public WebResponse getResponse(WebRequest request) throws IOException {
+        public WebResponse loadWebResponse(WebRequest request) throws IOException {
             URL url = request == null ? null : request.getUrl();
-            if (allowed(url)) {
-                return delegate.getResponse(request);
+            if (url == null) {
+                throw new IOException("Blocked browser request with no URL.");
+            }
+            String protocol = url.getProtocol();
+            if ("about".equalsIgnoreCase(protocol) || "data".equalsIgnoreCase(protocol)) {
+                return super.loadWebResponse(request);
+            }
+            if (("http".equalsIgnoreCase(protocol) || "https".equalsIgnoreCase(protocol))
+                    && LOCAL_HOST.equalsIgnoreCase(url.getHost())) {
+                return workspaceResponse(request, url);
             }
             throw new IOException("Blocked non-workspace browser request: " + redactedUrl(url));
         }
 
-        @Override
-        public void close() {
+        private WebResponse workspaceResponse(WebRequest request, URL url) throws IOException {
+            Path requested = workspacePath(url);
+            if (!requested.startsWith(root)) {
+                throw new IOException("Blocked non-workspace browser request: " + redactedUrl(url));
+            }
+            record(requested);
+            if (!Files.exists(requested) || Files.isDirectory(requested)) {
+                WebResponseData data = new WebResponseData(
+                        ("Missing workspace resource: " + root.relativize(requested)).getBytes(StandardCharsets.UTF_8),
+                        404,
+                        "Not Found",
+                        List.of(new NameValuePair(HttpHeader.CONTENT_TYPE, "text/plain; charset=UTF-8")));
+                return new WebResponse(data, request, 0);
+            }
+            byte[] body = Files.readAllBytes(requested);
+            WebResponseData data = new WebResponseData(
+                    body,
+                    200,
+                    "OK",
+                    List.of(new NameValuePair(HttpHeader.CONTENT_TYPE, contentType(requested))));
+            return new WebResponse(data, request, 0);
+        }
+
+        private Path workspacePath(URL url) throws IOException {
+            String decoded;
             try {
-                delegate.close();
-            } catch (IOException ignored) {
-                // Closing verifier-local browser resources is best-effort.
+                decoded = url.toURI().getPath();
+            } catch (URISyntaxException e) {
+                throw new IOException("Invalid workspace browser request URL.");
+            }
+            String relative = decoded == null ? "" : decoded.startsWith("/") ? decoded.substring(1) : decoded;
+            return root.resolve(relative).toAbsolutePath().normalize();
+        }
+
+        private void record(Path requested) {
+            try {
+                if (requested.startsWith(root)) {
+                    workspaceRequests.add("`" + root.relativize(requested).toString().replace('\\', '/') + "`");
+                }
+            } catch (IllegalArgumentException e) {
+                // Request accounting is evidence-only; allow/deny remains authoritative.
             }
         }
 
-        private boolean allowed(URL url) {
-            if (url == null) return false;
-            String protocol = url.getProtocol();
-            if ("about".equalsIgnoreCase(protocol) || "data".equalsIgnoreCase(protocol)) return true;
-            if (!"file".equalsIgnoreCase(protocol)) return false;
-            try {
-                Path requested = Path.of(URI.create(url.toString())).toAbsolutePath().normalize();
-                return requested.startsWith(root);
-            } catch (IllegalArgumentException e) {
-                return false;
-            }
+        private static String contentType(Path path) {
+            String name = path.getFileName() == null ? "" : path.getFileName().toString().toLowerCase();
+            if (name.endsWith(".html") || name.endsWith(".htm")) return "text/html; charset=UTF-8";
+            if (name.endsWith(".js")) return "text/javascript; charset=UTF-8";
+            if (name.endsWith(".css")) return "text/css; charset=UTF-8";
+            if (name.endsWith(".json")) return "application/json; charset=UTF-8";
+            return "application/octet-stream";
         }
     }
 
@@ -281,16 +344,8 @@ final class StaticWebBrowserBehaviorVerifier {
         }
     }
 
-    private static void dispatchClick(HtmlPage page, String id) {
-        page.executeJavaScript("""
-                (function() {
-                  var el = document.getElementById('%s');
-                  if (!el) return;
-                  var event = document.createEvent('MouseEvents');
-                  event.initEvent('click', true, true);
-                  el.dispatchEvent(event);
-                })();
-                """.formatted(jsString(id)));
+    private static void click(HtmlPage page, String id) throws IOException {
+        page.getElementById(id).click();
     }
 
     private record FallbackClickObservation(String afterEval, String afterClick) {}
@@ -308,9 +363,13 @@ final class StaticWebBrowserBehaviorVerifier {
                   var textAfterEval = outputAfterEval ? (outputAfterEval.innerText || outputAfterEval.textContent || '') : '';
                   var el = document.getElementById('%s');
                   if (el) {
-                    var event = document.createEvent('MouseEvents');
-                    event.initEvent('click', true, true);
-                    el.dispatchEvent(event);
+                    if (typeof el.click === 'function') {
+                      el.click();
+                    } else {
+                      var event = document.createEvent('MouseEvents');
+                      event.initEvent('click', true, true);
+                      el.dispatchEvent(event);
+                    }
                   }
                   var output = document.getElementById('%s');
                   var textAfterClick = output ? (output.innerText || output.textContent || '') : '';

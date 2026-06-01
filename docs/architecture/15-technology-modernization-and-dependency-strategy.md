@@ -22,21 +22,25 @@ runs during Talos's real post-apply verification, so HtmlUnit is a runtime capab
 The dependency is accepted under narrow conditions:
 
 - The only production entry point is `dev.talos.runtime.verification.StaticWebBrowserBehaviorVerifier`.
-- It may verify workspace-local static-web click/update claims by loading local `file:` pages and dispatching
-  DOM events.
-- Its `WorkspaceOnlyWebConnection` must keep blocking non-workspace requests; `about:` and `data:` remain the
-  only non-file schemes allowed.
+- It may verify workspace-local static-web click/update claims by loading pages through a synthetic
+  `http://talos.local` workspace origin and dispatching DOM events.
+- Its workspace-serving WebClient must keep blocking non-workspace requests; `about:` and `data:` remain the
+  only non-workspace schemes allowed.
 - It must fail closed: script errors become verifier failures, runner exceptions become `UNAVAILABLE`, and no
   DOM change becomes `FAILED`.
 - It must not be reused as general browser automation, internet browsing, rendering proof, screenshot proof,
   or arbitrary JavaScript execution outside the static-web verification lane.
+- JaCoCo test instrumentation excludes HtmlUnit packages; coverage gates measure Talos code, not third-party
+  dependency internals that can exceed bytecode instrumentation limits.
 - Because HtmlUnit is a heavy transitive dependency, future uses require a specific ticket and evidence that
   the work cannot be handled by the existing verifier entry point.
 
 T626 tightened the fallback path so authoritative `BROWSER_BEHAVIOR` means an observed output change across
-the click boundary, not merely a DOM mutation during linked-script eval. T627 should decide the root-cause
-direction: make natural external-script loading deterministic enough to retire the fallback, or add a governed
-external-browser lane that is `UNAVAILABLE` by default when not configured.
+the click boundary, not merely a DOM mutation during linked-script eval. T627 replaced direct `file:` page
+loading with the synthetic workspace origin because HtmlUnit bypasses `WebConnection` for `file:` URLs. The
+causally checked fallback remains because HtmlUnit still does not give reliable natural handler observation for
+ordinary external-script listeners; a future external-browser lane must be governed and `UNAVAILABLE` by default
+when not configured.
 
 ---
 
