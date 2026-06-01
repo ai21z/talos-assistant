@@ -57,6 +57,22 @@ class TaskVerificationOutcomeSelectorTest {
     }
 
     @Test
+    void sourceDerivedPositiveCoverageDoesNotProjectToPassedForGenericSummary() {
+        TaskVerificationResult result = TaskVerificationOutcomeSelector.select(
+                List.of("summary.md: source-derived artifact includes evidence from notes.md."),
+                List.of(),
+                1,
+                false,
+                expectationResult(false, false, false, false),
+                exactEditResult(false, false, false),
+                sourceDerivedResult(true));
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status());
+        assertTrue(result.summary().contains("Source-derived coverage checks passed"), result.summary());
+        assertTrue(result.summary().contains("summary semantics were not fully verified"), result.summary());
+    }
+
+    @Test
     void webCoherencePassPreservesMutatedTargetCountSummary() {
         TaskVerificationResult result = TaskVerificationOutcomeSelector.select(
                 List.of("HTML/CSS/JS selector coherence passed."),

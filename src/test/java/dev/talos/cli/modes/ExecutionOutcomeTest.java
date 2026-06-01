@@ -1922,6 +1922,63 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void postApplyGenericSourceDerivedSummaryIsCompletedUnverified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-source-derived-unverified-");
+        try {
+            Files.createDirectories(ws.resolve("docs"));
+            Files.writeString(ws.resolve("long-notes.txt"), """
+                    Alice shipped the prototype.
+                    Beta users asked for clearer onboarding.
+                    Publish a short release note next.
+                    """);
+            Files.writeString(ws.resolve("docs/summary.md"), """
+                    - Alice shipped the prototype.
+                    - Beta users need clearer onboarding.
+                    - Publish a short release note next.
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Summarize long-notes.txt into docs/summary.md. Keep it under 8 bullets."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created docs/summary.md.", 2, 2,
+                    List.of("talos.read_file", "talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of("long-notes.txt"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", "long-notes.txt", true, false, false,
+                                    "read long-notes.txt", "", dev.talos.tools.VerificationStatus.UNKNOWN
+                            ),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "docs/summary.md", true, true, false,
+                                    "wrote docs/summary.md", "", dev.talos.tools.VerificationStatus.PASS
+                            )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created docs/summary.md.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.READBACK_ONLY, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.finalAnswer().startsWith("[File write/readback passed."), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains(
+                    "Task-specific verification did not satisfy the requested claim"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Source-derived coverage checks passed"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void postApplyScopedCssVerificationDoesNotOverclaimFullWebCoherence() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-scoped-css-verify-");
         try {

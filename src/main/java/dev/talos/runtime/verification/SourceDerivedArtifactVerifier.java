@@ -70,9 +70,11 @@ final class SourceDerivedArtifactVerifier {
             return new Result(true, facts, problems);
         }
 
-        List<SourceEvidence> sourceEvidence = readSourceEvidence(root, contract.sourceEvidenceTargets(), problems);
+        List<VerifierResult> extractionEvidence = new ArrayList<>();
+        List<SourceEvidence> sourceEvidence = readSourceEvidence(
+                root, contract.sourceEvidenceTargets(), problems, extractionEvidence);
         if (sourceEvidence.isEmpty()) {
-            return new Result(true, facts, problems);
+            return new Result(true, facts, problems, reportFor(extractionEvidence));
         }
 
         Set<String> requestTerms = distinctiveTerms(request);
@@ -108,17 +110,22 @@ final class SourceDerivedArtifactVerifier {
             facts.add(targetPath + ": source-derived artifact includes evidence from "
                     + String.join(", ", contract.sourceEvidenceTargets()) + ".");
         }
-        return new Result(true, facts, problems);
+        return new Result(true, facts, problems, reportFor(extractionEvidence));
     }
 
-    record Result(boolean required, List<String> facts, List<String> problems) {
+    record Result(boolean required, List<String> facts, List<String> problems, VerificationReport report) {
         Result {
             facts = facts == null ? List.of() : List.copyOf(facts);
             problems = problems == null ? List.of() : List.copyOf(problems);
+            report = report == null ? VerificationReport.empty() : report;
+        }
+
+        Result(boolean required, List<String> facts, List<String> problems) {
+            this(required, facts, problems, VerificationReport.empty());
         }
 
         static Result notRequired() {
-            return new Result(false, List.of(), List.of());
+            return new Result(false, List.of(), List.of(), VerificationReport.empty());
         }
     }
 
@@ -157,7 +164,8 @@ final class SourceDerivedArtifactVerifier {
     private static List<SourceEvidence> readSourceEvidence(
             Path root,
             Collection<String> sourceTargets,
-            List<String> problems
+            List<String> problems,
+            List<VerifierResult> extractionEvidence
     ) {
         List<SourceEvidence> out = new ArrayList<>();
         Config extractionConfig = new Config(null);
@@ -171,7 +179,7 @@ final class SourceDerivedArtifactVerifier {
                 continue;
             }
             SourceEvidence extracted = extractedSourceEvidence(
-                    root, normalized, source, extractionConfig, extractionService, problems);
+                    root, normalized, source, extractionConfig, extractionService, problems, extractionEvidence);
             if (extracted != null) {
                 out.add(extracted);
                 continue;
@@ -192,7 +200,8 @@ final class SourceDerivedArtifactVerifier {
             Path source,
             Config extractionConfig,
             DocumentExtractionService extractionService,
-            List<String> problems
+            List<String> problems,
+            List<VerifierResult> extractionEvidence
     ) {
         FileCapabilityPolicy.FormatInfo info = FileCapabilityPolicy.describe(source, extractionConfig).orElse(null);
         if (info == null || info.capability() != FileCapabilityPolicy.Capability.EXTRACTABLE_TEXT_ENABLED) {
@@ -200,6 +209,9 @@ final class SourceDerivedArtifactVerifier {
         }
 
         DocumentExtractionResult result = extractionService.extract(DocumentExtractionRequest.read(source, root));
+        if (extractionEvidence != null) {
+            extractionEvidence.add(DocumentExtractionVerificationMapper.toVerifierResult(normalized, result));
+        }
         if ((result.status() == DocumentExtractionStatus.SUCCESS || result.status() == DocumentExtractionStatus.PARTIAL)
                 && !result.safeText().isBlank()) {
             return new SourceEvidence(normalized, result.safeText());
@@ -208,6 +220,25 @@ final class SourceDerivedArtifactVerifier {
         problems.add(normalized + ": source evidence document could not be extracted for derived artifact verification"
                 + " (status=" + result.status() + ").");
         return new SourceEvidence(normalized, "");
+    }
+
+    private static VerificationReport reportFor(List<VerifierResult> verifierResults) {
+        if (verifierResults == null || verifierResults.isEmpty()) return VerificationReport.empty();
+        List<String> reportFacts = new ArrayList<>();
+        List<String> reportProblems = new ArrayList<>();
+        List<String> reportLimitations = new ArrayList<>();
+        for (VerifierResult result : verifierResults) {
+            if (result == null) continue;
+            reportFacts.addAll(result.facts());
+            reportProblems.addAll(result.problems());
+            reportLimitations.addAll(result.limitations());
+        }
+        return new VerificationReport(
+                List.of(),
+                verifierResults,
+                reportFacts,
+                reportProblems,
+                reportLimitations);
     }
 
     private static boolean looksLikeInstructionEcho(

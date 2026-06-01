@@ -1343,7 +1343,9 @@ class AssistantTurnExecutorTest {
 
             assertTrue(Files.exists(workspace.resolve("docs/summary.md")), out.text());
             assertFalse(out.text().contains("[Evidence incomplete"), out.text());
-            assertTrue(out.text().contains("Source-derived artifact verification passed"), out.text());
+            assertTrue(out.text().contains("Source-derived coverage checks passed"), out.text());
+            assertTrue(out.text().contains("summary semantics were not fully verified"), out.text());
+            assertFalse(out.text().contains("[Static verification: passed"), out.text());
         }
 
         @Test

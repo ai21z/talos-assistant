@@ -2,11 +2,13 @@ package dev.talos.runtime.capability;
 
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,6 +57,51 @@ class CapabilityProfileRegistryTest {
             assertEquals(VerifierProfile.NONE, profile.verifierProfile(), prompt);
             assertEquals(RepairProfile.NONE, profile.repairProfile(), prompt);
         }
+    }
+
+    @Test
+    void sourceDerivedSummarySelectsSourceDerivedVerifierProfile() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("summary.md"),
+                Set.of("alpha.txt", "beta.txt"),
+                Set.of(),
+                "Summarize alpha.txt and beta.txt into summary.md.",
+                "test-source-derived-summary");
+
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+
+        assertFalse(profile.staticWeb());
+        assertEquals("source-derived", profile.id());
+        assertEquals(ArtifactKind.SOURCE_DERIVED_FILE, profile.artifactKind());
+        assertEquals(ArtifactOperation.CREATE, profile.operation());
+        assertEquals(TargetSurface.SOURCE_DERIVED_TEXT, profile.targetSurface());
+        assertEquals(VerifierProfile.SOURCE_DERIVED, profile.verifierProfile());
+        assertEquals(RepairProfile.NONE, profile.repairProfile());
+    }
+
+    @Test
+    void staticWebProfileWinsForWebSurfaceEvenWhenTaskHasSourceEvidence() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("index.html", "styles.css", "scripts.js"),
+                Set.of("brief.txt"),
+                Set.of(),
+                "Create index.html, styles.css, and scripts.js from brief.txt.",
+                "test-web-from-brief");
+
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+
+        assertTrue(profile.staticWeb());
+        assertEquals("static-web", profile.id());
+        assertEquals(ArtifactKind.STATIC_WEB, profile.artifactKind());
+        assertEquals(VerifierProfile.STATIC_WEB, profile.verifierProfile());
     }
 
     @Test

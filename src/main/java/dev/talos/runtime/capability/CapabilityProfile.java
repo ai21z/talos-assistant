@@ -30,6 +30,16 @@ public record CapabilityProfile(
                 RepairProfile.STATIC_WEB);
     }
 
+    public static CapabilityProfile sourceDerived(ArtifactOperation operation) {
+        return new CapabilityProfile(
+                SourceDerivedCapabilityProfile.ID,
+                ArtifactKind.SOURCE_DERIVED_FILE,
+                operation == null ? ArtifactOperation.NONE : operation,
+                TargetSurface.SOURCE_DERIVED_TEXT,
+                VerifierProfile.SOURCE_DERIVED,
+                RepairProfile.NONE);
+    }
+
     public boolean staticWeb() {
         return artifactKind == ArtifactKind.STATIC_WEB;
     }

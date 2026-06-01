@@ -2,6 +2,7 @@ package dev.talos.runtime.capability;
 
 public enum TargetSurface {
     NONE("none", false),
+    SOURCE_DERIVED_TEXT("source-derived text artifact", false),
     SELF_CONTAINED_HTML("self-contained HTML", true),
     FUNCTIONAL_WEB("functional web surface", true),
     HTML_CSS_JS("HTML/CSS/JS", false);
