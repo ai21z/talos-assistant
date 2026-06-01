@@ -3,10 +3,40 @@
 > Companion to `14-current-architecture-design-review.md`. This is a **decision-quality** review, not an
 > implementation plan and not a dependency-shopping list. No production code was changed, no dependencies
 > were added, no build files were edited. Web claims are cited to primary sources (see Appendix A).
-> "Current evidence" (measured/cited) is kept separate from "future speculation."
+> "Current evidence" (measured/cited) is kept separate from "future speculation." This original review
+> snapshot predates the T625/T626 static-web browser-verification work; see the 2026-06-01 addendum below.
 
 **Decision labels used:** `KEEP_CURRENT`, `ADOPT_NOW`, `SPIKE_NOW`, `DEFER_POST_BETA`, `DEFER_LONG_TERM`,
 `REJECT`, `NEEDS_MORE_DATA`.
+
+---
+
+## 2026-06-01 Addendum: HtmlUnit Runtime Dependency
+
+**Decision:** `ADOPT_NOW`, scoped to the static-web verifier lane only.
+
+T625 introduced `org.htmlunit:htmlunit:4.21.0` as an `implementation` dependency, pinned through
+`htmlUnitVersion` in `gradle.properties`. That scope is intentional: the verifier lives in `src/main` and
+runs during Talos's real post-apply verification, so HtmlUnit is a runtime capability, not test tooling.
+
+The dependency is accepted under narrow conditions:
+
+- The only production entry point is `dev.talos.runtime.verification.StaticWebBrowserBehaviorVerifier`.
+- It may verify workspace-local static-web click/update claims by loading local `file:` pages and dispatching
+  DOM events.
+- Its `WorkspaceOnlyWebConnection` must keep blocking non-workspace requests; `about:` and `data:` remain the
+  only non-file schemes allowed.
+- It must fail closed: script errors become verifier failures, runner exceptions become `UNAVAILABLE`, and no
+  DOM change becomes `FAILED`.
+- It must not be reused as general browser automation, internet browsing, rendering proof, screenshot proof,
+  or arbitrary JavaScript execution outside the static-web verification lane.
+- Because HtmlUnit is a heavy transitive dependency, future uses require a specific ticket and evidence that
+  the work cannot be handled by the existing verifier entry point.
+
+T626 tightened the fallback path so authoritative `BROWSER_BEHAVIOR` means an observed output change across
+the click boundary, not merely a DOM mutation during linked-script eval. T627 should decide the root-cause
+direction: make natural external-script loading deterministic enough to retire the fallback, or add a governed
+external-browser lane that is `UNAVAILABLE` by default when not configured.
 
 ---
 
@@ -69,7 +99,8 @@ the local-first/trust doctrine while solving no real Talos problem.
 - **Repo:** `ai21z/talos-cli`, Java 21, Gradle 8.14 (Kotlin DSL), JUnit 5.
 - **Current dependency versions (from `gradle.properties` / `build.gradle.kts`):** Lucene 10.2.2,
   sqlite-jdbc 3.46.0.0, Jackson 2.17.1, Picocli 4.7.6, JLine 3.26.3, JavaFX 21.0.3 (win), PDFBox 3.0.7,
-  POI 5.5.1, SLF4J 2.0.12, Logback 1.4.14, ArchUnit 1.4.2. `talosVersion=0.9.9`, `javaVersion=21`.
+  POI 5.5.1, HtmlUnit 4.21.0, SLF4J 2.0.12, Logback 1.4.14, ArchUnit 1.4.2. `talosVersion=0.9.9`,
+  `javaVersion=21`.
 - **Build facts confirmed:** Tests already run with `--add-modules jdk.incubator.vector` (Lucene ANN SIMD);
   `jpackage` + `installDist` tasks present; JavaFX bundled (win classifier).
 - **Local source inspected:** `core.retrieval` (RetrievalPipeline/Stage/StageOutput/RetrievalCandidate),
@@ -694,5 +725,6 @@ timeline
 
 ---
 
-*End of strategy. No production code changed, no dependencies added, no build files edited. Web claims are
+*End of original strategy. The original review changed no production code, dependencies, or build files.
+The 2026-06-01 addendum records the later HtmlUnit runtime dependency introduced by T625/T626. Web claims are
 cited to primary sources above; benchmark numbers are proposed thresholds, not measured results.*
