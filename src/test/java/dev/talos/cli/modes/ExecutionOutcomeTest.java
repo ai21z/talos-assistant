@@ -2020,6 +2020,8 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.verificationReport().authoritativeProofKinds()
                     .contains(ProofKind.PARSER_EXTRACTION.name()), outcome.verificationReport().toString());
             assertTrue(outcome.finalAnswer().contains("final-answer exactness was not verified"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("PDF text extraction may not match visual order"),
+                    outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -2069,6 +2071,8 @@ class ExecutionOutcomeTest {
             assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
             assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("summary semantics were not verified"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("PDF text extraction may not match visual order"),
+                    outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {

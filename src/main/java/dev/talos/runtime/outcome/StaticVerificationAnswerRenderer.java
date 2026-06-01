@@ -73,6 +73,17 @@ public final class StaticVerificationAnswerRenderer {
             }
             out.append("\n\n");
         }
+        List<String> extractionLimitations = documentExtractionLimitations(report);
+        if (!extractionLimitations.isEmpty()) {
+            out.append("Document extraction limitations:");
+            for (String limitation : extractionLimitations.subList(0, Math.min(5, extractionLimitations.size()))) {
+                out.append("\n- ").append(singleLine(limitation));
+            }
+            if (extractionLimitations.size() > 5) {
+                out.append("\n- ... ").append(extractionLimitations.size() - 5).append(" more");
+            }
+            out.append("\n\n");
+        }
         return out.toString();
     }
 
@@ -187,6 +198,17 @@ public final class StaticVerificationAnswerRenderer {
 
     private static boolean hasParserExtractionEvidence(VerificationReport report) {
         return report != null && report.authoritativeProofKinds().contains("PARSER_EXTRACTION");
+    }
+
+    private static List<String> documentExtractionLimitations(VerificationReport report) {
+        if (!hasParserExtractionEvidence(report) || report.limitations().isEmpty()) return List.of();
+        LinkedHashSet<String> limitations = new LinkedHashSet<>();
+        report.limitations().stream()
+                .filter(Objects::nonNull)
+                .map(String::strip)
+                .filter(value -> !value.isBlank())
+                .forEach(limitations::add);
+        return List.copyOf(limitations);
     }
 
     private static boolean isWorkspaceOperationOutcome(ToolCallLoop.ToolOutcome outcome) {
