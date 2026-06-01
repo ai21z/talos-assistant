@@ -264,8 +264,24 @@ public final class JsonSessionStore implements SessionStore {
         out.put("proposalSummary", safe.proposalSummary());
         out.put("previousOutcomeStatus", safe.previousOutcomeStatus());
         out.put("verifierFindings", safe.verifierFindings());
+        out.put("requiredVerificationClaims", safe.requiredVerificationClaims().stream()
+                .map(JsonSessionStore::requiredVerificationClaimToMap)
+                .toList());
         out.put("blockedReason", safe.blockedReason());
         out.put("suppressionReason", safe.suppressionReason());
+        return out;
+    }
+
+    private static Map<String, Object> requiredVerificationClaimToMap(
+            ActiveTaskContext.RequiredVerificationClaim claim) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (claim == null) return out;
+        out.put("id", claim.id());
+        out.put("description", claim.description());
+        out.put("proofKind", claim.proofKind());
+        out.put("triggerSelector", claim.triggerSelector());
+        out.put("outputSelector", claim.outputSelector());
+        out.put("eventType", claim.eventType());
         return out;
     }
 
@@ -289,11 +305,31 @@ public final class JsonSessionStore implements SessionStore {
                     stringVal(map, "proposalSummary", ""),
                     stringVal(map, "previousOutcomeStatus", ""),
                     stringList(map.get("verifierFindings")),
+                    requiredVerificationClaimsFrom(map.get("requiredVerificationClaims")),
                     stringVal(map, "blockedReason", ""),
                     stringVal(map, "suppressionReason", ""));
         } catch (Exception e) {
             return ActiveTaskContext.none();
         }
+    }
+
+    private static List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaimsFrom(Object raw) {
+        if (!(raw instanceof List<?> values) || values.isEmpty()) return List.of();
+        List<ActiveTaskContext.RequiredVerificationClaim> out = new java.util.ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof Map<?, ?> map)) continue;
+            ActiveTaskContext.RequiredVerificationClaim claim = new ActiveTaskContext.RequiredVerificationClaim(
+                    stringVal(map, "id", ""),
+                    stringVal(map, "description", ""),
+                    stringVal(map, "proofKind", ""),
+                    stringVal(map, "triggerSelector", ""),
+                    stringVal(map, "outputSelector", ""),
+                    stringVal(map, "eventType", ""));
+            if (!claim.triggerSelector().isBlank() && !claim.outputSelector().isBlank()) {
+                out.add(claim);
+            }
+        }
+        return List.copyOf(out);
     }
 
     private static Map<String, Object> artifactGoalToMap(ArtifactGoal goal) {

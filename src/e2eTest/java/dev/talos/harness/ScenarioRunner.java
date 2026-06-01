@@ -151,7 +151,7 @@ public final class ScenarioRunner {
 
         // 6. Run the scripted response through the tool loop.
         // Sandbox MUST be rooted at the temp workspace so relative paths resolve correctly.
-        var ctx = Context.builder(new Config())
+        var ctx = Context.builder(new Config(null))
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .llm(llm)
                 .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
@@ -407,7 +407,7 @@ public final class ScenarioRunner {
         //    sandbox rooted at workspace, and the tool-call loop.
         //    No streamSink → non-streaming path, deterministic.
         var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var ctx = Context.builder(new Config())
+        var ctx = Context.builder(new Config(null))
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
@@ -476,7 +476,7 @@ public final class ScenarioRunner {
 
         var streamedChunks = new StringBuilder();
         var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var ctx = Context.builder(new Config())
+        var ctx = Context.builder(new Config(null))
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)

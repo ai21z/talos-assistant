@@ -75,7 +75,7 @@ class PermissionPolicyTest {
     void protectedReadFileAsksWithoutRemembering() {
         PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
 
-        PermissionDecision decision = policy.decide(request(new Config(),
+        PermissionDecision decision = policy.decide(request(new Config(null),
                 new ToolCall("talos.read_file", Map.of("path", ".env")),
                 ToolRiskLevel.READ_ONLY,
                 ExecutionPhase.INSPECT));

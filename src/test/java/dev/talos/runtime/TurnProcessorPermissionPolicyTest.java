@@ -80,7 +80,7 @@ class TurnProcessorPermissionPolicyTest {
         AtomicInteger gateCalls = new AtomicInteger();
         AtomicReference<String> approvalDescription = new AtomicReference<>();
         AtomicReference<String> approvalDetail = new AtomicReference<>();
-        Config config = new Config();
+        Config config = new Config(null);
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         TurnProcessor processor = new TurnProcessor(

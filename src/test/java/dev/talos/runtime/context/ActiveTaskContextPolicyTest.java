@@ -205,12 +205,81 @@ class ActiveTaskContextPolicyTest {
         assertFalse(decision.taskContract().mutationAllowed());
     }
 
+    @Test void repairPromptConsumesVerifierContextWithRequiredClaim() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        String userRequest = "Fix the remaining static verification problems and make the existing site verified.";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertTrue(decision.consumed());
+        assertEquals(TaskType.FILE_EDIT, decision.taskContract().type());
+        assertEquals(Set.of("index.html", "scripts.js", "styles.css"), decision.taskContract().expectedTargets());
+        assertTrue(decision.taskContract().originalUserRequest().contains("#teaser-button"),
+                decision.taskContract().originalUserRequest());
+        assertTrue(decision.taskContract().originalUserRequest().contains("#teaser-status"),
+                decision.taskContract().originalUserRequest());
+    }
+
+    @Test void statusQuestionDoesNotConsumeVerifierContextAsRepairMutation() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        String userRequest = "Is it verified now?";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+    }
+
+    @Test void completionQuestionDoesNotConsumeVerifierContextAsRepairMutation() {
+        ActiveTaskContext saved = staticWebVerifierContext();
+        String userRequest = "Is it complete?";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+    }
+
     private static ActiveTaskContext readmeProposal() {
         return ActiveTaskContext.proposedChanges(
                 2,
                 "trace-propose",
                 List.of("README.md"),
                 "Add title and usage.");
+    }
+
+    private static ActiveTaskContext staticWebVerifierContext() {
+        return ActiveTaskContext.verifierFindings(
+                2,
+                "trace-static",
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of("scripts.js: JavaScript syntax check failed"),
+                "FAILED",
+                List.of(new ActiveTaskContext.RequiredVerificationClaim(
+                        "static-web-interaction:#teaser-button->#teaser-status",
+                        "Static interaction #teaser-button -> #teaser-status.",
+                        "STATIC_INTERACTION_GUARD",
+                        "#teaser-button",
+                        "#teaser-status",
+                        "click")));
     }
 
     private static void assertNonActiveBaseline(TaskContract rawContract, ActiveTaskContext savedContext) {

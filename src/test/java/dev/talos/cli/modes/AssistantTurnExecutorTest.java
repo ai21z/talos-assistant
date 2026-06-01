@@ -3478,7 +3478,7 @@ class AssistantTurnExecutorTest {
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, (description, detail) -> false, registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                             "The file says SECRET=manual-test.")))
@@ -3533,7 +3533,7 @@ class AssistantTurnExecutorTest {
                     },
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"\\\\.env\"}}",
                             "The approved file says SECRET=manual-test.")))
@@ -3645,7 +3645,7 @@ class AssistantTurnExecutorTest {
                     },
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "I can help with that.",
                             "The file says SECRET=manual-test.")))
@@ -3703,7 +3703,7 @@ class AssistantTurnExecutorTest {
                     },
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "I can help with that.",
                             "The approved file says SECRET=manual-test.")))
@@ -3758,7 +3758,7 @@ class AssistantTurnExecutorTest {
                     },
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "I can help with that.",
                             "I'm sorry, but I can't provide that.")))
@@ -3818,7 +3818,7 @@ class AssistantTurnExecutorTest {
                     },
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "I can help with that.",
                             "The approved files say SECRET=manual-test and Public project notes.")))
@@ -3876,7 +3876,7 @@ class AssistantTurnExecutorTest {
                     },
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
-            var ctx = Context.builder(new Config())
+            var ctx = Context.builder(new Config(null))
                     .llm(LlmClient.scripted(List.of(
                             "I cannot access local files directly.",
                             "The approved file says SECRET=manual-test.")))

@@ -108,6 +108,79 @@ class ActiveTaskContextUpdaterTest {
     }
 
     @Test
+    void failedStaticWebInteractionVerificationStoresRequiredClaimForRepair() {
+        String request = "Create a synthwave website with a button with id teaser-button "
+                + "that updates visible text in #teaser-status when clicked.";
+        TurnResult result = turn(
+                9,
+                new Result.Ok("Static verification failed."),
+                policy("FILE_CREATE", true, true, List.of("index.html", "styles.css", "scripts.js")),
+                trace(9, "trace-failed-interaction", true, true,
+                        List.of("index.html", "styles.css", "scripts.js"),
+                        "FAILED",
+                        "scripts.js: JavaScript syntax check failed at line 4",
+                        "GRANTED_OR_NOT_REQUIRED",
+                        "SUCCEEDED",
+                        "FAILED",
+                        1,
+                        1,
+                        List.of("STATIC_INTERACTION_GUARD"),
+                        List.of("Browser behavior verifier observed JavaScript error.")),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "scripts.js", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                request,
+                ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        ActiveTaskContext context = update.activeTaskContext();
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, context.kind());
+        assertEquals(1, context.requiredVerificationClaims().size());
+        ActiveTaskContext.RequiredVerificationClaim claim = context.requiredVerificationClaims().getFirst();
+        assertEquals("#teaser-button", claim.triggerSelector());
+        assertEquals("#teaser-status", claim.outputSelector());
+        assertEquals("click", claim.eventType());
+        assertTrue(context.renderForPlan().contains("#teaser-button"), context.renderForPlan());
+        assertTrue(context.renderForPlan().contains("#teaser-status"), context.renderForPlan());
+    }
+
+    @Test
+    void repairPromptConsumesVerifierContextAndCarriesRequiredClaimIntoContract() {
+        ActiveTaskContext previous = ActiveTaskContext.verifierFindings(
+                9,
+                "trace-failed-interaction",
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of("scripts.js: JavaScript syntax check failed at line 4"),
+                "FAILED",
+                List.of(new ActiveTaskContext.RequiredVerificationClaim(
+                        "static-web-interaction:#teaser-button->#teaser-status",
+                        "Static interaction #teaser-button -> #teaser-status.",
+                        "STATIC_INTERACTION_GUARD",
+                        "#teaser-button",
+                        "#teaser-status",
+                        "click")));
+
+        var rawContract = dev.talos.runtime.task.TaskContractResolver.fromUserRequest(
+                "Fix the remaining static verification problems and make the existing Neon Voltage site verified. "
+                        + "Keep exactly index.html, styles.css, and scripts.js; do not create any other files.");
+
+        var decision = dev.talos.runtime.context.ActiveTaskContextPolicy.evaluate(
+                rawContract.originalUserRequest(),
+                rawContract,
+                previous,
+                ArtifactGoal.fromActiveContext(previous),
+                10);
+
+        assertTrue(decision.consumed());
+        assertTrue(decision.taskContract().originalUserRequest().contains("#teaser-button"),
+                decision.taskContract().originalUserRequest());
+        assertTrue(decision.taskContract().originalUserRequest().contains("#teaser-status"),
+                decision.taskContract().originalUserRequest());
+    }
+
+    @Test
     void successfulMutationWithPassingVerificationClearsExistingContextAndGoal() {
         ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
                 6, "trace-old", List.of("index.html"), "Change the hero.");
@@ -301,6 +374,38 @@ class ActiveTaskContextUpdaterTest {
             String approvalStatus,
             String mutationStatus,
             String classification) {
+        return trace(
+                turnNumber,
+                traceId,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                verificationStatus,
+                verificationProblem,
+                approvalStatus,
+                mutationStatus,
+                classification,
+                0,
+                0,
+                List.of(),
+                List.of());
+    }
+
+    private static LocalTurnTrace trace(
+            int turnNumber,
+            String traceId,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            List<String> expectedTargets,
+            String verificationStatus,
+            String verificationProblem,
+            String approvalStatus,
+            String mutationStatus,
+            String classification,
+            int requiredClaimCount,
+            int unsatisfiedRequiredClaimCount,
+            List<String> authoritativeProofKinds,
+            List<String> limitations) {
         List<String> problems = verificationProblem == null || verificationProblem.isBlank()
                 ? List.of()
                 : List.of(verificationProblem);
@@ -312,7 +417,14 @@ class ActiveTaskContextUpdaterTest {
                         mutationAllowed,
                         expectedTargets,
                         List.of()))
-                .verification(verificationStatus, verificationProblem, problems)
+                .verification(
+                        verificationStatus,
+                        verificationProblem,
+                        problems,
+                        requiredClaimCount,
+                        unsatisfiedRequiredClaimCount,
+                        authoritativeProofKinds,
+                        limitations)
                 .outcome(classification, verificationStatus, approvalStatus, mutationStatus, classification)
                 .build();
     }

@@ -65,6 +65,39 @@ class JsonSessionStoreTest {
             assertEquals(List.of("README.md"), loaded.activeTaskContext().targets());
             assertEquals(ArtifactGoal.ArtifactKind.README, loaded.artifactGoal().artifactKind());
         }
+        @Test void roundTrip_preservesActiveTaskContextRequiredVerificationClaims() {
+            var store = store();
+            ActiveTaskContext context = ActiveTaskContext.verifierFindings(
+                    3,
+                    "trace-save",
+                    List.of("index.html", "styles.css", "scripts.js"),
+                    List.of("scripts.js: JavaScript syntax check failed"),
+                    "FAILED",
+                    List.of(new ActiveTaskContext.RequiredVerificationClaim(
+                            "static-web-interaction:#teaser-button->#teaser-status",
+                            "Static interaction #teaser-button -> #teaser-status.",
+                            "STATIC_INTERACTION_GUARD",
+                            "#teaser-button",
+                            "#teaser-status",
+                            "click")));
+            ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+            SessionData original = new SessionData("ctx-claim", "/tmp/ws", "goal sketch", 1,
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
+                    context, goal);
+
+            store.save(original);
+
+            SessionData loaded = store.load("ctx-claim").orElseThrow();
+            ActiveTaskContext loadedContext = loaded.activeTaskContext();
+            assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, loadedContext.kind());
+            assertEquals(1, loadedContext.requiredVerificationClaims().size());
+            ActiveTaskContext.RequiredVerificationClaim claim =
+                    loadedContext.requiredVerificationClaims().getFirst();
+            assertEquals("#teaser-button", claim.triggerSelector());
+            assertEquals("#teaser-status", claim.outputSelector());
+            assertEquals("STATIC_INTERACTION_GUARD", claim.proofKind());
+            assertTrue(loadedContext.renderForPlan().contains("#teaser-button"), loadedContext.renderForPlan());
+        }
         @Test void load_oldSnapshotWithoutActiveContextDefaultsToNone() throws Exception {
             var store = store();
             Files.writeString(tempDir.resolve("legacy.json"), """
