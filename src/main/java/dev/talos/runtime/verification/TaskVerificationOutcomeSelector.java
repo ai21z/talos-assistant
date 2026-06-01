@@ -102,8 +102,9 @@ final class TaskVerificationOutcomeSelector {
                     safeFacts);
         }
         if (sourceDerived.required() && !webCoherenceRequired) {
-            return TaskVerificationResult.passed(
-                    "Source-derived artifact verification passed.",
+            return TaskVerificationResult.readbackOnly(
+                    "Source-derived coverage checks passed, but required summary verification was not satisfied; "
+                            + "summary semantics were not fully verified.",
                     safeFacts);
         }
         if (webCoherenceRequired) {

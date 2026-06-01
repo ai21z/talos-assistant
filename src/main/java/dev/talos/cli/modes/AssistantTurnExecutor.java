@@ -774,7 +774,7 @@ public final class AssistantTurnExecutor {
                 List.of(),
                 activeTaskContext,
                 artifactGoal,
-                ActiveTaskContext.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.derivedVerifierProfile(taskContract),
                 ctx == null ? null : ctx.cfg());
     }
 

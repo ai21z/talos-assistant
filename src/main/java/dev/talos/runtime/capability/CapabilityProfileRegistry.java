@@ -3,9 +3,14 @@ package dev.talos.runtime.capability;
 import dev.talos.runtime.task.TaskContract;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 
 public final class CapabilityProfileRegistry {
+    private static final List<CapabilityProfileSelector> SELECTORS = List.of(
+            StaticWebCapabilityProfile::select,
+            SourceDerivedCapabilityProfile::select);
+
     private CapabilityProfileRegistry() {}
 
     public static CapabilityProfile select(TaskContract contract) {
@@ -13,8 +18,10 @@ public final class CapabilityProfileRegistry {
     }
 
     public static CapabilityProfile select(TaskContract contract, Path workspace, Set<String> mutatedPaths) {
-        CapabilityProfile staticWeb = StaticWebCapabilityProfile.select(contract, workspace, mutatedPaths);
-        if (staticWeb.staticWeb()) return staticWeb;
+        for (CapabilityProfileSelector selector : SELECTORS) {
+            CapabilityProfile profile = selector.select(contract, workspace, mutatedPaths);
+            if (profile != null && profile != CapabilityProfile.none()) return profile;
+        }
         return CapabilityProfile.none();
     }
 }

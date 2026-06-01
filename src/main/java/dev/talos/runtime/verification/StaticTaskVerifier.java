@@ -191,9 +191,11 @@ public final class StaticTaskVerifier {
         if (StaticWebCapabilityProfile.requiresSeparateAssetMutations(profile)) {
             verifyPrimaryWebMutationCoverage(mutatedPaths, facts, problems);
         }
-        VerificationReport claimReport = VerificationReport.empty();
+        VerificationReport claimReport = sourceDerivedVerification.report();
         if (webCoherenceRequired) {
-            claimReport = verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems);
+            claimReport = VerificationReport.merge(
+                    claimReport,
+                    verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems));
         }
 
         TaskVerificationResult compatibilityResult = TaskVerificationOutcomeSelector.select(

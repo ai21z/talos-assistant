@@ -2,6 +2,9 @@ package dev.talos.runtime.turn;
 
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
+import dev.talos.runtime.capability.CapabilityProfile;
+import dev.talos.runtime.capability.CapabilityProfileRegistry;
+import dev.talos.runtime.capability.VerifierProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -70,7 +73,7 @@ public record CurrentTurnPlan(
                 blockedTools,
                 NONE_OR_NOT_DERIVED,
                 NONE_OR_NOT_DERIVED,
-                NONE_OR_NOT_DERIVED);
+                derivedVerifierProfile(contract));
     }
 
     public static CurrentTurnPlan create(
@@ -89,7 +92,7 @@ public record CurrentTurnPlan(
                 blockedTools,
                 NONE_OR_NOT_DERIVED,
                 NONE_OR_NOT_DERIVED,
-                NONE_OR_NOT_DERIVED,
+                derivedVerifierProfile(contract),
                 cfg);
     }
 
@@ -160,6 +163,14 @@ public record CurrentTurnPlan(
         if (contract.mutationAllowed()) return ExecutionPhase.APPLY;
         if (contract.verificationRequired()) return ExecutionPhase.VERIFY;
         return ExecutionPhase.INSPECT;
+    }
+
+    public static String derivedVerifierProfile(TaskContract contract) {
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+        if (profile == null || profile.verifierProfile() == VerifierProfile.NONE) {
+            return NONE_OR_NOT_DERIVED;
+        }
+        return profile.verifierProfile().name();
     }
 
     private static ExecutionPhase defaultPhase(TaskContract contract) {

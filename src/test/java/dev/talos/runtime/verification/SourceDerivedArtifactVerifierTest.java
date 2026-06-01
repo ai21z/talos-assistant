@@ -70,6 +70,18 @@ class SourceDerivedArtifactVerifierTest {
                                 && f.contains("report.docx")
                                 && f.contains("budget.xlsx")),
                 result.facts().toString());
+        assertTrue(result.report().verifierResults().stream()
+                        .filter(v -> v.proofKind() == ProofKind.PARSER_EXTRACTION)
+                        .filter(v -> v.authority() == EvidenceAuthority.AUTHORITATIVE)
+                        .filter(v -> v.coverage() == EvidenceCoverage.SCOPED)
+                        .filter(v -> v.verdict() == VerificationVerdict.VERIFIED)
+                        .count() >= 3,
+                result.report().toString());
+        assertTrue(result.report().limitations().stream()
+                        .anyMatch(l -> l.contains("PDF text extraction may not match visual order")
+                                || l.contains("layout, comments, tracked changes")
+                                || l.contains("formulas are not recalculated")),
+                result.report().limitations().toString());
     }
 
     @Test

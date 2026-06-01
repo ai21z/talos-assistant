@@ -2,6 +2,7 @@ package dev.talos.runtime.turn;
 
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
+import dev.talos.runtime.capability.VerifierProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.task.TaskContract;
@@ -159,6 +160,44 @@ class CurrentTurnPlanTest {
         assertEquals("README APPLY_EDIT targets=[README.md] source=ACTIVE_CONTEXT",
                 plan.artifactGoal());
         assertEquals("NONE_OR_NOT_DERIVED", plan.verifierProfile());
+    }
+
+    @Test
+    void createDerivesSourceDerivedVerifierProfileWhenNoProfileIsExplicit() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("summary.md"),
+                Set.of("alpha.txt", "beta.txt"),
+                Set.of(),
+                "Summarize alpha.txt and beta.txt into summary.md.",
+                "test-source-derived-plan");
+
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.read_file", "talos.write_file"),
+                List.of());
+
+        assertEquals(VerifierProfile.SOURCE_DERIVED.name(), plan.verifierProfile());
+    }
+
+    @Test
+    void createDerivesStaticWebVerifierProfileWhenNoProfileIsExplicit() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator.");
+
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+
+        assertEquals(VerifierProfile.STATIC_WEB.name(), plan.verifierProfile());
     }
 
     @Test

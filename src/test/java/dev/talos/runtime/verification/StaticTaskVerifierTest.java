@@ -1385,7 +1385,7 @@ class StaticTaskVerifierTest {
     }
 
     @Test
-    void sourceDerivedMultiSourceSummaryPassesWhenEachReadableSourceContributesDistinctiveFact() throws Exception {
+    void sourceDerivedMultiSourceSummaryChecksCoverageWithoutVerifyingSemantics() throws Exception {
         Files.writeString(workspace.resolve("alpha.txt"), """
                 Alpha source says orbital zinc inventory depends on cobalt ledger entries.
                 """);
@@ -1403,8 +1403,9 @@ class StaticTaskVerifierTest {
                 loopResult(List.of(successfulWrite("summary.md", VerificationStatus.PASS))),
                 0);
 
-        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
-        assertTrue(result.summary().contains("Source-derived artifact verification passed"), result.summary());
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status(), result.problems().toString());
+        assertTrue(result.summary().contains("Source-derived coverage checks passed"), result.summary());
+        assertTrue(result.summary().contains("summary semantics were not fully verified"), result.summary());
         assertTrue(result.facts().stream()
                         .anyMatch(f -> f.contains("summary.md: source-derived artifact includes evidence from")
                                 && f.contains("alpha.txt")
@@ -1442,7 +1443,7 @@ class StaticTaskVerifierTest {
     }
 
     @Test
-    void sourceDerivedOfficeDocumentSummaryPassesWhenEachExtractedSourceContributesDistinctiveFact() throws Exception {
+    void sourceDerivedOfficeDocumentSummaryChecksExtractionCoverageWithoutVerifyingSemantics() throws Exception {
         copyDocumentFixture("canonical-text.pdf", "report.pdf");
         copyDocumentFixture("canonical-report.docx", "report.docx");
         copyDocumentFixture("canonical-workbook.xlsx", "budget.xlsx");
@@ -1458,14 +1459,45 @@ class StaticTaskVerifierTest {
                 loopResult(List.of(successfulWrite("office-summary.md", VerificationStatus.PASS))),
                 0);
 
-        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
-        assertTrue(result.summary().contains("Source-derived artifact verification passed"), result.summary());
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status(), result.problems().toString());
+        assertTrue(result.summary().contains("Source-derived coverage checks passed"), result.summary());
+        assertTrue(result.summary().contains("summary semantics were not fully verified"), result.summary());
         assertTrue(result.facts().stream()
                         .anyMatch(f -> f.contains("office-summary.md: source-derived artifact includes evidence from")
                                 && f.contains("report.pdf")
                                 && f.contains("report.docx")
-                        && f.contains("budget.xlsx")),
+                                && f.contains("budget.xlsx")),
                 result.facts().toString());
+    }
+
+    @Test
+    void sourceDerivedOfficeDocumentSummaryThreadsParserExtractionEvidenceIntoReport() throws Exception {
+        copyDocumentFixture("canonical-text.pdf", "report.pdf");
+        copyDocumentFixture("canonical-report.docx", "report.docx");
+        copyDocumentFixture("canonical-workbook.xlsx", "budget.xlsx");
+        Files.writeString(workspace.resolve("office-summary.md"), """
+                - The PDF evidence includes CANONICAL_PDF_TEXT_ALPHA.
+                - The Word document evidence includes CANONICAL_DOCX_TEXT_BETA.
+                - The workbook evidence includes CANONICAL_XLSX_TEXT_GAMMA.
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                officeDocumentSummaryContract(),
+                loopResult(List.of(successfulWrite("office-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, evidence.compatibilityResult().status());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.PARSER_EXTRACTION.name()),
+                evidence.report().toString());
+        assertTrue(evidence.report().verifierResults().stream()
+                        .filter(v -> v.proofKind() == ProofKind.PARSER_EXTRACTION)
+                        .filter(v -> v.authority() == EvidenceAuthority.AUTHORITATIVE)
+                        .filter(v -> v.coverage() == EvidenceCoverage.SCOPED)
+                        .count() >= 3,
+                evidence.report().toString());
+        assertFalse(evidence.report().requiredClaimsSatisfied(),
+                "Parser extraction evidence must not verify summary semantics.");
     }
 
     @Test
