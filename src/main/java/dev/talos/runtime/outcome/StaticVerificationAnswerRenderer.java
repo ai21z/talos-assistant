@@ -17,10 +17,28 @@ public final class StaticVerificationAnswerRenderer {
     private StaticVerificationAnswerRenderer() {}
 
     public static String passedAnnotation(TaskVerificationResult result) {
+        return passedAnnotation(result, VerificationReport.empty());
+    }
+
+    public static String passedAnnotation(
+            TaskVerificationResult result,
+            VerificationReport report
+    ) {
         StringBuilder out = new StringBuilder();
         out.append("[Static verification: passed - ")
                 .append(verificationSummary(result))
                 .append("]\n\n");
+        List<String> limitations = generalLimitations(report);
+        if (!limitations.isEmpty()) {
+            out.append("Static verification limitations:");
+            for (String limitation : limitations.subList(0, Math.min(5, limitations.size()))) {
+                out.append("\n- ").append(singleLine(limitation));
+            }
+            if (limitations.size() > 5) {
+                out.append("\n- ... ").append(limitations.size() - 5).append(" more");
+            }
+            out.append("\n\n");
+        }
         List<String> contextualFacts = contextualStaticWebFacts(result);
         if (!contextualFacts.isEmpty()) {
             out.append("Contextual static-web findings outside this turn:");
@@ -202,6 +220,17 @@ public final class StaticVerificationAnswerRenderer {
 
     private static List<String> documentExtractionLimitations(VerificationReport report) {
         if (!hasParserExtractionEvidence(report) || report.limitations().isEmpty()) return List.of();
+        LinkedHashSet<String> limitations = new LinkedHashSet<>();
+        report.limitations().stream()
+                .filter(Objects::nonNull)
+                .map(String::strip)
+                .filter(value -> !value.isBlank())
+                .forEach(limitations::add);
+        return List.copyOf(limitations);
+    }
+
+    private static List<String> generalLimitations(VerificationReport report) {
+        if (report == null || report.limitations().isEmpty()) return List.of();
         LinkedHashSet<String> limitations = new LinkedHashSet<>();
         report.limitations().stream()
                 .filter(Objects::nonNull)
