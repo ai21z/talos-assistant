@@ -2172,6 +2172,99 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void remoteStaticWebAssetReferenceSurfacesLimitationWithoutMaskingInteractionProof() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                html {
+                  background-image: url('https://images.example.test/synthwave-stage.jpg');
+                }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Create a synthwave website with a button with id teaser-button "
+                                + "that updates visible text in #teaser-status when clicked."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
+                evidence.report().authoritativeProofKinds().toString());
+        assertTrue(evidence.report().limitations().stream()
+                        .anyMatch(limit -> limit.contains("Remote static-web asset references were not fetched")
+                                && limit.contains("styles.css")
+                                && limit.contains("https://images.example.test")),
+                evidence.report().limitations().toString());
+    }
+
+    @Test
+    void explicitOfflineStaticWebRequestFailsWhenRemoteAssetReferenceRemains() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body {
+                  background: #050010 url("https://cdn.example.test/neon.png") center / cover no-repeat;
+                }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Create an offline self-contained synthwave website with a button with id teaser-button "
+                                + "that updates visible text in #teaser-status when clicked. Do not use remote assets."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
+                evidence.report().authoritativeProofKinds().toString());
+        assertTrue(evidence.compatibilityResult().problems().stream()
+                        .anyMatch(problem -> problem.contains("Explicit offline/static-web request contains remote asset references")
+                                && problem.contains("https://cdn.example.test")),
+                evidence.compatibilityResult().problems().toString());
+    }
+
+    @Test
     void vagueStaticVerificationRepairWithoutClaimContextDoesNotPassStaticCoherenceOnly() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>

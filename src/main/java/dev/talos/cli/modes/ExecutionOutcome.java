@@ -383,7 +383,7 @@ record ExecutionOutcome(
             }
         } else if (verificationStatus == VerificationStatus.PASSED) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = StaticVerificationAnswerRenderer.passedAnnotation(taskVerification)
+                current = StaticVerificationAnswerRenderer.passedAnnotation(taskVerification, verificationReport)
                         + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
                         + current;
             }

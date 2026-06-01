@@ -316,6 +316,10 @@ public final class StaticTaskVerifier {
                 contract.originalUserRequest(),
                 selectors);
         interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
+        StaticWebRemoteAssetVerifier.Result remoteAssetVerification =
+                StaticWebRemoteAssetVerifier.verify(contract, selectors);
+        interactionReport = VerificationReport.merge(interactionReport, remoteAssetVerification.report());
+        staticWebProblems.addAll(remoteAssetVerification.blockingProblems());
         if (!interactionReport.hasRequiredClaims()
                 && StaticWebInteractionVerifier.looksLikeStaticVerificationRepairWithoutBinding(
                 contract.originalUserRequest())) {
@@ -388,6 +392,10 @@ public final class StaticTaskVerifier {
                 contract.originalUserRequest(),
                 selectors);
         interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
+        StaticWebRemoteAssetVerifier.Result remoteAssetVerification =
+                StaticWebRemoteAssetVerifier.verify(contract, selectors);
+        interactionReport = VerificationReport.merge(interactionReport, remoteAssetVerification.report());
+        problems.addAll(remoteAssetVerification.blockingProblems());
         if (!interactionReport.hasRequiredClaims()
                 && StaticWebInteractionVerifier.looksLikeStaticVerificationRepairWithoutBinding(
                 contract.originalUserRequest())) {

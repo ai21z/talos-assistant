@@ -3676,6 +3676,75 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void passedStaticWebVerificationSurfacesRemoteAssetLimitationInFinalAnswer() throws Exception {
+        Path ws = Files.createTempDirectory("talos-t640-remote-asset-limitation-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body>
+                        <button id="teaser-button">Show teaser</button>
+                        <p id="teaser-status">Waiting.</p>
+                        <script src="scripts.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), """
+                    body {
+                      background: #050010 url("https://images.example.test/neon-stage.jpg") center / cover no-repeat;
+                    }
+                    """);
+            Files.writeString(ws.resolve("scripts.js"), """
+                    document.getElementById('teaser-button').addEventListener('click', function() {
+                      document.getElementById('teaser-status').textContent = 'Teaser ready';
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a synthwave website with a button with id teaser-button "
+                            + "that updates visible text in #teaser-status when clicked."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html, styles.css, and scripts.js.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 3, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "styles.css", true, true, false,
+                                    "wrote styles.css", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "scripts.js", true, true, false,
+                                    "wrote scripts.js", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertNotNull(outcome.verificationReport());
+            assertTrue(outcome.verificationReport().limitations().stream()
+                            .anyMatch(line -> line.contains("Remote static-web asset references were not fetched")),
+                    outcome.verificationReport().limitations().toString());
+            assertTrue(outcome.finalAnswer().contains("Static verification limitations"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Remote static-web asset references were not fetched"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void embeddedStaticVerificationPassMarkerCannotSelfCertifyWhenPostApplyVerificationSkipped() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
