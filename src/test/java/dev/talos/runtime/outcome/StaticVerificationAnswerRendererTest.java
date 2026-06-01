@@ -11,6 +11,7 @@ import dev.talos.runtime.verification.VerificationClaim;
 import dev.talos.runtime.verification.VerificationObligation;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.runtime.verification.VerificationVerdict;
+import dev.talos.runtime.verification.VerifierResult;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import org.junit.jupiter.api.Test;
 
@@ -95,6 +96,40 @@ class StaticVerificationAnswerRendererTest {
 
         assertTrue(rendered.contains("Unsatisfied verification detail:"), rendered);
         assertTrue(rendered.contains("does not assign visible text"), rendered);
+    }
+
+    @Test
+    void readbackOnlyAnnotationRendersDocumentExtractionLimitations() {
+        TaskVerificationResult result = TaskVerificationResult.readbackOnly(
+                "Document parser extraction evidence verified extracted text only; summary semantics were not verified.",
+                List.of("report.pdf: parser extraction succeeded"));
+        VerificationReport report = new VerificationReport(
+                List.of(),
+                List.of(parserExtractionResult(
+                        "report.pdf: parser extraction succeeded",
+                        "PDF text extraction may not match visual order or layout."),
+                        parserExtractionResult(
+                                "brief.docx: parser extraction succeeded",
+                                "DOCX extraction is text-oriented; layout, comments, tracked changes, and embedded objects may be partial or omitted."),
+                        parserExtractionResult(
+                                "budget.xlsx: parser extraction succeeded",
+                                "XLSX extraction reports visible cells and cached display values; formulas are not recalculated.")),
+                List.of("report.pdf: parser extraction succeeded"),
+                List.of(),
+                List.of(
+                        "PDF text extraction may not match visual order or layout.",
+                        "DOCX extraction is text-oriented; layout, comments, tracked changes, and embedded objects may be partial or omitted.",
+                        "XLSX extraction reports visible cells and cached display values; formulas are not recalculated."));
+
+        String rendered = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(
+                result,
+                loopResult(),
+                report);
+
+        assertTrue(rendered.contains("Document extraction limitations:"), rendered);
+        assertTrue(rendered.contains("PDF text extraction may not match visual order"), rendered);
+        assertTrue(rendered.contains("layout, comments, tracked changes"), rendered);
+        assertTrue(rendered.contains("formulas are not recalculated"), rendered);
     }
 
     @Test
@@ -277,5 +312,17 @@ class StaticVerificationAnswerRendererTest {
                 List.of(),
                 problems,
                 limitations);
+    }
+
+    private static VerifierResult parserExtractionResult(String fact, String limitation) {
+        return new VerifierResult(
+                null,
+                ProofKind.PARSER_EXTRACTION,
+                EvidenceAuthority.AUTHORITATIVE,
+                EvidenceCoverage.SCOPED,
+                VerificationVerdict.VERIFIED,
+                List.of(fact),
+                List.of(),
+                List.of(limitation));
     }
 }
