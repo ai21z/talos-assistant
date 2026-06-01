@@ -239,6 +239,18 @@ public final class StaticTaskVerifier {
         if (primary.size() < 3) {
             if (!primary.isEmpty()
                     && profile.targetSurface().allowsFunctionalPartial()
+                    && hasSelectorInteractionClaim(contract)) {
+                VerificationReport report = verifyFunctionalInteractionWorkspace(
+                        root,
+                        contract,
+                        primary,
+                        mutatedPaths,
+                        facts,
+                        problems);
+                if (report.hasRequiredClaims()) return report;
+            }
+            if (!primary.isEmpty()
+                    && profile.targetSurface().allowsFunctionalPartial()
                     && StaticWebCapabilityProfile.looksStyledWebTask(contract, mutatedPaths)) {
                 StaticWebPartialVerifier.verifyStyledWebWorkspace(root, primary, facts, problems);
                 if (!problems.isEmpty()) return VerificationReport.empty();
@@ -258,6 +270,17 @@ public final class StaticTaskVerifier {
             return VerificationReport.empty();
         }
         if (!hasPrimaryWebSurface(primary)) {
+            if (profile.targetSurface().allowsFunctionalPartial()
+                    && hasSelectorInteractionClaim(contract)) {
+                VerificationReport report = verifyFunctionalInteractionWorkspace(
+                        root,
+                        contract,
+                        primary,
+                        mutatedPaths,
+                        facts,
+                        problems);
+                if (report.hasRequiredClaims()) return report;
+            }
             if (profile.targetSurface().allowsFunctionalPartial()
                     && StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
                 StaticWebPartialVerifier.verifyFunctionalWebWorkspace(root, contract, primary, facts, problems);
@@ -293,6 +316,7 @@ public final class StaticTaskVerifier {
                 contract.originalUserRequest(),
                 selectors);
         interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
+        interactionReport = withoutSupersededStaticRuntimeLimitation(interactionReport);
         facts.addAll(interactionReport.facts());
         facts.addAll(interactionReport.limitations());
         if (interactionReport.hasRequiredFailure()) {
@@ -324,6 +348,89 @@ public final class StaticTaskVerifier {
                     + selectors.htmlFile() + ", " + selectors.cssFile() + ", and " + selectors.jsFile() + ".");
         }
         return interactionReport;
+    }
+
+    private static boolean hasSelectorInteractionClaim(TaskContract contract) {
+        return contract != null
+                && StaticWebInteractionVerifier.detectBinding(contract.originalUserRequest()).isPresent();
+    }
+
+    private static VerificationReport verifyFunctionalInteractionWorkspace(
+            Path root,
+            TaskContract contract,
+            List<String> primary,
+            Set<String> mutatedPaths,
+            List<String> facts,
+            List<String> problems
+    ) {
+        StaticWebPartialVerifier.verifyFunctionalWebWorkspace(root, contract, primary, facts, problems);
+        if (!problems.isEmpty()) return VerificationReport.empty();
+
+        StaticWebSelectorAnalyzer.Facts selectors = StaticWebSelectorAnalyzer.analyzeFunctional(
+                root,
+                primary,
+                preferredWebTargetFiles(contract, mutatedPaths));
+        if (selectors == null) {
+            problems.add("functional web interaction could not be checked because HTML/JavaScript primary files could not be read.");
+            return VerificationReport.empty();
+        }
+
+        VerificationReport interactionReport = StaticWebInteractionVerifier.verify(
+                contract.originalUserRequest(),
+                selectors);
+        VerificationReport browserBehaviorReport = StaticWebBrowserBehaviorVerifier.verify(
+                root,
+                contract.originalUserRequest(),
+                selectors);
+        interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
+        interactionReport = withoutSupersededStaticRuntimeLimitation(interactionReport);
+        facts.addAll(interactionReport.facts());
+        facts.addAll(interactionReport.limitations());
+        if (interactionReport.hasRequiredFailure()) {
+            problems.addAll(interactionReport.problems());
+        }
+        if (interactionReport.requiredClaimsSatisfied()) {
+            facts.add("Functional web interaction checks passed for " + selectors.htmlFile()
+                    + " and " + selectors.jsFile() + ".");
+        }
+        return interactionReport;
+    }
+
+    private static VerificationReport withoutSupersededStaticRuntimeLimitation(VerificationReport report) {
+        if (report == null
+                || !report.authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name())) {
+            return report;
+        }
+        List<ClaimResult> claimResults = report.claimResults().stream()
+                .map(StaticTaskVerifier::withoutSupersededStaticRuntimeLimitation)
+                .toList();
+        return new VerificationReport(
+                claimResults,
+                report.verifierResults(),
+                report.facts(),
+                report.problems(),
+                withoutSupersededStaticRuntimeLimitations(report.limitations()));
+    }
+
+    private static ClaimResult withoutSupersededStaticRuntimeLimitation(ClaimResult result) {
+        if (result == null) return null;
+        return new ClaimResult(
+                result.claim(),
+                result.obligation(),
+                result.verdict(),
+                result.proofKind(),
+                result.authority(),
+                result.coverage(),
+                result.facts(),
+                result.problems(),
+                withoutSupersededStaticRuntimeLimitations(result.limitations()));
+    }
+
+    private static List<String> withoutSupersededStaticRuntimeLimitations(List<String> limitations) {
+        if (limitations == null || limitations.isEmpty()) return List.of();
+        return limitations.stream()
+                .filter(limit -> limit == null || !limit.contains("browser/runtime behavior was not executed"))
+                .toList();
     }
 
     public static List<String> obviousPrimaryFiles(Path workspace) {

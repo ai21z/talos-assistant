@@ -2125,6 +2125,82 @@ class StaticTaskVerifierTest {
         assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
         assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
                 evidence.report().authoritativeProofKinds().toString());
+        assertFalse(evidence.report().limitations().stream()
+                        .anyMatch(limit -> limit.contains("browser/runtime behavior was not executed")),
+                evidence.report().limitations().toString());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionCarriesBrowserBehaviorProofWithoutCssFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                const trigger = document.getElementById('teaser-button');
+                const status = document.getElementById('teaser-status');
+                trigger.addEventListener('click', function() {
+                  status.textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update scripts.js so #teaser-button updates #teaser-status when clicked."),
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+        TaskVerificationResult result = evidence.compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
+                evidence.report().authoritativeProofKinds().toString());
+        assertFalse(evidence.report().limitations().stream()
+                        .anyMatch(limit -> limit.contains("browser/runtime behavior was not executed")),
+                evidence.report().limitations().toString());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionNoOpWithoutCssFileFailsBrowserBehaviorProof() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textC;
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update scripts.js so #teaser-button updates #teaser-status when clicked."),
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+        TaskVerificationResult result = evidence.compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.summary());
+        assertTrue(evidence.report().hasRequiredFailure(), evidence.report().toString());
+        assertTrue(evidence.report().problems().stream()
+                        .anyMatch(problem -> problem.contains("did not change")),
+                evidence.report().problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("small HTML/CSS/JS surface")),
+                result.problems().toString());
     }
 
     @Test

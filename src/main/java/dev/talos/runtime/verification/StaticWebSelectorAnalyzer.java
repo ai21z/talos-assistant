@@ -97,6 +97,64 @@ final class StaticWebSelectorAnalyzer {
         }
     }
 
+    static Facts analyzeFunctional(
+            Path root,
+            List<String> primaryFiles,
+            Collection<String> preferredAssetFiles
+    ) {
+        try {
+            String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
+            if (htmlFile == null) return null;
+            String html = Files.readString(root.resolve(htmlFile));
+            Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
+            List<String> htmlIdOccurrences = htmlIdOccurrences(html);
+            Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
+            List<String> linkedCssOccurrences = linkedCssOccurrences(html);
+            List<String> linkedJsOccurrences = linkedJavaScriptOccurrences(html);
+            Set<String> linkedCssFiles = new LinkedHashSet<>(linkedCssOccurrences);
+            Set<String> linkedJsFiles = new LinkedHashSet<>(linkedJsOccurrences);
+            String cssFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedCssFiles, preferredAssetFiles, ".css");
+            String jsFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedJsFiles, preferredAssetFiles, ".js");
+            if (jsFile == null) return null;
+
+            String css = "";
+            Set<String> cssClasses = Set.of();
+            Set<String> cssIds = Set.of();
+            Set<String> cssBareClassSelectors = Set.of();
+            if (cssFile != null) {
+                css = Files.readString(root.resolve(cssFile));
+                cssClasses = extractCssSelectors(css, CSS_CLASS_SELECTOR);
+                cssIds = extractCssSelectors(css, CSS_ID_SELECTOR);
+                cssBareClassSelectors = extractBareClassSelectors(css, htmlClasses);
+            }
+            String js = Files.readString(root.resolve(jsFile));
+
+            return new Facts(
+                    htmlFile,
+                    cssFile == null ? "" : cssFile,
+                    jsFile,
+                    htmlClasses,
+                    htmlIds,
+                    htmlIdOccurrences,
+                    cssClasses,
+                    cssIds,
+                    cssBareClassSelectors,
+                    extractJsClasses(js),
+                    extractJsDynamicClasses(js),
+                    extractJsIds(js),
+                    linkedCssFiles,
+                    linkedJsFiles,
+                    linkedCssOccurrences,
+                    linkedJsOccurrences,
+                    html,
+                    css,
+                    js,
+                    existingFileNames(root));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     record Facts(
             String htmlFile,
             String cssFile,
