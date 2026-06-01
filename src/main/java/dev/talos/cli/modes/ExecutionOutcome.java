@@ -28,6 +28,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.EmbeddedStaticVerificationResultParser;
+import dev.talos.runtime.verification.DocumentExtractionOutcomeVerifier;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationEvidence;
 import dev.talos.runtime.verification.TaskVerificationResult;
@@ -340,6 +341,10 @@ record ExecutionOutcome(
         TaskVerificationEvidence embeddedEvidence = TaskVerificationEvidence.embeddedAssistant(embeddedVerification);
         boolean usingEmbeddedVerification = embeddedEvidence.compatibilityResult().status()
                 != TaskVerificationStatus.NOT_RUN;
+        TaskVerificationEvidence documentExtractionEvidence =
+                DocumentExtractionOutcomeVerifier.verifyWithEvidence(contract, loopResult);
+        boolean usingDocumentExtractionVerification = documentExtractionEvidence.compatibilityResult().status()
+                != TaskVerificationStatus.NOT_RUN;
         TaskVerificationEvidence taskVerificationEvidence = workspace != null && shouldVerifyPostApply(
                 contract, completionStatus, loopResult, extraMutationSuccesses)
                 ? StaticTaskVerifier.verifyWithEvidence(
@@ -347,6 +352,8 @@ record ExecutionOutcome(
                         contract,
                         loopResult,
                         extraMutationSuccesses)
+                : usingDocumentExtractionVerification
+                ? documentExtractionEvidence
                 : usingEmbeddedVerification
                 ? embeddedEvidence
                 : TaskVerificationEvidence.notRun("Post-apply verification was not applicable.");
@@ -380,6 +387,10 @@ record ExecutionOutcome(
                         + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
                         + current;
             }
+        }
+        if (unsupportedDocumentCapabilityLimited) {
+            current = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
+                    current, loopResult);
         }
 
         OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(

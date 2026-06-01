@@ -7,7 +7,7 @@ import java.util.List;
  *
  * <p>The compatibility result remains the existing status surface. The rich
  * report carries claim-scoped verifier evidence and must stay authoritative
- * only when it came from a real post-apply verifier.
+ * only when it came from a real verifier or tool-result-derived runtime evidence.
  */
 public record TaskVerificationEvidence(
         TaskVerificationResult compatibilityResult,
@@ -37,6 +37,16 @@ public record TaskVerificationEvidence(
                 compatibilityResult,
                 report,
                 TaskVerificationEvidenceSource.POST_APPLY_STATIC);
+    }
+
+    public static TaskVerificationEvidence documentExtraction(
+            TaskVerificationResult compatibilityResult,
+            VerificationReport report
+    ) {
+        return new TaskVerificationEvidence(
+                compatibilityResult,
+                report,
+                TaskVerificationEvidenceSource.DOCUMENT_EXTRACTION_TOOL_RESULT);
     }
 
     public static TaskVerificationEvidence embeddedAssistant(TaskVerificationResult compatibilityResult) {

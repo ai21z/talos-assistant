@@ -9,7 +9,8 @@ import java.util.Set;
 public final class CapabilityProfileRegistry {
     private static final List<CapabilityProfileSelector> SELECTORS = List.of(
             StaticWebCapabilityProfile::select,
-            SourceDerivedCapabilityProfile::select);
+            SourceDerivedCapabilityProfile::select,
+            DocumentExtractionCapabilityProfile::select);
 
     private CapabilityProfileRegistry() {}
 

@@ -8,6 +8,7 @@ import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.verification.ProofKind;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -1969,6 +1970,105 @@ class ExecutionOutcomeTest {
                     "Task-specific verification did not satisfy the requested claim"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("Source-derived coverage checks passed"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void documentExtractionExactTextParserEvidenceDoesNotVerifyFinalAnswerExactness() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-document-extract-verified-");
+        try {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Extract the exact text from report.pdf."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Extracted text from report.pdf.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of("report.pdf"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file",
+                            "report.pdf",
+                            true,
+                            false,
+                            false,
+                            "Extracted document text from report.pdf (status: SUCCESS)",
+                            "",
+                            dev.talos.tools.VerificationStatus.UNKNOWN)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Extracted text from report.pdf.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.verificationReport().authoritativeProofKinds()
+                    .contains(ProofKind.PARSER_EXTRACTION.name()), outcome.verificationReport().toString());
+            assertTrue(outcome.finalAnswer().contains("final-answer exactness was not verified"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void documentSummaryParserExtractionDoesNotBecomeCompletedVerified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-document-summary-unverified-");
+        try {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Summarize report.pdf."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Report summary.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of("report.pdf"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file",
+                            "report.pdf",
+                            true,
+                            false,
+                            false,
+                            "Extracted document text from report.pdf (status: SUCCESS)",
+                            "",
+                            dev.talos.tools.VerificationStatus.UNKNOWN)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Report summary.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertFalse(outcome.finalAnswer().contains("[Static verification: passed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("summary semantics were not verified"), outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
