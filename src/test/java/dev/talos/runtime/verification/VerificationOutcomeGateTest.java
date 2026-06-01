@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VerificationOutcomeGateTest {
 
     @Test
-    void authoritativeVerifiedRequiredClaimAllowsExistingPassProjectionToStand() {
+    void authoritativeVerifiedRequiredClaimProjectsPassedRequiredVerification() {
         VerificationReport report = VerificationReport.ofClaim(claimResult(
                 VerificationVerdict.VERIFIED,
                 EvidenceAuthority.AUTHORITATIVE));
@@ -21,7 +21,10 @@ class VerificationOutcomeGateTest {
         Optional<TaskVerificationResult> override =
                 VerificationOutcomeGate.compatibilityOverride(report, List.of("Static coherence passed."));
 
-        assertTrue(override.isEmpty());
+        assertTrue(override.isPresent());
+        assertEquals(TaskVerificationStatus.PASSED, override.get().status());
+        assertTrue(override.get().summary().contains("Required interaction verification passed"),
+                override.get().summary());
     }
 
     @Test
@@ -81,7 +84,10 @@ class VerificationOutcomeGateTest {
         assertTrue(report.requiredClaimsSatisfied());
         assertEquals(1, report.requiredClaimCount());
         assertEquals(0, report.unsatisfiedRequiredClaimCount());
-        assertTrue(override.isEmpty());
+        assertTrue(override.isPresent());
+        assertEquals(TaskVerificationStatus.PASSED, override.get().status());
+        assertTrue(override.get().summary().contains("Required interaction verification passed"),
+                override.get().summary());
     }
 
     @Test

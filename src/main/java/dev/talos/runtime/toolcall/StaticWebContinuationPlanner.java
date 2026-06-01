@@ -102,9 +102,7 @@ final class StaticWebContinuationPlanner {
 
     static boolean staticWebVerificationAlreadyPasses(LoopState state) {
         TaskVerificationResult verification = staticWebVerification(state);
-        if (verification.status() != TaskVerificationStatus.PASSED) return false;
-        String summary = verification.summary() == null ? "" : verification.summary();
-        return summary.contains("Static web coherence checks passed");
+        return verification.status() == TaskVerificationStatus.PASSED;
     }
 
     static boolean mutatedSmallWebFile(ToolCallLoop.ToolOutcome outcome) {

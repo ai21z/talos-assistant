@@ -10,6 +10,9 @@ import java.util.regex.Pattern;
 
 final class StaticWebInteractionVerifier {
     private static final Pattern REQUEST_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
+    private static final Pattern REQUEST_NATURAL_ID = Pattern.compile(
+            "\\bid\\s*(?:=|:|is|named|called)?\\s*['\"`]?([A-Za-z_][A-Za-z0-9_-]*)['\"`]?",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern VISIBLE_TEXT_ASSIGNMENT = Pattern.compile(
             "\\.\\s*(?:textContent|innerText)\\s*=", Pattern.CASE_INSENSITIVE);
 
@@ -145,26 +148,32 @@ final class StaticWebInteractionVerifier {
         if (request == null || request.isBlank()) return Optional.empty();
         String lower = request.toLowerCase();
         if (!containsInteractionVerb(lower)) return Optional.empty();
-        List<String> ids = new ArrayList<>();
+        Set<String> ids = new LinkedHashSet<>();
         Matcher matcher = REQUEST_ID_SELECTOR.matcher(request);
         while (matcher.find()) {
             String id = matcher.group(1);
             if (id != null && !id.isBlank()) ids.add(id);
         }
+        matcher = REQUEST_NATURAL_ID.matcher(request);
+        while (matcher.find()) {
+            String id = matcher.group(1);
+            if (id != null && !id.isBlank()) ids.add(id);
+        }
         if (ids.size() < 2) return Optional.empty();
-        String trigger = ids.stream()
+        List<String> orderedIds = new ArrayList<>(ids);
+        String trigger = orderedIds.stream()
                 .filter(id -> id.toLowerCase().contains("button")
                         || id.toLowerCase().contains("trigger"))
                 .findFirst()
-                .orElse(ids.get(0));
-        String output = ids.stream()
+                .orElse(orderedIds.get(0));
+        String output = orderedIds.stream()
                 .filter(id -> !id.equals(trigger))
                 .filter(id -> id.toLowerCase().contains("status")
                         || id.toLowerCase().contains("result")
                         || id.toLowerCase().contains("output")
                         || id.toLowerCase().contains("message"))
                 .findFirst()
-                .orElseGet(() -> ids.stream().filter(id -> !id.equals(trigger)).findFirst().orElse(""));
+                .orElseGet(() -> orderedIds.stream().filter(id -> !id.equals(trigger)).findFirst().orElse(""));
         if (output.isBlank()) return Optional.empty();
         boolean clickLike = lower.contains("click")
                 || lower.contains("clicked")

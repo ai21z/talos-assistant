@@ -30,7 +30,9 @@ final class VerificationOutcomeGate {
                     requiredSummary(report, "Required interaction verification was not satisfied."),
                     facts));
         }
-        return Optional.empty();
+        return Optional.of(TaskVerificationResult.passed(
+                requiredSummary(report, "Required interaction verification passed."),
+                facts));
     }
 
     private static String requiredSummary(VerificationReport report, String fallback) {

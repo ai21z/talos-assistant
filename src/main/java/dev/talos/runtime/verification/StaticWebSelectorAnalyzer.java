@@ -211,6 +211,7 @@ final class StaticWebSelectorAnalyzer {
             if (looksLikeNearPlaceholder(js, "javascript")) {
                 out.add(jsFile + ": JavaScript file appears to be placeholder content.");
             }
+            out.addAll(StaticWebJavaScriptSyntaxVerifier.syntaxProblems(jsFile, js));
             return out;
         }
 
