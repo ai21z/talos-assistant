@@ -40,6 +40,16 @@ public record CapabilityProfile(
                 RepairProfile.NONE);
     }
 
+    public static CapabilityProfile documentExtraction() {
+        return new CapabilityProfile(
+                DocumentExtractionCapabilityProfile.ID,
+                ArtifactKind.DOCUMENT_TEXT,
+                ArtifactOperation.READ_ONLY,
+                TargetSurface.DOCUMENT_TEXT,
+                VerifierProfile.DOCUMENT_EXTRACTION,
+                RepairProfile.NONE);
+    }
+
     public boolean staticWeb() {
         return artifactKind == ArtifactKind.STATIC_WEB;
     }

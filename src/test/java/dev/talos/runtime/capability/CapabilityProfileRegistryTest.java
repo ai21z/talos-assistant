@@ -124,6 +124,21 @@ class CapabilityProfileRegistryTest {
     }
 
     @Test
+    void documentExtractionRequestSelectsDocumentExtractionVerifierProfile() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Extract the exact text from report.pdf.");
+
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+
+        assertFalse(profile.staticWeb());
+        assertEquals("document-extraction", profile.id());
+        assertEquals(ArtifactKind.DOCUMENT_TEXT, profile.artifactKind());
+        assertEquals(ArtifactOperation.READ_ONLY, profile.operation());
+        assertEquals(TargetSurface.DOCUMENT_TEXT, profile.targetSurface());
+        assertEquals(VerifierProfile.DOCUMENT_EXTRACTION, profile.verifierProfile());
+    }
+
+    @Test
     void markdownDocumentAboutWebpageDoesNotSelectStaticWebProfile() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create docs/synthwave-webpage-plan.md with a concise plan for a cool looking "

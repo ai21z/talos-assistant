@@ -201,6 +201,21 @@ class CurrentTurnPlanTest {
     }
 
     @Test
+    void createDerivesDocumentExtractionVerifierProfileWhenNoProfileIsExplicit() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Extract the exact text from report.pdf.");
+
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+
+        assertEquals(VerifierProfile.DOCUMENT_EXTRACTION.name(), plan.verifierProfile());
+    }
+
+    @Test
     void directConstructorDefensivelyCopiesTaskExpectations() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Overwrite index.html with exactly AFTER. Use talos.write_file.");

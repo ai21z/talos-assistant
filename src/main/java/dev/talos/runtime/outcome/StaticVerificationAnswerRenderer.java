@@ -49,8 +49,12 @@ public final class StaticVerificationAnswerRenderer {
     ) {
         String readbackKind = hasSuccessfulWorkspaceOperation(loopResult)
                 ? "Workspace operation/readback"
+                : hasParserExtractionEvidence(report)
+                ? "Document extraction"
                 : "File write/readback";
-        String verifierReason = hasUnsatisfiedTaskSpecificVerification(result)
+        String verifierReason = hasParserExtractionEvidence(report)
+                ? "Parser extraction evidence was gathered, but requested summary/analysis semantics were not verified, "
+                : hasUnsatisfiedTaskSpecificVerification(result)
                 ? "Task-specific verification did not satisfy the requested claim, "
                 : "No task-specific verifier was applicable, ";
         StringBuilder out = new StringBuilder();
@@ -179,6 +183,10 @@ public final class StaticVerificationAnswerRenderer {
                 .anyMatch(outcome -> outcome.success()
                         && outcome.mutating()
                         && isWorkspaceOperationOutcome(outcome));
+    }
+
+    private static boolean hasParserExtractionEvidence(VerificationReport report) {
+        return report != null && report.authoritativeProofKinds().contains("PARSER_EXTRACTION");
     }
 
     private static boolean isWorkspaceOperationOutcome(ToolCallLoop.ToolOutcome outcome) {
