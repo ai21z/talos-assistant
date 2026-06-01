@@ -53,6 +53,7 @@ public final class DocumentExtractionVerificationMapper {
                     + ": document extraction failed (status=" + statusName(status) + ").");
             case NOT_RUN -> limitations.add(path
                     + ": document extraction did not run (status=" + statusName(status) + ").");
+            // Current DocumentExtractionStatus values do not map here; keep the branch explicit for future callers.
             case UNVERIFIED -> limitations.add(path
                     + ": document extraction did not produce verified parser evidence (status="
                     + statusName(status) + ").");

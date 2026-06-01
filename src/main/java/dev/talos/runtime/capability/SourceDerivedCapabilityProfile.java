@@ -13,11 +13,11 @@ public final class SourceDerivedCapabilityProfile {
     private SourceDerivedCapabilityProfile() {}
 
     public static CapabilityProfile select(TaskContract contract, Path workspace, Set<String> mutatedPaths) {
-        if (!looksSourceDerivedSummary(contract)) return CapabilityProfile.none();
+        if (!isApplicable(contract)) return CapabilityProfile.none();
         return CapabilityProfile.sourceDerived(operationFor(contract));
     }
 
-    private static boolean looksSourceDerivedSummary(TaskContract contract) {
+    public static boolean isApplicable(TaskContract contract) {
         if (contract == null) return false;
         if (contract.sourceEvidenceTargets().isEmpty() || contract.expectedTargets().isEmpty()) return false;
         String request = contract.originalUserRequest();
