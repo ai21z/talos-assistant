@@ -128,7 +128,7 @@ class InfraCommandsTest {
         @Test void verbose_contains_document_extraction_preflight() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
 
-            String text = cmd.execute("--verbose", ctx).toString();
+            String text = cmd.execute("--verbose", Context.builder(new Config(null)).build()).toString();
 
             assertTrue(text.contains("Document Extraction"), text);
             assertTrue(text.contains("PDF"), text);

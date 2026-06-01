@@ -8,7 +8,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-final class StaticWebInteractionVerifier {
+public final class StaticWebInteractionVerifier {
     private static final Pattern REQUEST_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern REQUEST_NATURAL_ID = Pattern.compile(
             "\\bid\\s*(?:=|:|is|named|called)?\\s*['\"`]?([A-Za-z_][A-Za-z0-9_-]*)['\"`]?",
@@ -144,7 +144,7 @@ final class StaticWebInteractionVerifier {
                         + binding.outputSelector() + "` with `textContent` or `innerText`.")));
     }
 
-    static Optional<TargetBinding> detectBinding(String request) {
+    public static Optional<TargetBinding> detectBinding(String request) {
         if (request == null || request.isBlank()) return Optional.empty();
         String lower = request.toLowerCase();
         if (!containsInteractionVerb(lower)) return Optional.empty();
@@ -181,6 +181,47 @@ final class StaticWebInteractionVerifier {
                 || trigger.toLowerCase().contains("button");
         if (!clickLike) return Optional.empty();
         return Optional.of(new TargetBinding("#" + trigger, "#" + output, "click"));
+    }
+
+    static boolean looksLikeStaticVerificationRepairWithoutBinding(String request) {
+        if (request == null || request.isBlank()) return false;
+        if (detectBinding(request).isPresent()) return false;
+        String lower = request.toLowerCase();
+        boolean makeVerified = (lower.contains("make existing") && lower.contains("verified"))
+                || (lower.contains("make the existing") && lower.contains("verified"))
+                || lower.contains("make it verified")
+                || (lower.contains("make the") && lower.contains("verified"));
+        boolean repairVerb = lower.contains("fix")
+                || lower.contains("repair")
+                || lower.contains("remaining")
+                || lower.contains("verified")
+                || lower.contains("verify");
+        return makeVerified && repairVerb;
+    }
+
+    static VerificationReport unavailableRepairClaimContext() {
+        VerificationClaim claim = new VerificationClaim(
+                "static-web-repair-claim-context:unavailable",
+                "Required static-web repair claim context.",
+                ProofKind.STATIC_INTERACTION_GUARD,
+                new TargetBinding("", "", "click"),
+                true);
+        VerificationObligation obligation = new VerificationObligation(
+                claim,
+                Set.of(ProofKind.STATIC_INTERACTION_GUARD, ProofKind.BROWSER_BEHAVIOR),
+                EvidenceAuthority.AUTHORITATIVE,
+                claim.binding());
+        return VerificationReport.ofClaim(new ClaimResult(
+                claim,
+                obligation,
+                VerificationVerdict.UNAVAILABLE,
+                ProofKind.STATIC_INTERACTION_GUARD,
+                EvidenceAuthority.AUTHORITATIVE,
+                EvidenceCoverage.BEST_EFFORT,
+                List.of(),
+                List.of(),
+                List.of("required static-web repair claim context was unavailable; "
+                        + "the current repair request did not include a concrete trigger/output binding.")));
     }
 
     private static boolean containsInteractionVerb(String lower) {

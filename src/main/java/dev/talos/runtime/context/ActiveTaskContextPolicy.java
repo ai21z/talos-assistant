@@ -107,6 +107,17 @@ public final class ActiveTaskContextPolicy {
                     false);
         }
 
+        if (isRepairContinuation(userRequest)
+                && savedContext.hasTargets()
+                && savedContext.kind() == ActiveTaskContext.Kind.VERIFIER_FINDINGS) {
+            return new Decision(
+                    contextualizedContract(userRequest, savedContext),
+                    savedContext,
+                    savedGoal,
+                    savedContext,
+                    true);
+        }
+
         if (isNarrowDeicticApply(userRequest) && savedContext.hasTargets() && isConsumable(savedContext.kind())) {
             return new Decision(
                     contextualizedContract(userRequest, savedContext),
@@ -179,10 +190,54 @@ public final class ActiveTaskContextPolicy {
 
     private static String contextSummary(ActiveTaskContext context) {
         if (!context.proposalSummary().isBlank()) return context.proposalSummary();
+        if (!context.requiredVerificationClaims().isEmpty()) {
+            String claims = context.requiredVerificationClaims().stream()
+                    .map(ActiveTaskContext.RequiredVerificationClaim::renderForPlan)
+                    .reduce((first, second) -> first + "; " + second)
+                    .orElse("");
+            if (!context.verifierFindings().isEmpty()) {
+                return claims + "; findings=" + String.join("; ", context.verifierFindings());
+            }
+            return claims;
+        }
         if (!context.verifierFindings().isEmpty()) return String.join("; ", context.verifierFindings());
         if (!context.blockedReason().isBlank()) return context.blockedReason();
         if (!context.previousOutcomeStatus().isBlank()) return context.previousOutcomeStatus();
         return "";
+    }
+
+    private static boolean isRepairContinuation(String userRequest) {
+        String lower = normalized(userRequest);
+        if (isStatusQuestion(lower)) return false;
+        return lower.contains("fix")
+                || lower.contains("repair")
+                || lower.contains("remaining")
+                || lower.contains("try again")
+                || startsWithImperative(lower, "complete")
+                || startsWithImperative(lower, "finish")
+                || lower.contains("make it work")
+                || (lower.contains("make") && lower.contains("verified"))
+                || (lower.contains("static verification") && lower.contains("problems"));
+    }
+
+    private static boolean isStatusQuestion(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!lower.endsWith("?")) return false;
+        return lower.startsWith("is ")
+                || lower.startsWith("was ")
+                || lower.startsWith("are ")
+                || lower.startsWith("did ")
+                || lower.startsWith("does ")
+                || lower.startsWith("what ")
+                || lower.startsWith("where ")
+                || lower.startsWith("why ")
+                || lower.startsWith("how ");
+    }
+
+    private static boolean startsWithImperative(String lower, String verb) {
+        return lower.equals(verb)
+                || lower.startsWith(verb + " ")
+                || lower.startsWith("please " + verb + " ");
     }
 
     private static Set<String> normalizedTargets(List<String> targets) {

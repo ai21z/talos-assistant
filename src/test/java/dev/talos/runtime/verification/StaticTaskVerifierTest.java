@@ -2172,6 +2172,91 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void vagueStaticVerificationRepairWithoutClaimContextDoesNotPassStaticCoherenceOnly() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <h1>Welcome to Neon Voltage</h1>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "body { color: #fff; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('Neon Voltage site is verified!');\n");
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Fix the remaining static verification problems and make the existing Neon Voltage site verified. "
+                                + "Keep exactly index.html, styles.css, and scripts.js; do not create any other files."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertEquals(1, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(1, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+        assertTrue(evidence.report().limitations().stream()
+                        .anyMatch(limit -> limit.contains("required static-web repair claim context was unavailable")),
+                evidence.report().limitations().toString());
+    }
+
+    @Test
+    void structuralStaticVerificationRepairWithoutInteractionClaimCanPassStaticCoherence() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <meta charset="utf-8">
+                  <title>BMI Calculator</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main class="calculator">
+                    <h1>BMI Calculator</h1>
+                    <form id="bmiForm">
+                      <label for="weight">Weight</label>
+                      <input id="weight" type="number">
+                      <label for="height">Height</label>
+                      <input id="height" type="number">
+                      <button type="submit">Calculate BMI</button>
+                    </form>
+                    <p id="result"></p>
+                  </main>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 460px; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('bmiForm').addEventListener('submit', (event) => {
+                  event.preventDefault();
+                  document.getElementById('result').textContent = 'Your BMI is 22.0';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Fix the remaining static verification problems for this 3-file webpage now. If edit_file is fragile, "
+                                + "overwrite index.html, styles.css, and scripts.js with complete corrected versions."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertEquals(0, evidence.report().requiredClaimCount(), evidence.report().toString());
+    }
+
+    @Test
     void invalidLinkedJavaScriptForNaturalLanguageInteractionDoesNotPassStaticWebVerification() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>

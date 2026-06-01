@@ -19,18 +19,53 @@ public record ActiveTaskContext(
         String proposalSummary,
         String previousOutcomeStatus,
         List<String> verifierFindings,
+        List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaims,
         String blockedReason,
         String suppressionReason) {
 
-    public static final int SCHEMA_VERSION = 1;
+    public static final int SCHEMA_VERSION = 2;
     public static final int MAX_TARGETS = 5;
     public static final int MAX_PROPOSAL_CHARS = 600;
     public static final int MAX_FINDINGS = 5;
     public static final int MAX_FINDINGS_CHARS = 500;
+    public static final int MAX_REQUIRED_CLAIMS = 3;
     public static final int PROMPT_RENDER_CHAR_CAP = 1200;
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
 
     private static final Pattern API_KEY_TOKEN = Pattern.compile("(?i)\\bsk-[a-z0-9_-]{8,}\\b");
+
+    public ActiveTaskContext(
+            int schemaVersion,
+            State state,
+            Kind kind,
+            int sourceTurnNumber,
+            String sourceTraceId,
+            int updatedTurnNumber,
+            int expiresAfterTurnNumber,
+            List<String> targets,
+            Operation operation,
+            String proposalSummary,
+            String previousOutcomeStatus,
+            List<String> verifierFindings,
+            String blockedReason,
+            String suppressionReason) {
+        this(
+                schemaVersion,
+                state,
+                kind,
+                sourceTurnNumber,
+                sourceTraceId,
+                updatedTurnNumber,
+                expiresAfterTurnNumber,
+                targets,
+                operation,
+                proposalSummary,
+                previousOutcomeStatus,
+                verifierFindings,
+                List.of(),
+                blockedReason,
+                suppressionReason);
+    }
 
     public ActiveTaskContext {
         schemaVersion = SCHEMA_VERSION;
@@ -42,8 +77,44 @@ public record ActiveTaskContext(
         proposalSummary = normalizeText(proposalSummary, MAX_PROPOSAL_CHARS);
         previousOutcomeStatus = normalizeText(previousOutcomeStatus, Integer.MAX_VALUE);
         verifierFindings = normalizeFindings(verifierFindings);
+        requiredVerificationClaims = normalizeRequiredClaims(requiredVerificationClaims);
         blockedReason = normalizeText(blockedReason, MAX_PROPOSAL_CHARS);
         suppressionReason = normalizeText(suppressionReason, MAX_PROPOSAL_CHARS);
+    }
+
+    public record RequiredVerificationClaim(
+            String id,
+            String description,
+            String proofKind,
+            String triggerSelector,
+            String outputSelector,
+            String eventType) {
+        public RequiredVerificationClaim {
+            id = normalizeText(id, 200);
+            description = normalizeText(description, 300);
+            proofKind = normalizeText(proofKind, 80);
+            triggerSelector = normalizeSelector(triggerSelector);
+            outputSelector = normalizeSelector(outputSelector);
+            eventType = normalizeText(eventType, 40).toLowerCase(java.util.Locale.ROOT);
+            if (eventType.isBlank()) eventType = "click";
+        }
+
+        public String renderForPlan() {
+            String rendered = "requiredVerificationClaim{"
+                    + "id=" + id
+                    + ", proofKind=" + proofKind
+                    + ", event=" + eventType
+                    + ", trigger=" + triggerSelector
+                    + ", output=" + outputSelector
+                    + ", instruction=" + eventType + " " + triggerSelector
+                    + " updates visible text in " + outputSelector
+                    + '}';
+            return PromptAuditRedactor.preview(rendered, MAX_FINDINGS_CHARS);
+        }
+
+        boolean usable() {
+            return !triggerSelector.isBlank() && !outputSelector.isBlank();
+        }
     }
 
     public enum State { NONE, ACTIVE, SUPPRESSED, CLEARED, EXPIRED }
@@ -65,6 +136,7 @@ public record ActiveTaskContext(
                 Operation.NONE,
                 "",
                 "",
+                List.of(),
                 List.of(),
                 "",
                 "");
@@ -88,6 +160,7 @@ public record ActiveTaskContext(
                 proposalSummary,
                 "",
                 List.of(),
+                List.of(),
                 "",
                 "");
     }
@@ -98,6 +171,16 @@ public record ActiveTaskContext(
             List<String> targets,
             List<String> findings,
             String outcomeStatus) {
+        return verifierFindings(turnNumber, traceId, targets, findings, outcomeStatus, List.of());
+    }
+
+    public static ActiveTaskContext verifierFindings(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            List<String> findings,
+            String outcomeStatus,
+            List<RequiredVerificationClaim> requiredClaims) {
         return new ActiveTaskContext(
                 SCHEMA_VERSION,
                 State.ACTIVE,
@@ -111,6 +194,7 @@ public record ActiveTaskContext(
                 "",
                 outcomeStatus,
                 findings,
+                requiredClaims,
                 "",
                 "");
     }
@@ -132,6 +216,7 @@ public record ActiveTaskContext(
                 Operation.APPLY_EDIT,
                 "",
                 "NO_FILES_CHANGED",
+                List.of(),
                 List.of(),
                 blockedReason,
                 "");
@@ -176,6 +261,12 @@ public record ActiveTaskContext(
         if (!proposalSummary.isBlank()) sb.append(", proposal=").append(proposalSummary);
         if (!previousOutcomeStatus.isBlank()) sb.append(", previousOutcome=").append(previousOutcomeStatus);
         if (!verifierFindings.isEmpty()) sb.append(", findings=").append(verifierFindings);
+        if (!requiredVerificationClaims.isEmpty()) {
+            sb.append(", requiredClaims=")
+                    .append(requiredVerificationClaims.stream()
+                            .map(RequiredVerificationClaim::renderForPlan)
+                            .toList());
+        }
         if (!blockedReason.isBlank()) sb.append(", blocked=").append(blockedReason);
         if (!suppressionReason.isBlank()) sb.append(", reason=").append(suppressionReason);
         sb.append('}');
@@ -196,6 +287,7 @@ public record ActiveTaskContext(
                 proposalSummary,
                 previousOutcomeStatus,
                 verifierFindings,
+                requiredVerificationClaims,
                 blockedReason,
                 reason);
     }
@@ -222,11 +314,28 @@ public record ActiveTaskContext(
         return List.copyOf(normalized);
     }
 
+    private static List<RequiredVerificationClaim> normalizeRequiredClaims(List<RequiredVerificationClaim> rawClaims) {
+        if (rawClaims == null || rawClaims.isEmpty()) return List.of();
+        LinkedHashSet<RequiredVerificationClaim> normalized = new LinkedHashSet<>();
+        for (RequiredVerificationClaim claim : rawClaims) {
+            if (claim == null || !claim.usable()) continue;
+            normalized.add(claim);
+            if (normalized.size() == MAX_REQUIRED_CLAIMS) break;
+        }
+        return List.copyOf(normalized);
+    }
+
     private static String normalizeText(String value, int maxChars) {
         if (value == null) return "";
         String normalized = value.strip();
         if (normalized.length() <= maxChars) return normalized;
         return normalized.substring(0, maxChars);
+    }
+
+    private static String normalizeSelector(String selector) {
+        String normalized = normalizeText(selector, 120);
+        if (normalized.isBlank()) return "";
+        return normalized.startsWith("#") || normalized.startsWith(".") ? normalized : "#" + normalized;
     }
 
     private static String cappedPreview(String value) {

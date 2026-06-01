@@ -179,9 +179,10 @@ class ApprovalGatedToolTest {
             captured[1] = detail;
             return true;
         };
+        Config config = new Config(null);
         var processor = new TurnProcessor(ModeController.defaultController(), gate, registry);
-        var session = new Session(workspace, new Config());
-        var ctx = Context.builder(new Config())
+        var session = new Session(workspace, config);
+        var ctx = Context.builder(config)
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .build();
         var call = new ToolCall("talos.read_file", Map.of("path", " .env"));
@@ -221,8 +222,9 @@ class ApprovalGatedToolTest {
         var registry = new ToolRegistry();
         registry.register(new dev.talos.tools.impl.ReadFileTool());
         var processor = new TurnProcessor(ModeController.defaultController(), (desc, detail) -> false, registry);
-        var session = new Session(workspace, new Config());
-        var ctx = Context.builder(new Config())
+        Config config = new Config(null);
+        var session = new Session(workspace, config);
+        var ctx = Context.builder(config)
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .build();
         var call = new ToolCall("talos.read_file", Map.of("path", " .env"));

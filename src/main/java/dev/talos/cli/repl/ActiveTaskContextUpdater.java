@@ -12,6 +12,9 @@ import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.verification.ProofKind;
+import dev.talos.runtime.verification.StaticWebInteractionVerifier;
+import dev.talos.runtime.verification.TargetBinding;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -59,7 +62,8 @@ public final class ActiveTaskContextUpdater {
                     facts.traceId(),
                     targets,
                     facts.verifierFindings(),
-                    facts.verificationStatus());
+                    facts.verificationStatus(),
+                    requiredVerificationClaims(facts, userInput));
             return active(context);
         }
 
@@ -141,6 +145,29 @@ public final class ActiveTaskContextUpdater {
         return explicitProposal || (noMutationYet && changeIntent);
     }
 
+    private static List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaims(
+            TurnFacts facts,
+            String userInput) {
+        if (facts == null || !facts.unsatisfiedRequiredClaim()) return List.of();
+        return StaticWebInteractionVerifier.detectBinding(userInput)
+                .map(ActiveTaskContextUpdater::requiredStaticWebInteractionClaim)
+                .map(List::of)
+                .orElse(List.of());
+    }
+
+    private static ActiveTaskContext.RequiredVerificationClaim requiredStaticWebInteractionClaim(
+            TargetBinding binding) {
+        String id = "static-web-interaction:"
+                + binding.triggerSelector() + "->" + binding.outputSelector();
+        return new ActiveTaskContext.RequiredVerificationClaim(
+                id,
+                "Static interaction " + binding.triggerSelector() + " -> " + binding.outputSelector() + ".",
+                ProofKind.STATIC_INTERACTION_GUARD.name(),
+                binding.triggerSelector(),
+                binding.outputSelector(),
+                binding.eventType());
+    }
+
     private record TurnFacts(
             TurnAudit audit,
             TurnPolicyTrace policyTrace,
@@ -151,6 +178,8 @@ public final class ActiveTaskContextUpdater {
             String mutationStatus,
             String completionStatus,
             List<String> verifierFindings,
+            int requiredClaimCount,
+            int unsatisfiedRequiredClaimCount,
             boolean mutationAllowed,
             boolean successfulMutation,
             boolean approvalDeniedMutationAttempt
@@ -185,6 +214,8 @@ public final class ActiveTaskContextUpdater {
                     mutationStatus(localTrace),
                     completionStatus(localTrace),
                     verifierFindings(localTrace),
+                    requiredClaimCount(localTrace),
+                    unsatisfiedRequiredClaimCount(localTrace),
                     mutationAllowed(policyTrace, localTrace),
                     successfulMutation,
                     deniedMutation);
@@ -198,6 +229,10 @@ public final class ActiveTaskContextUpdater {
             return mutationSucceeded()
                     && "PASSED".equalsIgnoreCase(verificationStatus)
                     && "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+        }
+
+        boolean unsatisfiedRequiredClaim() {
+            return requiredClaimCount > 0 && unsatisfiedRequiredClaimCount > 0;
         }
 
         private boolean mutationSucceeded() {
@@ -266,6 +301,18 @@ public final class ActiveTaskContextUpdater {
             List<String> out = new ArrayList<>();
             out.add(summary);
             return List.copyOf(out);
+        }
+
+        private static int requiredClaimCount(LocalTurnTrace localTrace) {
+            return localTrace == null || localTrace.verification() == null
+                    ? 0
+                    : localTrace.verification().requiredClaimCount();
+        }
+
+        private static int unsatisfiedRequiredClaimCount(LocalTurnTrace localTrace) {
+            return localTrace == null || localTrace.verification() == null
+                    ? 0
+                    : localTrace.verification().unsatisfiedRequiredClaimCount();
         }
 
         private static boolean mutationAllowed(TurnPolicyTrace policyTrace, LocalTurnTrace localTrace) {

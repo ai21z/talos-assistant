@@ -316,6 +316,11 @@ public final class StaticTaskVerifier {
                 contract.originalUserRequest(),
                 selectors);
         interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
+        if (!interactionReport.hasRequiredClaims()
+                && StaticWebInteractionVerifier.looksLikeStaticVerificationRepairWithoutBinding(
+                contract.originalUserRequest())) {
+            interactionReport = StaticWebInteractionVerifier.unavailableRepairClaimContext();
+        }
         interactionReport = withoutSupersededStaticRuntimeLimitation(interactionReport);
         facts.addAll(interactionReport.facts());
         facts.addAll(interactionReport.limitations());
@@ -383,6 +388,11 @@ public final class StaticTaskVerifier {
                 contract.originalUserRequest(),
                 selectors);
         interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
+        if (!interactionReport.hasRequiredClaims()
+                && StaticWebInteractionVerifier.looksLikeStaticVerificationRepairWithoutBinding(
+                contract.originalUserRequest())) {
+            interactionReport = StaticWebInteractionVerifier.unavailableRepairClaimContext();
+        }
         interactionReport = withoutSupersededStaticRuntimeLimitation(interactionReport);
         facts.addAll(interactionReport.facts());
         facts.addAll(interactionReport.limitations());
