@@ -89,7 +89,10 @@ final class StaticWebContinuationPlanner {
         Optional<VerificationContinuation> continuation = verificationContinuation(state);
         if (continuation.isEmpty()) return Optional.empty();
         VerificationContinuation value = continuation.get();
-        List<ToolSpec> narrowed = filterTools(baseTools, List.of("talos.write_file", "talos.edit_file"));
+        List<String> allowedTools = value.fullRewriteRepair()
+                ? List.of("talos.write_file")
+                : List.of("talos.write_file", "talos.edit_file");
+        List<ToolSpec> narrowed = filterTools(baseTools, allowedTools);
         List<ToolSpec> tools = narrowed.isEmpty()
                 ? safeTools(baseTools)
                 : narrowed;
@@ -237,23 +240,27 @@ final class StaticWebContinuationPlanner {
             }
         }
         if (continuation != null && continuation.fullRewriteRepair()) {
-            frame.append("Repair the failed interaction behavior now. Preserve the requested trigger/output binding ")
-                    .append("and use complete file content for each listed repair target.");
+            frame.append("Repair the listed static-web verification problems now. Preserve the requested ")
+                    .append("trigger/output binding when present and use complete file content for each ")
+                    .append("listed repair target.");
         } else {
             frame.append("Write or repair the missing static web assets now. ")
                     .append("For linked CSS/JavaScript files, create the exact linked filenames.");
         }
+        String toolInstruction = continuation != null && continuation.fullRewriteRepair()
+                ? "Call talos.write_file now for the listed static web repair target files."
+                : "Call talos.write_file or talos.edit_file now for the missing static web target files.";
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
                         This is a bounded static-web verification continuation.
                         The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
-                        Use the visible write/edit tools now. Do not claim completion until tool-backed changes have executed.
+                        Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
                         """),
                 ChatMessage.system(frame.toString().stripTrailing()),
                 ChatMessage.user("Current user request:\n"
                         + (userTask == null ? "" : userTask.strip())
-                        + "\n\nCall talos.write_file or talos.edit_file now for the missing static web target files."));
+                        + "\n\n" + toolInstruction));
     }
 
     private static String staticWebVerificationFailureContext(TaskVerificationResult verification) {
