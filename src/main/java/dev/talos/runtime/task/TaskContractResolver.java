@@ -40,6 +40,9 @@ public final class TaskContractResolver {
 
     private static final Pattern LEAVE_TARGET_ALONE_SPAN = Pattern.compile(
             "(?i)\\bleave\\s+(.{0,120}?)\\s+alone\\b");
+    private static final Pattern PRESERVE_UNCHANGED_TARGET_SPAN = Pattern.compile(
+            "(?i)\\b(?:keep|preserve)\\s+(.{0,160}?)\\s+"
+                    + "(?:unchanged|as\\s*-?\\s*is|intact)\\b");
     private static final Pattern DIRECT_NOT_TARGET_PREFIX = Pattern.compile(
             "(?is)(?:^|[\\s,;])not\\s+$");
 
@@ -707,8 +710,41 @@ public final class TaskContractResolver {
         addTargetsFromSpanMatches(out, NEGATED_TARGET_SPAN.matcher(userRequest));
         addTargetsFromSpanMatches(out, AVOID_TARGET_SPAN.matcher(userRequest));
         addTargetsFromSpanMatches(out, LEAVE_TARGET_ALONE_SPAN.matcher(userRequest));
+        out.addAll(extractPreserveUnchangedTargets(userRequest));
         addDirectNotTargets(out, userRequest);
         return Set.copyOf(out);
+    }
+
+    public static Set<String> extractPreserveUnchangedTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        Set<String> out = new LinkedHashSet<>();
+        Matcher preserveMatcher = PRESERVE_UNCHANGED_TARGET_SPAN.matcher(userRequest);
+        while (preserveMatcher.find()) {
+            String span = firstSentenceFragment(preserveMatcher.group(1));
+            if (!preserveSpanNamesOnlyTargets(span)) continue;
+            Matcher targetMatcher = TARGET_FILE.matcher(span);
+            while (targetMatcher.find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static boolean preserveSpanNamesOnlyTargets(String span) {
+        if (span == null || span.isBlank()) return false;
+        String residue = TARGET_FILE.matcher(span).replaceAll(" ");
+        residue = residue
+                .replace('`', ' ')
+                .replace('\'', ' ')
+                .replace('"', ' ')
+                .replace(',', ' ')
+                .replace('(', ' ')
+                .replace(')', ' ')
+                .replaceAll("(?i)\\b(?:the|file|files|target|targets|current|existing|root|and|or)\\b", " ")
+                .replaceAll("\\s+", " ")
+                .strip();
+        return residue.isBlank();
     }
 
     private static void addDirectNotTargets(Set<String> out, String userRequest) {

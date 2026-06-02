@@ -55,4 +55,25 @@ class PromptDebugInspectorTargetRolesTest {
         assertFalse(rendered.contains("scripts.js = MUST_MUTATE"), rendered);
         assertFalse(rendered.contains("script.js = MUST_MUTATE"), rendered);
     }
+
+    @Test
+    void promptDebugShowsPreserveReasonForForbiddenTargets() {
+        PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
+                "CHAT_REQUEST",
+                "ollama",
+                "gpt-oss:20b",
+                false,
+                Instant.parse("2026-05-31T00:00:00Z"),
+                List.of(ChatMessage.user(
+                        "Keep styles.css unchanged. Update index.html and scripts.js.")),
+                List.of(),
+                ChatRequestControls.defaults(),
+                "");
+
+        String rendered = PromptDebugInspector.format(snapshot);
+
+        assertTrue(rendered.contains("styles.css = FORBIDDEN (preserve-unchanged-target)"), rendered);
+        assertTrue(rendered.contains("index.html = MUST_MUTATE"), rendered);
+        assertTrue(rendered.contains("scripts.js = MUST_MUTATE"), rendered);
+    }
 }
