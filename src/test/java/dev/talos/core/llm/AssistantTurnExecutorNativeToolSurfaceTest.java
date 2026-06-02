@@ -107,6 +107,26 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
     }
 
     @Test
+    void broadStaticWebRewriteSendsWriteFileButNotEditFile() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+
+        AssistantTurnExecutor.execute(
+                messages("Update index.html and scripts.js so Neon Meridian is a polished synthwave band "
+                        + "landing page. Adjust styles.css as needed. Make #teaser-button update "
+                        + "#teaser-status with a visible teaser message."),
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        List<String> names = toolNames(resolver.lastRequest);
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+    }
+
+    @Test
     void explicitMoveTurnSendsOnlyMovePathNativeToolSpec() {
         RecordingResolver resolver = new RecordingResolver();
         Context ctx = context(resolver);
