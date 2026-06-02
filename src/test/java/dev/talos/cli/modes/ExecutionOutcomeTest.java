@@ -765,6 +765,79 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void partialMutationDoesNotHideActionObligationBlock() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Update index.html and scripts.js. Make #teaser-button update #teaser-status."));
+
+        String answer = """
+                [Action obligation failed: pending static repair progress was not satisfied.]
+
+                Remaining target(s): scripts.js.
+                The model returned prose instead of the required write_file repair call.
+                """;
+        var loopResult = new ToolCallLoop.LoopResult(
+                answer,
+                4,
+                3,
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of(),
+                1,
+                0,
+                false,
+                1,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        "COMPACT_MUTATION_CONTINUATION_NO_TOOL: compact mutation continuation returned no write/edit tool calls."),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.write_file",
+                                "index.html",
+                                true,
+                                true,
+                                false,
+                                "wrote index.html",
+                                "",
+                                dev.talos.tools.VerificationStatus.PASS),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.edit_file",
+                                "scripts.js",
+                                false,
+                                true,
+                                false,
+                                "",
+                                "old_string not found in scripts.js.",
+                                null)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+        assertTrue(outcome.finalAnswer().startsWith(
+                        "[Truth check: Talos applied mutation(s) before this action-obligation block.]"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("Changed target(s) before the block: index.html."),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("[Action obligation failed:"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("Remaining target(s): scripts.js."), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("Succeeded:"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("Failed:"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("scripts.js: old_string not found in scripts.js."),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().startsWith(
+                        "[Truth check: some requested file changes succeeded and some failed."),
+                outcome.finalAnswer());
+    }
+
+    @Test
     void preMutationActionObligationBlockKeepsNoFileChangedWording() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

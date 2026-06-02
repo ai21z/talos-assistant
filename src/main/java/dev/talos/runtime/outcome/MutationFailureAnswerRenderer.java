@@ -108,8 +108,7 @@ public final class MutationFailureAnswerRenderer {
     ) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
-        if (answer != null && answer.startsWith(
-                "[Action obligation failed: static repair used the wrong mutation tool.]")) return answer;
+        boolean actionObligationAnswer = answer != null && answer.startsWith("[Action obligation failed:");
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
@@ -130,6 +129,18 @@ public final class MutationFailureAnswerRenderer {
                 .toList();
         if (successes.isEmpty() || failures.isEmpty()) return answer;
 
+        String partialSummary = partialMutationOutcomeSummary(successes, failures, !actionObligationAnswer);
+        if (actionObligationAnswer) {
+            return answer.stripTrailing() + "\n\n" + partialSummary;
+        }
+        return partialSummary;
+    }
+
+    private static String partialMutationOutcomeSummary(
+            List<ToolCallLoop.ToolOutcome> successes,
+            List<ToolCallLoop.ToolOutcome> failures,
+            boolean includeReplacementNote
+    ) {
         StringBuilder out = new StringBuilder(PARTIAL_MUTATION_ANNOTATION);
         out.append("Succeeded:\n");
         for (ToolCallLoop.ToolOutcome outcome : successes) {
@@ -147,7 +158,9 @@ public final class MutationFailureAnswerRenderer {
                     .append(trimFailureMessage(outcome.errorMessage()))
                     .append('\n');
         }
-        out.append("\nThe assistant summary was replaced with this verified mutation outcome because the turn had partial success.");
+        if (includeReplacementNote) {
+            out.append("\nThe assistant summary was replaced with this verified mutation outcome because the turn had partial success.");
+        }
         return out.toString().stripTrailing();
     }
 
