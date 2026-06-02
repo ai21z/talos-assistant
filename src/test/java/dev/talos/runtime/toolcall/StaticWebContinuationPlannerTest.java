@@ -222,6 +222,64 @@ class StaticWebContinuationPlannerTest {
         assertFalse(prompt.contains("Missing or unmutated target files: script.js"), prompt);
     }
 
+    @Test
+    void fullRewriteInteractionRepairExposesOnlyWriteFileAndDoesNotInviteEditFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <title>Neon Meridian</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main class="stage">
+                    <button id="teaser-button" type="button">Play teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                  </main>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".stage { padding: 2rem; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textC;
+                });
+                """);
+        LoopState state = state(
+                "Update index.html and scripts.js so #teaser-button updates #teaser-status when clicked.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "scripts.js",
+                true,
+                true,
+                false,
+                "Wrote scripts.js",
+                ""));
+        state.mutatingToolSuccesses = 2;
+
+        Optional<StaticWebContinuationPlanner.Plan> plan =
+                StaticWebContinuationPlanner.verificationFailurePlan(state, baseTools());
+
+        assertTrue(plan.isPresent(), "failed explicit interaction verification should continue to full rewrite repair");
+        StaticWebContinuationPlanner.Plan continuation = plan.get();
+        assertEquals(List.of("talos.write_file"), toolNames(continuation.tools()));
+        assertTrue(continuation.pendingActionObligation().isPresent());
+        assertEquals(List.of("index.html", "scripts.js"), continuation.pendingActionObligation().orElseThrow().targets());
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js"), prompt);
+        assertTrue(prompt.contains("Call talos.write_file now"), prompt);
+        assertFalse(prompt.contains("talos.edit_file"), prompt);
+    }
+
     private LoopState state(String request) {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
