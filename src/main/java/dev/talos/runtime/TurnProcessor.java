@@ -17,6 +17,7 @@ import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.safety.SafeLogFormatter;
+import dev.talos.runtime.intent.TargetRole;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -35,9 +36,11 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -916,12 +919,35 @@ public final class TurnProcessor {
                 return null;
             }
         }
+        for (String optional : optionalMutationTargets(taskContract)) {
+            if (sameExpectedTarget(call.toolName(), path, optional)) {
+                return null;
+            }
+        }
         return ToolResult.fail(ToolError.invalidParams(
                 "Target outside expected targets before approval: `" + path
                         + "` is outside the current expected target set: "
                         + String.join(", ", orderedExpectedTargets(taskContract))
                         + ". Similar filenames are not substitutes for required target paths. "
                         + "No approval was requested and no file was changed."));
+    }
+
+    private static Set<String> optionalMutationTargets(TaskContract taskContract) {
+        if (taskContract == null
+                || taskContract.originalUserRequest().isBlank()
+                || taskContract.expectedTargets().isEmpty()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        TaskContractResolver.intentFromUserRequest(taskContract.originalUserRequest())
+                .targets()
+                .targets()
+                .stream()
+                .filter(target -> target.role() == TargetRole.MAY_MUTATE)
+                .map(target -> target.path())
+                .filter(path -> path != null && !path.isBlank())
+                .forEach(out::add);
+        return Set.copyOf(out);
     }
 
     private static ToolResult validateSandboxPathBeforeApproval(ToolCall call, Session session, RuntimeTurnContext ctx) {
