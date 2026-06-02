@@ -72,6 +72,73 @@ class RolefulIntentRecoveryRegressionTest {
     }
 
     @Test
+    void keepUnchangedTargetIsForbiddenAndDoesNotDriveMutationProgress() {
+        String prompt = "Keep styles.css unchanged, including its current visual asset references. "
+                + "Update index.html and scripts.js so #teaser-button updates #teaser-status when clicked.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
+                List.of());
+        LoopState state = state(prompt, Path.of("."));
+        state.toolOutcomes.add(successfulWrite("index.html"));
+        state.toolOutcomes.add(successfulWrite("scripts.js"));
+
+        assertEquals(Set.of("index.html", "scripts.js"), contract.expectedTargets());
+        assertEquals(Set.of("styles.css"), contract.forbiddenTargets());
+        assertEquals("MUST_MUTATE", roleFor(trace, "index.html"));
+        assertEquals("MUST_MUTATE", roleFor(trace, "scripts.js"));
+        assertEquals("FORBIDDEN", roleFor(trace, "styles.css"));
+        assertEquals("preserve-unchanged-target", reasonFor(trace, "styles.css"));
+        assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
+    }
+
+    @Test
+    void preserveAsIsTargetIsForbiddenWhenOtherFilesAreUpdated() {
+        String prompt = "Preserve styles.css as-is. Update scripts.js to repair the teaser click handler.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
+                List.of());
+
+        assertEquals(Set.of("scripts.js"), contract.expectedTargets());
+        assertEquals(Set.of("styles.css"), contract.forbiddenTargets());
+        assertEquals("FORBIDDEN", roleFor(trace, "styles.css"));
+        assertEquals("preserve-unchanged-target", reasonFor(trace, "styles.css"));
+    }
+
+    @Test
+    void preservingSelectorsInsideMutatedFileDoesNotForbidThatFile() {
+        String prompt = "Rewrite styles.css but preserve its selectors so index.html still works.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
+                List.of());
+
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertTrue(contract.forbiddenTargets().isEmpty());
+        assertEquals("MUST_MUTATE", roleFor(trace, "styles.css"));
+    }
+
+    @Test
+    void keepingSelectorsUnchangedInsideMutatedFileDoesNotForbidThatFile() {
+        String prompt = "Rewrite styles.css but keep styles.css selectors unchanged so index.html still works.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertTrue(contract.forbiddenTargets().isEmpty());
+    }
+
+    @Test
     void verifyOnlyConstraintTargetDoesNotBecomeMutationProgress() {
         String prompt = "Rewrite styles.css so index.html still works.";
 
@@ -199,6 +266,14 @@ class RolefulIntentRecoveryRegressionTest {
         return trace.rolefulTargets().stream()
                 .filter(target -> path.equals(target.path()))
                 .map(TurnPolicyTrace.RolefulTarget::role)
+                .findFirst()
+                .orElse("");
+    }
+
+    private static String reasonFor(TurnPolicyTrace trace, String path) {
+        return trace.rolefulTargets().stream()
+                .filter(target -> path.equals(target.path()))
+                .map(TurnPolicyTrace.RolefulTarget::reason)
                 .findFirst()
                 .orElse("");
     }

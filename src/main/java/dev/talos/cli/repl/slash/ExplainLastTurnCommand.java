@@ -389,12 +389,34 @@ public final class ExplainLastTurnCommand implements Command {
         if (!trace.forbiddenTargets().isEmpty()) {
             sb.append("  Forbidden targets: ").append(String.join(", ", trace.forbiddenTargets())).append('\n');
         }
+        if (!trace.rolefulTargets().isEmpty()) {
+            sb.append("  Target roles: ").append(formatRolefulTargets(trace.rolefulTargets())).append('\n');
+        }
         sb.append("  Phase: initial=").append(trace.initialPhase())
                 .append(" final=").append(trace.finalPhase())
                 .append('\n');
         sb.append("  Native tools: ").append(listOrNone(trace.nativeTools())).append('\n');
         sb.append("  Prompt tools: ").append(listOrNone(trace.promptTools())).append('\n');
         sb.append("  Blocked: ").append(listOrNone(trace.blocks())).append('\n');
+    }
+
+    private static String formatRolefulTargets(List<dev.talos.runtime.TurnPolicyTrace.RolefulTarget> targets) {
+        if (targets == null || targets.isEmpty()) return "none";
+        return targets.stream()
+                .sorted(Comparator
+                        .comparing((dev.talos.runtime.TurnPolicyTrace.RolefulTarget target) -> target.path())
+                        .thenComparing(dev.talos.runtime.TurnPolicyTrace.RolefulTarget::role))
+                .map(ExplainLastTurnCommand::formatRolefulTarget)
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static String formatRolefulTarget(dev.talos.runtime.TurnPolicyTrace.RolefulTarget target) {
+        if (target == null) return "";
+        String rendered = target.path() + " = " + target.role();
+        if (!target.reason().isBlank()) {
+            rendered += " (" + target.reason() + ")";
+        }
+        return rendered;
     }
 
     private static String listOrNone(List<String> values) {

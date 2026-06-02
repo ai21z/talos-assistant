@@ -538,6 +538,36 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void traceViewShowsRolefulTargetDerivationReasons() {
+        String prompt = "Keep styles.css unchanged. Update index.html and scripts.js.";
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
+                dev.talos.runtime.task.TaskContractResolver.fromUserRequest(prompt),
+                "APPLY",
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.read_file", "talos.write_file"));
+        TurnRecord turn = new TurnRecord(
+                14,
+                Instant.parse("2026-04-26T00:00:00Z"),
+                1234,
+                prompt,
+                "Blocked before completion.",
+                List.of(),
+                0,
+                0,
+                0,
+                "2 stages, 5.0ms, final=3",
+                "ok",
+                policyTrace);
+
+        String text = ExplainLastTurnCommand.renderTrace(turn);
+
+        assertTrue(text.contains("Target roles:"), text);
+        assertTrue(text.contains("styles.css = FORBIDDEN (preserve-unchanged-target)"), text);
+        assertTrue(text.contains("index.html = MUST_MUTATE"), text);
+        assertTrue(text.contains("scripts.js = MUST_MUTATE"), text);
+    }
+
+    @Test
     void executeRejectsUnknownView() {
         var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));
 

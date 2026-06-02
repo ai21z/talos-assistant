@@ -195,8 +195,17 @@ public final class PromptDebugInspector {
                 .sorted(Comparator
                         .comparing((TurnPolicyTrace.RolefulTarget target) -> target.path())
                         .thenComparing(TurnPolicyTrace.RolefulTarget::role))
-                .map(target -> target.path() + " = " + target.role())
+                .map(PromptDebugInspector::formatRolefulTarget)
                 .collect(Collectors.joining(", "));
+    }
+
+    private static String formatRolefulTarget(TurnPolicyTrace.RolefulTarget target) {
+        if (target == null) return "";
+        String rendered = target.path() + " = " + target.role();
+        if (!target.reason().isBlank()) {
+            rendered += " (" + target.reason() + ")";
+        }
+        return rendered;
     }
 
     private static int targetIndex(String requestLower, String target) {

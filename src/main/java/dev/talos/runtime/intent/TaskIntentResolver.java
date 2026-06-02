@@ -1,6 +1,7 @@
 package dev.talos.runtime.intent;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 
 import java.util.LinkedHashSet;
@@ -52,13 +53,13 @@ public final class TaskIntentResolver {
         }
         ArtifactTargetSet targets = ArtifactTargetSet.empty();
         for (String target : contract.expectedTargets()) {
-            targets = targets.with(TargetRef.of(target, TargetRole.MUST_MUTATE));
+            targets = targets.with(targetRef(contract.originalUserRequest(), target, TargetRole.MUST_MUTATE));
         }
         for (String target : contract.sourceEvidenceTargets()) {
-            targets = targets.with(TargetRef.of(target, TargetRole.SOURCE_EVIDENCE));
+            targets = targets.with(targetRef(contract.originalUserRequest(), target, TargetRole.SOURCE_EVIDENCE));
         }
         for (String target : contract.forbiddenTargets()) {
-            targets = targets.with(TargetRef.of(target, TargetRole.FORBIDDEN));
+            targets = targets.with(targetRef(contract.originalUserRequest(), target, TargetRole.FORBIDDEN));
         }
         return new TaskIntent(
                 contract.type(),
@@ -84,16 +85,16 @@ public final class TaskIntentResolver {
     ) {
         ArtifactTargetSet targets = ArtifactTargetSet.empty();
         for (String target : mutationTargets) {
-            targets = targets.with(TargetRef.of(target, TargetRole.MUST_MUTATE));
+            targets = targets.with(targetRef(originalUserRequest, target, TargetRole.MUST_MUTATE));
         }
         for (String target : verifyOnlyTargets) {
-            targets = targets.with(TargetRef.of(target, TargetRole.VERIFY_ONLY));
+            targets = targets.with(targetRef(originalUserRequest, target, TargetRole.VERIFY_ONLY));
         }
         for (String target : sourceEvidenceTargets) {
-            targets = targets.with(TargetRef.of(target, TargetRole.SOURCE_EVIDENCE));
+            targets = targets.with(targetRef(originalUserRequest, target, TargetRole.SOURCE_EVIDENCE));
         }
         for (String target : forbiddenTargets) {
-            targets = targets.with(TargetRef.of(target, TargetRole.FORBIDDEN));
+            targets = targets.with(targetRef(originalUserRequest, target, TargetRole.FORBIDDEN));
         }
         return new TaskIntent(
                 type,
@@ -103,6 +104,35 @@ public final class TaskIntentResolver {
                 targets,
                 originalUserRequest,
                 classificationReason);
+    }
+
+    private static TargetRef targetRef(String userRequest, String target, TargetRole role) {
+        return new TargetRef(target, role, derivationForTarget(userRequest, target, role));
+    }
+
+    private static IntentDerivation derivationForTarget(String userRequest, String target, TargetRole role) {
+        boolean preserveTarget = role == TargetRole.FORBIDDEN
+                && TaskContractResolver.extractPreserveUnchangedTargets(userRequest).contains(target);
+        String reason = switch (role) {
+            case FORBIDDEN -> preserveTarget ? "preserve-unchanged-target" : "explicit-forbidden-target";
+            case MUST_MUTATE, OUTPUT_DESTINATION -> mentionedInMutationClause(userRequest, target)
+                    ? "explicit-mutation-target"
+                    : "active-contract-projection";
+            case VERIFY_ONLY -> "verify-only-constraint-target";
+            case SOURCE_EVIDENCE, MUST_READ -> "source-evidence-target";
+            case MAY_MUTATE -> "optional-mutation-target";
+            case MENTIONED_ONLY -> "mentioned-target";
+        };
+        TargetSource source = "active-contract-projection".equals(reason)
+                ? TargetSource.RUNTIME_DEFAULT
+                : TargetSource.USER_REQUEST;
+        return new IntentDerivation(
+                source,
+                reason,
+                IntentDerivation.UNKNOWN_OFFSET,
+                IntentDerivation.UNKNOWN_OFFSET,
+                sourceTextForTarget(userRequest, target),
+                1.0);
     }
 
     private static boolean shouldTreatExtraFileConstraintAsScoped(
@@ -265,6 +295,31 @@ public final class TaskIntentResolver {
     private static boolean containsExplicitMutationVerb(String lowerClause) {
         return lowerClause.matches("(?s).*\\b(?:improve|edit|update|rewrite|modify|change|fix|"
                 + "restyle|redesign|polish)\\b.*");
+    }
+
+    private static boolean mentionedInMutationClause(String userRequest, String target) {
+        if (userRequest == null || userRequest.isBlank() || target == null) return false;
+        for (String clause : clauses(userRequest)) {
+            String mutationFragment = mutationFragment(clause);
+            String lowerClause = mutationFragment.toLowerCase(Locale.ROOT);
+            if (!isNegatedClause(lowerClause)
+                    && !isAdvisoryClause(lowerClause)
+                    && containsExplicitMutationVerb(lowerClause)
+                    && containsTarget(mutationFragment, target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String sourceTextForTarget(String userRequest, String target) {
+        if (userRequest == null || userRequest.isBlank() || target == null) return "";
+        for (String clause : clauses(userRequest)) {
+            if (containsTarget(clause, target)) {
+                return clause.strip();
+            }
+        }
+        return "";
     }
 
     private static boolean containsTarget(String clause, String target) {
