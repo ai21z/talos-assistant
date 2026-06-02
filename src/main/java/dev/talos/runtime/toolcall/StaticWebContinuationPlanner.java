@@ -410,6 +410,7 @@ final class StaticWebContinuationPlanner {
             if (problem == null || problem.isBlank()) continue;
             String lower = problem.toLowerCase(Locale.ROOT);
             Set<String> problemTargets = addBacktickStaticWebTargets(problem, targets);
+            problemTargets.addAll(addPlainPrefixStaticWebTargets(problem, targets));
             exactTargets.addAll(problemTargets);
             if ((lower.contains("css file") || lower.contains("css target"))
                     && !hasTargetWithExtension(problemTargets, ".css")) {
@@ -561,6 +562,31 @@ final class StaticWebContinuationPlanner {
                 added.add(candidate);
             }
             start = close + 1;
+        }
+        return added;
+    }
+
+    private static Set<String> addPlainPrefixStaticWebTargets(String text, Set<String> targets) {
+        LinkedHashSet<String> added = new LinkedHashSet<>();
+        if (text == null || text.isBlank() || targets == null) return added;
+        String stripped = text.strip();
+        while (stripped.startsWith("-") || stripped.startsWith("*")) {
+            stripped = stripped.substring(1).strip();
+        }
+        int colon = stripped.indexOf(':');
+        if (colon <= 0) return added;
+        String detail = stripped.substring(colon + 1).toLowerCase(Locale.ROOT);
+        if (detail.contains("expected target was not successfully mutated")) return added;
+        if (!detail.contains("file appears to be placeholder content")
+                && !detail.contains("syntax check failed")
+                && !detail.contains("could not be read for functional web verification")) {
+            return added;
+        }
+        String candidate = ToolCallSupport.normalizePath(stripped.substring(0, colon).strip());
+        if (candidate.contains(" ")) return added;
+        if (StaticWebCapabilityProfile.isSmallWebFile(candidate)) {
+            targets.add(candidate);
+            added.add(candidate);
         }
         return added;
     }

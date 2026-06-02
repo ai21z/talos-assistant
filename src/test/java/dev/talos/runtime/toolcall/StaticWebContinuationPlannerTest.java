@@ -223,6 +223,71 @@ class StaticWebContinuationPlannerTest {
     }
 
     @Test
+    void verificationFailurePlanPreservesExactPlainProblemPrefixPluralScriptTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <title>Neon Meridian</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main class="stage">
+                    <button id="teaser-button" type="button">Play teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                  </main>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".stage { padding: 2rem; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "// Existing content\n");
+        LoopState state = state(
+                "Update index.html and scripts.js so #teaser-button updates #teaser-status when clicked.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "styles.css",
+                true,
+                true,
+                false,
+                "Wrote styles.css",
+                ""));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "scripts.js",
+                true,
+                true,
+                false,
+                "Wrote scripts.js",
+                ""));
+        state.mutatingToolSuccesses = 3;
+
+        Optional<StaticWebContinuationPlanner.Plan> plan =
+                StaticWebContinuationPlanner.verificationFailurePlan(state, baseTools());
+
+        assertTrue(plan.isPresent(), "placeholder scripts.js should require exact-path repair continuation");
+        StaticWebContinuationPlanner.Plan continuation = plan.get();
+        assertEquals(List.of("index.html", "scripts.js"), continuation.missingTargets());
+        assertEquals(List.of("talos.write_file"), toolNames(continuation.tools()));
+        assertTrue(continuation.pendingActionObligation().isPresent());
+        assertEquals(List.of("index.html", "scripts.js"),
+                continuation.pendingActionObligation().orElseThrow().targets());
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js"), prompt);
+        assertFalse(prompt.contains("Missing or unmutated target files: script.js"), prompt);
+        assertFalse(prompt.contains("Static web repair target files: script.js"), prompt);
+        assertTrue(prompt.contains("scripts.js: JavaScript file appears to be placeholder content."), prompt);
+    }
+
+    @Test
     void fullRewriteInteractionRepairExposesOnlyWriteFileAndDoesNotInviteEditFile() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
