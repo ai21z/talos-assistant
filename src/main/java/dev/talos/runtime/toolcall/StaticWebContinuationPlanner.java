@@ -5,7 +5,9 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.StaticWebInteractionVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -51,8 +53,13 @@ final class StaticWebContinuationPlanner {
 
     private record VerificationContinuation(
             TaskVerificationResult verification,
-            List<String> missingTargets
-    ) {}
+            List<String> repairTargets,
+            boolean fullRewriteRepair
+    ) {
+        VerificationContinuation {
+            repairTargets = repairTargets == null ? List.of() : List.copyOf(repairTargets);
+        }
+    }
 
     static Optional<Plan> nextPlan(LoopState state, List<ToolSpec> baseTools) {
         Optional<Plan> directoryOnly = directoryOnlyPlan(state, baseTools);
@@ -86,18 +93,29 @@ final class StaticWebContinuationPlanner {
         List<ToolSpec> tools = narrowed.isEmpty()
                 ? safeTools(baseTools)
                 : narrowed;
-        Optional<PendingActionObligation> obligation = value.missingTargets().isEmpty()
+        Optional<PendingActionObligation> obligation = value.repairTargets().isEmpty()
                 ? Optional.empty()
-                : Optional.of(PendingActionObligation.expectedTargets(
-                        value.missingTargets(),
-                        staticWebVerificationFailureContext(value.verification())));
+                : Optional.of(value.fullRewriteRepair()
+                        ? PendingActionObligation.staticRepairTargets(
+                                value.repairTargets(),
+                                staticWebVerificationFailureContext(value.verification()))
+                        : PendingActionObligation.expectedTargets(
+                                value.repairTargets(),
+                                staticWebVerificationFailureContext(value.verification())));
+        if (value.fullRewriteRepair()) {
+            state.staticWebFullRewriteRequiredTargets.addAll(value.repairTargets());
+        }
+        LocalTurnTraceCapture.recordRepair(
+                "PLANNED",
+                "STATIC_VERIFICATION_REPAIR: static-web verification continuation targets "
+                        + String.join(", ", value.repairTargets()));
         return Optional.of(new Plan(
                 staticWebVerificationContinuationMessages(state, value),
                 tools,
                 staticWebCreationContinuationControls(state, tools),
                 "static-web-verification-continuation",
                 obligation,
-                value.missingTargets()));
+                value.repairTargets()));
     }
 
     static boolean staticWebVerificationAlreadyPasses(LoopState state) {
@@ -199,13 +217,15 @@ final class StaticWebContinuationPlanner {
         }
         TaskVerificationResult verification = continuation == null ? null : continuation.verification();
         List<String> problems = verification == null ? List.of() : verification.problems();
-        List<String> targets = continuation == null ? List.of() : continuation.missingTargets();
+        List<String> targets = continuation == null ? List.of() : continuation.repairTargets();
         StringBuilder frame = new StringBuilder();
         frame.append("[StaticWebVerificationContinuation]\n")
                 .append("Static verification found the current web artifact incomplete after a successful mutation.\n")
                 .append("Continue the same user request with file mutation tools. Do not answer in prose.\n");
         if (!targets.isEmpty()) {
-            frame.append("Missing or unmutated target files: ")
+            frame.append(continuation != null && continuation.fullRewriteRepair()
+                            ? "Static web repair target files: "
+                            : "Missing or unmutated target files: ")
                     .append(String.join(", ", targets))
                     .append('\n');
         }
@@ -216,8 +236,13 @@ final class StaticWebContinuationPlanner {
                 frame.append("- ").append(problem.strip()).append('\n');
             }
         }
-        frame.append("Write or repair the missing static web assets now. ")
-                .append("For linked CSS/JavaScript files, create the exact linked filenames.");
+        if (continuation != null && continuation.fullRewriteRepair()) {
+            frame.append("Repair the failed interaction behavior now. Preserve the requested trigger/output binding ")
+                    .append("and use complete file content for each listed repair target.");
+        } else {
+            frame.append("Write or repair the missing static web assets now. ")
+                    .append("For linked CSS/JavaScript files, create the exact linked filenames.");
+        }
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
@@ -287,13 +312,86 @@ final class StaticWebContinuationPlanner {
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) {
             return Optional.empty();
         }
-        if (!StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return Optional.empty();
+        if (!looksContinuationEligibleStaticWebTask(contract)) return Optional.empty();
         if (!hasSuccessfulSmallWebFileMutation(state)) return Optional.empty();
         TaskVerificationResult verification = staticWebVerification(state);
         if (verification.status() != TaskVerificationStatus.FAILED) return Optional.empty();
         List<String> missingTargets = missingStaticWebTargets(verification, state);
-        if (missingTargets.isEmpty()) return Optional.empty();
-        return Optional.of(new VerificationContinuation(verification, missingTargets));
+        if (!missingTargets.isEmpty()) {
+            return Optional.of(new VerificationContinuation(verification, missingTargets, false));
+        }
+        List<String> interactionRepairTargets = interactionRepairTargets(verification, state, contract);
+        if (interactionRepairTargets.isEmpty()) return Optional.empty();
+        return Optional.of(new VerificationContinuation(verification, interactionRepairTargets, true));
+    }
+
+    private static List<String> interactionRepairTargets(
+            TaskVerificationResult verification,
+            LoopState state,
+            TaskContract contract
+    ) {
+        if (contract == null
+                || StaticWebInteractionVerifier.detectBinding(contract.originalUserRequest()).isEmpty()) {
+            return List.of();
+        }
+        if (!looksLikeInteractionVerificationFailure(verification)) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        List<String> expected = contract.expectedTargets().stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(StaticWebCapabilityProfile::isSmallWebFile)
+                .toList();
+        boolean needsCss = hasCssProblem(verification);
+        for (String target : expected) {
+            String lower = target.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".js")) {
+                out.add(target);
+            } else if (needsCss && lower.endsWith(".css")) {
+                out.add(target);
+            }
+        }
+        if (out.isEmpty()) {
+            for (String target : successfulSmallWebMutationKeys(state)) {
+                String display = ExpectedTargetProgressAccounting.displayExpectedTargetForKey(expected, target);
+                if (display.isBlank()) display = target;
+                String lower = display.toLowerCase(Locale.ROOT);
+                if (lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".js")
+                        || (needsCss && lower.endsWith(".css"))) {
+                    out.add(display);
+                }
+            }
+        }
+        return out.stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(path -> !path.isBlank())
+                .filter(StaticWebCapabilityProfile::isSmallWebFile)
+                .sorted()
+                .toList();
+    }
+
+    private static boolean looksLikeInteractionVerificationFailure(TaskVerificationResult verification) {
+        if (verification == null || verification.status() != TaskVerificationStatus.FAILED) return false;
+        String haystack = ((verification.summary() == null ? "" : verification.summary()) + "\n"
+                + String.join("\n", verification.problems()) + "\n"
+                + String.join("\n", verification.facts())).toLowerCase(Locale.ROOT);
+        return haystack.contains("static interaction")
+                || haystack.contains("browser behavior")
+                || haystack.contains("click handler")
+                || haystack.contains("visible text")
+                || haystack.contains("trigger")
+                || haystack.contains("output");
+    }
+
+    private static boolean looksContinuationEligibleStaticWebTask(TaskContract contract) {
+        if (StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return true;
+        return contract != null
+                && StaticWebInteractionVerifier.detectBinding(contract.originalUserRequest()).isPresent();
+    }
+
+    private static boolean hasCssProblem(TaskVerificationResult verification) {
+        if (verification == null) return false;
+        String haystack = ((verification.summary() == null ? "" : verification.summary()) + "\n"
+                + String.join("\n", verification.problems())).toLowerCase(Locale.ROOT);
+        return haystack.contains("css");
     }
 
     private static List<String> missingStaticWebTargets(TaskVerificationResult verification, LoopState state) {
