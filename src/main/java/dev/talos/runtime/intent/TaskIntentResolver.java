@@ -15,11 +15,22 @@ public final class TaskIntentResolver {
     public static TaskIntent fromUserRequest(String userRequest, TaskContract legacyContract) {
         TaskIntent parityIntent = fromLegacyContract(legacyContract);
         Set<String> mutationTargets = explicitMutationTargets(userRequest, legacyContract);
+        Set<String> optionalMutationTargets = explicitOptionalMutationTargets(userRequest, legacyContract);
+        if (!optionalMutationTargets.isEmpty()) {
+            LinkedHashSet<String> requiredMutationTargets = new LinkedHashSet<>(mutationTargets);
+            requiredMutationTargets.removeAll(optionalMutationTargets);
+            if (!requiredMutationTargets.isEmpty()) {
+                mutationTargets = Set.copyOf(requiredMutationTargets);
+            } else {
+                optionalMutationTargets = Set.of();
+            }
+        }
         Set<String> verifyOnlyTargets = explicitVerifyOnlyTargets(userRequest, legacyContract);
         Set<String> forbiddenTargets = explicitForbiddenTargets(userRequest, legacyContract);
         if (!shouldTreatExtraFileConstraintAsScoped(userRequest, legacyContract, mutationTargets)) {
             if (!shouldTreatConstraintTargetsAsVerifyOnly(legacyContract, mutationTargets, verifyOnlyTargets)
-                    && !shouldApplyExplicitForbiddenTargets(legacyContract, mutationTargets, forbiddenTargets)) {
+                    && !shouldApplyExplicitForbiddenTargets(legacyContract, mutationTargets, forbiddenTargets)
+                    && optionalMutationTargets.isEmpty()) {
                 return parityIntent;
             }
             return rolefulIntent(
@@ -28,6 +39,7 @@ public final class TaskIntentResolver {
                     legacyContract.mutationAllowed(),
                     legacyContract.verificationRequired(),
                     mutationTargets,
+                    optionalMutationTargets,
                     verifyOnlyTargets,
                     forbiddenTargets,
                     legacyContract.sourceEvidenceTargets(),
@@ -40,6 +52,7 @@ public final class TaskIntentResolver {
                 true,
                 true,
                 mutationTargets,
+                optionalMutationTargets,
                 verifyOnlyTargets,
                 forbiddenTargets,
                 legacyContract.sourceEvidenceTargets(),
@@ -77,6 +90,7 @@ public final class TaskIntentResolver {
             boolean mutationAllowed,
             boolean verificationRequired,
             Set<String> mutationTargets,
+            Set<String> optionalMutationTargets,
             Set<String> verifyOnlyTargets,
             Set<String> forbiddenTargets,
             Set<String> sourceEvidenceTargets,
@@ -86,6 +100,9 @@ public final class TaskIntentResolver {
         ArtifactTargetSet targets = ArtifactTargetSet.empty();
         for (String target : mutationTargets) {
             targets = targets.with(targetRef(originalUserRequest, target, TargetRole.MUST_MUTATE));
+        }
+        for (String target : optionalMutationTargets) {
+            targets = targets.with(targetRef(originalUserRequest, target, TargetRole.MAY_MUTATE));
         }
         for (String target : verifyOnlyTargets) {
             targets = targets.with(targetRef(originalUserRequest, target, TargetRole.VERIFY_ONLY));
@@ -186,6 +203,32 @@ public final class TaskIntentResolver {
             }
             for (String target : legacyContract.expectedTargets()) {
                 if (!legacyContract.forbiddenTargets().contains(target) && containsTarget(mutationFragment, target)) {
+                    targets.add(target);
+                }
+            }
+        }
+        return Set.copyOf(targets);
+    }
+
+    private static Set<String> explicitOptionalMutationTargets(String userRequest, TaskContract legacyContract) {
+        if (userRequest == null || userRequest.isBlank()
+                || legacyContract == null
+                || legacyContract.expectedTargets().isEmpty()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String clause : clauses(userRequest)) {
+            String mutationFragment = mutationFragment(clause);
+            String lowerClause = mutationFragment.toLowerCase(Locale.ROOT);
+            if (isNegatedClause(lowerClause)
+                    || isAdvisoryClause(lowerClause)
+                    || !containsExplicitMutationVerb(lowerClause)) {
+                continue;
+            }
+            for (String target : legacyContract.expectedTargets()) {
+                if (!legacyContract.forbiddenTargets().contains(target)
+                        && containsTarget(mutationFragment, target)
+                        && hasOptionalMutationQualifier(mutationFragment, target, legacyContract.expectedTargets())) {
                     targets.add(target);
                 }
             }
@@ -294,8 +337,103 @@ public final class TaskIntentResolver {
 
     private static boolean containsExplicitMutationVerb(String lowerClause) {
         return lowerClause.matches("(?s).*\\b(?:improve|edit|update|rewrite|modify|change|fix|"
-                + "restyle|redesign|polish)\\b.*");
+                + "adjust|tweak|restyle|redesign|polish)\\b.*");
     }
+
+    private static boolean hasOptionalMutationQualifier(String fragment, String target, Set<String> allTargets) {
+        if (fragment == null || fragment.isBlank() || target == null || target.isBlank()) return false;
+        String lower = fragment.toLowerCase(Locale.ROOT);
+        String lowerTarget = target.toLowerCase(Locale.ROOT);
+        int from = 0;
+        while (from >= 0 && from < lower.length()) {
+            int targetIndex = lower.indexOf(lowerTarget, from);
+            if (targetIndex < 0) return false;
+            int targetEnd = targetIndex + lowerTarget.length();
+            if (hasOptionalMarkerAfter(lower, targetEnd, allTargets, target)
+                    || hasOptionalMarkerBefore(lower, targetIndex, allTargets, target)) {
+                return true;
+            }
+            from = targetEnd;
+        }
+        return false;
+    }
+
+    private static boolean hasOptionalMarkerAfter(
+            String lower,
+            int targetEnd,
+            Set<String> allTargets,
+            String target
+    ) {
+        int end = Math.min(lower.length(), targetEnd + 80);
+        OptionalMarker marker = firstOptionalMarker(lower, targetEnd, end);
+        return marker != null
+                && !containsDifferentTarget(lower.substring(targetEnd, marker.index()), allTargets, target);
+    }
+
+    private static boolean hasOptionalMarkerBefore(
+            String lower,
+            int targetIndex,
+            Set<String> allTargets,
+            String target
+    ) {
+        int start = Math.max(0, targetIndex - 80);
+        OptionalMarker marker = lastOptionalMarker(lower, start, targetIndex);
+        return marker != null
+                && !containsDifferentTarget(lower.substring(marker.end(), targetIndex), allTargets, target);
+    }
+
+    private static OptionalMarker firstOptionalMarker(String lower, int start, int end) {
+        OptionalMarker best = null;
+        for (String phrase : OPTIONAL_MUTATION_QUALIFIERS) {
+            int index = lower.indexOf(phrase, start);
+            if (index >= 0 && index < end && (best == null || index < best.index())) {
+                best = new OptionalMarker(index, index + phrase.length());
+            }
+        }
+        return best;
+    }
+
+    private static OptionalMarker lastOptionalMarker(String lower, int start, int end) {
+        OptionalMarker best = null;
+        String window = lower.substring(start, end);
+        for (String phrase : OPTIONAL_MUTATION_QUALIFIERS) {
+            int index = window.lastIndexOf(phrase);
+            if (index >= 0) {
+                int absolute = start + index;
+                if (best == null || absolute > best.index()) {
+                    best = new OptionalMarker(absolute, absolute + phrase.length());
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean containsDifferentTarget(String segment, Set<String> allTargets, String target) {
+        if (segment == null || segment.isBlank() || allTargets == null || allTargets.isEmpty()) return false;
+        String lowerSegment = segment.toLowerCase(Locale.ROOT);
+        String lowerTarget = target == null ? "" : target.toLowerCase(Locale.ROOT);
+        for (String candidate : allTargets) {
+            if (candidate == null || candidate.isBlank()) continue;
+            String lowerCandidate = candidate.toLowerCase(Locale.ROOT);
+            if (!lowerCandidate.equals(lowerTarget) && lowerSegment.contains(lowerCandidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final Set<String> OPTIONAL_MUTATION_QUALIFIERS = Set.of(
+            "only if necessary",
+            "only if needed",
+            "when necessary",
+            "when needed",
+            "if necessary",
+            "if needed",
+            "as necessary",
+            "as needed"
+    );
+
+    private record OptionalMarker(int index, int end) {}
 
     private static boolean mentionedInMutationClause(String userRequest, String target) {
         if (userRequest == null || userRequest.isBlank() || target == null) return false;

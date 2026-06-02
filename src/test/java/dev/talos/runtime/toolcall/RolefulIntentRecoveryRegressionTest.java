@@ -139,6 +139,61 @@ class RolefulIntentRecoveryRegressionTest {
     }
 
     @Test
+    void asNeededTargetIsOptionalAndDoesNotDriveMutationProgress() {
+        String prompt = "Update index.html and scripts.js for the synthwave band site. "
+                + "Adjust styles.css as needed.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
+                List.of());
+        LoopState state = state(prompt, Path.of("."));
+        state.toolOutcomes.add(successfulWrite("index.html"));
+        state.toolOutcomes.add(successfulWrite("scripts.js"));
+
+        assertEquals(Set.of("index.html", "scripts.js"), contract.expectedTargets());
+        assertFalse(contract.expectedTargets().contains("styles.css"));
+        assertTrue(contract.forbiddenTargets().isEmpty());
+        assertEquals("MAY_MUTATE", roleFor(trace, "styles.css"));
+        assertEquals("optional-mutation-target", reasonFor(trace, "styles.css"));
+        assertTrue(ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state).isEmpty());
+    }
+
+    @Test
+    void commaSeparatedAsNeededTargetOnlyOptionalizesQualifiedFile() {
+        String prompt = "Update index.html and scripts.js, adjust styles.css as needed.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
+                List.of());
+
+        assertEquals(Set.of("index.html", "scripts.js"), contract.expectedTargets());
+        assertEquals("MUST_MUTATE", roleFor(trace, "index.html"));
+        assertEquals("MUST_MUTATE", roleFor(trace, "scripts.js"));
+        assertEquals("MAY_MUTATE", roleFor(trace, "styles.css"));
+    }
+
+    @Test
+    void soleAsNeededMutationTargetRemainsRequired() {
+        String prompt = "Update styles.css as needed.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+        TurnPolicyTrace trace = TurnPolicyTrace.from(
+                contract,
+                "APPLY",
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY),
+                List.of());
+
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertEquals("MUST_MUTATE", roleFor(trace, "styles.css"));
+    }
+
+    @Test
     void verifyOnlyConstraintTargetDoesNotBecomeMutationProgress() {
         String prompt = "Rewrite styles.css so index.html still works.";
 

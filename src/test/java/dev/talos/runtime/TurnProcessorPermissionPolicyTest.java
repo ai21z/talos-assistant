@@ -4,6 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
@@ -237,6 +238,30 @@ class TurnProcessorPermissionPolicyTest {
                 result.errorMessage());
         assertFalse(Files.exists(workspace.resolve("tmp/unrelated")));
         assertEquals(0, gateCalls.get(), "unrelated target must block before approval");
+    }
+
+    @Test
+    void asNeededMutationTargetIsAllowedButNotRequired(@TempDir Path workspace) throws Exception {
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = new Config();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(), gateApproves(gateCalls), registry);
+
+        TurnUserRequestCapture.set("Update index.html and scripts.js. Adjust styles.css as needed.");
+        assertEquals(
+                java.util.Set.of("index.html", "scripts.js"),
+                TaskContractResolver.fromUserRequest("Update index.html and scripts.js. Adjust styles.css as needed.")
+                        .expectedTargets());
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "styles.css", "content", "body { margin: 0; }\n")),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, gateCalls.get(), "optional mutation target should still ask for approval before writing");
+        assertEquals("body { margin: 0; }\n", Files.readString(workspace.resolve("styles.css")));
     }
 
     private static TurnProcessor processor(Config config, ApprovalGate gate, TalosTool tool) {
