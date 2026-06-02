@@ -50,6 +50,10 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
         return new PendingActionObligation(Kind.STATIC_REPAIR_TARGETS_REMAINING, targets);
     }
 
+    public static PendingActionObligation staticRepairTargets(List<String> targets, String failureContext) {
+        return new PendingActionObligation(Kind.STATIC_REPAIR_TARGETS_REMAINING, targets, failureContext);
+    }
+
     public static PendingActionObligation oldStringMissTargets(List<String> targets) {
         return new PendingActionObligation(Kind.OLD_STRING_MISS_TARGET_REPAIR, targets);
     }

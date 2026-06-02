@@ -1099,6 +1099,35 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/87-static-web-interaction-failure-repairs-mutated-targets.json] 87: static web interaction failure repairs mutated targets")
+    void staticWebInteractionFailureRepairsMutatedTargets() {
+        var loaded = JsonScenarioLoader.load("scenarios/87-static-web-interaction-failure-repairs-mutated-targets.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(4, 4, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertFileContains("index.html", "id=\"teaser-button\"")
+                    .assertFileContains("index.html", "id=\"teaser-status\"")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("styles.css", ".stage")
+                    .assertFileContains("scripts.js", "textContent = 'Neon Meridian teaser armed")
+                    .assertLocalTraceRecorded();
+
+            assertTraceExpectedTargets(result, "index.html", "scripts.js", "styles.css");
+            assertTraceForbiddenTargets(result);
+            assertRolefulTarget(result, "index.html", "MUST_MUTATE");
+            assertRolefulTarget(result, "scripts.js", "MUST_MUTATE");
+            assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_VERIFIED");
+            assertEquals("PLANNED", result.localTrace().repair().status());
+            assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
     void functionalWebTaskMissingJavascriptFailsVerification() {
         var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");

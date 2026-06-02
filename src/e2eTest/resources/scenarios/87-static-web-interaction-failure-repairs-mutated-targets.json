@@ -1,0 +1,17 @@
+{
+  "name": "static web interaction failure repairs mutated targets",
+  "fixture": "broken-bmi-site",
+  "v1Pack": true,
+  "claims": [
+    "verification-failure-after-all-expected-targets-continues",
+    "static-web-interaction-repair-uses-same-mutated-web-targets",
+    "browser-behavior-proof-can-pass-after-bounded-repair"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Create index.html, styles.css, and scripts.js for Neon Meridian, a polished synthwave band landing page. Make #teaser-button update #teaser-status with a visible teaser message when clicked.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>Neon Meridian</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"stage\\\">\\n    <h1>Neon Meridian</h1>\\n    <p>Midnight synthwave from the lower orbit.</p>\\n    <button id=\\\"teaser-button\\\" type=\\\"button\\\">Play teaser</button>\\n    <p id=\\\"teaser-status\\\">Waiting for signal.</p>\\n  </main>\\n  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body { margin: 0; min-height: 100vh; font-family: Arial, sans-serif; background: #12051f; color: #f8f3ff; }\\n.stage { max-width: 760px; margin: 0 auto; padding: 4rem 2rem; }\\n#teaser-button { cursor: pointer; }\\n#teaser-status { font-weight: 700; }\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"document.getElementById('teaser-button').addEventListener('click', function() {\\n  document.getElementById('teaser-status').textC;\\n});\"}}\n```",
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"document.getElementById('teaser-button').addEventListener('click', function() {\\n  document.getElementById('teaser-status').textContent = 'Neon Meridian teaser armed: new single drops at midnight.';\\n});\"}}\n```"
+  ]
+}
