@@ -208,15 +208,42 @@ class ToolSurfacePlannerTest {
                 registry());
 
         List<String> names = plan.nativeToolNames();
-        assertEquals("static web file target apply surface", plan.reason());
+        assertEquals("static web full-file apply surface", plan.reason());
         assertTrue(names.contains("talos.write_file"), names.toString());
-        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
         assertTrue(names.contains("talos.read_file"), names.toString());
         assertFalse(names.contains("talos.mkdir"), names.toString());
         assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
         assertFalse(names.contains("talos.copy_path"), names.toString());
         assertFalse(names.contains("talos.move_path"), names.toString());
         assertFalse(names.contains("talos.rename_path"), names.toString());
+    }
+
+    @Test
+    void broadStaticWebRewriteUsesWriteFileOnlyMutationSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html and scripts.js so Neon Meridian is a polished synthwave band "
+                                + "landing page. Adjust styles.css as needed. Make #teaser-button update "
+                                + "#teaser-status with a visible teaser message."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("static web full-file apply surface", plan.reason());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.list_dir"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertEquals(
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.write_file"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest(
+                                "Update index.html and scripts.js so Neon Meridian is a polished synthwave band "
+                                        + "landing page. Adjust styles.css as needed. Make #teaser-button update "
+                                        + "#teaser-status with a visible teaser message."),
+                        ExecutionPhase.APPLY));
     }
 
     @Test
@@ -237,6 +264,24 @@ class ToolSurfacePlannerTest {
         assertFalse(names.contains("talos.move_path"), names.toString());
         assertFalse(names.contains("talos.copy_path"), names.toString());
         assertFalse(names.contains("talos.delete_path"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
+    void narrowStaticWebFixKeepsEditFileVisible() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Now apply the smallest fix by editing index.html so the CSS and JavaScript "
+                                + ".cta-button selector has a matching element in the HTML, and update "
+                                + "style.css too."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
         assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
     }
 

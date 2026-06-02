@@ -98,6 +98,37 @@ public final class StaticWebCapabilityProfile {
                 || lower.endsWith(".tsx");
     }
 
+    public static boolean prefersFullFileWriteForInitialApply(TaskContract contract) {
+        if (contract == null || !contract.mutationAllowed() || contract.expectedTargets().isEmpty()) return false;
+        if (!allExpectedTargetsAreSmallWebFiles(contract)) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        if (looksNarrowStaticWebEdit(lower)) return false;
+        boolean broadWebIntent = looksBroadWebTask(contract)
+                || looksStyledWebTask(contract, Set.of())
+                || looksFunctionalWebTask(contract);
+        if (!broadWebIntent) return false;
+        return contract.type() == TaskType.FILE_CREATE
+                || lower.contains("build")
+                || containsPositiveCreateIntent(lower)
+                || lower.contains("generate")
+                || lower.contains("scaffold")
+                || lower.contains("set up")
+                || lower.contains("setup")
+                || lower.contains("full ")
+                || lower.contains("complete")
+                || lower.contains("polished")
+                || lower.contains("modern")
+                || lower.contains("landing page")
+                || lower.contains("website")
+                || lower.contains("webpage")
+                || lower.contains("web page")
+                || lower.contains("frontend")
+                || lower.contains("rewrite")
+                || lower.contains("redesign");
+    }
+
     public static boolean isStructuralProblem(String problem) {
         if (problem == null || problem.isBlank()) return false;
         String lower = problem.toLowerCase(Locale.ROOT);
@@ -257,6 +288,24 @@ public final class StaticWebCapabilityProfile {
                     || lower.endsWith(".ts") || lower.endsWith(".tsx");
         }
         return html && css && js;
+    }
+
+    private static boolean allExpectedTargetsAreSmallWebFiles(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) return false;
+        for (String target : contract.expectedTargets()) {
+            if (!isSmallWebFile(target)) return false;
+        }
+        return true;
+    }
+
+    private static boolean looksNarrowStaticWebEdit(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (lower.contains("edit_file") || lower.contains("old_string")) return true;
+        if (lower.contains("smallest fix") || lower.contains("small fix")) return true;
+        if (lower.contains("selector bug") || lower.contains("selector mismatch")) return true;
+        return lower.contains("changing ")
+                && lower.contains(" to ")
+                && (lower.contains("selector") || lower.contains(".") || lower.contains("#"));
     }
 
     private static boolean shouldCheckSelectorCoherence(String userRequest) {

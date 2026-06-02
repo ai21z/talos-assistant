@@ -339,14 +339,14 @@ class UnifiedAssistantModeTest {
                 render.taskType());
         assertTrue(render.mutationAllowed());
         assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
-        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.edit_file"), render.tools().toString());
         assertTrue(render.systemPrompt().contains("You CAN create files"), render.systemPrompt());
         assertTrue(render.messages().stream()
                         .anyMatch(message -> message.content() != null
                                 && message.content().contains("[CurrentTurnCapability]")
                                 && message.content().contains("obligation: MUTATING_TOOL_REQUIRED")
                                 && message.content().contains("talos.write_file")
-                                && message.content().contains("talos.edit_file")),
+                                && message.content().contains("Available mutating tools: talos.write_file.")),
                 render.messages().toString());
         assertFalse(render.systemPrompt().contains("This specific user turn is read-only"),
                 render.systemPrompt());
@@ -403,7 +403,7 @@ class UnifiedAssistantModeTest {
         assertEquals("FILE_CREATE", render.taskType());
         assertTrue(render.mutationAllowed());
         assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
-        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.edit_file"), render.tools().toString());
         assertTrue(render.systemPrompt().contains("You CAN create files"), render.systemPrompt());
         assertFalse(render.systemPrompt().contains("This specific user turn is read-only"),
                 render.systemPrompt());
@@ -437,7 +437,7 @@ class UnifiedAssistantModeTest {
         assertEquals("FILE_CREATE", render.taskType());
         assertTrue(render.mutationAllowed());
         assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
-        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.edit_file"), render.tools().toString());
         assertTrue(render.messages().stream()
                 .map(message -> message.content() == null ? "" : message.content())
                 .anyMatch(content -> content.contains("[Static verification repair context]")
@@ -538,7 +538,7 @@ class UnifiedAssistantModeTest {
         assertEquals("FILE_CREATE", render.taskType());
         assertTrue(render.mutationAllowed());
         assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
-        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.edit_file"), render.tools().toString());
         assertTrue(render.messages().stream()
                 .map(message -> message.content() == null ? "" : message.content())
                 .anyMatch(content -> content.contains("[Static verification repair context]")

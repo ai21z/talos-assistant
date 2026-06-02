@@ -85,6 +85,12 @@ public final class ToolSurfacePlanner {
                         descriptor -> intent.toolNames().contains(descriptor.name()),
                         intent.surfaceReason());
             }
+            if (staticWebFullFileApplyTargets(contract)) {
+                return select(
+                        registry,
+                        ToolSurfacePlanner::isFileTargetFullWriteApplyOperation,
+                        "static web full-file apply surface");
+            }
             if (fileEditTargets(contract)) {
                 return select(
                         registry,
@@ -125,6 +131,10 @@ public final class ToolSurfacePlanner {
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
             if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 return workspaceOperation.get().toolNames();
+            }
+            if (staticWebFullFileApplyTargets(contract)) {
+                return List.of("talos.grep", "talos.list_dir",
+                        "talos.read_file", "talos.retrieve", "talos.write_file");
             }
             if (fileEditTargets(contract)) {
                 return List.of("talos.edit_file", "talos.grep", "talos.list_dir",
@@ -193,6 +203,11 @@ public final class ToolSurfacePlanner {
         return hasHtml;
     }
 
+    private static boolean staticWebFullFileApplyTargets(TaskContract contract) {
+        return exactStaticWebFileTargets(contract)
+                && StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract);
+    }
+
     private static Plan select(ToolRegistry registry, java.util.function.Predicate<ToolDescriptor> predicate,
                                String reason) {
         List<ToolSpec> specs = registry.descriptors().stream()
@@ -224,6 +239,12 @@ public final class ToolSurfacePlanner {
         if (isReadOnlyOperation(descriptor)) return true;
         String name = descriptor == null ? "" : descriptor.name();
         return "talos.write_file".equals(name) || "talos.edit_file".equals(name);
+    }
+
+    private static boolean isFileTargetFullWriteApplyOperation(ToolDescriptor descriptor) {
+        if (isReadOnlyOperation(descriptor)) return true;
+        String name = descriptor == null ? "" : descriptor.name();
+        return "talos.write_file".equals(name);
     }
 
     private static boolean isVerificationOperation(ToolDescriptor descriptor) {
