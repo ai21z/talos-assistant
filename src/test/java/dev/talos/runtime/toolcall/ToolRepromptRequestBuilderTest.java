@@ -149,6 +149,31 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
+    void staticRepairMessagesDoNotReadRemainingTargetOutsideWorkspace() throws Exception {
+        Path workspace = tempDir.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(tempDir.resolve("outside.css"), "body { color: hotpink; }");
+        LoopState state = loopState(
+                broadTools(),
+                List.of(ChatMessage.user("Adjust styles.css as needed.")),
+                workspace);
+
+        List<ChatMessage> messages =
+                ToolRepromptRequestBuilder.messages(
+                        state,
+                        true,
+                        List.of("../outside.css"),
+                        "Adjust styles.css as needed.");
+
+        String payload = messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertFalse(payload.contains("[StaticRepairReadbacks]"), payload);
+        assertFalse(payload.contains("hotpink"), payload);
+    }
+
+    @Test
     void nonStaticRepairMessagesReuseCurrentStateMessages() {
         List<ChatMessage> messages = List.of(ChatMessage.system("sys"), ChatMessage.user("Continue."));
         LoopState state = loopState(broadTools(), messages);

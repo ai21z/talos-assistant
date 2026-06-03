@@ -403,6 +403,9 @@ class StaticWebContinuationPlannerTest {
         String prompt = prompt(continuation.messages());
         assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js, styles.css"), prompt);
         assertTrue(prompt.contains("CSS references missing class selectors: `.stage`"), prompt);
+        assertTrue(prompt.contains("[StaticRepairReadbacks]"), prompt);
+        assertTrue(prompt.contains("Path: styles.css"), prompt);
+        assertTrue(prompt.contains(".stage { padding: 2rem; }"), prompt);
         assertFalse(prompt.contains("Missing or unmutated target files: styles.css"), prompt);
     }
 
