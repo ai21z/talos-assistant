@@ -2172,6 +2172,47 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void browserVerifiedInteractionIsNotFailedByCssUtilityOrStateSelectors() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status"></p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                #teaser-status.visible { opacity: 1; }
+                .hidden { display: none; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Create a synthwave website with a button with id teaser-button "
+                                + "that updates visible text in #teaser-status when clicked."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
+                evidence.report().authoritativeProofKinds().toString());
+    }
+
+    @Test
     void remoteStaticWebAssetReferenceSurfacesLimitationWithoutMaskingInteractionProof() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
