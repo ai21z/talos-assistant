@@ -223,6 +223,8 @@ final class StaticWebSelectorAnalyzer {
             Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
             cssMissingClasses.removeAll(htmlClasses);
             cssMissingClasses.removeAll(jsDynamicClasses);
+            cssMissingClasses.removeIf(cls -> isCssUtilityOrStateClass(cls)
+                    || cssClassIsStateForExistingId(cls, htmlIds, css));
             Set<String> jsMissingClasses = new LinkedHashSet<>(jsClasses);
             jsMissingClasses.removeAll(htmlClasses);
             Set<String> cssMissingIds = new LinkedHashSet<>(cssIds);
@@ -416,6 +418,42 @@ final class StaticWebSelectorAnalyzer {
             }
         }
         return out;
+    }
+
+    private static boolean isCssUtilityOrStateClass(String cls) {
+        if (cls == null || cls.isBlank()) return false;
+        return switch (cls.toLowerCase(Locale.ROOT)) {
+            case "hidden", "visible", "active", "inactive", "open", "closed",
+                    "expanded", "collapsed", "selected", "disabled", "enabled",
+                    "show", "shown", "hide", "sr-only", "is-active",
+                    "is-hidden", "is-visible" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean cssClassIsStateForExistingId(String cls, Set<String> htmlIds, String css) {
+        if (cls == null || cls.isBlank() || htmlIds == null || htmlIds.isEmpty()
+                || css == null || css.isBlank()) {
+            return false;
+        }
+        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(stripCssComments(css));
+        String classNeedle = "." + cls;
+        while (preludeMatcher.find()) {
+            String prelude = preludeMatcher.group(1);
+            if (prelude == null || prelude.isBlank()) continue;
+            for (String selector : prelude.split(",")) {
+                String compact = selector.replaceAll("\\s+", "");
+                if (!compact.contains(classNeedle)) continue;
+                for (String id : htmlIds) {
+                    String idNeedle = "#" + id;
+                    if (compact.contains(idNeedle + classNeedle)
+                            || compact.contains(classNeedle + idNeedle)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static Set<String> extractBareClassSelectors(String css, Set<String> htmlClasses) {

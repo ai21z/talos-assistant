@@ -91,6 +91,44 @@ class StaticWebSelectorAnalyzerTest {
         assertNotNull(facts);
         assertFalse(facts.selectorProblems().stream()
                         .anyMatch(problem -> problem.contains("`.css`")),
+                        facts.selectorProblems().toString());
+    }
+
+    @Test
+    void cssStateAndUtilityClassesDoNotRequireInitialHtmlClassMarkup() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show Teaser</button>
+                    <p id="teaser-status"></p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                #teaser-status.visible { opacity: 1; }
+                .hidden { display: none; }
+                .missing-card { padding: 1rem; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Ready.';
+                });
+                """);
+
+        StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyze(
+                workspace.toAbsolutePath().normalize(),
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of());
+
+        assertNotNull(facts);
+        assertFalse(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.visible`")),
+                facts.selectorProblems().toString());
+        assertFalse(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.hidden`")),
+                facts.selectorProblems().toString());
+        assertTrue(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.missing-card`")),
                 facts.selectorProblems().toString());
     }
 }
