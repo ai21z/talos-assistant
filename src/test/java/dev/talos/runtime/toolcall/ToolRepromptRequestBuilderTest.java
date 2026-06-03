@@ -87,6 +87,31 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
+    void staticRepairMessagesIncludeReadbackForRemainingRepairTarget() {
+        LoopState state = loopState(
+                broadTools(),
+                List.of(ChatMessage.user("Adjust styles.css as needed.")));
+        state.successfulReadCallBodies.put(
+                "talos.read_file:path=styles.css;",
+                "1 | body { color: #fff; }\n2 | .stage { padding: 3rem; }");
+
+        List<ChatMessage> messages =
+                ToolRepromptRequestBuilder.messages(
+                        state,
+                        true,
+                        List.of("styles.css"),
+                        "Adjust styles.css as needed.");
+
+        String payload = messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(payload.contains("[StaticRepairReadbacks]"), payload);
+        assertTrue(payload.contains("Path: styles.css"), payload);
+        assertTrue(payload.contains(".stage { padding: 3rem; }"), payload);
+    }
+
+    @Test
     void nonStaticRepairMessagesReuseCurrentStateMessages() {
         List<ChatMessage> messages = List.of(ChatMessage.system("sys"), ChatMessage.user("Continue."));
         LoopState state = loopState(broadTools(), messages);
