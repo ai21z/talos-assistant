@@ -2,6 +2,8 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
@@ -356,6 +358,9 @@ final class StaticWebContinuationPlanner {
                 out.add(target);
             }
         }
+        if (needsCss) {
+            out.addAll(optionalCssRepairTargets(contract));
+        }
         if (out.isEmpty()) {
             for (String target : successfulSmallWebMutationKeys(state)) {
                 String display = ExpectedTargetProgressAccounting.displayExpectedTargetForKey(expected, target);
@@ -370,6 +375,18 @@ final class StaticWebContinuationPlanner {
         return out.stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(path -> !path.isBlank())
+                .filter(StaticWebCapabilityProfile::isSmallWebFile)
+                .sorted()
+                .toList();
+    }
+
+    private static List<String> optionalCssRepairTargets(TaskContract contract) {
+        if (contract == null || contract.originalUserRequest().isBlank()) return List.of();
+        TaskIntent intent = TaskContractResolver.intentFromUserRequest(contract.originalUserRequest());
+        return intent.targets().pathsByRole(TargetRole.MAY_MUTATE).stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(path -> !path.isBlank())
+                .filter(path -> path.toLowerCase(Locale.ROOT).endsWith(".css"))
                 .filter(StaticWebCapabilityProfile::isSmallWebFile)
                 .sorted()
                 .toList();

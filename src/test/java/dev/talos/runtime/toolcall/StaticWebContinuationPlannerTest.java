@@ -345,6 +345,67 @@ class StaticWebContinuationPlannerTest {
         assertFalse(prompt.contains("talos.edit_file"), prompt);
     }
 
+    @Test
+    void fullRewriteInteractionRepairIncludesOptionalCssWhenCssVerificationFails() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <title>Neon Meridian</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main class="hero">
+                    <button id="teaser-button" type="button">Play teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                  </main>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".stage { padding: 2rem; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser unlocked.';
+                });
+                """);
+        LoopState state = state(
+                "Update index.html and scripts.js so Neon Meridian is a polished synthwave band landing page. "
+                        + "Adjust styles.css as needed. Make #teaser-button update #teaser-status with a visible teaser message.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "scripts.js",
+                true,
+                true,
+                false,
+                "Wrote scripts.js",
+                ""));
+        state.mutatingToolSuccesses = 2;
+
+        Optional<StaticWebContinuationPlanner.Plan> plan =
+                StaticWebContinuationPlanner.verificationFailurePlan(state, baseTools());
+
+        assertTrue(plan.isPresent(), "CSS verification failure should make optional CSS repair-applicable");
+        StaticWebContinuationPlanner.Plan continuation = plan.get();
+        assertEquals(List.of("talos.write_file"), toolNames(continuation.tools()));
+        assertEquals(List.of("index.html", "scripts.js", "styles.css"), continuation.missingTargets());
+        assertTrue(continuation.pendingActionObligation().isPresent());
+        assertEquals(List.of("index.html", "scripts.js", "styles.css"),
+                continuation.pendingActionObligation().orElseThrow().targets());
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js, styles.css"), prompt);
+        assertTrue(prompt.contains("CSS references missing class selectors: `.stage`"), prompt);
+        assertFalse(prompt.contains("Missing or unmutated target files: styles.css"), prompt);
+    }
+
     private LoopState state(String request) {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
