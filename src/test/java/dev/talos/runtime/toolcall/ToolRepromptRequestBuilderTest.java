@@ -174,6 +174,27 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
+    void staticRepairMessagesUseTargetedFinalUserInstruction() {
+        LoopState state = loopState(
+                broadTools(),
+                List.of(ChatMessage.user("Update index.html and scripts.js. Adjust styles.css as needed.")));
+
+        List<ChatMessage> messages =
+                ToolRepromptRequestBuilder.messages(
+                        state,
+                        true,
+                        List.of("styles.css"),
+                        "Update index.html and scripts.js. Adjust styles.css as needed.");
+
+        ChatMessage last = messages.get(messages.size() - 1);
+        assertEquals("user", last.role());
+        assertTrue(last.content().contains("Repair exactly the remaining static-web target path(s): styles.css"),
+                last.content());
+        assertTrue(last.content().contains("Do not write any other file in this continuation."), last.content());
+        assertTrue(last.content().contains("Original user request:"), last.content());
+    }
+
+    @Test
     void nonStaticRepairMessagesReuseCurrentStateMessages() {
         List<ChatMessage> messages = List.of(ChatMessage.system("sys"), ChatMessage.user("Continue."));
         LoopState state = loopState(broadTools(), messages);

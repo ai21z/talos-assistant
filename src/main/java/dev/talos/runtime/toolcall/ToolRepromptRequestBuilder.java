@@ -60,8 +60,19 @@ final class ToolRepromptRequestBuilder {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Continue the bounded static repair."
                 : userTask.strip();
-        out.add(ChatMessage.user(currentTask));
+        out.add(ChatMessage.user(staticRepairUserInstruction(remainingRepairTargets, currentTask)));
         return out;
+    }
+
+    private static String staticRepairUserInstruction(List<String> remainingRepairTargets, String currentTask) {
+        String targets = remainingRepairTargets == null || remainingRepairTargets.isEmpty()
+                ? "(unknown)"
+                : String.join(", ", remainingRepairTargets);
+        return "Repair exactly the remaining static-web target path(s): " + targets + ".\n"
+                + "Call talos.write_file with complete corrected file content for those path(s) only.\n"
+                + "Do not write any other file in this continuation.\n\n"
+                + "Original user request:\n"
+                + (currentTask == null ? "" : currentTask.strip());
     }
 
     static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
