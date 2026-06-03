@@ -8,6 +8,7 @@ import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRepromptRequestBuilderTest {
+    @TempDir
+    Path tempDir;
+
     @Test
     void staticRepairProgressNarrowsToolsToWriteFileWhenAvailable() {
         LoopState state = loopState(broadTools(), List.of(ChatMessage.user("Fix the page.")));
@@ -112,6 +116,39 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
+    void staticRepairMessagesReadCurrentRemainingTargetWhenReadCacheWasCleared() throws Exception {
+        Files.writeString(tempDir.resolve("styles.css"), """
+                body {
+                  background: #14061f;
+                }
+
+                .stage {
+                  padding: 3rem;
+                }
+                """);
+        LoopState state = loopState(
+                broadTools(),
+                List.of(ChatMessage.user("Adjust styles.css as needed.")),
+                tempDir);
+
+        List<ChatMessage> messages =
+                ToolRepromptRequestBuilder.messages(
+                        state,
+                        true,
+                        List.of("styles.css"),
+                        "Adjust styles.css as needed.");
+
+        String payload = messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(payload.contains("[StaticRepairReadbacks]"), payload);
+        assertTrue(payload.contains("Path: styles.css"), payload);
+        assertTrue(payload.contains("background: #14061f;"), payload);
+        assertTrue(payload.contains(".stage"), payload);
+    }
+
+    @Test
     void nonStaticRepairMessagesReuseCurrentStateMessages() {
         List<ChatMessage> messages = List.of(ChatMessage.system("sys"), ChatMessage.user("Continue."));
         LoopState state = loopState(broadTools(), messages);
@@ -153,11 +190,15 @@ class ToolRepromptRequestBuilderTest {
     }
 
     private static LoopState loopState(List<ToolSpec> tools, List<ChatMessage> messages) {
+        return loopState(tools, messages, Path.of("."));
+    }
+
+    private static LoopState loopState(List<ToolSpec> tools, List<ChatMessage> messages, Path workspace) {
         Context ctx = Context.builder(new Config())
                 .llm(LlmClient.scripted("No tool call."))
                 .nativeToolSpecs(tools)
                 .build();
-        return new LoopState("", List.of(), messages, Path.of("."), ctx, null, 5, 0);
+        return new LoopState("", List.of(), messages, workspace, ctx, null, 5, 0);
     }
 
     private static List<ToolSpec> broadTools() {
