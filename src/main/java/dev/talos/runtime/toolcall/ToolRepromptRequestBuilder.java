@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
@@ -55,11 +56,50 @@ final class ToolRepromptRequestBuilder {
                         + "replacement targets: " + String.join(", ", remainingRepairTargets)
                         + ". Use talos.write_file with complete corrected file content for each remaining target. "
                         + "Do not claim completion until static verification passes."));
+        staticRepairReadbacks(state, remainingRepairTargets)
+                .ifPresent(readbacks -> out.add(ChatMessage.system(readbacks)));
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Continue the bounded static repair."
                 : userTask.strip();
         out.add(ChatMessage.user(currentTask));
         return out;
+    }
+
+    private static Optional<String> staticRepairReadbacks(LoopState state, List<String> remainingRepairTargets) {
+        if (state == null
+                || state.successfulReadCallBodies.isEmpty()
+                || remainingRepairTargets == null
+                || remainingRepairTargets.isEmpty()) {
+            return Optional.empty();
+        }
+        StringBuilder out = new StringBuilder();
+        for (String target : remainingRepairTargets) {
+            String normalized = ToolCallSupport.normalizePath(target);
+            if (normalized.isBlank() || !StaticWebCapabilityProfile.isSmallWebFile(normalized)) continue;
+            String body = successfulReadbackForPath(state, normalized);
+            if (body.isBlank()) continue;
+            if (out.isEmpty()) {
+                out.append("[StaticRepairReadbacks]\n")
+                        .append("Use these already-read current file contents while rewriting the remaining repair targets. ")
+                        .append("Line-number prefixes are display-only; do not copy them into files.\n");
+            }
+            out.append("Path: ").append(normalized).append('\n')
+                    .append(body.strip())
+                    .append("\n---\n");
+        }
+        return out.isEmpty() ? Optional.empty() : Optional.of(out.toString().strip());
+    }
+
+    private static String successfulReadbackForPath(LoopState state, String normalizedPath) {
+        if (state == null || normalizedPath == null || normalizedPath.isBlank()) return "";
+        String keyNeedle = "path=" + normalizedPath.toLowerCase(java.util.Locale.ROOT) + ";";
+        for (var entry : state.successfulReadCallBodies.entrySet()) {
+            String key = entry.getKey() == null ? "" : entry.getKey().toLowerCase(java.util.Locale.ROOT);
+            if (key.contains(keyNeedle)) {
+                return entry.getValue() == null ? "" : entry.getValue();
+            }
+        }
+        return "";
     }
 
     static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
