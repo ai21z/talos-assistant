@@ -406,6 +406,12 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("[StaticRepairReadbacks]"), prompt);
         assertTrue(prompt.contains("Path: styles.css"), prompt);
         assertTrue(prompt.contains(".stage { padding: 2rem; }"), prompt);
+        ChatMessage last = continuation.messages().get(continuation.messages().size() - 1);
+        assertEquals("user", last.role());
+        assertTrue(last.content().contains(
+                "Repair exactly the listed static-web target path(s): index.html, scripts.js, styles.css"),
+                last.content());
+        assertTrue(last.content().contains("Do not write any other file in this continuation."), last.content());
         assertFalse(prompt.contains("Missing or unmutated target files: styles.css"), prompt);
     }
 
