@@ -262,10 +262,24 @@ final class StaticWebContinuationPlanner {
         messages.add(ChatMessage.system(frame.toString().stripTrailing()));
         StaticRepairReadbackContext.render(state, targets)
                 .ifPresent(readbacks -> messages.add(ChatMessage.system(readbacks)));
-        messages.add(ChatMessage.user("Current user request:\n"
-                + (userTask == null ? "" : userTask.strip())
-                + "\n\n" + toolInstruction));
+        messages.add(ChatMessage.user(staticWebVerificationUserInstruction(targets, toolInstruction, userTask)));
         return messages;
+    }
+
+    private static String staticWebVerificationUserInstruction(
+            List<String> targets,
+            String toolInstruction,
+            String userTask
+    ) {
+        String targetList = targets == null || targets.isEmpty() ? "(unknown)" : String.join(", ", targets);
+        String safeToolInstruction = toolInstruction == null || toolInstruction.isBlank()
+                ? "Use the visible file mutation tool now."
+                : toolInstruction.strip();
+        return "Repair exactly the listed static-web target path(s): " + targetList + ".\n"
+                + safeToolInstruction + "\n"
+                + "Do not write any other file in this continuation.\n\n"
+                + "Original user request:\n"
+                + (userTask == null ? "" : userTask.strip());
     }
 
     private static String staticWebVerificationFailureContext(TaskVerificationResult verification) {
