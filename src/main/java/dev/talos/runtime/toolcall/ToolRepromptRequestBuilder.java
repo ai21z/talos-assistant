@@ -8,6 +8,8 @@ import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -67,7 +69,6 @@ final class ToolRepromptRequestBuilder {
 
     private static Optional<String> staticRepairReadbacks(LoopState state, List<String> remainingRepairTargets) {
         if (state == null
-                || state.successfulReadCallBodies.isEmpty()
                 || remainingRepairTargets == null
                 || remainingRepairTargets.isEmpty()) {
             return Optional.empty();
@@ -76,7 +77,7 @@ final class ToolRepromptRequestBuilder {
         for (String target : remainingRepairTargets) {
             String normalized = ToolCallSupport.normalizePath(target);
             if (normalized.isBlank() || !StaticWebCapabilityProfile.isSmallWebFile(normalized)) continue;
-            String body = successfulReadbackForPath(state, normalized);
+            String body = currentReadbackForPath(state, normalized);
             if (body.isBlank()) continue;
             if (out.isEmpty()) {
                 out.append("[StaticRepairReadbacks]\n")
@@ -90,6 +91,12 @@ final class ToolRepromptRequestBuilder {
         return out.isEmpty() ? Optional.empty() : Optional.of(out.toString().strip());
     }
 
+    private static String currentReadbackForPath(LoopState state, String normalizedPath) {
+        String cached = successfulReadbackForPath(state, normalizedPath);
+        if (!cached.isBlank()) return cached;
+        return workspaceFileReadbackForPath(state, normalizedPath);
+    }
+
     private static String successfulReadbackForPath(LoopState state, String normalizedPath) {
         if (state == null || normalizedPath == null || normalizedPath.isBlank()) return "";
         String keyNeedle = "path=" + normalizedPath.toLowerCase(java.util.Locale.ROOT) + ";";
@@ -100,6 +107,24 @@ final class ToolRepromptRequestBuilder {
             }
         }
         return "";
+    }
+
+    private static String workspaceFileReadbackForPath(LoopState state, String normalizedPath) {
+        if (state == null
+                || state.workspace == null
+                || normalizedPath == null
+                || normalizedPath.isBlank()) {
+            return "";
+        }
+        try {
+            Path root = state.workspace.toAbsolutePath().normalize();
+            Path resolved = root.resolve(normalizedPath).toAbsolutePath().normalize();
+            if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) return "";
+            if (Files.size(resolved) > 64 * 1024L) return "";
+            return Files.readString(resolved);
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
