@@ -252,17 +252,20 @@ final class StaticWebContinuationPlanner {
         String toolInstruction = continuation != null && continuation.fullRewriteRepair()
                 ? "Call talos.write_file now for the listed static web repair target files."
                 : "Call talos.write_file or talos.edit_file now for the missing static web target files.";
-        return List.of(
-                ChatMessage.system("""
-                        You are Talos, a local-first workspace assistant.
-                        This is a bounded static-web verification continuation.
-                        The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
-                        Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
-                        """),
-                ChatMessage.system(frame.toString().stripTrailing()),
-                ChatMessage.user("Current user request:\n"
-                        + (userTask == null ? "" : userTask.strip())
-                        + "\n\n" + toolInstruction));
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("""
+                You are Talos, a local-first workspace assistant.
+                This is a bounded static-web verification continuation.
+                The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
+                Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
+                """));
+        messages.add(ChatMessage.system(frame.toString().stripTrailing()));
+        StaticRepairReadbackContext.render(state, targets)
+                .ifPresent(readbacks -> messages.add(ChatMessage.system(readbacks)));
+        messages.add(ChatMessage.user("Current user request:\n"
+                + (userTask == null ? "" : userTask.strip())
+                + "\n\n" + toolInstruction));
+        return messages;
     }
 
     private static String staticWebVerificationFailureContext(TaskVerificationResult verification) {

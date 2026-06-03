@@ -1,6 +1,5 @@
 package dev.talos.runtime.toolcall;
 
-import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
@@ -8,8 +7,6 @@ import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -58,73 +55,13 @@ final class ToolRepromptRequestBuilder {
                         + "replacement targets: " + String.join(", ", remainingRepairTargets)
                         + ". Use talos.write_file with complete corrected file content for each remaining target. "
                         + "Do not claim completion until static verification passes."));
-        staticRepairReadbacks(state, remainingRepairTargets)
+        StaticRepairReadbackContext.render(state, remainingRepairTargets)
                 .ifPresent(readbacks -> out.add(ChatMessage.system(readbacks)));
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Continue the bounded static repair."
                 : userTask.strip();
         out.add(ChatMessage.user(currentTask));
         return out;
-    }
-
-    private static Optional<String> staticRepairReadbacks(LoopState state, List<String> remainingRepairTargets) {
-        if (state == null
-                || remainingRepairTargets == null
-                || remainingRepairTargets.isEmpty()) {
-            return Optional.empty();
-        }
-        StringBuilder out = new StringBuilder();
-        for (String target : remainingRepairTargets) {
-            String normalized = ToolCallSupport.normalizePath(target);
-            if (normalized.isBlank() || !StaticWebCapabilityProfile.isSmallWebFile(normalized)) continue;
-            String body = currentReadbackForPath(state, normalized);
-            if (body.isBlank()) continue;
-            if (out.isEmpty()) {
-                out.append("[StaticRepairReadbacks]\n")
-                        .append("Use these already-read current file contents while rewriting the remaining repair targets. ")
-                        .append("Line-number prefixes are display-only; do not copy them into files.\n");
-            }
-            out.append("Path: ").append(normalized).append('\n')
-                    .append(body.strip())
-                    .append("\n---\n");
-        }
-        return out.isEmpty() ? Optional.empty() : Optional.of(out.toString().strip());
-    }
-
-    private static String currentReadbackForPath(LoopState state, String normalizedPath) {
-        String cached = successfulReadbackForPath(state, normalizedPath);
-        if (!cached.isBlank()) return cached;
-        return workspaceFileReadbackForPath(state, normalizedPath);
-    }
-
-    private static String successfulReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null || normalizedPath == null || normalizedPath.isBlank()) return "";
-        String keyNeedle = "path=" + normalizedPath.toLowerCase(java.util.Locale.ROOT) + ";";
-        for (var entry : state.successfulReadCallBodies.entrySet()) {
-            String key = entry.getKey() == null ? "" : entry.getKey().toLowerCase(java.util.Locale.ROOT);
-            if (key.contains(keyNeedle)) {
-                return entry.getValue() == null ? "" : entry.getValue();
-            }
-        }
-        return "";
-    }
-
-    private static String workspaceFileReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null
-                || state.workspace == null
-                || normalizedPath == null
-                || normalizedPath.isBlank()) {
-            return "";
-        }
-        try {
-            Path root = state.workspace.toAbsolutePath().normalize();
-            Path resolved = root.resolve(normalizedPath).toAbsolutePath().normalize();
-            if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) return "";
-            if (Files.size(resolved) > 64 * 1024L) return "";
-            return Files.readString(resolved);
-        } catch (Exception ignored) {
-            return "";
-        }
     }
 
     static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
