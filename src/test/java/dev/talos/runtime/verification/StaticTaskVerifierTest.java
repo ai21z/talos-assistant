@@ -6,6 +6,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.tools.VerificationStatus;
@@ -3600,6 +3601,42 @@ class StaticTaskVerifierTest {
         assertEquals(TaskVerificationStatus.FAILED, result.status());
         assertTrue(result.problems().stream()
                 .anyMatch(p -> p.contains("index.html: expected target was not successfully mutated")));
+    }
+
+    @Test
+    void dirtyStaticWebContinuationReadmeOnlyMutationFailsExpectedTargetVerification() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main>Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { color: white; }");
+        Files.writeString(workspace.resolve("script.js"), "console.log('retrocats');");
+        Files.writeString(workspace.resolve("README.md"), "Placeholder");
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromUserRequest(
+                        "Make this Retrocats website even more polished and complete. "
+                                + "Use Tailwind correctly, preserve facts, and repair anything unverified."),
+                workspace);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                contract,
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("index.html: expected target was not successfully mutated")),
+                result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("style.css: expected target was not successfully mutated")),
+                result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("script.js: expected target was not successfully mutated")),
+                result.problems().toString());
     }
 
     @Test

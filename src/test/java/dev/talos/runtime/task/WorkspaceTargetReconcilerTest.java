@@ -154,6 +154,71 @@ class WorkspaceTargetReconcilerTest {
         assertFalse(contract.expectedTargets().contains("script.js"), contract.expectedTargets().toString());
     }
 
+    @Test
+    void dirtyStaticWebPolishPromptReconstructsTargetsFromLinkedWorkspaceSurface(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main>Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('retrocats');\n");
+        TaskContract raw = TaskContractResolver.fromUserRequest(
+                "Make this Retrocats website even more polished and complete. "
+                        + "Use Tailwind correctly, preserve facts, and repair anything unverified.");
+
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertTrue(contract.classificationReason().contains("workspace-static-web-surface"),
+                contract.classificationReason());
+    }
+
+    @Test
+    void dirtyStaticWebPolishPromptPrefersLinkedCanonicalAssetsOverSiblingAliases(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main>Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { color: black; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('linked');\n");
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('orphan');\n");
+        TaskContract raw = TaskContractResolver.fromUserRequest("Make this website better.");
+
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertFalse(contract.expectedTargets().contains("styles.css"), contract.expectedTargets().toString());
+        assertFalse(contract.expectedTargets().contains("scripts.js"), contract.expectedTargets().toString());
+    }
+
+    @Test
+    void statusQuestionOverExistingWebSurfaceDoesNotBecomeMutationTargetBinding(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><link rel="stylesheet" href="style.css"></head>
+                <body><script src="script.js"></script></body></html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('status');\n");
+        TaskContract raw = TaskContractResolver.fromUserRequest("Is it verified now? What remains unverified?");
+
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+        assertFalse(contract.mutationAllowed());
+        assertEquals(Set.of(), contract.expectedTargets());
+    }
+
     private static TaskContract reconciledStaticWebContract(Path workspace) {
         TaskContract raw = TaskContractResolver.fromUserRequest(
                 "Create a modern synthwave website here with CSS styling and JavaScript interaction.");

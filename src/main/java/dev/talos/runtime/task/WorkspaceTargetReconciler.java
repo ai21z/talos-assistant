@@ -2,7 +2,9 @@ package dev.talos.runtime.task;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -21,8 +23,11 @@ public final class WorkspaceTargetReconciler {
     private WorkspaceTargetReconciler() {}
 
     public static TaskContract reconcile(TaskContract contract, Path workspace) {
-        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+        if (contract == null || workspace == null) {
             return contract;
+        }
+        if (contract.expectedTargets().isEmpty()) {
+            return reconcileWorkspaceStaticWebSurface(contract, workspace);
         }
         Set<String> expected = new LinkedHashSet<>(contract.expectedTargets());
         boolean changed = false;
@@ -44,6 +49,129 @@ public final class WorkspaceTargetReconciler {
                 contract.originalUserRequest(),
                 contract.classificationReason(),
                 contract.staticWebRequirements());
+    }
+
+    private static TaskContract reconcileWorkspaceStaticWebSurface(TaskContract contract, Path workspace) {
+        if (!shouldReconstructStaticWebTargets(contract, workspace)) {
+            return contract;
+        }
+        Set<String> expected = workspaceStaticWebTargets(workspace);
+        if (expected.isEmpty()) {
+            return contract;
+        }
+        return new TaskContract(
+                contract.type(),
+                contract.mutationRequested(),
+                contract.mutationAllowed(),
+                contract.verificationRequired(),
+                expected,
+                contract.sourceEvidenceTargets(),
+                contract.forbiddenTargets(),
+                contract.originalUserRequest(),
+                appendClassificationReason(contract.classificationReason(),
+                        "workspace-static-web-surface-targets"),
+                contract.staticWebRequirements());
+    }
+
+    private static boolean shouldReconstructStaticWebTargets(TaskContract contract, Path workspace) {
+        if (contract == null || workspace == null) return false;
+        if (!contract.mutationAllowed() || !contract.verificationRequired()) return false;
+        if (!contract.expectedTargets().isEmpty()) return false;
+        if (!looksLikeStaticWebWorkspaceContinuation(contract.originalUserRequest())) return false;
+        return Files.isRegularFile(workspace.resolve("index.html"));
+    }
+
+    private static boolean looksLikeStaticWebWorkspaceContinuation(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        boolean namesWebSurface = lower.contains("website")
+                || lower.contains("web site")
+                || lower.contains("webpage")
+                || lower.contains("web page")
+                || containsWholeWord(lower, "site")
+                || lower.contains("frontend")
+                || lower.contains("static web")
+                || lower.contains("tailwind");
+        if (!namesWebSurface) return false;
+        return lower.contains("make")
+                || lower.contains("polish")
+                || lower.contains("polished")
+                || lower.contains("complete")
+                || lower.contains("better")
+                || lower.contains("modern")
+                || lower.contains("repair")
+                || lower.contains("fix")
+                || lower.contains("rewrite")
+                || lower.contains("redesign")
+                || lower.contains("verified")
+                || lower.contains("unverified");
+    }
+
+    private static boolean containsWholeWord(String lower, String token) {
+        if (lower == null || lower.isBlank() || token == null || token.isBlank()) return false;
+        int start = 0;
+        while (start < lower.length()) {
+            int index = lower.indexOf(token, start);
+            if (index < 0) return false;
+            int before = index - 1;
+            int after = index + token.length();
+            boolean leftBoundary = before < 0 || !Character.isLetterOrDigit(lower.charAt(before));
+            boolean rightBoundary = after >= lower.length() || !Character.isLetterOrDigit(lower.charAt(after));
+            if (leftBoundary && rightBoundary) return true;
+            start = after;
+        }
+        return false;
+    }
+
+    private static Set<String> workspaceStaticWebTargets(Path workspace) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (!Files.isRegularFile(workspace.resolve("index.html"))) {
+            return Set.of();
+        }
+        out.add("index.html");
+        Set<String> linked = linkedLocalAssets(workspace);
+        addLinkedAssetsByExtension(out, linked, ".css");
+        addLinkedAssetsByExtension(out, linked, ".js");
+        addExistingPairIfMissing(out, workspace, ".css", "style.css", "styles.css");
+        addExistingPairIfMissing(out, workspace, ".js", "script.js", "scripts.js");
+        return Set.copyOf(out);
+    }
+
+    private static void addLinkedAssetsByExtension(Set<String> out, Set<String> linked, String extension) {
+        if (linked == null || linked.isEmpty()) return;
+        List<String> sorted = new ArrayList<>(linked);
+        sorted.sort(String.CASE_INSENSITIVE_ORDER);
+        for (String target : sorted) {
+            if (target != null && target.toLowerCase(Locale.ROOT).endsWith(extension)) {
+                out.add(target);
+            }
+        }
+    }
+
+    private static void addExistingPairIfMissing(
+            Set<String> out,
+            Path workspace,
+            String extension,
+            String conventional,
+            String alternate
+    ) {
+        boolean alreadyHasExtension = out.stream()
+                .anyMatch(target -> target.toLowerCase(Locale.ROOT).endsWith(extension));
+        if (alreadyHasExtension) return;
+        boolean conventionalExists = rootFileExists(workspace, conventional);
+        boolean alternateExists = rootFileExists(workspace, alternate);
+        if (conventionalExists && !alternateExists) {
+            out.add(conventional);
+        } else if (alternateExists && !conventionalExists) {
+            out.add(alternate);
+        }
+    }
+
+    private static String appendClassificationReason(String existing, String reason) {
+        if (reason == null || reason.isBlank()) return existing == null ? "" : existing;
+        if (existing == null || existing.isBlank()) return reason;
+        if (existing.contains(reason)) return existing;
+        return existing + "+" + reason;
     }
 
     private static boolean reconcileLinkedPair(

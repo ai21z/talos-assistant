@@ -1,6 +1,6 @@
 # T699 - Dirty Static-Web Workspace-Surface Target Binding
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
@@ -65,6 +65,24 @@ This is not hidden session pollution. The dirty process printed that a saved ses
 - `ToolSurfacePlannerTest`: reconstructed static-web target contract uses the narrow write-file static-web surface, not broad workspace operations.
 - `ApprovalGatedToolTest` or tool-call execution test: `write_file(README.md)` is blocked before approval when the current contract has reconstructed static-web expected targets.
 - `StaticTaskVerifierTest`: dirty continuation writing only `README.md` cannot produce `READBACK_ONLY` completion for a static-web polish prompt.
+
+## Completion Evidence
+
+Implemented in the inner dev loop after RED tests reproduced the T698 failure shape:
+
+- `WorkspaceTargetReconcilerTest` now covers new-process dirty static-web polish prompts over an existing linked `index.html`/`style.css`/`script.js` surface, canonical linked-file preference, and status-only non-mutation behavior.
+- `ToolSurfacePlannerTest` now proves the reconstructed contract selects the narrow static-web full-file surface: `grep`, `list_dir`, `read_file`, `retrieve`, `write_file`.
+- `StaticWebRepairPathGuardTest` now proves `write_file(README.md)` is rejected before approval for an exact static-web target set.
+- `StaticTaskVerifierTest` now proves a `README.md`-only mutation cannot complete a reconstructed static-web continuation as readback-only.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.WorkspaceTargetReconcilerTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.runtime.toolcall.StaticWebRepairPathGuardTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.task.*" --tests "dev.talos.runtime.toolcall.*" --tests "dev.talos.runtime.verification.*" --no-daemon
+```
+
+Both commands passed.
 
 ## Non-Goals
 
