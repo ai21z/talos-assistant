@@ -214,7 +214,8 @@ public final class AssistantTurnExecutor {
         recordPolicyTrace(currentTurnPlan, ctx);
         injectTaskContractInstruction(messages, currentTurnPlan, true);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract(), workspace);
-        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
+        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, ctx);
+        recordPromptDebugDiagnostics(promptAudit);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(
@@ -1003,17 +1004,41 @@ public final class AssistantTurnExecutor {
         List<String> nativeTools = ctx == null
                 ? defaultVisibleToolNames(contract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
-        return recordPromptAudit(CurrentTurnPlan.compatibility(
-                contract, phase, nativeTools, nativeTools, List.of()), messages);
+        return recordPromptAudit(
+                CurrentTurnPlan.compatibility(contract, phase, nativeTools, nativeTools, List.of()),
+                messages,
+                ctx);
     }
 
     private static PromptAuditSnapshot recordPromptAudit(
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
+        return recordPromptAudit(plan, messages, null);
+    }
+
+    private static PromptAuditSnapshot recordPromptAudit(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx
+    ) {
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
+                plan,
+                messages,
+                ctx == null || ctx.conversationManager() == null
+                        ? null
+                        : ctx.conversationManager().lastCompactionStatus());
         LocalTurnTraceCapture.recordPromptAudit(snapshot);
         return snapshot;
+    }
+
+    private static void recordPromptDebugDiagnostics(PromptAuditSnapshot snapshot) {
+        if (snapshot == null
+                || snapshot.compactionStatus().isBlank()
+                || PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.compactionStatus())) {
+            return;
+        }
+        PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
     }
 
     private static void emitPromptAuditIfEnabled(PromptAuditSnapshot snapshot, Context ctx) {

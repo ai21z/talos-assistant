@@ -249,6 +249,6 @@ Completed evidence, 2026-06-06:
 
 - Candidate live audit for long-session context behavior after deterministic
   tests are green.
-- `T711 - Compaction Operational Evidence And Trace Status` remains the follow-up
-  for richer compaction status fields and any future operational-evidence
-  integration beyond prose-anchor integrity.
+- `T711 - Compaction Operational Evidence And Trace Status` completed the richer
+  compaction status trace/debug fields. Any future operational-evidence
+  integration beyond prose-anchor integrity should use a new focused ticket.

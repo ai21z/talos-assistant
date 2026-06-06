@@ -614,6 +614,44 @@ class ConversationCompactionTest {
         }
 
         @Test
+        void maybeCompact_exposesLastCompactionStatusForPromptAudit() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+
+            assertFalse(cm.lastCompactionStatus().attempted());
+            assertEquals("NEVER_ATTEMPTED", cm.lastCompactionStatus().status());
+
+            assertFalse(cm.maybeCompactWith((existingSketch, oldTurns) ->
+                            ConversationCompactor.CompactionResult.integrityRejected(
+                                    existingSketch, "critical-evidence-missing:index.html"),
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+
+            ConversationCompactionStatus rejected = cm.lastCompactionStatus();
+            assertTrue(rejected.attempted());
+            assertEquals("FAILED", rejected.status());
+            assertEquals("INTEGRITY_REJECT", rejected.category());
+            assertEquals("critical-evidence-missing:index.html", rejected.reason());
+            assertEquals("REJECTED", rejected.integrityStatus());
+            assertEquals(0, rejected.consecutiveFailureCount(),
+                    "integrity reject should not increment the LLM/output failure count");
+            assertTrue(rejected.summarizedTurnCount() > 0);
+            assertTrue(rejected.preservedTailTurnCount() > 0);
+
+            assertTrue(cm.maybeCompactWith((existingSketch, oldTurns) ->
+                            ConversationCompactor.CompactionResult.succeeded("recovered sketch"),
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+
+            ConversationCompactionStatus succeeded = cm.lastCompactionStatus();
+            assertEquals("SUCCEEDED", succeeded.status());
+            assertEquals("SUCCESS", succeeded.category());
+            assertEquals("ACCEPTED", succeeded.integrityStatus());
+            assertEquals(0, succeeded.consecutiveFailureCount());
+        }
+
+        @Test
         void maybeCompact_threeConsecutiveFailuresTripBreakerForSession() {
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));

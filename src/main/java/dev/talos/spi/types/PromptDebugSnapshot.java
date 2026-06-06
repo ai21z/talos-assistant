@@ -2,6 +2,7 @@ package dev.talos.spi.types;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -19,7 +20,8 @@ public record PromptDebugSnapshot(
         List<ChatMessage> messages,
         List<ToolSpec> tools,
         ChatRequestControls controls,
-        String providerBodyJson
+        String providerBodyJson,
+        Map<String, String> diagnostics
 ) {
     public PromptDebugSnapshot {
         stage = Objects.requireNonNullElse(stage, "");
@@ -30,6 +32,44 @@ public record PromptDebugSnapshot(
         tools = tools == null ? List.of() : List.copyOf(tools);
         controls = controls == null ? ChatRequestControls.defaults() : controls;
         providerBodyJson = Objects.requireNonNullElse(providerBodyJson, "");
+        diagnostics = diagnostics == null ? Map.of() : Map.copyOf(diagnostics);
+    }
+
+    public PromptDebugSnapshot(
+            String stage,
+            String backend,
+            String model,
+            boolean stream,
+            Instant capturedAt,
+            List<ChatMessage> messages,
+            List<ToolSpec> tools,
+            ChatRequestControls controls,
+            String providerBodyJson
+    ) {
+        this(stage, backend, model, stream, capturedAt, messages, tools, controls, providerBodyJson, Map.of());
+    }
+
+    public PromptDebugSnapshot withDiagnostics(Map<String, String> extraDiagnostics) {
+        if (extraDiagnostics == null || extraDiagnostics.isEmpty()) return this;
+        java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>(diagnostics);
+        for (Map.Entry<String, String> entry : extraDiagnostics.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || key.isBlank() || value == null || value.isBlank()) continue;
+            merged.put(key.strip(), value.strip());
+        }
+        if (merged.equals(diagnostics)) return this;
+        return new PromptDebugSnapshot(
+                stage,
+                backend,
+                model,
+                stream,
+                capturedAt,
+                messages,
+                tools,
+                controls,
+                providerBodyJson,
+                merged);
     }
 
     public static PromptDebugSnapshot fromChatRequest(ChatRequest request, boolean stream) {
@@ -71,6 +111,7 @@ public record PromptDebugSnapshot(
                 safe.messages,
                 safe.tools,
                 safe.controls,
-                providerBodyJson);
+                providerBodyJson,
+                Map.of());
     }
 }

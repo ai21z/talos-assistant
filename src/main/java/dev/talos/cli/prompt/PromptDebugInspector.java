@@ -12,6 +12,7 @@ import dev.talos.spi.types.ToolSpec;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,6 +49,7 @@ public final class PromptDebugInspector {
         out.append('\n');
         out.append("- Response format: ").append(snapshot.controls().responseFormat()).append('\n');
         out.append("- Debug tags: ").append(debugTags(snapshot.controls().debugTags())).append('\n');
+        appendDiagnostics(out, snapshot.diagnostics());
         out.append("- Captured: ").append(snapshot.capturedAt()).append('\n');
         out.append("- Messages: ").append(snapshot.messages().size())
                 .append(" total, ").append(countRole(snapshot.messages(), "system"))
@@ -91,6 +93,16 @@ public final class PromptDebugInspector {
         }
 
         return out.toString();
+    }
+
+    private static void appendDiagnostics(StringBuilder out, Map<String, String> diagnostics) {
+        if (diagnostics == null || diagnostics.isEmpty()) {
+            return;
+        }
+        String compactionStatus = diagnostics.get("compactionStatus");
+        if (compactionStatus != null && !compactionStatus.isBlank()) {
+            out.append("- Compaction: ").append(compactionStatus).append('\n');
+        }
     }
 
     private static void appendContextLedger(StringBuilder out) {

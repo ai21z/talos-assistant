@@ -76,6 +76,8 @@ public final class ConversationManager {
     /** Compact sketch of older turns (null until first compaction). */
     private volatile String sketch;
     private int consecutiveCompactionFailures;
+    private volatile ConversationCompactionStatus lastCompactionStatus =
+            ConversationCompactionStatus.neverAttempted();
 
     public ConversationManager(ConversationMemory memory, TokenBudget budget) {
         this.memory = Objects.requireNonNull(memory, "memory must not be null");
@@ -255,6 +257,10 @@ public final class ConversationManager {
             if (consecutiveCompactionFailures >= MAX_CONSECUTIVE_COMPACTION_FAILURES) {
                 LOG.warn("Compaction skipped: {} consecutive failures reached session breaker",
                         consecutiveCompactionFailures);
+                lastCompactionStatus = ConversationCompactionStatus.skipped(
+                        "failure-breaker-open",
+                        consecutiveCompactionFailures,
+                        allTurns.size());
                 return false;
             }
         }
@@ -293,6 +299,7 @@ public final class ConversationManager {
         if (oldTurns.isEmpty()) {
             return false;
         }
+        int preservedTailTurns = Math.max(0, allTurns.size() - oldTurns.size());
 
         // Perform compaction. Pruning is allowed only after an explicit success.
         ConversationCompactor.CompactionResult result;
@@ -305,11 +312,22 @@ public final class ConversationManager {
         }
 
         if (result == null || !result.succeeded()) {
+            int failureCount;
             if (result == null || result.countsTowardFailureBreaker()) {
                 synchronized (this) {
                     consecutiveCompactionFailures++;
+                    failureCount = consecutiveCompactionFailures;
+                }
+            } else {
+                synchronized (this) {
+                    failureCount = consecutiveCompactionFailures;
                 }
             }
+            lastCompactionStatus = ConversationCompactionStatus.fromResult(
+                    result,
+                    failureCount,
+                    oldTurns.size(),
+                    preservedTailTurns);
             LOG.warn("Compaction failed: reason={}, category={}, preserved {} old turns and prior sketch",
                     result != null ? result.reason() : "null-result",
                     result != null ? result.category() : "NULL_RESULT",
@@ -321,6 +339,11 @@ public final class ConversationManager {
         synchronized (this) {
             sketch = newSketch;
             consecutiveCompactionFailures = 0;
+            lastCompactionStatus = ConversationCompactionStatus.fromResult(
+                    result,
+                    0,
+                    oldTurns.size(),
+                    preservedTailTurns);
         }
 
         // Prune old turns from memory
@@ -387,6 +410,7 @@ public final class ConversationManager {
         synchronized (this) {
             sketch = null;
             consecutiveCompactionFailures = 0;
+            lastCompactionStatus = ConversationCompactionStatus.neverAttempted();
         }
     }
 
@@ -403,6 +427,11 @@ public final class ConversationManager {
     /** Get the current sketch (may be null). */
     public synchronized String sketch() {
         return sketch;
+    }
+
+    /** Latest compaction attempt status for trace and prompt-debug audit metadata. */
+    public ConversationCompactionStatus lastCompactionStatus() {
+        return lastCompactionStatus;
     }
 
     /** Set the sketch directly (for testing or restoration). */

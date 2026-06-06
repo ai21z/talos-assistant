@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.core.context.ConversationCompactionStatus;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
@@ -165,6 +166,86 @@ class PromptAuditSnapshotTest {
 
         assertEquals("INCLUDED_COMPACTED", snapshot.historyPolicy());
         assertTrue(snapshot.renderCompact().contains("history: INCLUDED_COMPACTED messages=1"));
+    }
+
+    @Test
+    void renderCompactIncludesCompactionStatusWhenAvailable() {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.assistant("[Conversation context] User is working on the Retrocats static site."),
+                ChatMessage.user("Continue the site."));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        Set.of("index.html"),
+                        Set.of(),
+                        "Continue the site."),
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
+                plan,
+                messages,
+                new ConversationCompactionStatus(
+                        true,
+                        "FAILED",
+                        "INTEGRITY_REJECT",
+                        "critical-evidence-missing:index.html",
+                        0,
+                        8,
+                        2,
+                        "REJECTED"));
+
+        assertTrue(snapshot.compactionStatus().contains("status=FAILED"), snapshot.compactionStatus());
+        assertTrue(snapshot.compactionStatus().contains("category=INTEGRITY_REJECT"), snapshot.compactionStatus());
+        assertTrue(snapshot.compactionStatus().contains("oldTurns=8"), snapshot.compactionStatus());
+        assertTrue(snapshot.compactionStatus().contains("preservedTail=2"), snapshot.compactionStatus());
+        assertTrue(snapshot.renderCompact().contains("compaction: status=FAILED"), snapshot.renderCompact());
+        assertTrue(snapshot.renderCompact().contains("integrity=REJECTED"), snapshot.renderCompact());
+    }
+
+    @Test
+    void compactionStatusReasonIsRedactedInPromptAudit() throws Exception {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.assistant("[Conversation context] User is working on the Retrocats static site."),
+                ChatMessage.user("Continue the site."));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        Set.of("index.html"),
+                        Set.of(),
+                        "Continue the site."),
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
+                plan,
+                messages,
+                new ConversationCompactionStatus(
+                        true,
+                        "FAILED",
+                        "INTEGRITY_REJECT",
+                        "critical-evidence-missing API_KEY=super-secret",
+                        0,
+                        8,
+                        2,
+                        "REJECTED"));
+
+        assertFalse(snapshot.compactionStatus().contains("super-secret"), snapshot.compactionStatus());
+        assertTrue(snapshot.compactionStatus().contains("API_KEY=[redacted]"), snapshot.compactionStatus());
+        assertFalse(MAPPER.writeValueAsString(snapshot).contains("super-secret"),
+                "serialized prompt audit must not persist raw compaction-status secret values");
     }
 
     @Test

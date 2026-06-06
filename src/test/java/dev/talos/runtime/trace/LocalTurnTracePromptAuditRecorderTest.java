@@ -38,7 +38,8 @@ class LocalTurnTracePromptAuditRecorderTest {
                 "actionObligation", "MUTATING_TOOL_REQUIRED",
                 "currentTurnFrameInjected", true,
                 "currentTurnFramePlacement", "AFTER_HISTORY_BEFORE_USER",
-                "historyPolicy", "INCLUDED"), event.data());
+                "historyPolicy", "INCLUDED",
+                "compactionStatus", "NOT_DERIVED"), event.data());
     }
 
     @Test

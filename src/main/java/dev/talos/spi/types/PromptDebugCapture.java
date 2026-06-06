@@ -2,6 +2,7 @@ package dev.talos.spi.types;
 
 import java.util.Optional;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Process-local holder for the latest prompt debug snapshot. */
@@ -14,19 +15,25 @@ public final class PromptDebugCapture {
             new AtomicReference<>(List.of());
     private static final AtomicReference<Boolean> LAST_TURN_WITHOUT_PROVIDER_REQUEST =
             new AtomicReference<>(false);
+    private static final AtomicReference<Map<String, String>> TURN_DIAGNOSTICS =
+            new AtomicReference<>(Map.of());
 
     private PromptDebugCapture() {}
 
     public static void record(PromptDebugSnapshot snapshot) {
         if (snapshot != null) {
+            boolean backgroundMaintenance = isBackgroundMaintenance(snapshot);
+            PromptDebugSnapshot enriched = backgroundMaintenance
+                    ? snapshot
+                    : snapshot.withDiagnostics(TURN_DIAGNOSTICS.get());
             LAST_TURN_WITHOUT_PROVIDER_REQUEST.set(false);
-            LATEST_RECORDED.set(snapshot);
-            if (!isBackgroundMaintenance(snapshot)) {
-                LATEST_USER_FACING.set(snapshot);
+            LATEST_RECORDED.set(enriched);
+            if (!backgroundMaintenance) {
+                LATEST_USER_FACING.set(enriched);
                 USER_FACING_HISTORY.updateAndGet(existing -> {
                     var copy = new java.util.ArrayList<>(
                             existing == null ? List.<PromptDebugSnapshot>of() : existing);
-                    copy.add(snapshot);
+                    copy.add(enriched);
                     return List.copyOf(copy);
                 });
             }
@@ -39,6 +46,20 @@ public final class PromptDebugCapture {
         LATEST_USER_FACING.set(null);
         USER_FACING_HISTORY.set(List.of());
         LAST_TURN_WITHOUT_PROVIDER_REQUEST.set(true);
+        TURN_DIAGNOSTICS.set(Map.of());
+    }
+
+    /** Adds turn-scoped prompt-debug metadata to the next user-facing capture. */
+    public static void putTurnDiagnostic(String key, String value) {
+        if (key == null || key.isBlank() || value == null || value.isBlank()) {
+            return;
+        }
+        TURN_DIAGNOSTICS.updateAndGet(existing -> {
+            java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>(
+                    existing == null ? Map.<String, String>of() : existing);
+            merged.put(key.strip(), value.strip());
+            return Map.copyOf(merged);
+        });
     }
 
     /**
@@ -69,6 +90,7 @@ public final class PromptDebugCapture {
         LATEST_USER_FACING.set(null);
         USER_FACING_HISTORY.set(List.of());
         LAST_TURN_WITHOUT_PROVIDER_REQUEST.set(false);
+        TURN_DIAGNOSTICS.set(Map.of());
     }
 
     private static boolean isBackgroundMaintenance(PromptDebugSnapshot snapshot) {

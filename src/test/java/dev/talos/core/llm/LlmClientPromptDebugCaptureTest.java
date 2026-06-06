@@ -142,6 +142,7 @@ class LlmClientPromptDebugCaptureTest {
                 "COMPAT_CHAT_HTTP_BODY");
 
         PromptDebugCapture.record(userFacing);
+        PromptDebugCapture.putTurnDiagnostic("compactionStatus", "status=SKIPPED category=SKIPPED");
         PromptDebugCapture.record(background);
 
         PromptDebugSnapshot latest = PromptDebugCapture.latest().orElseThrow();
@@ -151,6 +152,7 @@ class LlmClientPromptDebugCaptureTest {
         assertFalse(latest.controls().debugTags().contains("prompt-debug:background-maintenance"));
         assertTrue(PromptDebugCapture.latestRecorded().orElseThrow()
                 .controls().debugTags().contains("prompt-debug:background-maintenance"));
+        assertTrue(PromptDebugCapture.latestRecorded().orElseThrow().diagnostics().isEmpty());
     }
 
     @Test
@@ -167,6 +169,30 @@ class LlmClientPromptDebugCaptureTest {
         assertTrue(latest.messages().stream()
                 .anyMatch(message -> message.content().contains("List current files.")));
         assertFalse(latest.controls().debugTags().contains("prompt-debug:background-maintenance"));
+    }
+
+    @Test
+    void turnDiagnosticsAttachToPromptDebugCapture() {
+        PromptDebugCapture.beginTurn();
+        PromptDebugCapture.putTurnDiagnostic(
+                "compactionStatus",
+                "status=FAILED category=INTEGRITY_REJECT reason=critical-evidence-missing:index.html");
+        PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder:14b",
+                        "",
+                        "",
+                        List.of(),
+                        null,
+                        List.of(ChatMessage.user("Continue the site repair.")),
+                        List.of(writeSpec())),
+                false));
+
+        PromptDebugSnapshot latest = PromptDebugCapture.latest().orElseThrow();
+        assertEquals(
+                "status=FAILED category=INTEGRITY_REJECT reason=critical-evidence-missing:index.html",
+                latest.diagnostics().get("compactionStatus"));
     }
 
     @Test
