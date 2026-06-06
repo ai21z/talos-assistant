@@ -1202,7 +1202,8 @@ remaining in a permanent "we will decide later" state.
 
 **Status**
 
-- Done on `ticket/CCR-019-compaction-failure-preserves-history`
+- Safety-core slice implemented in current tree as `T709a`; broader `T709`
+  remains open for integrity/redaction/trace hardening.
 - High-confidence bug confirmed from the manual-testing transcript
   (`manual-testing/test-output:53–55`): compaction LLM call failed but
   history was still pruned, losing turns.
@@ -1241,6 +1242,8 @@ compaction attempt which also failed, yet history was pruned anyway.
 - Compaction prompt tuning
 - Compaction trigger thresholds or budget fractions
 - Cross-turn memory persistence
+- T709b work: tool/evidence-pair preservation, deterministic summary
+  integrity/redaction checks, and trace/debug compaction reporting
 
 **Main files**
 
@@ -1262,6 +1265,8 @@ compaction attempt which also failed, yet history was pruned anyway.
 - Sketch is preserved unchanged on failure.
 - Unit tests cover: thrown LLM, blank output, empty turns, and
   successful compaction prune path.
+- Three consecutive failures trip a session-local breaker until a successful
+  compaction or `ConversationManager.clear()` resets it.
 - Full test suite still green.
 
 **Rollback plan**

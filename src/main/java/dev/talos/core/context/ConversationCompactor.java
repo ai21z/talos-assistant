@@ -27,7 +27,7 @@ import java.util.Objects;
  * </ol>
  *
  * <p>If the LLM call fails (timeout, connection error, malformed output),
- * the compactor returns the existing sketch unchanged — never loses context.
+ * the compactor reports failure with the existing sketch unchanged — never loses context.
  *
  * @see ConversationManager
  */
@@ -69,6 +69,24 @@ public final class ConversationCompactor {
     static final int MAX_SKETCH_CHARS = 2_000;
 
     /**
+     * Result for a compaction attempt. Callers that may destructively prune
+     * history must check {@link #succeeded()} before discarding old turns.
+     */
+    public record CompactionResult(String sketch, boolean succeeded, String reason) {
+        public static CompactionResult succeeded(String sketch) {
+            return new CompactionResult(sketch, true, "success");
+        }
+
+        public static CompactionResult skipped(String existingSketch, String reason) {
+            return new CompactionResult(existingSketch, false, reason);
+        }
+
+        public static CompactionResult failed(String existingSketch, String reason) {
+            return new CompactionResult(existingSketch, false, reason);
+        }
+    }
+
+    /**
      * Compact old conversation turns into a sketch.
      *
      * @param existingSketch previous sketch (may be null or empty)
@@ -77,10 +95,23 @@ public final class ConversationCompactor {
      * @return the new sketch, or {@code existingSketch} if compaction fails
      */
     public static String compact(String existingSketch, List<ChatMessage> oldTurns, LlmClient llm) {
+        return tryCompact(existingSketch, oldTurns, llm).sketch();
+    }
+
+    /**
+     * Attempt to compact old conversation turns into a sketch with explicit
+     * success/failure state for callers that gate destructive pruning.
+     *
+     * @param existingSketch previous sketch (may be null or empty)
+     * @param oldTurns       turns to summarize (user/assistant pairs)
+     * @param llm            the LLM client to use for summarization
+     * @return compaction result carrying the sketch and success state
+     */
+    public static CompactionResult tryCompact(String existingSketch, List<ChatMessage> oldTurns, LlmClient llm) {
         Objects.requireNonNull(llm, "llm must not be null");
 
         if (oldTurns == null || oldTurns.isEmpty()) {
-            return existingSketch; // nothing to compact
+            return CompactionResult.skipped(existingSketch, "no-old-turns");
         }
 
         String userPrompt = buildCompactionPrompt(existingSketch, oldTurns);
@@ -89,18 +120,18 @@ public final class ConversationCompactor {
             String sketch = llm.chatPlain(COMPACTION_SYSTEM_PROMPT, userPrompt);
             if (sketch == null || sketch.isBlank()) {
                 LOG.warn("Compaction returned empty sketch, keeping existing");
-                return existingSketch;
+                return CompactionResult.failed(existingSketch, "empty-output");
             }
             sketch = sketch.strip();
             if (sketch.length() > MAX_SKETCH_CHARS) {
                 sketch = sketch.substring(0, MAX_SKETCH_CHARS);
             }
             LOG.info("Conversation compacted: {} turns → {} char sketch", oldTurns.size(), sketch.length());
-            return sketch;
+            return CompactionResult.succeeded(sketch);
         } catch (Exception e) {
             LOG.warn("Compaction LLM call failed, keeping existing sketch (exception={})",
                     e.getClass().getSimpleName());
-            return existingSketch;
+            return CompactionResult.failed(existingSketch, "exception:" + e.getClass().getSimpleName());
         }
     }
 

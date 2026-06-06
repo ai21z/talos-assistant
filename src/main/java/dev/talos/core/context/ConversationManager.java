@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiFunction;
 
 /**
  * Token-aware conversation history manager with automatic compaction.
@@ -62,11 +63,19 @@ public final class ConversationManager {
      */
     static final double ASSIST_HISTORY_BUDGET_FRACTION = 0.55;
 
+    /**
+     * Stop attempting compaction after repeated failures in the same session.
+     * Failed compaction preserves verbatim turns, so repeatedly retrying would
+     * just burn model calls without improving context safety.
+     */
+    static final int MAX_CONSECUTIVE_COMPACTION_FAILURES = 3;
+
     private final ConversationMemory memory;
     private final TokenBudget budget;
 
     /** Compact sketch of older turns (null until first compaction). */
     private volatile String sketch;
+    private int consecutiveCompactionFailures;
 
     public ConversationManager(ConversationMemory memory, TokenBudget budget) {
         this.memory = Objects.requireNonNull(memory, "memory must not be null");
@@ -177,7 +186,11 @@ public final class ConversationManager {
      * @return true if compaction was performed
      */
     public boolean maybeCompact(LlmClient llm) {
-        return maybeCompactWithBudget(llm, COMPACTION_THRESHOLD_PAIRS, HISTORY_BUDGET_FRACTION);
+        if (llm == null) return false;
+        return maybeCompactWith(
+                (existingSketch, oldTurns) -> ConversationCompactor.tryCompact(existingSketch, oldTurns, llm),
+                COMPACTION_THRESHOLD_PAIRS,
+                HISTORY_BUDGET_FRACTION);
     }
 
     /**
@@ -195,7 +208,11 @@ public final class ConversationManager {
      * @return true if compaction was performed
      */
     public boolean maybeCompactForAssist(LlmClient llm) {
-        return maybeCompactWithBudget(llm, ASSIST_COMPACTION_THRESHOLD_PAIRS, ASSIST_HISTORY_BUDGET_FRACTION);
+        if (llm == null) return false;
+        return maybeCompactWith(
+                (existingSketch, oldTurns) -> ConversationCompactor.tryCompact(existingSketch, oldTurns, llm),
+                ASSIST_COMPACTION_THRESHOLD_PAIRS,
+                ASSIST_HISTORY_BUDGET_FRACTION);
     }
 
     /**
@@ -212,9 +229,11 @@ public final class ConversationManager {
      * @param budgetFraction fraction of context window used as the history budget
      * @return true if compaction was performed
      */
-    private boolean maybeCompactWithBudget(LlmClient llm, int pairThreshold, double budgetFraction) {
-        if (llm == null) return false;
-
+    boolean maybeCompactWith(
+            BiFunction<String, List<ChatMessage>, ConversationCompactor.CompactionResult> compactor,
+            int pairThreshold,
+            double budgetFraction) {
+        if (compactor == null) return false;
         int pairs = turnCount();
         if (pairs < pairThreshold) {
             return false;
@@ -225,6 +244,14 @@ public final class ConversationManager {
 
         if (totalTokens <= historyBudget) {
             return false; // everything fits, no need to compact
+        }
+
+        synchronized (this) {
+            if (consecutiveCompactionFailures >= MAX_CONSECUTIVE_COMPACTION_FAILURES) {
+                LOG.warn("Compaction skipped: {} consecutive failures reached session breaker",
+                        consecutiveCompactionFailures);
+                return false;
+            }
         }
 
         LOG.info("Compaction triggered: {} pairs, {} tokens > {} budget (fraction={})",
@@ -263,10 +290,29 @@ public final class ConversationManager {
             return false;
         }
 
-        // Perform compaction
-        String newSketch = ConversationCompactor.compact(sketch, oldTurns, llm);
+        // Perform compaction. Pruning is allowed only after an explicit success.
+        ConversationCompactor.CompactionResult result;
+        String priorSketch = sketch;
+        try {
+            result = compactor.apply(priorSketch, List.copyOf(oldTurns));
+        } catch (Exception e) {
+            result = ConversationCompactor.CompactionResult.failed(
+                    priorSketch, "exception:" + e.getClass().getSimpleName());
+        }
+
+        if (result == null || !result.succeeded()) {
+            synchronized (this) {
+                consecutiveCompactionFailures++;
+            }
+            LOG.warn("Compaction failed: reason={}, preserved {} old turns and prior sketch",
+                    result != null ? result.reason() : "null-result", oldTurns.size());
+            return false;
+        }
+
+        String newSketch = result.sketch();
         synchronized (this) {
             sketch = newSketch;
+            consecutiveCompactionFailures = 0;
         }
 
         // Prune old turns from memory
@@ -318,6 +364,7 @@ public final class ConversationManager {
         memory.clear();
         synchronized (this) {
             sketch = null;
+            consecutiveCompactionFailures = 0;
         }
     }
 

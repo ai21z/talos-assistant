@@ -3,6 +3,7 @@ package dev.talos.core.context;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -29,6 +31,14 @@ class ConversationCompactionTest {
         llm.put("default_backend", "ollama");
         cfg.data.put("llm", llm);
         return cfg;
+    }
+
+    private static void addOverflowingTurns(ConversationManager cm) {
+        for (int i = 0; i < 8; i++) {
+            cm.addTurn("What about feature number " + i + "?",
+                    "Feature " + i + " is a complex topic that requires detailed explanation. "
+                            + "Here are the key points you should know about this feature.");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -70,6 +80,22 @@ class ConversationCompactionTest {
         void compact_nullLlm_throws() {
             assertThrows(NullPointerException.class, () ->
                     ConversationCompactor.compact(null, List.of(), null));
+        }
+
+        @Test
+        void tryCompact_blankOutput_reportsFailureAndPreservesExistingSketch() {
+            LlmClient llm = ScriptedNativeLlmClient.of(List.of(new LlmClient.StreamResult("", List.of())));
+            List<ChatMessage> turns = List.of(
+                    ChatMessage.user("Keep this exact fact"),
+                    ChatMessage.assistant("The exact fact is still active.")
+            );
+
+            ConversationCompactor.CompactionResult result =
+                    ConversationCompactor.tryCompact("prior sketch", turns, llm);
+
+            assertFalse(result.succeeded());
+            assertEquals("prior sketch", result.sketch());
+            assertEquals("empty-output", result.reason());
         }
 
         @Test
@@ -260,11 +286,7 @@ class ConversationCompactionTest {
             LlmClient llm = new LlmClient(placeholderConfig());
 
             // Add enough turns to overflow: 6+ pairs with decent-length content
-            for (int i = 0; i < 8; i++) {
-                cm.addTurn("What about feature number " + i + "?",
-                           "Feature " + i + " is a complex topic that requires detailed explanation. "
-                           + "Here are the key points you should know about this feature.");
-            }
+            addOverflowingTurns(cm);
 
             int turnsBefore = cm.turnCount();
             assertTrue(turnsBefore >= ConversationManager.COMPACTION_THRESHOLD_PAIRS);
@@ -275,6 +297,162 @@ class ConversationCompactionTest {
             // After compaction: fewer turns in memory, sketch populated
             assertTrue(cm.turnCount() < turnsBefore,
                     "Turns should be pruned: before=" + turnsBefore + ", after=" + cm.turnCount());
+        }
+
+        @Test
+        void maybeCompact_failedCompactionPreservesTurnsAndSketch() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            cm.setSketch("prior sketch");
+            addOverflowingTurns(cm);
+            List<ChatMessage> turnsBefore = mem.getTurns();
+
+            boolean compacted = cm.maybeCompactWith(
+                    (existingSketch, oldTurns) ->
+                            ConversationCompactor.CompactionResult.failed(existingSketch, "thrown"),
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION);
+
+            assertFalse(compacted);
+            assertEquals("prior sketch", cm.sketch());
+            assertEquals(turnsBefore, mem.getTurns());
+        }
+
+        @Test
+        void maybeCompact_thrownCompactionPreservesTurnsAndSketch() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            cm.setSketch("prior sketch");
+            addOverflowingTurns(cm);
+            List<ChatMessage> turnsBefore = mem.getTurns();
+
+            boolean compacted = cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                        throw new IllegalStateException("compactor failed");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION);
+
+            assertFalse(compacted);
+            assertEquals("prior sketch", cm.sketch());
+            assertEquals(turnsBefore, mem.getTurns());
+        }
+
+        @Test
+        void maybeCompact_blankCompactionOutputPreservesTurnsAndSketch() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            cm.setSketch("prior sketch");
+            addOverflowingTurns(cm);
+            List<ChatMessage> turnsBefore = mem.getTurns();
+            LlmClient llm = ScriptedNativeLlmClient.of(List.of(new LlmClient.StreamResult("", List.of())));
+
+            assertFalse(cm.maybeCompact(llm));
+
+            assertEquals("prior sketch", cm.sketch());
+            assertEquals(turnsBefore, mem.getTurns());
+        }
+
+        @Test
+        void maybeCompact_successPrunesExactlySummarizedOldTurnSnapshot() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+            int turnsBefore = mem.getTurns().size();
+            AtomicInteger summarizedTurns = new AtomicInteger();
+
+            boolean compacted = cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                        summarizedTurns.set(oldTurns.size());
+                        return ConversationCompactor.CompactionResult.succeeded("new sketch");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION);
+
+            assertTrue(compacted);
+            assertEquals("new sketch", cm.sketch());
+            assertTrue(summarizedTurns.get() > 0);
+            assertEquals(turnsBefore - summarizedTurns.get(), mem.getTurns().size());
+        }
+
+        @Test
+        void maybeCompact_threeConsecutiveFailuresTripBreakerForSession() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+            AtomicInteger attempts = new AtomicInteger();
+
+            for (int i = 0; i < 4; i++) {
+                assertFalse(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                            attempts.incrementAndGet();
+                            return ConversationCompactor.CompactionResult.failed(existingSketch, "test-failure");
+                        },
+                        ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                        ConversationManager.HISTORY_BUDGET_FRACTION));
+            }
+
+            assertEquals(3, attempts.get(), "fourth call should be skipped by the breaker");
+        }
+
+        @Test
+        void maybeCompact_successResetsFailureBreaker() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+            AtomicInteger attempts = new AtomicInteger();
+
+            for (int i = 0; i < 2; i++) {
+                assertFalse(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                            attempts.incrementAndGet();
+                            return ConversationCompactor.CompactionResult.failed(existingSketch, "test-failure");
+                        },
+                        ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                        ConversationManager.HISTORY_BUDGET_FRACTION));
+            }
+
+            assertTrue(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                        attempts.incrementAndGet();
+                        return ConversationCompactor.CompactionResult.succeeded("reset sketch");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+
+            addOverflowingTurns(cm);
+            assertFalse(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                        attempts.incrementAndGet();
+                        return ConversationCompactor.CompactionResult.failed(existingSketch, "after-reset");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+
+            assertEquals(4, attempts.get(), "failure after success should still invoke compaction");
+        }
+
+        @Test
+        void clear_resetsCompactionFailureBreaker() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+            AtomicInteger attempts = new AtomicInteger();
+
+            for (int i = 0; i < 3; i++) {
+                assertFalse(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                            attempts.incrementAndGet();
+                            return ConversationCompactor.CompactionResult.failed(existingSketch, "test-failure");
+                        },
+                        ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                        ConversationManager.HISTORY_BUDGET_FRACTION));
+            }
+
+            cm.clear();
+            addOverflowingTurns(cm);
+
+            assertTrue(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                        attempts.incrementAndGet();
+                        return ConversationCompactor.CompactionResult.succeeded("after clear");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+
+            assertEquals(4, attempts.get(), "clear should reset the breaker for this session");
         }
 
         @Test

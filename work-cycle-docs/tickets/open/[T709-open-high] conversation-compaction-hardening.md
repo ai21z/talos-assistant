@@ -99,6 +99,21 @@ summary-quality checks, and a deterministic failure circuit breaker.
 
 ## Implementation Notes
 
+Progress note, 2026-06-06:
+
+- T709a implemented the compaction data-loss gate and session-local failure
+  breaker:
+  - `ConversationCompactor.tryCompact(...)` returns explicit success/failure
+    state while legacy `compact(...)` remains a string-compatible wrapper.
+  - `ConversationManager` prunes old turns only after `succeeded == true`.
+  - Blank/thrown compaction failures preserve the prior sketch and all verbatim
+    turns.
+  - Three consecutive failures skip further compaction attempts for the
+    session until a success or `ConversationManager.clear()` resets the breaker.
+- T709 remains open for T709b: represented tool/evidence-pair preservation,
+  deterministic summary integrity/redaction checks, and visible compaction
+  status in trace/debug.
+
 Initial direction:
 
 - Preserve a recent tail verbatim.
