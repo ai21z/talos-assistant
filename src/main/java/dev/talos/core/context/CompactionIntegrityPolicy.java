@@ -17,8 +17,10 @@ import java.util.regex.Pattern;
  * <p>Compaction is destructive only when the manager prunes summarized turns, so
  * a sketch must clear a small evidence-preservation gate before it can be marked
  * successful. This is intentionally conservative and non-LLM: redact protected
- * content, reject vacuous summaries, and require critical operational anchors
- * from represented history to survive.
+ * content, reject vacuous summaries, and require critical prose anchors from
+ * represented {@link ChatMessage} history to survive. Structured tool evidence
+ * is stored separately by runtime session memory; this policy deliberately does
+ * not require compacted prose to re-echo that durable evidence.
  */
 final class CompactionIntegrityPolicy {
     private static final Pattern TOOL_ANCHOR = Pattern.compile("\\btalos\\.[A-Za-z0-9_]+\\b");
@@ -41,6 +43,8 @@ final class CompactionIntegrityPolicy {
             "none",
             "omitted");
 
+    // Small caps keep the deterministic gate conservative without turning a
+    // summary into a verbatim transcript requirement.
     private static final int MAX_REQUIRED_PATH_ANCHORS = 4;
     private static final int MAX_REQUIRED_GENERIC_ANCHORS = 8;
 

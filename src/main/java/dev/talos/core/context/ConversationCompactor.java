@@ -73,21 +73,47 @@ public final class ConversationCompactor {
      * Result for a compaction attempt. Callers that may destructively prune
      * history must check {@link #succeeded()} before discarding old turns.
      */
-    public record CompactionResult(String sketch, boolean succeeded, String reason) {
+    public record CompactionResult(String sketch, boolean succeeded, String reason, Category category) {
+        public enum Category {
+            SUCCESS,
+            SKIPPED,
+            LLM_FAILURE,
+            BLANK_OUTPUT,
+            INTEGRITY_REJECT
+        }
+
+        public CompactionResult {
+            reason = reason == null || reason.isBlank() ? "not-specified" : reason;
+            category = category == null ? (succeeded ? Category.SUCCESS : Category.LLM_FAILURE) : category;
+        }
+
         public static CompactionResult succeeded(String sketch) {
-            return new CompactionResult(sketch, true, "success");
+            return new CompactionResult(sketch, true, "success", Category.SUCCESS);
         }
 
         public static CompactionResult succeeded(String sketch, String reason) {
-            return new CompactionResult(sketch, true, reason == null || reason.isBlank() ? "success" : reason);
+            return new CompactionResult(sketch, true, reason == null || reason.isBlank() ? "success" : reason,
+                    Category.SUCCESS);
         }
 
         public static CompactionResult skipped(String existingSketch, String reason) {
-            return new CompactionResult(existingSketch, false, reason);
+            return new CompactionResult(existingSketch, false, reason, Category.SKIPPED);
         }
 
         public static CompactionResult failed(String existingSketch, String reason) {
-            return new CompactionResult(existingSketch, false, reason);
+            return new CompactionResult(existingSketch, false, reason, Category.LLM_FAILURE);
+        }
+
+        public static CompactionResult blankOutput(String existingSketch) {
+            return new CompactionResult(existingSketch, false, "empty-output", Category.BLANK_OUTPUT);
+        }
+
+        public static CompactionResult integrityRejected(String existingSketch, String reason) {
+            return new CompactionResult(existingSketch, false, reason, Category.INTEGRITY_REJECT);
+        }
+
+        public boolean countsTowardFailureBreaker() {
+            return category == Category.LLM_FAILURE || category == Category.BLANK_OUTPUT;
         }
     }
 
@@ -125,7 +151,7 @@ public final class ConversationCompactor {
             String sketch = llm.chatPlain(COMPACTION_SYSTEM_PROMPT, userPrompt);
             if (sketch == null || sketch.isBlank()) {
                 LOG.warn("Compaction returned empty sketch, keeping existing");
-                return CompactionResult.failed(existingSketch, "empty-output");
+                return CompactionResult.blankOutput(existingSketch);
             }
             sketch = sketch.strip();
             if (sketch.length() > MAX_SKETCH_CHARS) {
@@ -135,7 +161,7 @@ public final class ConversationCompactor {
                     CompactionIntegrityPolicy.validate(existingSketch, oldTurns, sketch);
             if (!integrity.succeeded()) {
                 LOG.warn("Compaction sketch rejected by integrity policy: reason={}", integrity.reason());
-                return CompactionResult.failed(existingSketch, integrity.reason());
+                return CompactionResult.integrityRejected(existingSketch, integrity.reason());
             }
             LOG.info("Conversation compacted: {} turns → {} char sketch", oldTurns.size(), integrity.sketch().length());
             return CompactionResult.succeeded(integrity.sketch(), integrity.reason());

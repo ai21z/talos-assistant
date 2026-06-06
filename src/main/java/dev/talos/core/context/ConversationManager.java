@@ -305,11 +305,15 @@ public final class ConversationManager {
         }
 
         if (result == null || !result.succeeded()) {
-            synchronized (this) {
-                consecutiveCompactionFailures++;
+            if (result == null || result.countsTowardFailureBreaker()) {
+                synchronized (this) {
+                    consecutiveCompactionFailures++;
+                }
             }
-            LOG.warn("Compaction failed: reason={}, preserved {} old turns and prior sketch",
-                    result != null ? result.reason() : "null-result", oldTurns.size());
+            LOG.warn("Compaction failed: reason={}, category={}, preserved {} old turns and prior sketch",
+                    result != null ? result.reason() : "null-result",
+                    result != null ? result.category() : "NULL_RESULT",
+                    oldTurns.size());
             return false;
         }
 
@@ -360,6 +364,8 @@ public final class ConversationManager {
 
     private static boolean completeUserAssistantPairs(List<ChatMessage> turns) {
         if (turns == null) return true;
+        // SessionMemory appends pairs; if another memory implementation violates
+        // that shape, fail closed rather than guessing a safe compaction boundary.
         if (turns.size() % 2 != 0) return false;
         for (int i = 0; i < turns.size(); i += 2) {
             ChatMessage user = turns.get(i);
