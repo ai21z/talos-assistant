@@ -53,6 +53,29 @@ public final class TaskContractResolver {
                     + "(?:creating\\s+|create\\s+|using\\s+|use\\s+)?"
                     + "(?:a\\s+|any\\s+)?(?:broken\\s+|placeholder\\s+|fake\\s+|stub\\s+|local\\s+|orphan(?:ed)?\\s+)*"
                     + "tailwind\\s+(?:artifacts?|files?|css\\s+files?)\\b");
+    private static final Pattern GENERIC_FRAMEWORK_LOCAL_ARTIFACT_BAN = Pattern.compile(
+            "(?i)\\b(?:no|avoid|without|do\\s+not|don't|dont)\\s+"
+                    + "(?:creating\\s+|create\\s+|using\\s+|use\\s+)?"
+                    + "(?:a\\s+|any\\s+)?(?:broken\\s+|placeholder\\s+|fake\\s+|stub\\s+|local\\s+|orphan(?:ed)?\\s+)*"
+                    + "(?:frontend\\s+|framework\\s+|cdn\\s+)?(?:artifacts?|files?|css\\s+files?|js\\s+files?)\\b");
+    private static final Pattern FRAMEWORK_CDN_ONLY = Pattern.compile(
+            "(?i)\\b(?:bootstrap|alpine|htmx|react|vue)\\b.{0,80}\\b(?:cdn\\s+only|through\\s+the\\s+cdn\\s+only|with\\s+the\\s+cdn\\s+only)\\b");
+    private static final List<FrameworkArtifactFamily> FRONTEND_FRAMEWORK_ARTIFACTS = List.of(
+            new FrameworkArtifactFamily("bootstrap", List.of(
+                    "bootstrap.css",
+                    "bootstrap.min.css",
+                    "bootstrap.js",
+                    "bootstrap.min.js",
+                    "bootstrap.bundle.js",
+                    "bootstrap.bundle.min.js")),
+            new FrameworkArtifactFamily("alpine", List.of("alpine.js", "alpine.min.js")),
+            new FrameworkArtifactFamily("htmx", List.of("htmx.js", "htmx.min.js")),
+            new FrameworkArtifactFamily("react", List.of(
+                    "react.js",
+                    "react.min.js",
+                    "react-dom.js",
+                    "react-dom.min.js")),
+            new FrameworkArtifactFamily("vue", List.of("vue.js", "vue.min.js")));
 
     private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
@@ -790,6 +813,7 @@ public final class TaskContractResolver {
         addTargetsFromSpanMatches(out, LEAVE_TARGET_ALONE_SPAN.matcher(userRequest));
         out.addAll(extractPreserveUnchangedTargets(userRequest));
         addTailwindNegativeLocalArtifactTargets(out, userRequest);
+        addFrontendFrameworkNegativeLocalArtifactTargets(out, userRequest);
         addDirectNotTargets(out, userRequest);
         return Set.copyOf(out);
     }
@@ -812,6 +836,44 @@ public final class TaskContractResolver {
         if (out == null) return;
         out.add("tailwind.css");
         out.add("tailwind.min.css");
+    }
+
+    private static void addFrontendFrameworkNegativeLocalArtifactTargets(Set<String> out, String userRequest) {
+        if (out == null || userRequest == null || userRequest.isBlank()) return;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        boolean genericLocalArtifactBan = GENERIC_FRAMEWORK_LOCAL_ARTIFACT_BAN.matcher(userRequest).find()
+                || FRAMEWORK_CDN_ONLY.matcher(userRequest).find();
+        for (FrameworkArtifactFamily family : FRONTEND_FRAMEWORK_ARTIFACTS) {
+            if (!containsFrameworkName(userRequest, family.name())) continue;
+            if (genericLocalArtifactBan) {
+                out.addAll(family.artifactTargets());
+                continue;
+            }
+            for (String target : family.artifactTargets()) {
+                if (lower.contains("no placeholder " + family.name())
+                        || lower.contains("no broken " + target)
+                        || lower.contains("no placeholder " + target)
+                        || lower.contains("do not create " + target)
+                        || lower.contains("don't create " + target)
+                        || lower.contains("dont create " + target)
+                        || lower.contains("do not use " + target)
+                        || lower.contains("don't use " + target)
+                        || lower.contains("dont use " + target)) {
+                    out.add(target);
+                }
+            }
+        }
+    }
+
+    private static boolean containsFrameworkName(String value, String frameworkName) {
+        if (value == null || value.isBlank() || frameworkName == null || frameworkName.isBlank()) {
+            return false;
+        }
+        return Pattern.compile("(?i)(?<![A-Za-z0-9_-])"
+                        + Pattern.quote(frameworkName)
+                        + "(?![A-Za-z0-9_-])")
+                .matcher(value)
+                .find();
     }
 
     public static Set<String> extractPreserveUnchangedTargets(String userRequest) {
@@ -1609,4 +1671,6 @@ public final class TaskContractResolver {
     private static String normalizeTargetForComparison(String raw) {
         return normalizeTarget(raw).toLowerCase(Locale.ROOT);
     }
+
+    private record FrameworkArtifactFamily(String name, List<String> artifactTargets) {}
 }

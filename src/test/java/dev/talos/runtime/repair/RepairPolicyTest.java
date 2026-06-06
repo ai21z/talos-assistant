@@ -190,6 +190,95 @@ class RepairPolicyTest {
     }
 
     @Test
+    void staticRepairPlanMapsForbiddenBootstrapArtifactToWritableSiteTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("""
+                Create a complete Retrocats static website using exactly index.html, style.css, and script.js.
+                Use Bootstrap through the CDN only. No local framework artifacts.
+                """));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - bootstrap.css: local Bootstrap artifact is unsupported without an explicit build-backed local artifact request.]
+
+                Remaining static verification problems:
+                - bootstrap.css: local Bootstrap artifact is unsupported without an explicit build-backed local artifact request.
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - style.css: Updated style.css
+                - bootstrap.css: Updated bootstrap.css
+                - script.js: Updated script.js
+                """));
+        messages.add(ChatMessage.user("Final pass: inspect the current files and repair anything unverified."));
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of("bootstrap.css", "bootstrap.min.css"),
+                "Final pass: inspect the current files and repair anything unverified.",
+                "test-static-web-bootstrap-repair");
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertFalse(plan.steps().stream()
+                        .anyMatch(step -> "bootstrap.css".equals(step.targetPath())
+                                || "bootstrap.min.css".equals(step.targetPath())),
+                plan.instruction());
+        String fullTargetsLine = plan.instruction().lines()
+                .filter(line -> line.startsWith("Full-file replacement targets:"))
+                .findFirst()
+                .orElse("");
+        assertFalse(fullTargetsLine.contains("bootstrap.css"), plan.instruction());
+        assertFalse(fullTargetsLine.contains("bootstrap.min.css"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("index.html"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("style.css"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("script.js"), plan.instruction());
+    }
+
+    @Test
+    void reactiveArtifactProblemDoesNotTriggerReactFrameworkRepair() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("""
+                Create a reactive Retrocats static website using exactly index.html, style.css, and script.js.
+                """));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - local reactive artifact is unsupported.]
+
+                Remaining static verification problems:
+                - local reactive artifact is unsupported.
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - style.css: Updated style.css
+                - script.js: Updated script.js
+                """));
+        messages.add(ChatMessage.user("Final pass: inspect the current files and repair anything unverified."));
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of(),
+                "Final pass: inspect the current files and repair anything unverified.",
+                "test-static-web-reactive-not-react");
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertFalse(plan.instruction().contains("Cross-file coherence checklist"),
+                plan.instruction());
+    }
+
+    @Test
     void selectorRepairFactsAreCompactedForLargeClassInventories(@TempDir Path workspace) throws Exception {
         StringBuilder classes = new StringBuilder("hero cta-button");
         for (int i = 0; i < 160; i++) {

@@ -289,6 +289,87 @@ class ActiveTaskContextUpdaterTest {
     }
 
     @Test
+    void noMutationStaticWebContinuationDoesNotShrinkRicherSavedContext() {
+        ActiveTaskContext previous = ActiveTaskContext.pendingMutation(
+                2,
+                "trace-rich-static",
+                List.of("index.html", "style.css", "script.js"),
+                "No required static-web mutation completed.",
+                StaticWebRequirements.of(
+                        List.of("Retrocats", "Costanza", "Life span", "Berlin 22 July 2026"),
+                        java.util.Set.of("tailwind.css", "tailwind.min.css")));
+        ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
+        TurnResult result = turn(
+                3,
+                new Result.Ok("[Truth check: no file was changed.]"),
+                policy("FILE_CREATE", true, true, List.of("index.html", "style.css")),
+                trace(3, "trace-thin-static", true, true,
+                        List.of("index.html", "style.css"),
+                        "NOT_RUN", "", "GRANTED_OR_NOT_REQUIRED", "NOT_REQUESTED", "BLOCKED_BY_POLICY"),
+                List.of(),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Make this Retrocats website even more polished and complete. "
+                        + "Use Tailwind correctly, preserve the required band facts, and repair anything unverified.",
+                previous,
+                previousGoal);
+
+        ActiveTaskContext context = update.activeTaskContext();
+        assertEquals(ActiveTaskContext.Kind.PENDING_MUTATION, context.kind());
+        assertEquals(List.of("index.html", "style.css", "script.js"), context.targets());
+        assertTrue(context.staticWebRequirements().requiredVisibleFacts().contains("Life span"),
+                context.staticWebRequirements().toString());
+        assertEquals(java.util.Set.of("tailwind.css", "tailwind.min.css"),
+                context.staticWebRequirements().forbiddenArtifacts());
+        assertEquals(ArtifactGoal.ArtifactKind.STATIC_WEB, update.artifactGoal().artifactKind());
+        assertEquals(List.of("index.html", "style.css", "script.js"), update.artifactGoal().targets());
+    }
+
+    @Test
+    void failedStaticWebContinuationDoesNotShrinkRicherSavedContext() {
+        ActiveTaskContext previous = ActiveTaskContext.pendingMutation(
+                2,
+                "trace-rich-static",
+                List.of("index.html", "style.css", "script.js"),
+                "No required static-web mutation completed.",
+                StaticWebRequirements.of(
+                        List.of("Retrocats", "Costanza", "Life span", "Berlin 22 July 2026"),
+                        java.util.Set.of("tailwind.css", "tailwind.min.css")));
+        ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
+        TurnResult result = turn(
+                3,
+                new Result.Ok("Static verification failed."),
+                policy("FILE_CREATE", true, true, List.of("index.html", "style.css")),
+                trace(3, "trace-thin-static-failed", true, true,
+                        List.of("index.html", "style.css"),
+                        "FAILED",
+                        "index.html: Tailwind utility classes are used, but no accepted runtime was found.",
+                        "GRANTED_OR_NOT_REQUIRED",
+                        "SUCCEEDED",
+                        "FAILED"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Make this Retrocats website even more polished and complete. "
+                        + "Use Tailwind correctly, preserve the required band facts, and repair anything unverified.",
+                previous,
+                previousGoal);
+
+        ActiveTaskContext context = update.activeTaskContext();
+        assertEquals(ActiveTaskContext.Kind.VERIFIER_FINDINGS, context.kind());
+        assertEquals(List.of("index.html", "style.css", "script.js"), context.targets());
+        assertTrue(context.staticWebRequirements().requiredVisibleFacts().contains("Life span"),
+                context.staticWebRequirements().toString());
+        assertEquals(java.util.Set.of("tailwind.css", "tailwind.min.css"),
+                context.staticWebRequirements().forbiddenArtifacts());
+        assertEquals(List.of("index.html", "style.css", "script.js"), update.artifactGoal().targets());
+    }
+
+    @Test
     void successfulMutationWithNotRunVerificationPreservesExistingContextAndGoal() {
         assertSuccessfulUnverifiedMutationPreservesContext(
                 "NOT_RUN",

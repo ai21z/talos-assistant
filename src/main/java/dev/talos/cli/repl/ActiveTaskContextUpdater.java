@@ -21,11 +21,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Derives the next active task context from deterministic post-turn facts.
  */
 public final class ActiveTaskContextUpdater {
+    private static final Pattern STATIC_WEB_FILE_TARGET = Pattern.compile(
+            "(?i)\\b[A-Za-z0-9_.-]+\\.(?:html?|css|js|jsx|ts|tsx)\\b");
+
 
     public record Update(ActiveTaskContext activeTaskContext, ArtifactGoal artifactGoal) {
         public Update {
@@ -46,7 +52,7 @@ public final class ActiveTaskContextUpdater {
         }
 
         TurnFacts facts = TurnFacts.from(result);
-        List<String> targets = facts.targets();
+        List<String> targets = durableStaticWebTargets(facts.targets(), preservedContext, userInput);
         StaticWebRequirements requirements = staticWebRequirements(userInput, facts, preservedContext);
 
         if (facts.approvalDeniedMutationAttempt()) {
@@ -195,6 +201,72 @@ public final class ActiveTaskContextUpdater {
                 || lower.contains("fix")
                 || lower.contains("apply");
         return explicitProposal || (noMutationYet && changeIntent);
+    }
+
+    private static List<String> durableStaticWebTargets(
+            List<String> currentTargets,
+            ActiveTaskContext preservedContext,
+            String userInput) {
+        if (currentTargets == null || currentTargets.isEmpty()) return List.of();
+        if (preservedContext == null
+                || preservedContext.state() != ActiveTaskContext.State.ACTIVE
+                || !preservedContext.hasTargets()) {
+            return currentTargets;
+        }
+        List<String> preservedTargets = preservedContext.targets();
+        if (!looksLikeStaticWebTargets(currentTargets) || !looksLikeStaticWebTargets(preservedTargets)) {
+            return currentTargets;
+        }
+        Set<String> current = normalizedTargetSet(currentTargets);
+        Set<String> preserved = normalizedTargetSet(preservedTargets);
+        if (current.isEmpty() || preserved.isEmpty() || current.equals(preserved)) {
+            return currentTargets;
+        }
+        if (!preserved.containsAll(current)) {
+            return currentTargets;
+        }
+        if (explicitReplacementStaticWebTargets(userInput, preserved)) {
+            return currentTargets;
+        }
+        return preservedTargets;
+    }
+
+    private static boolean explicitReplacementStaticWebTargets(String userInput, Set<String> preservedTargets) {
+        if (userInput == null || userInput.isBlank()
+                || preservedTargets == null || preservedTargets.isEmpty()) {
+            return false;
+        }
+        String lower = userInput.toLowerCase(Locale.ROOT);
+        if (!(lower.contains("exactly") || lower.contains("only") || lower.contains("replace")
+                || lower.contains("instead"))) {
+            return false;
+        }
+        Set<String> mentioned = new LinkedHashSet<>();
+        Matcher matcher = STATIC_WEB_FILE_TARGET.matcher(userInput);
+        while (matcher.find()) {
+            String target = normalizeTarget(matcher.group());
+            if (!target.isBlank()) mentioned.add(target);
+        }
+        return !mentioned.isEmpty() && !mentioned.containsAll(preservedTargets);
+    }
+
+    private static Set<String> normalizedTargetSet(List<String> targets) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (targets == null) return out;
+        for (String target : targets) {
+            String normalized = normalizeTarget(target);
+            if (!normalized.isBlank()) out.add(normalized);
+        }
+        return out;
+    }
+
+    private static String normalizeTarget(String target) {
+        if (target == null) return "";
+        String normalized = target.strip().replace('\\', '/').toLowerCase(Locale.ROOT);
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
     }
 
     private static boolean looksLikeStaticWebTargets(List<String> targets) {
