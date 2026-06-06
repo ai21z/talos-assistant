@@ -234,7 +234,12 @@ public final class ConversationManager {
             int pairThreshold,
             double budgetFraction) {
         if (compactor == null) return false;
-        int pairs = turnCount();
+        List<ChatMessage> allTurns = memory.getTurns();
+        if (!completeUserAssistantPairs(allTurns)) {
+            LOG.warn("Compaction skipped: stored conversation history is not complete user/assistant pairs");
+            return false;
+        }
+        int pairs = allTurns.size() / 2;
         if (pairs < pairThreshold) {
             return false;
         }
@@ -258,7 +263,6 @@ public final class ConversationManager {
                 pairs, totalTokens, historyBudget, budgetFraction);
 
         // Identify which turns don't fit (the "old" ones)
-        List<ChatMessage> allTurns = memory.getTurns();
         List<ChatMessage> oldTurns = new ArrayList<>();
         int tokensFromEnd = 0;
 
@@ -352,6 +356,18 @@ public final class ConversationManager {
     /** Number of stored user/assistant exchanges (pairs). */
     public int turnCount() {
         return memory.getTurns().size() / 2;
+    }
+
+    private static boolean completeUserAssistantPairs(List<ChatMessage> turns) {
+        if (turns == null) return true;
+        if (turns.size() % 2 != 0) return false;
+        for (int i = 0; i < turns.size(); i += 2) {
+            ChatMessage user = turns.get(i);
+            ChatMessage assistant = turns.get(i + 1);
+            if (user == null || assistant == null) return false;
+            if (!"user".equals(user.role()) || !"assistant".equals(assistant.role())) return false;
+        }
+        return true;
     }
 
     /** Check if any conversation history exists. */
