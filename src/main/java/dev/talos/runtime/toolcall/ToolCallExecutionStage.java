@@ -292,6 +292,95 @@ public final class ToolCallExecutionStage {
                 continue;
             }
 
+            String staticWebRewriteGroundingDiagnostic =
+                    StaticWebRewriteGroundingGuard.diagnostic(
+                            effective,
+                            state,
+                            currentTaskContract,
+                            pathHint);
+            if (staticWebRewriteGroundingDiagnostic != null) {
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
+                ToolResult result = ToolResult.fail(ToolError.invalidParams(staticWebRewriteGroundingDiagnostic));
+                emitToolResult(effective.toolName(), result);
+                LocalTurnTraceCapture.recordActionObligation(
+                        "STATIC_WEB_REWRITE_GROUNDING",
+                        "FAILED",
+                        staticWebRewriteGroundingDiagnostic,
+                        "STATIC_WEB_WRITE_BEFORE_READ");
+                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                        effective,
+                        pathHint,
+                        staticWebRewriteGroundingDiagnostic,
+                        workspaceOperationPlan));
+                appendResultMessage(state, parsed.useNativePath(), i,
+                        ToolCallSupport.formatToolResult(effective, result));
+                LOG.debug("Blocked static-web rewrite {} for {} before approval: {}",
+                        effective.toolName(),
+                        SafeLogFormatter.value(pathHint),
+                        SafeLogFormatter.text(staticWebRewriteGroundingDiagnostic));
+                continue;
+            }
+
+            String staticWebRepairPathDiagnostic =
+                    StaticWebRepairPathGuard.diagnostic(effective, currentTaskContract, pathHint);
+            if (staticWebRepairPathDiagnostic != null) {
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
+                ToolResult result = ToolResult.fail(ToolError.invalidParams(staticWebRepairPathDiagnostic));
+                emitToolResult(effective.toolName(), result);
+                LocalTurnTraceCapture.recordActionObligation(
+                        "STATIC_WEB_REPAIR_TARGET_PATH",
+                        "FAILED",
+                        staticWebRepairPathDiagnostic,
+                        "STATIC_WEB_REPAIR_DIRECTORY_TARGET_BEFORE_APPROVAL");
+                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                        effective,
+                        pathHint,
+                        staticWebRepairPathDiagnostic,
+                        workspaceOperationPlan));
+                appendResultMessage(state, parsed.useNativePath(), i,
+                        ToolCallSupport.formatToolResult(effective, result));
+                LOG.debug("Blocked static-web repair {} for invalid target {} before approval: {}",
+                        effective.toolName(),
+                        SafeLogFormatter.value(pathHint),
+                        SafeLogFormatter.text(staticWebRepairPathDiagnostic));
+                continue;
+            }
+
+            String staticWebBlankRequiredAssetDiagnostic =
+                    StaticWebRequiredAssetWriteGuard.diagnostic(
+                            effective,
+                            state,
+                            currentTaskContract,
+                            pathHint);
+            if (staticWebBlankRequiredAssetDiagnostic != null) {
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
+                ToolResult result = ToolResult.fail(ToolError.invalidParams(staticWebBlankRequiredAssetDiagnostic));
+                emitToolResult(effective.toolName(), result);
+                LocalTurnTraceCapture.recordActionObligation(
+                        "STATIC_WEB_REQUIRED_ASSET_WRITE",
+                        "FAILED",
+                        staticWebBlankRequiredAssetDiagnostic,
+                        "STATIC_WEB_REQUIRED_ASSET_BLANK_WRITE_BEFORE_APPROVAL");
+                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                        effective,
+                        pathHint,
+                        staticWebBlankRequiredAssetDiagnostic,
+                        workspaceOperationPlan));
+                appendResultMessage(state, parsed.useNativePath(), i,
+                        ToolCallSupport.formatToolResult(effective, result));
+                LOG.debug("Blocked static-web blank required asset write {} for {} before approval: {}",
+                        effective.toolName(),
+                        SafeLogFormatter.value(pathHint),
+                        SafeLogFormatter.text(staticWebBlankRequiredAssetDiagnostic));
+                continue;
+            }
+
             String readBeforeWriteNudge = null;
             if (!strict && "talos.edit_file".equals(effective.toolName()) && pathHint != null) {
                 if (!state.pathsReadThisTurn.contains(ToolCallSupport.normalizePath(pathHint))) {

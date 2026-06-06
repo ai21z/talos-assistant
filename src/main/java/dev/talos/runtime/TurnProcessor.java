@@ -35,6 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -866,7 +867,80 @@ public final class TurnProcessor {
                             + "so no edit would be made. No approval was requested and no file was changed."));
         }
 
+        ToolResult exactEditMatchValidation =
+                validateExactEditMatchBeforeApproval(path, oldString, session.workspace());
+        if (exactEditMatchValidation != null) {
+            return exactEditMatchValidation;
+        }
+
         return null;
+    }
+
+    private static ToolResult validateExactEditMatchBeforeApproval(
+            String path,
+            String oldString,
+            Path workspace
+    ) {
+        if (workspace == null || path == null || path.isBlank()
+                || oldString == null || oldString.isEmpty()) {
+            return null;
+        }
+        Path root = workspace.normalize();
+        Path target;
+        try {
+            target = root.resolve(path).normalize();
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (!target.startsWith(root)) return null;
+        if (!Files.isRegularFile(target)) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: target file not found before approval: `"
+                            + path
+                            + "`. Call talos.read_file or talos.list_dir first to confirm the path. "
+                            + "No approval was requested and no file was changed."));
+        }
+        String content;
+        try {
+            content = Files.readString(target);
+        } catch (Exception e) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: target file could not be read before approval: `"
+                            + path
+                            + "`. Call talos.read_file first and retry with exact current text. "
+                            + "No approval was requested and no file was changed."));
+        }
+        int occurrences = countOccurrences(content, oldString);
+        if (occurrences == 0) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: old_string not found in `"
+                            + path
+                            + "` before approval. Call talos.read_file first, then retry with exact current text "
+                            + "or use talos.write_file with the complete updated file content. "
+                            + "No approval was requested and no file was changed."));
+        }
+        if (occurrences > 1) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: old_string appears "
+                            + occurrences
+                            + " times in `"
+                            + path
+                            + "` before approval. Provide a unique old_string from talos.read_file output "
+                            + "or use talos.write_file with the complete updated file content. "
+                            + "No approval was requested and no file was changed."));
+        }
+        return null;
+    }
+
+    private static int countOccurrences(String content, String needle) {
+        if (content == null || needle == null || needle.isEmpty()) return 0;
+        int count = 0;
+        int index = 0;
+        while ((index = content.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 
     private static ToolResult validateUnsupportedDocumentWriteBeforeApproval(String path) {

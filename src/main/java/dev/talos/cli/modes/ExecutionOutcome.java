@@ -75,6 +75,7 @@ record ExecutionOutcome(
                             AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT,
                             NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_REPLACEMENT,
                             NoToolAnswerTruthfulnessGuard.MALFORMED_TOOL_PROTOCOL_REPLACEMENT,
+                            NoToolAnswerTruthfulnessGuard.MUTATION_CAPABILITY_CORRECTION,
                             MutationFailureAnswerRenderer.DENIED_MUTATION_ANNOTATION,
                             MutationFailureAnswerRenderer.POLICY_DENIED_MUTATION_ANNOTATION,
                             MutationFailureAnswerRenderer.MIXED_DENIED_MUTATION_ANNOTATION,
@@ -518,18 +519,26 @@ record ExecutionOutcome(
         boolean noToolMutationReplaced = false;
         boolean malformedProtocolDebrisReplaced = false;
         boolean localAccessCapabilityCorrected = false;
+        boolean mutationCapabilityCorrected = false;
 
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)
                 || ToolCallParser.looksLikeMalformedToolProtocol(shaped)) {
             shaped = NoToolAnswerTruthfulnessGuard.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
             malformedProtocolDebrisReplaced = true;
         } else {
-            String corrected = NoToolAnswerTruthfulnessGuard.correctNegativeLocalAccessClaimIfNeeded(
+            String corrected = NoToolAnswerTruthfulnessGuard.correctNegativeMutationCapabilityClaimIfNeeded(
                     shaped, safePlan, messages);
-            localAccessCapabilityCorrected = !Objects.equals(shaped, corrected);
+            mutationCapabilityCorrected = !Objects.equals(shaped, corrected);
             shaped = corrected;
 
-            if (!localAccessCapabilityCorrected) {
+            if (!mutationCapabilityCorrected) {
+                corrected = NoToolAnswerTruthfulnessGuard.correctNegativeLocalAccessClaimIfNeeded(
+                        shaped, safePlan, messages);
+                localAccessCapabilityCorrected = !Objects.equals(shaped, corrected);
+                shaped = corrected;
+            }
+
+            if (!localAccessCapabilityCorrected && !mutationCapabilityCorrected) {
                 if (streamed) {
                     String replaced = NoToolAnswerTruthfulnessGuard.enforceStreamingNoToolTruthfulness(
                             shaped, safePlan, messages);
@@ -555,7 +564,8 @@ record ExecutionOutcome(
         boolean blocked = noToolMutationReplaced || commandRequiredButNotRun || unsupportedCommandNotAvailable;
         boolean ungrounded = shaped != null
                 && (shaped.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION)
-                || localAccessCapabilityCorrected);
+                || localAccessCapabilityCorrected
+                || mutationCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
         EvidenceObligationAssessment evidenceAssessment =
                 EvidenceObligationAssessment.assess(safePlan, null, null);

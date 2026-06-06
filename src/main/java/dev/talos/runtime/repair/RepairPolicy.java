@@ -26,6 +26,9 @@ public final class RepairPolicy {
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
                     + "properties|gradle|kts|toml|ini|env|csv))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+    private static final Pattern BACKTICKED_TOKEN = Pattern.compile("`([^`]+)`");
+    private static final int MAX_SELECTOR_FACT_CHARS = 2_200;
+    private static final int MAX_OBSERVED_SELECTOR_TOKENS = 24;
 
     private RepairPolicy() {}
 
@@ -68,26 +71,29 @@ public final class RepairPolicy {
                 problems,
                 messages,
                 missingExpectedTargets);
+        List<String> forbiddenTargets = contract.forbiddenTargets().stream()
+                .sorted()
+                .toList();
+        previousTargets = withoutForbiddenTargets(previousTargets, forbiddenTargets);
         if (!expectedTargets.isEmpty()
                 && !previousTargets.isEmpty()
                 && !targetsOverlap(expectedTargets, previousTargets)) {
             return RepairDecision.notApplicable(
                     "static repair context skipped: targets did not overlap with current task targets");
         }
-        List<String> forbiddenTargets = contract.forbiddenTargets().stream()
-                .sorted()
-                .toList();
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
+        boolean tailwindCoherenceRepair = problems.stream().anyMatch(RepairPolicy::isTailwindCoherenceProblem);
         List<RepairPlanStep> steps = planSteps(
                 problems,
                 expectedTargets,
                 missingExpectedTargets,
-                similarWrongTargets);
+                similarWrongTargets,
+                forbiddenTargets);
         String instruction = renderStaticVerificationInstruction(
                 problems,
                 expectedTargets,
                 steps,
-                structuralWebRepair,
+                structuralWebRepair || tailwindCoherenceRepair,
                 missingExpectedTargets,
                 similarWrongTargets);
 
@@ -159,6 +165,7 @@ public final class RepairPolicy {
         if (selectorFacts == null || selectorFacts.isBlank()) {
             return instruction;
         }
+        selectorFacts = compactSelectorFacts(selectorFacts);
         return instruction
                 + "\n\n[Current static selector facts]\n"
                 + selectorFacts
@@ -198,15 +205,19 @@ public final class RepairPolicy {
             List<String> problems,
             List<String> expectedTargets,
             List<String> missingExpectedTargets,
-            List<WrongTargetPair> similarWrongTargets
+            List<WrongTargetPair> similarWrongTargets,
+            List<String> forbiddenTargets
     ) {
         List<RepairPlanStep> steps = new ArrayList<>();
         Set<String> targets = new LinkedHashSet<>();
+        Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
+        boolean tailwindCoherenceRepair = problems.stream().anyMatch(RepairPolicy::isTailwindCoherenceProblem);
+        boolean siteCoherenceRepair = structuralWebRepair || tailwindCoherenceRepair;
         Set<String> verifierSpecificTargets = verifierSpecificStructuralRepairTargets(problems, expectedTargets);
         if (structuralWebRepair && !verifierSpecificTargets.isEmpty()) {
             targets.addAll(verifierSpecificTargets);
-        } else if (structuralWebRepair && expectedTargets != null && !expectedTargets.isEmpty()) {
+        } else if (siteCoherenceRepair && expectedTargets != null && !expectedTargets.isEmpty()) {
             targets.addAll(expectedTargets);
         } else {
             for (String problem : problems) {
@@ -217,12 +228,17 @@ public final class RepairPolicy {
             }
         }
         removeWrongSimilarEvidenceTargets(targets, missingExpectedTargets, similarWrongTargets);
+        removeForbiddenTargets(targets, forbiddenKeys);
+        if (targets.isEmpty() && siteCoherenceRepair && expectedTargets != null && !expectedTargets.isEmpty()) {
+            targets.addAll(expectedTargets);
+            removeForbiddenTargets(targets, forbiddenKeys);
+        }
         for (String target : targets) {
             if (!StaticWebCapabilityProfile.isSmallWebFile(target)) continue;
             steps.add(new RepairPlanStep(
                     RepairStepType.WRITE_COMPLETE_FILE,
                     target,
-                    structuralWebRepair
+                    siteCoherenceRepair
                             ? "static verifier reported structural web-file problems"
                             : "static verifier reported unresolved web-file problem",
                     "You must use talos.write_file with complete corrected file content for " + target + ".",
@@ -235,6 +251,48 @@ public final class RepairPolicy {
                 "Run static post-apply verification before claiming the task is complete.",
                 false));
         return List.copyOf(steps);
+    }
+
+    private static boolean isTailwindCoherenceProblem(String problem) {
+        if (problem == null || problem.isBlank()) return false;
+        String lower = problem.toLowerCase(Locale.ROOT);
+        return lower.contains("tailwind")
+                && (lower.contains("artifact")
+                || lower.contains("directive")
+                || lower.contains("cdn")
+                || lower.contains("runtime")
+                || lower.contains("build")
+                || lower.contains("utility class"));
+    }
+
+    private static Set<String> withoutForbiddenTargets(
+            Set<String> targets,
+            List<String> forbiddenTargets
+    ) {
+        if (targets == null || targets.isEmpty()) return Set.of();
+        Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
+        if (forbiddenKeys.isEmpty()) return targets;
+        LinkedHashSet<String> out = new LinkedHashSet<>(targets);
+        removeForbiddenTargets(out, forbiddenKeys);
+        return out;
+    }
+
+    private static Set<String> normalizedTargetKeys(List<String> targets) {
+        if (targets == null || targets.isEmpty()) return Set.of();
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        for (String target : targets) {
+            String key = normalizeTargetKey(target);
+            if (!key.isBlank()) keys.add(key);
+        }
+        return keys;
+    }
+
+    private static void removeForbiddenTargets(Set<String> targets, Set<String> forbiddenKeys) {
+        if (targets == null || targets.isEmpty()
+                || forbiddenKeys == null || forbiddenKeys.isEmpty()) {
+            return;
+        }
+        targets.removeIf(target -> forbiddenKeys.contains(normalizeTargetKey(target)));
     }
 
     private static Set<String> verifierSpecificStructuralRepairTargets(
@@ -475,6 +533,64 @@ public final class RepairPolicy {
                 out.add(target);
             }
         }
+    }
+
+    private static String compactSelectorFacts(String selectorFacts) {
+        if (selectorFacts == null || selectorFacts.isBlank()) return "";
+        if (selectorFacts.length() <= MAX_SELECTOR_FACT_CHARS) return selectorFacts;
+        StringBuilder out = new StringBuilder();
+        int mismatchLines = 0;
+        boolean inMismatches = false;
+        for (String rawLine : selectorFacts.split("\\R")) {
+            String line = rawLine.stripTrailing();
+            if (line.startsWith("- Classes:") || line.startsWith("- IDs:")) {
+                appendLine(out, compactObservedSelectorLine(line));
+                continue;
+            }
+            if (line.equals("Mismatches found:")) {
+                inMismatches = true;
+                appendLine(out, line);
+                continue;
+            }
+            if (inMismatches && line.startsWith("- ")) {
+                mismatchLines++;
+                if (mismatchLines <= 12) {
+                    appendLine(out, line);
+                }
+                continue;
+            }
+            appendLine(out, line);
+        }
+        if (mismatchLines > 12) {
+            appendLine(out, "- ... " + (mismatchLines - 12) + " more selector/linkage mismatch lines omitted");
+        }
+        String compacted = out.toString().stripTrailing();
+        if (compacted.length() <= MAX_SELECTOR_FACT_CHARS) return compacted;
+        return compacted.substring(0, MAX_SELECTOR_FACT_CHARS - 80).stripTrailing()
+                + "\n... selector fact context truncated after preserving primary targets and mismatch findings.";
+    }
+
+    private static String compactObservedSelectorLine(String line) {
+        Matcher matcher = BACKTICKED_TOKEN.matcher(line);
+        List<String> tokens = new ArrayList<>();
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            if (token != null && !token.isBlank()) tokens.add(token);
+        }
+        if (tokens.size() <= MAX_OBSERVED_SELECTOR_TOKENS) return line;
+        String label = line.substring(0, line.indexOf(':') + 1);
+        List<String> kept = tokens.subList(0, MAX_OBSERVED_SELECTOR_TOKENS);
+        String rendered = kept.stream()
+                .map(token -> "`" + token + "`")
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("none");
+        return label + " " + rendered + ", ... "
+                + (tokens.size() - kept.size()) + " more observed selectors omitted";
+    }
+
+    private static void appendLine(StringBuilder out, String line) {
+        if (out.length() > 0) out.append('\n');
+        out.append(line == null ? "" : line);
     }
 
     private static String firstRepairContextValue(String content, String label) {

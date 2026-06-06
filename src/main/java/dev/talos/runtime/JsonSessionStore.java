@@ -10,6 +10,7 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -267,8 +268,17 @@ public final class JsonSessionStore implements SessionStore {
         out.put("requiredVerificationClaims", safe.requiredVerificationClaims().stream()
                 .map(JsonSessionStore::requiredVerificationClaimToMap)
                 .toList());
+        out.put("staticWebRequirements", staticWebRequirementsToMap(safe.staticWebRequirements()));
         out.put("blockedReason", safe.blockedReason());
         out.put("suppressionReason", safe.suppressionReason());
+        return out;
+    }
+
+    private static Map<String, Object> staticWebRequirementsToMap(StaticWebRequirements requirements) {
+        StaticWebRequirements safe = requirements == null ? StaticWebRequirements.none() : requirements;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("requiredVisibleFacts", safe.requiredVisibleFacts());
+        out.put("forbiddenArtifacts", safe.forbiddenArtifacts().stream().sorted().toList());
         return out;
     }
 
@@ -306,11 +316,19 @@ public final class JsonSessionStore implements SessionStore {
                     stringVal(map, "previousOutcomeStatus", ""),
                     stringList(map.get("verifierFindings")),
                     requiredVerificationClaimsFrom(map.get("requiredVerificationClaims")),
+                    staticWebRequirementsFrom(map.get("staticWebRequirements")),
                     stringVal(map, "blockedReason", ""),
                     stringVal(map, "suppressionReason", ""));
         } catch (Exception e) {
             return ActiveTaskContext.none();
         }
+    }
+
+    private static StaticWebRequirements staticWebRequirementsFrom(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) return StaticWebRequirements.none();
+        return StaticWebRequirements.of(
+                stringList(map.get("requiredVisibleFacts")),
+                new java.util.LinkedHashSet<>(stringList(map.get("forbiddenArtifacts"))));
     }
 
     private static List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaimsFrom(Object raw) {

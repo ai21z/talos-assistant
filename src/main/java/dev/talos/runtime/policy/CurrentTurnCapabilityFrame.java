@@ -80,6 +80,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
         appendSourceEvidenceTargets(frame, contract, mutationAllowed);
+        appendStaticWebRequirements(frame, contract, mutationAllowed);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendProposalApplyGuidance(frame, activeTaskContext, artifactGoal, mutationAllowed);
         appendTaskExpectations(frame, taskExpectations);
@@ -251,6 +252,32 @@ public final class CurrentTurnCapabilityFrame {
                 .append("Read these exact source target paths before writing or editing the requested output target(s).\n")
                 .append("Use the source content only for the requested derived artifact.\n")
                 .append("Do not read protected or unrelated files unless the user explicitly named them as source targets.\n");
+    }
+
+    private static void appendStaticWebRequirements(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed
+    ) {
+        if (!mutationAllowed
+                || contract == null
+                || contract.staticWebRequirements().isEmpty()) {
+            return;
+        }
+        var requirements = contract.staticWebRequirements();
+        frame.append("[StaticWebRequirements]\n");
+        if (!requirements.requiredVisibleFacts().isEmpty()) {
+            frame.append("requiredVisibleFacts: ")
+                    .append(String.join(", ", requirements.requiredVisibleFacts()))
+                    .append('\n')
+                    .append("Preserve these facts as visible site content; do not invent replacements.\n");
+        }
+        if (!requirements.forbiddenArtifacts().isEmpty()) {
+            frame.append("forbiddenArtifacts: ")
+                    .append(String.join(", ", requirements.forbiddenArtifacts().stream().sorted().toList()))
+                    .append('\n')
+                    .append("Do not create, edit, or rely on these forbidden local artifacts.\n");
+        }
     }
 
     private static List<String> orderedSourceEvidenceTargets(TaskContract contract) {

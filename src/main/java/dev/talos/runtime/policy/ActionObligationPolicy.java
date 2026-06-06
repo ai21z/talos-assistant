@@ -17,6 +17,7 @@ public final class ActionObligationPolicy {
             case DIRECTORY_LISTING -> ActionObligation.LIST_DIR_ONLY;
             case WORKSPACE_EXPLAIN, DIAGNOSE_ONLY -> ActionObligation.INSPECT_REQUIRED;
             case VERIFY_ONLY -> ActionObligation.VERIFY_FROM_EVIDENCE;
+            case CHECKPOINT_RESTORE -> ActionObligation.DIRECT_ANSWER_ONLY;
             case FILE_CREATE, FILE_EDIT -> fileMutationObligation(contract, phase);
             case READ_ONLY_QA -> ActionObligation.NONE;
             case UNKNOWN -> ActionObligation.UNKNOWN;

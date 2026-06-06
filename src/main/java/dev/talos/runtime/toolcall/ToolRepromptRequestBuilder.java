@@ -1,6 +1,10 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -26,10 +30,21 @@ final class ToolRepromptRequestBuilder {
             return narrowed.isEmpty() ? base : narrowed;
         }
         if (expectedTargetProgress) {
-            List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file", "talos.edit_file"));
+            List<String> allowed = staticWebExpectedTargetProgressPrefersWriteFile(state)
+                    ? List.of("talos.write_file")
+                    : List.of("talos.write_file", "talos.edit_file");
+            List<ToolSpec> narrowed = filterTools(base, allowed);
             return narrowed.isEmpty() ? base : narrowed;
         }
         return base;
+    }
+
+    private static boolean staticWebExpectedTargetProgressPrefersWriteFile(LoopState state) {
+        if (state == null || state.messages == null) return false;
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(state.messages),
+                state.workspace);
+        return StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract);
     }
 
     static List<ChatMessage> messages(

@@ -41,6 +41,9 @@ public final class ToolSurfacePlanner {
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             return new Plan(List.of(), "small-talk");
         }
+        if (contract != null && contract.type() == TaskType.CHECKPOINT_RESTORE) {
+            return new Plan(List.of(), "checkpoint restore direct answer");
+        }
         if (sessionUncertaintyRequest(contract)) {
             return new Plan(List.of(), "session-uncertainty direct answer");
         }
@@ -116,6 +119,7 @@ public final class ToolSurfacePlanner {
 
     public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
+        if (contract.type() == TaskType.CHECKPOINT_RESTORE) return List.of();
         if (sessionUncertaintyRequest(contract)) return List.of();
         if (unsupportedCommandRequest(contract)) return List.of();
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");

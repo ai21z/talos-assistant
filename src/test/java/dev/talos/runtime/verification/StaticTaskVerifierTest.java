@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -1862,6 +1863,202 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void staticWebVerificationFailsUnprocessedTailwindDirectivesWithoutRuntimeOrBuild() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main class="min-h-screen bg-slate-950 text-pink-300">Retrocats</main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), """
+                @tailwind base;
+                @tailwind components;
+                @tailwind utilities;
+                """);
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing site to look better with Tailwind styling.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("Tailwind") && p.contains("unprocessed")),
+                result.problems().toString());
+    }
+
+    @Test
+    void staticWebVerificationAllowsTailwindCdnRuntime() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <script src="https://cdn.tailwindcss.com"></script>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body><main class="min-h-screen bg-slate-950 text-pink-300">Retrocats</main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { margin: 0; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing site to look better with Tailwind styling.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("Tailwind")),
+                result.problems().toString());
+    }
+
+    @Test
+    void remoteTailwindCssHrefIsNotTreatedAsMissingLocalStylesheet() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body><main class="min-h-screen bg-slate-950 text-pink-300">Retrocats</main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { margin: 0; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a complete Retrocats static website. Do not create local tailwind.min.css.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertFalse(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("HTML references missing CSS file")
+                                && problem.contains("tailwind.min.css")),
+                result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("Tailwind utility classes")),
+                result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(limitation -> limitation.contains("cdn.jsdelivr.net")
+                                && limitation.contains("tailwind.min.css")),
+                result.facts().toString());
+    }
+
+    @Test
+    void staticWebVerificationAllowsGeneratedCssForUtilityClasses() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main class="min-h-screen bg-slate-950 text-pink-300">Retrocats</main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), """
+                .min-h-screen { min-height: 100vh; }
+                .bg-slate-950 { background-color: #020617; }
+                .text-pink-300 { color: #f9a8d4; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing site to look better with Tailwind styling.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("Tailwind")),
+                result.problems().toString());
+    }
+
+    @Test
+    void staticWebVerificationFailsOrphanTailwindDirectivesFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main class="hero">Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), ".hero { color: #ff4fd8; }\n");
+        Files.writeString(workspace.resolve("styles.css"), """
+                @tailwind base;
+                @tailwind components;
+                @tailwind utilities;
+                """);
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Make the changes in Tailwind by updating styles.css.",
+                loopResult(List.of(successfulWrite("styles.css", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("styles.css") && p.contains("not linked")),
+                result.problems().toString());
+    }
+
+    @Test
+    void staticWebVerificationFailsOrphanLocalTailwindPlaceholderFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <script src="https://cdn.tailwindcss.com"></script>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body><main class="min-h-screen bg-slate-950 text-pink-300">Retrocats</main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { margin: 0; }\n");
+        Files.writeString(workspace.resolve("tailwind.css"), "/* Tailwind placeholder file */\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create the Retrocats site with valid Tailwind CDN only. No local Tailwind artifacts.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("tailwind.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("tailwind.css") && p.contains("local Tailwind artifact")),
+                result.problems().toString());
+    }
+
+    @Test
     void staticButtonFixtureFailsWhenResultHandlerHasTruncatedTextContentAssignment() throws Exception {
         writeButtonFixtureWebFiles("""
                 document.querySelector('#run-button').addEventListener('click', () => {
@@ -3405,6 +3602,131 @@ class StaticTaskVerifierTest {
         assertFalse(result.facts().stream()
                         .anyMatch(f -> f.contains("Expected mutation target(s) were updated")),
                 result.facts().toString());
+    }
+
+    @Test
+    void staticWebRewriteFailsWhenRequiredBandFactsAreDropped() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Retrocats</title>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <h1>Cool Band</h1>
+                    <p>Retro Cat 1 and Retro Cat 2 are touring soon.</p>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { background: #111; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ok');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing Retrocats website. Preserve the band facts: Costanza, Merri, "
+                        + "Cassette Love, Nine-zero vhs, Future tense, Past Perfect Vibes, Dust to Dust, "
+                        + "Gold for the old, Life span, Rome, Barcelona, Berlin.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("required content facts missing")),
+                result.problems().toString());
+    }
+
+    @Test
+    void staticWebRewritePassesContentPreservationWhenRequiredBandFactsRemain() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Retrocats</title>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <h1>Retrocats</h1>
+                    <p>Costanza and Merri formed Retrocats in 2024.</p>
+                    <p>Cassette Love, Nine-zero vhs, Future tense, and Past Perfect Vibes.</p>
+                    <p>Dust to Dust, Gold for the old, Life span.</p>
+                    <p>Rome, Barcelona, Berlin.</p>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { background: #111; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ok');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing Retrocats website. Preserve the band facts: Costanza, Merri, "
+                        + "Cassette Love, Nine-zero vhs, Future tense, Past Perfect Vibes, Dust to Dust, "
+                        + "Gold for the old, Life span, Rome, Barcelona, Berlin.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.facts().stream()
+                        .anyMatch(fact -> fact.contains("Required static-web content facts were preserved")),
+                result.facts().toString());
+    }
+
+    @Test
+    void staticWebRewriteFailsWhenDurableRequiredFactsAreDroppedFromFollowUp() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Retrocats</title>
+                    <script src="https://cdn.tailwindcss.com"></script>
+                  </head>
+                  <body>
+                    <main class="min-h-screen bg-slate-950 text-pink-300">
+                      <h1>Retrocats</h1>
+                      <p>Formed in 2010 in Los Angeles by Alice and Bob.</p>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { background: #111; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ok');\n");
+        TaskContract followUpContract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of("tailwind.min.css"),
+                "Make this Retrocats website more polished and complete.",
+                "active-static-web-context",
+                StaticWebRequirements.of(
+                        List.of("Retrocats", "Costanza", "Merri", "Berlin 22 July 2026"),
+                        Set.of("tailwind.min.css")));
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                followUpContract,
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("required content facts missing")
+                                && problem.contains("Costanza")),
+                result.problems().toString());
     }
 
     @Test

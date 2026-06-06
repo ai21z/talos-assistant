@@ -45,6 +45,14 @@ public final class TaskContractResolver {
                     + "(?:unchanged|as\\s*-?\\s*is|intact)\\b");
     private static final Pattern DIRECT_NOT_TARGET_PREFIX = Pattern.compile(
             "(?is)(?:^|[\\s,;])not\\s+$");
+    private static final Pattern TAILWIND_NEGATIVE_LOCAL_ARTIFACT = Pattern.compile(
+            "(?i)\\bno\\s+(?:broken|placeholder|fake|stub|local|orphan(?:ed)?)\\s+"
+                    + "(.{0,80}?tailwind(?:\\.min)?\\.css)\\b");
+    private static final Pattern TAILWIND_GENERIC_LOCAL_ARTIFACT_BAN = Pattern.compile(
+            "(?i)\\b(?:no|avoid|without|do\\s+not|don't|dont)\\s+"
+                    + "(?:creating\\s+|create\\s+|using\\s+|use\\s+)?"
+                    + "(?:a\\s+|any\\s+)?(?:broken\\s+|placeholder\\s+|fake\\s+|stub\\s+|local\\s+|orphan(?:ed)?\\s+)*"
+                    + "tailwind\\s+(?:artifacts?|files?|css\\s+files?)\\b");
 
     private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
@@ -288,6 +296,10 @@ public final class TaskContractResolver {
                 || MutationIntent.looksPriorChangeStatusQuestion(latest)) {
             return current;
         }
+        if (!current.mutationRequested() && looksLikeConfirmationFollowUp(latest)) {
+            TaskContract inherited = inheritedAssistantPlanContract(messages, latest, current);
+            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
+        }
         if (looksLikeRepairFollowUp(latest)) {
             TaskContract inherited = inheritedRepairContract(messages, latest, current);
             if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
@@ -325,6 +337,18 @@ public final class TaskContractResolver {
 
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
+        if (looksLikeCheckpointRestoreRequest(lower)) {
+            return new TaskContract(
+                    TaskType.CHECKPOINT_RESTORE,
+                    true,
+                    true,
+                    true,
+                    Set.of(),
+                    Set.of(),
+                    Set.of(),
+                    original,
+                    "checkpoint-restore-request");
+        }
         if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(original)) {
             return new TaskContract(
                     TaskType.SMALL_TALK,
@@ -413,7 +437,9 @@ public final class TaskContractResolver {
                 LinkedHashSet<String> mergedSources = new LinkedHashSet<>(sourceEvidenceTargets);
                 mergedSources.addAll(lexicalSourceTargets);
                 sourceEvidenceTargets = Set.copyOf(mergedSources);
-                expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
+                if (!readEvidenceTargetsAreAlsoMutationTargets(original)) {
+                    expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
+                }
             }
             if (expectedTargets.isEmpty()) {
                 expectedTargets = withoutForbiddenTargets(
@@ -451,6 +477,36 @@ public final class TaskContractResolver {
                         : unsupportedCommandVerificationRequest
                         ? "unsupported-command-verification-request"
                         : classificationReason);
+    }
+
+    private static boolean looksLikeCheckpointRestoreRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        String normalized = lower.strip().replaceAll("\\s+", " ");
+        if (normalized.startsWith("how ")
+                || normalized.startsWith("what ")
+                || normalized.startsWith("why ")
+                || normalized.startsWith("explain ")
+                || normalized.startsWith("tell me ")) {
+            return false;
+        }
+        boolean restoreVerb = normalized.contains("revert")
+                || normalized.contains("undo")
+                || normalized.contains("rollback")
+                || normalized.contains("roll back")
+                || normalized.contains("restore");
+        if (!restoreVerb) return false;
+        return normalized.contains("your change")
+                || normalized.contains("your changes")
+                || normalized.contains("talos change")
+                || normalized.contains("talos changes")
+                || normalized.contains("previous change")
+                || normalized.contains("previous changes")
+                || normalized.contains("last change")
+                || normalized.contains("last changes")
+                || normalized.contains("last turn")
+                || normalized.contains("previous turn")
+                || normalized.contains("what you changed")
+                || normalized.contains("what you did");
     }
 
     public static Set<String> extractExpectedTargets(String userRequest) {
@@ -494,6 +550,28 @@ public final class TaskContractResolver {
             }
         }
         return Set.copyOf(out);
+    }
+
+    private static boolean readEvidenceTargetsAreAlsoMutationTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        boolean asksReadFirst = lower.contains("read the current")
+                || lower.contains("read current")
+                || lower.contains("inspect the current")
+                || lower.contains("inspect current")
+                || lower.contains("open the current")
+                || lower.contains("open current");
+        if (!asksReadFirst) return false;
+        return lower.contains("then rewrite the existing files")
+                || lower.contains("then rewrite existing files")
+                || lower.contains("then update the existing files")
+                || lower.contains("then update existing files")
+                || lower.contains("then edit the existing files")
+                || lower.contains("then edit existing files")
+                || lower.contains("rewrite the existing files")
+                || lower.contains("rewrite existing files")
+                || lower.contains("rewrite the current files")
+                || lower.contains("update the current files");
     }
 
     private static String sourceEvidenceFragment(String marker, String span) {
@@ -711,8 +789,29 @@ public final class TaskContractResolver {
         addTargetsFromSpanMatches(out, AVOID_TARGET_SPAN.matcher(userRequest));
         addTargetsFromSpanMatches(out, LEAVE_TARGET_ALONE_SPAN.matcher(userRequest));
         out.addAll(extractPreserveUnchangedTargets(userRequest));
+        addTailwindNegativeLocalArtifactTargets(out, userRequest);
         addDirectNotTargets(out, userRequest);
         return Set.copyOf(out);
+    }
+
+    private static void addTailwindNegativeLocalArtifactTargets(Set<String> out, String userRequest) {
+        if (TAILWIND_GENERIC_LOCAL_ARTIFACT_BAN.matcher(userRequest).find()) {
+            addCommonLocalTailwindArtifactTargets(out);
+        }
+        Matcher spanMatcher = TAILWIND_NEGATIVE_LOCAL_ARTIFACT.matcher(userRequest);
+        while (spanMatcher.find()) {
+            Matcher targetMatcher = TARGET_FILE.matcher(spanMatcher.group(1));
+            while (targetMatcher.find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+        }
+    }
+
+    private static void addCommonLocalTailwindArtifactTargets(Set<String> out) {
+        if (out == null) return;
+        out.add("tailwind.css");
+        out.add("tailwind.min.css");
     }
 
     public static Set<String> extractPreserveUnchangedTargets(String userRequest) {
@@ -1066,6 +1165,24 @@ public final class TaskContractResolver {
         return DEICTIC_FOLLOW_UPS.contains(lower);
     }
 
+    private static boolean looksLikeConfirmationFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.strip().toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .replaceAll("[.!?]+$", "");
+        return lower.equals("yes")
+                || lower.equals("yes proceed")
+                || lower.equals("yes proceed please")
+                || lower.equals("proceed")
+                || lower.equals("proceed please")
+                || lower.equals("go ahead")
+                || lower.equals("go ahead please")
+                || lower.equals("do it")
+                || lower.equals("do it please")
+                || lower.equals("continue")
+                || lower.equals("continue please");
+    }
+
     private static boolean looksLikeRepairFollowUp(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.strip().toLowerCase(Locale.ROOT)
@@ -1089,6 +1206,13 @@ public final class TaskContractResolver {
                 || lower.contains("fix this")
                 || lower.contains("repair it")
                 || lower.contains("repair this")
+                || lower.contains("final pass")
+                || lower.contains("stress check")
+                || lower.contains("inspect and repair")
+                || lower.contains("repair anything remaining")
+                || lower.contains("fix what remains")
+                || lower.contains("leave it in the best verified state")
+                || lower.contains("best verified state")
                 || lower.contains("still does not work")
                 || lower.contains("still doesn't work")
                 || lower.contains("it does not work")
@@ -1137,7 +1261,6 @@ public final class TaskContractResolver {
             TaskContract contract
     ) {
         if (contract == null
-                || !contract.mutationAllowed()
                 || !contract.expectedTargets().isEmpty()
                 || !looksContextualStaticWebAssetFollowUp(latestUserRequest)
                 || !priorMessagesMentionStaticWebSurface(messages, latestUserRequest)) {
@@ -1148,15 +1271,17 @@ public final class TaskContractResolver {
                 contract.forbiddenTargets());
         if (expectedTargets.isEmpty()) return contract;
         return new TaskContract(
-                contract.type(),
-                contract.mutationRequested(),
-                contract.mutationAllowed(),
-                contract.verificationRequired(),
+                contract.mutationAllowed() ? contract.type() : TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
                 expectedTargets,
                 contract.sourceEvidenceTargets(),
                 contract.forbiddenTargets(),
                 contract.originalUserRequest(),
-                contract.classificationReason());
+                contract.mutationAllowed()
+                        ? contract.classificationReason()
+                        : "contextual-static-web-follow-up");
     }
 
     private static boolean looksContextualStaticWebAssetFollowUp(String userRequest) {
@@ -1169,7 +1294,45 @@ public final class TaskContractResolver {
         boolean filesWithAssets = lower.contains("files")
                 && (mentionsStyleAsset(lower) || mentionsScriptAsset(lower));
         boolean styledInteraction = mentionsStyleAsset(lower) && mentionsScriptAsset(lower);
-        return restFiles || filesWithAssets || styledInteraction;
+        boolean existingSiteRewrite = (lower.contains("site")
+                || lower.contains("website")
+                || lower.contains("webpage")
+                || lower.contains("web page")
+                || lower.contains("page"))
+                && (lower.contains("rewrite")
+                || lower.contains("redesign")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("improve")
+                || lower.contains("better"));
+        return restFiles || filesWithAssets || styledInteraction || existingSiteRewrite
+                || looksVagueStaticWebRedesignFollowUp(lower);
+    }
+
+    private static boolean looksVagueStaticWebRedesignFollowUp(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        boolean mutationPhrase = lower.contains("make it better")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("more modern")
+                || lower.contains("still bad")
+                || lower.contains("according to my intent")
+                || lower.contains("make the changes in tailwind")
+                || (lower.contains("edit") && lower.contains("better"))
+                || (lower.contains("modify") && lower.contains("files"));
+        if (!mutationPhrase) return false;
+        return !startsLikeReadOnlyQuestion(lower);
+    }
+
+    private static boolean startsLikeReadOnlyQuestion(String lower) {
+        if (lower == null) return false;
+        String normalized = lower.strip();
+        return normalized.startsWith("what ")
+                || normalized.startsWith("why ")
+                || normalized.startsWith("how ")
+                || normalized.startsWith("which ")
+                || normalized.startsWith("where ")
+                || normalized.startsWith("when ");
     }
 
     private static boolean priorMessagesMentionStaticWebSurface(
@@ -1211,6 +1374,48 @@ public final class TaskContractResolver {
             return i;
         }
         return -1;
+    }
+
+    private static TaskContract inheritedAssistantPlanContract(
+            List<ChatMessage> messages,
+            String latestUserRequest,
+            TaskContract current
+    ) {
+        String previousAssistant = previousAssistantResponse(messages, latestUserRequest);
+        if (!looksLikeConcreteMutationProposal(previousAssistant)) return null;
+        Set<String> expectedTargets = extractExpectedTargets(previousAssistant);
+        if (expectedTargets.isEmpty()) return null;
+        Set<String> forbiddenTargets = current == null ? Set.of() : current.forbiddenTargets();
+        expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
+        if (expectedTargets.isEmpty()) return null;
+        return new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                expectedTargets,
+                Set.of(),
+                forbiddenTargets,
+                "Confirmed assistant-proposed mutation plan.\n\nConfirmation follow-up: "
+                        + (latestUserRequest == null ? "" : latestUserRequest.strip()),
+                "confirmation-follow-up-inherits-assistant-mutation-plan");
+    }
+
+    private static boolean looksLikeConcreteMutationProposal(String assistantResponse) {
+        if (assistantResponse == null || assistantResponse.isBlank()) return false;
+        String lower = assistantResponse.toLowerCase(Locale.ROOT);
+        boolean asksConfirmation = lower.contains("would you like")
+                || lower.contains("should i proceed")
+                || lower.contains("shall i proceed")
+                || lower.contains("proceed?");
+        if (!asksConfirmation) return false;
+        boolean mutationLanguage = lower.contains("update")
+                || lower.contains("edit")
+                || lower.contains("create")
+                || lower.contains("write")
+                || lower.contains("change")
+                || lower.contains("modify");
+        return mutationLanguage && !extractExpectedTargets(assistantResponse).isEmpty();
     }
 
     private static TaskContract inheritedRepairContract(

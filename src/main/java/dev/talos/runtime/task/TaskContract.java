@@ -18,7 +18,8 @@ public record TaskContract(
         Set<String> sourceEvidenceTargets,
         Set<String> forbiddenTargets,
         String originalUserRequest,
-        String classificationReason
+        String classificationReason,
+        StaticWebRequirements staticWebRequirements
 ) {
     public TaskContract(
             TaskType type,
@@ -38,7 +39,8 @@ public record TaskContract(
                 Set.of(),
                 forbiddenTargets,
                 originalUserRequest,
-                "");
+                "",
+                null);
     }
 
     public TaskContract(
@@ -60,7 +62,32 @@ public record TaskContract(
                 Set.of(),
                 forbiddenTargets,
                 originalUserRequest,
-                classificationReason);
+                classificationReason,
+                null);
+    }
+
+    public TaskContract(
+            TaskType type,
+            boolean mutationRequested,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            Set<String> expectedTargets,
+            Set<String> sourceEvidenceTargets,
+            Set<String> forbiddenTargets,
+            String originalUserRequest,
+            String classificationReason
+    ) {
+        this(
+                type,
+                mutationRequested,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                sourceEvidenceTargets,
+                forbiddenTargets,
+                originalUserRequest,
+                classificationReason,
+                null);
     }
 
     public TaskContract {
@@ -70,6 +97,9 @@ public record TaskContract(
         forbiddenTargets = forbiddenTargets == null ? Set.of() : Set.copyOf(forbiddenTargets);
         originalUserRequest = originalUserRequest == null ? "" : originalUserRequest;
         classificationReason = classificationReason == null ? "" : classificationReason;
+        staticWebRequirements = staticWebRequirements == null
+                ? StaticWebRequirements.fromRequest(originalUserRequest, forbiddenTargets)
+                : staticWebRequirements.merge(StaticWebRequirements.fromRequest(originalUserRequest, forbiddenTargets));
     }
 
     public static TaskContract unknown(String userRequest) {
@@ -82,6 +112,7 @@ public record TaskContract(
                 Set.of(),
                 Set.of(),
                 userRequest,
-                "unknown");
+                "unknown",
+                StaticWebRequirements.none());
     }
 }

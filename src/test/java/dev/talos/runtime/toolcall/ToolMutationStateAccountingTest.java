@@ -19,6 +19,7 @@ class ToolMutationStateAccountingTest {
         state.staticWebFullRewriteRequiredTargets.add("src/App.java");
         state.successfulReadCalls.put("talos.read_file:path=src/App.java;", "1 | old");
         state.successfulReadCallBodies.put("talos.read_file:path=src/App.java;", "1 | old");
+        state.readFileBodiesThisTurn.put("src/App.java", "1 | old");
         ToolCall write = new ToolCall("talos.write_file", Map.of(
                 "path", "src\\App.java",
                 "content", "new"));
@@ -38,6 +39,7 @@ class ToolMutationStateAccountingTest {
         assertFalse(state.staticWebFullRewriteRequiredTargets.contains("src/App.java"));
         assertTrue(state.successfulReadCalls.isEmpty());
         assertTrue(state.successfulReadCallBodies.isEmpty());
+        assertEquals("1 | old", state.readFileBodiesThisTurn.get("src/App.java"));
         assertEquals(java.util.List.of("✓ Wrote file successfully"), state.pendingMutationSummaries);
     }
 

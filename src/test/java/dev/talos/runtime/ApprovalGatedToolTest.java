@@ -357,7 +357,8 @@ class ApprovalGatedToolTest {
     }
 
     @Test
-    void explicitEditRequestStillReachesApproval() {
+    void explicitEditRequestStillReachesApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "old\n");
         var registry = new ToolRegistry();
         registry.register(editFileTool());
 
@@ -371,8 +372,10 @@ class ApprovalGatedToolTest {
                 gate,
                 registry);
 
-        var ctx = Context.builder(new Config()).build();
-        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var session = new Session(workspace, new Config());
         var call = new ToolCall("talos.edit_file", Map.of(
                 "path", "index.html",
                 "old_string", "old",
@@ -381,7 +384,7 @@ class ApprovalGatedToolTest {
         TurnUserRequestCapture.set("edit the title in index.html");
         try {
             ToolResult result = processor.executeTool(session, call, ctx);
-            assertTrue(result.success(), "explicit edit request should keep approval path");
+            assertTrue(result.success(), "explicit edit request should keep approval path: " + result.errorMessage());
             assertEquals(1, gateCalls[0], "approval should still be consulted");
         } finally {
             TurnUserRequestCapture.clear();
@@ -458,7 +461,8 @@ class ApprovalGatedToolTest {
     }
 
     @Test
-    void editFileDeletionStillReachesApproval() {
+    void editFileDeletionStillReachesApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<div class=\"unused\"></div>\n");
         var registry = new ToolRegistry();
         registry.register(editFileTool());
 
@@ -472,8 +476,10 @@ class ApprovalGatedToolTest {
                 gate,
                 registry);
 
-        var ctx = Context.builder(new Config()).build();
-        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var session = new Session(workspace, new Config());
         var call = new ToolCall("talos.edit_file", Map.of(
                 "path", "index.html",
                 "old_string", "<div class=\"unused\"></div>",
@@ -482,7 +488,8 @@ class ApprovalGatedToolTest {
         TurnUserRequestCapture.set("remove the unused div from index.html");
         try {
             ToolResult result = processor.executeTool(session, call, ctx);
-            assertTrue(result.success(), "empty new_string is valid deletion and should reach approval");
+            assertTrue(result.success(), "empty new_string is valid deletion and should reach approval: "
+                    + result.errorMessage());
             assertEquals(1, gateCalls[0], "valid deletion should still ask approval");
         } finally {
             TurnUserRequestCapture.clear();
@@ -630,7 +637,8 @@ class ApprovalGatedToolTest {
     }
 
     @Test
-    void directImperativeEditRequestStillReachesApproval() {
+    void directImperativeEditRequestStillReachesApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("greeting.txt"), "Hello world\n");
         var registry = new ToolRegistry();
         registry.register(editFileTool());
 
@@ -644,8 +652,10 @@ class ApprovalGatedToolTest {
                 gate,
                 registry);
 
-        var ctx = Context.builder(new Config()).build();
-        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var session = new Session(workspace, new Config());
         var call = new ToolCall("talos.edit_file", Map.of(
                 "path", "greeting.txt",
                 "old_string", "Hello world",
@@ -654,7 +664,8 @@ class ApprovalGatedToolTest {
         TurnUserRequestCapture.set("Edit greeting.txt so Hello world becomes Hello Talos.");
         try {
             ToolResult result = processor.executeTool(session, call, ctx);
-            assertTrue(result.success(), "direct imperative edit request should keep approval path");
+            assertTrue(result.success(), "direct imperative edit request should keep approval path: "
+                    + result.errorMessage());
             assertEquals(1, gateCalls[0], "approval should still be consulted");
         } finally {
             TurnUserRequestCapture.clear();

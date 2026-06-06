@@ -8,6 +8,7 @@ import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 
@@ -183,15 +184,15 @@ class ActiveTaskContextUpdaterTest {
     @Test
     void successfulMutationWithPassingVerificationClearsExistingContextAndGoal() {
         ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
-                6, "trace-old", List.of("index.html"), "Change the hero.");
+                6, "trace-old", List.of("README.md"), "Change the title.");
         ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
         TurnResult result = turn(
                 10,
                 new Result.Ok("Done."),
-                policy("FILE_EDIT", true, true, List.of("index.html")),
-                trace(10, "trace-success", true, true, List.of("index.html"),
+                policy("FILE_EDIT", true, true, List.of("README.md")),
+                trace(10, "trace-success", true, true, List.of("README.md"),
                         "PASSED", "All checks passed", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_VERIFIED"),
-                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, "")),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "README.md", true, "")),
                 0);
 
         ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
@@ -202,6 +203,89 @@ class ActiveTaskContextUpdaterTest {
 
         assertEquals(ActiveTaskContext.none(), update.activeTaskContext());
         assertEquals(ArtifactGoal.none(), update.artifactGoal());
+    }
+
+    @Test
+    void successfulStaticWebMutationWithPassingVerificationKeepsDurableSurfaceContext() {
+        TurnResult result = turn(
+                10,
+                new Result.Ok("Done."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css", "script.js")),
+                trace(10, "trace-static-success", true, true, List.of("index.html", "style.css", "script.js"),
+                        "PASSED", "All checks passed", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_VERIFIED"),
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "style.css", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "script.js", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Create a synthwave band website.",
+                ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.VERIFIED_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html", "style.css", "script.js"), update.activeTaskContext().targets());
+        assertEquals(ArtifactGoal.ArtifactKind.STATIC_WEB, update.artifactGoal().artifactKind());
+    }
+
+    @Test
+    void successfulStaticWebMutationWithReadbackOnlyVerificationKeepsDurableSurfaceContext() {
+        TurnResult result = turn(
+                12,
+                new Result.Ok("Done."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css", "script.js")),
+                trace(12, "trace-static-unverified", true, true, List.of("index.html", "style.css", "script.js"),
+                        "READBACK_ONLY", "", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_UNVERIFIED"),
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "style.css", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "script.js", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "ok just edit the site to look better",
+                ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        assertEquals(ActiveTaskContext.Kind.PARTIAL_MUTATION, update.activeTaskContext().kind());
+        assertEquals(List.of("index.html", "style.css", "script.js"), update.activeTaskContext().targets());
+        assertEquals(ArtifactGoal.ArtifactKind.STATIC_WEB, update.artifactGoal().artifactKind());
+    }
+
+    @Test
+    void failedNoMutationStaticWebCreationCreatesPendingContextWithRequirements() {
+        String request = "Create a complete Retrocats website. Use exactly index.html, style.css, and script.js. "
+                + "Do not create a local tailwind.min.css file. "
+                + "The site must preserve these required visible facts: Retrocats, Costanza, Berlin 22 July 2026.";
+        TurnResult result = turn(
+                13,
+                new Result.Ok("[Action obligation failed: no file writes completed.]"),
+                policy("FILE_CREATE", true, true,
+                        List.of("index.html", "style.css", "script.js"),
+                        List.of("tailwind.min.css")),
+                trace(13, "trace-pending-static", true, true,
+                        List.of("index.html", "style.css", "script.js"),
+                        "NOT_RUN", "", "GRANTED_OR_NOT_REQUIRED", "NOT_REQUESTED", "BLOCKED_BY_POLICY"),
+                List.of(),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                request,
+                ActiveTaskContext.none(),
+                ArtifactGoal.none());
+
+        ActiveTaskContext context = update.activeTaskContext();
+        assertEquals(ActiveTaskContext.Kind.PENDING_MUTATION, context.kind());
+        assertEquals(ActiveTaskContext.Operation.CREATE, context.operation());
+        assertEquals(List.of("index.html", "style.css", "script.js"), context.targets());
+        StaticWebRequirements requirements = context.staticWebRequirements();
+        assertTrue(requirements.requiredVisibleFacts().contains("Costanza"), requirements.toString());
+        assertEquals(java.util.Set.of("tailwind.min.css"), requirements.forbiddenArtifacts());
+        assertEquals(ArtifactGoal.ArtifactKind.STATIC_WEB, update.artifactGoal().artifactKind());
     }
 
     @Test
@@ -257,17 +341,17 @@ class ActiveTaskContextUpdaterTest {
     @Test
     void recoveredFailedThenSuccessfulMutationClearsWhenTraceOutcomeIsVerifiedSucceeded() {
         ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
-                6, "trace-old", List.of("index.html"), "Change the hero.");
+                6, "trace-old", List.of("README.md"), "Change the title.");
         ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
         TurnResult result = turn(
                 12,
                 new Result.Ok("Done after retry."),
-                policy("FILE_EDIT", true, true, List.of("index.html")),
-                trace(12, "trace-recovered", true, true, List.of("index.html"),
+                policy("FILE_EDIT", true, true, List.of("README.md")),
+                trace(12, "trace-recovered", true, true, List.of("README.md"),
                         "PASSED", "All checks passed", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_VERIFIED"),
                 List.of(
-                        new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", false, "old_string not found"),
-                        new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, "")),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "README.md", false, "old_string not found"),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "README.md", true, "")),
                 0);
 
         ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
@@ -350,12 +434,21 @@ class ActiveTaskContextUpdaterTest {
             boolean mutationAllowed,
             boolean verificationRequired,
             List<String> expectedTargets) {
+        return policy(taskType, mutationAllowed, verificationRequired, expectedTargets, List.of());
+    }
+
+    private static TurnPolicyTrace policy(
+            String taskType,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            List<String> expectedTargets,
+            List<String> forbiddenTargets) {
         return new TurnPolicyTrace(
                 taskType,
                 mutationAllowed,
                 verificationRequired,
                 expectedTargets,
-                List.of(),
+                forbiddenTargets,
                 mutationAllowed ? "APPLY" : "INSPECT",
                 mutationAllowed ? "APPLY" : "INSPECT",
                 List.of(),

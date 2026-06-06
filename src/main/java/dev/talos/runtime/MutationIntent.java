@@ -33,7 +33,7 @@ public final class MutationIntent {
             "(make|build|create|generate|set\\s+up|setup|scaffold)";
 
     private static final String ARTIFACT_NOUNS =
-            "(website|site|web\\s*app|app|application|page|calculator|"
+            "(website|site|web\\s*page|webpage|landing\\s+page|web\\s*app|app|application|page|calculator|"
                     + "component|file|project|tool|ui|interface|stylesheet|"
                     + "style\\s*sheet|script)";
 
@@ -46,6 +46,12 @@ public final class MutationIntent {
     private static final String DIRECTORY_CREATION_REQUEST =
             "(?:make|create)\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?"
                     + "(?:directories|directory|dirs|dir|folders|folder)\\b";
+
+    private static final Pattern TERMINAL_BUILD_ARTIFACT_REQUEST = Pattern.compile(
+            "\\b(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?"
+                    + BUILD_ARTIFACT_VERBS + "\\s+(?:me\\s+)?"
+                    + "(?:(?:a|an|the|this|that)\\s+)?(?:\\S+\\s+){0,10}"
+                    + ARTIFACT_NOUNS + "\\b\\s*\\??\\s*$");
 
     private static final List<Pattern> REQUEST_PATTERNS = List.of(
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b"),
@@ -114,6 +120,11 @@ public final class MutationIntent {
             "dont modify", "dont write", "dont create", "dont save",
             "dont apply", "dont touch", "dont mutate", "leave files unchanged",
             "no file changes", "without changing"
+    );
+
+    private static final Set<String> SCOPED_TARGET_QUALIFIERS = Set.of(
+            "local", "broken", "placeholder", "fake", "stub", "orphan", "orphaned",
+            "extra", "new", "separate", "unlinked"
     );
 
     private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
@@ -238,6 +249,7 @@ public final class MutationIntent {
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
+        if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
@@ -245,6 +257,7 @@ public final class MutationIntent {
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
+        if (looksTerminalBuildArtifactRequest(lower)) return "explicit-terminal-build-artifact-request";
         if (looksNaturalMakeItArtifactRequest(lower)) return "natural-artifact-request";
         if (looksExplicitFileTargetMutation(lower)) return "explicit-mutation-verb-with-file-target";
         for (String marker : MARKERS) {
@@ -300,6 +313,26 @@ public final class MutationIntent {
                 || lower.contains("file")
                 || lower.contains("open and use")
                 || lower.contains("i just want"));
+    }
+
+    private static boolean looksTerminalBuildArtifactRequest(String lower) {
+        return lower != null && TERMINAL_BUILD_ARTIFACT_REQUEST.matcher(lower).find();
+    }
+
+    private static boolean looksCapabilityOnlyArtifactQuestion(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        boolean asksAboutCapability = lower.contains("is this in your skills")
+                || lower.contains("is that in your skills")
+                || lower.contains("outside your skills")
+                || lower.contains("outside your capabilities")
+                || lower.contains("is this something you can do")
+                || lower.contains("is that something you can do");
+        if (!asksAboutCapability) return false;
+        return Pattern.compile("\\b" + BUILD_ARTIFACT_VERBS + "\\b").matcher(lower).find()
+                && (Pattern.compile("\\b" + ARTIFACT_NOUNS + "\\b").matcher(lower).find()
+                || lower.contains("web pages")
+                || lower.contains("webpages")
+                || lower.contains("websites"));
     }
 
     private static boolean looksExplicitFileTargetMutation(String lower) {
@@ -466,12 +499,51 @@ public final class MutationIntent {
                 || tail.startsWith("secrets")
                 || tail.startsWith("credentials")
                 || tail.startsWith("else")
-                || startsWithNamedFileTarget(tail);
+                || startsWithNamedFileTarget(tail)
+                || startsWithQualifiedNamedFileTarget(tail)
+                || startsWithTailwindArtifactReference(tail);
     }
 
     private static boolean startsWithNamedFileTarget(String tail) {
         if (tail == null || tail.isBlank()) return false;
         var matcher = NAMED_FILE_TARGET.matcher(tail);
         return matcher.find() && matcher.start() <= 4;
+    }
+
+    private static boolean startsWithQualifiedNamedFileTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        String candidate = stripLeadingArticle(tail.stripLeading());
+        for (int i = 0; i < 4; i++) {
+            if (startsWithNamedFileTarget(candidate)) return true;
+            int space = candidate.indexOf(' ');
+            if (space < 0) return false;
+            String token = candidate.substring(0, space).replaceAll("[^a-z0-9-]", "");
+            if (!SCOPED_TARGET_QUALIFIERS.contains(token)) return false;
+            candidate = stripLeadingArticle(candidate.substring(space + 1).stripLeading());
+        }
+        return startsWithNamedFileTarget(candidate);
+    }
+
+    private static String stripLeadingArticle(String value) {
+        if (value == null || value.isBlank()) return "";
+        return value.replaceFirst("^(?:a|an|the)\\s+", "");
+    }
+
+    private static boolean startsWithTailwindArtifactReference(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        String candidate = stripLeadingArticle(tail.stripLeading());
+        for (int i = 0; i < 4; i++) {
+            if (candidate.startsWith("tailwind")
+                    && (candidate.contains(" file") || candidate.contains(" css"))) {
+                return true;
+            }
+            int space = candidate.indexOf(' ');
+            if (space < 0) return false;
+            String token = candidate.substring(0, space).replaceAll("[^a-z0-9-]", "");
+            if (!SCOPED_TARGET_QUALIFIERS.contains(token)) return false;
+            candidate = stripLeadingArticle(candidate.substring(space + 1).stripLeading());
+        }
+        return candidate.startsWith("tailwind")
+                && (candidate.contains(" file") || candidate.contains(" css"));
     }
 }

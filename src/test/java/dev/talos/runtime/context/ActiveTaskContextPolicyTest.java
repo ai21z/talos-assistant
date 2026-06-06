@@ -3,6 +3,7 @@ package dev.talos.runtime.context;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.StaticWebRequirements;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -242,6 +243,72 @@ class ActiveTaskContextPolicyTest {
         assertEquals(rawContract, decision.taskContract());
     }
 
+    @Test void vagueStaticWebRedesignConsumesActiveStaticWebContext() {
+        ActiveTaskContext saved = staticWebMutationContext();
+        String userRequest = "make it better and more modern";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertTrue(decision.consumed());
+        assertEquals(TaskType.FILE_EDIT, decision.taskContract().type());
+        assertTrue(decision.taskContract().mutationAllowed());
+        assertTrue(decision.taskContract().verificationRequired());
+        assertEquals(Set.of("index.html", "script.js", "style.css"),
+                decision.taskContract().expectedTargets());
+        assertEquals(ArtifactGoal.ArtifactKind.STATIC_WEB, decision.artifactGoal().artifactKind());
+    }
+
+    @Test void pendingStaticWebCreationContextReclassifiesPolishFollowUpAsFileCreate() {
+        ActiveTaskContext saved = ActiveTaskContext.pendingMutation(
+                2,
+                "trace-pending-static",
+                List.of("index.html", "style.css", "script.js"),
+                "No required file writes completed.",
+                StaticWebRequirements.of(
+                        List.of("Retrocats", "Costanza", "Berlin 22 July 2026"),
+                        Set.of("tailwind.min.css")));
+        String userRequest = "Make this Retrocats website even more polished and complete.";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertTrue(decision.consumed());
+        assertEquals(TaskType.FILE_CREATE, decision.taskContract().type());
+        assertTrue(decision.taskContract().mutationAllowed());
+        assertEquals(Set.of("index.html", "style.css", "script.js"),
+                decision.taskContract().expectedTargets());
+        assertEquals(Set.of("tailwind.min.css"), decision.taskContract().forbiddenTargets());
+        assertTrue(decision.taskContract().staticWebRequirements().requiredVisibleFacts().contains("Costanza"),
+                decision.taskContract().staticWebRequirements().toString());
+    }
+
+    @Test void unrelatedBetterQuestionDoesNotConsumeStaticWebContext() {
+        ActiveTaskContext saved = staticWebMutationContext();
+        String userRequest = "what is a better name for the band?";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+    }
+
     @Test void completionQuestionDoesNotConsumeVerifierContextAsRepairMutation() {
         ActiveTaskContext saved = staticWebVerifierContext();
         String userRequest = "Is it complete?";
@@ -280,6 +347,14 @@ class ActiveTaskContextPolicyTest {
                         "#teaser-button",
                         "#teaser-status",
                         "click")));
+    }
+
+    private static ActiveTaskContext staticWebMutationContext() {
+        return ActiveTaskContext.proposedChanges(
+                2,
+                "trace-static-web",
+                List.of("index.html", "style.css", "script.js"),
+                "Existing static web surface: index.html, style.css, script.js.");
     }
 
     private static void assertNonActiveBaseline(TaskContract rawContract, ActiveTaskContext savedContext) {

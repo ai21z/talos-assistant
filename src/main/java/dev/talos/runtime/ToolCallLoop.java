@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -81,7 +82,8 @@ public final class ToolCallLoop {
             int cushionFiresB3EditShortCircuit,
             int cushionFiresE1Suggestion,
             FailureDecision failureDecision,
-            List<ToolOutcome> toolOutcomes
+            List<ToolOutcome> toolOutcomes,
+            Map<String, String> readFileBodies
     ) {
         public LoopResult {
             toolNames = toolNames == null ? List.of() : List.copyOf(toolNames);
@@ -91,6 +93,7 @@ public final class ToolCallLoop {
                     ? FailureDecision.continueLoop()
                     : failureDecision;
             toolOutcomes = toolOutcomes == null ? List.of() : List.copyOf(toolOutcomes);
+            readFileBodies = readFileBodies == null ? Map.of() : Map.copyOf(readFileBodies);
         }
 
         public LoopResult(
@@ -138,6 +141,31 @@ public final class ToolCallLoop {
                     cushionFiresRedundantRead, cushionFiresAliasRescue,
                     cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
                     FailureDecision.continueLoop(), toolOutcomes);
+        }
+
+        public LoopResult(
+                String finalAnswer,
+                int iterations,
+                int toolsInvoked,
+                List<String> toolNames,
+                List<ChatMessage> messages,
+                int failedCalls,
+                int retriedCalls,
+                boolean hitIterLimit,
+                int mutatingToolSuccesses,
+                List<String> readPaths,
+                int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue,
+                int cushionFiresB3EditShortCircuit,
+                int cushionFiresE1Suggestion,
+                FailureDecision failureDecision,
+                List<ToolOutcome> toolOutcomes
+        ) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls,
+                    retriedCalls, hitIterLimit, mutatingToolSuccesses, readPaths,
+                    cushionFiresRedundantRead, cushionFiresAliasRescue,
+                    cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    failureDecision, toolOutcomes, Map.of());
         }
 
         public String summary() {
@@ -350,7 +378,8 @@ public final class ToolCallLoop {
                 hitIterLimit, state.mutatingToolSuccesses, List.copyOf(state.pathsReadThisTurn),
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
-                state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes));
+                state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes),
+                Map.copyOf(state.readFileBodiesThisTurn));
     }
 
     static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {

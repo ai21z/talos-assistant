@@ -9,6 +9,7 @@ public enum TaskType {
     DIAGNOSE_ONLY,
     FILE_EDIT,
     FILE_CREATE,
+    CHECKPOINT_RESTORE,
     VERIFY_ONLY,
     UNKNOWN
 }

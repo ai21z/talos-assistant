@@ -46,6 +46,21 @@ class CapabilityProfileRegistryTest {
     }
 
     @Test
+    void longFormWebsiteBriefEndingInCreateQuestionSelectsStaticWebProfile() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "I want a cool modern looking webpage for a synthwave band called Retrocats. "
+                        + "Use dark colors with orange and pink accents, include albums, top songs, "
+                        + "a bio, and concert dates. Can you create that web page?");
+
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+
+        assertTrue(profile.staticWeb());
+        assertEquals(ArtifactKind.STATIC_WEB, profile.artifactKind());
+        assertEquals(ArtifactOperation.CREATE, profile.operation());
+        assertEquals(VerifierProfile.STATIC_WEB, profile.verifierProfile());
+    }
+
+    @Test
     void readmeAndConfigTasksDoNotSelectStaticWebProfile() {
         for (String prompt : java.util.List.of(
                 "Update README.md with the new setup instructions.",

@@ -481,7 +481,7 @@ class JsonScenarioPackTest {
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(2, 2, 0, 0)
+            result.assertApprovalCounts(1, 1, 0, 0)
                     .assertAnswerContains("some requested file changes succeeded and some failed")
                     .assertAnswerContains("Call talos.read_file for `README.md`")
                     .assertAnswerContains("separate follow-up")

@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ToolCallRepromptStageToolSurfaceTest {
 
     @Test
-    void expectedTargetProgressRepromptUsesOnlyWriteAndEditTools() {
+    void staticWebExpectedTargetProgressRepromptUsesOnlyWriteFileTool() {
         RecordingResolver resolver = new RecordingResolver();
         List<ToolSpec> broadTools = broadToolSurface();
         LlmClient llm = new LlmClient(engineConfig(), resolver);
@@ -63,7 +63,7 @@ class ToolCallRepromptStageToolSurfaceTest {
 
         assertTrue(shouldReprompt);
         assertEquals(
-                List.of("talos.write_file", "talos.edit_file"),
+                List.of("talos.write_file"),
                 toolNames(resolver.lastRequest));
     }
 

@@ -16,6 +16,9 @@ public final class TaskIntentResolver {
         TaskIntent parityIntent = fromLegacyContract(legacyContract);
         Set<String> mutationTargets = explicitMutationTargets(userRequest, legacyContract);
         Set<String> optionalMutationTargets = explicitOptionalMutationTargets(userRequest, legacyContract);
+        if (hasExactStaticWebFileList(userRequest) || readThenRewriteExistingFiles(userRequest)) {
+            optionalMutationTargets = Set.of();
+        }
         if (!optionalMutationTargets.isEmpty()) {
             LinkedHashSet<String> requiredMutationTargets = new LinkedHashSet<>(mutationTargets);
             requiredMutationTargets.removeAll(optionalMutationTargets);
@@ -315,6 +318,37 @@ public final class TaskIntentResolver {
         String lower = userRequest == null ? "" : userRequest.toLowerCase(Locale.ROOT);
         return lower.matches("(?s).*\\b(?:do\\s+not|don't|dont)\\s+"
                 + "(?:create|add|write|save)\\s+(?:any\\s+)?extra\\s+files?\\b.*");
+    }
+
+    private static boolean hasExactStaticWebFileList(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        return lower.contains("use exactly")
+                && lower.contains("index.html")
+                && lower.contains("style.css")
+                && lower.contains("script.js");
+    }
+
+    private static boolean readThenRewriteExistingFiles(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        boolean asksReadFirst = lower.contains("read the current")
+                || lower.contains("read current")
+                || lower.contains("inspect the current")
+                || lower.contains("inspect current")
+                || lower.contains("open the current")
+                || lower.contains("open current");
+        if (!asksReadFirst) return false;
+        return lower.contains("then rewrite the existing files")
+                || lower.contains("then rewrite existing files")
+                || lower.contains("then update the existing files")
+                || lower.contains("then update existing files")
+                || lower.contains("then edit the existing files")
+                || lower.contains("then edit existing files")
+                || lower.contains("rewrite the existing files")
+                || lower.contains("rewrite existing files")
+                || lower.contains("rewrite the current files")
+                || lower.contains("update the current files");
     }
 
     private static boolean isNegatedClause(String lowerClause) {

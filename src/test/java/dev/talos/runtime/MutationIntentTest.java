@@ -10,6 +10,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutationIntentTest {
 
+    private static final String RETROCATS_AUDIT_PROMPT =
+            "Create a complete modern dark synthwave static website for a band called Retrocats. "
+                    + "Use exactly index.html, style.css, and script.js as the local files. "
+                    + "Use Tailwind correctly only through the official browser CDN or through generated CSS. "
+                    + "Do not create a local tailwind.min.css file, no broken tailwind.min.css, "
+                    + "no placeholder Tailwind file, and no unprocessed @tailwind directives. "
+                    + "The site must preserve these required visible facts: Retrocats, Costanza, Merri, "
+                    + "formed in 2024, analog synth sounds, electric guitars, 80s rock and metal blended "
+                    + "with synthwave, Cassette Love, Nine-zero vhs, Future tense, Past Perfect Vibes, "
+                    + "Dust to Dust, Gold for the old, Life span, Rome 15 July 2026, Barcelona 18 July 2026, "
+                    + "Berlin 22 July 2026. Make it visually strong: dark base, pink/orange synthwave "
+                    + "accents, band hero, albums, top songs, concerts, and a small interactive JavaScript enhancement.";
+
     private static final String T61_B_RETRY_PROMPT =
             "This is a retry after the denied attempt. Edit README.md now using talos.write_file. "
                     + "The complete file must contain exactly two lines: first line T61-B exact README; "
@@ -24,6 +37,8 @@ class MutationIntentTest {
                 "Rewrite scripts.js so the button works.",
                 "Can you make me a simple BMI calculator webpage here?",
                 "I am not technical, I just want a page I can open and use. Can you make it?",
+                "I want a modern synthwave band web page with dark colors, pink and orange accents, "
+                        + "album sections, top songs, and upcoming concerts. Can you create that web page?",
                 "Can you fix the files in this folder for me?",
                 "Great! now can you create that site?",
                 "Move public.txt to archive/public.txt.",
@@ -70,6 +85,14 @@ class MutationIntentTest {
     }
 
     @Test
+    void capabilityOnlyCreationQuestionsStayReadOnly() {
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "I want to make 2 web pages. Can you help me with that? Is this in your skills?"));
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Can you create websites, or is that outside your skills?"));
+    }
+
+    @Test
     void priorChangeStatusQuestionsAreNotMutationIntent() {
         assertFalse(MutationIntent.looksExplicitMutationRequest("did you make the changes?"));
         assertFalse(MutationIntent.looksExplicitMutationRequest("did you update the files?"));
@@ -93,6 +116,29 @@ class MutationIntentTest {
                 "Summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files."));
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Summarize long-notes.txt into ideas/summary.md. do not touch protected files."));
+    }
+
+    @Test
+    void scopedTailwindArtifactNegationDoesNotCancelExplicitStaticWebCreation() {
+        assertTrue(MutationIntent.looksExplicitMutationRequest(RETROCATS_AUDIT_PROMPT));
+        assertFalse(MutationIntent.classificationReason(RETROCATS_AUDIT_PROMPT)
+                .contains("global-read-only-negation"));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Create the website. Do not create a local tailwind.min.css file."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Create the website. Do not use local tailwind.min.css."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Create the website with no broken tailwind.min.css and no placeholder Tailwind file."));
+    }
+
+    @Test
+    void globalCreateNegationsStillCancelMutationIntent() {
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Do not create files. Just explain the website structure."));
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Do not create anything. Describe what you would make."));
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Do not edit anything. Review the current site."));
     }
 
     @Test

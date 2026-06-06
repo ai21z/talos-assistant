@@ -101,6 +101,42 @@ class MutationFailureAnswerRendererTest {
     }
 
     @Test
+    void readOnlyDeniedMutationDropsManualSnippetAndCapabilityDeflection() {
+        String answer = """
+                It seems I cannot create files in this workspace.
+
+                ### `index.html`
+                ```html
+                <h1>Retrocats</h1>
+                ```
+
+                You can copy and paste these snippets into their respective files.
+                """;
+        var loopResult = loopResult(List.of(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                false,
+                true,
+                true,
+                "",
+                "The user did not ask to modify files on this turn, so do not call talos.write_file.",
+                null,
+                ToolError.DENIED)));
+
+        String out = MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                answer,
+                plan("Can you diagnose this page without changing files?"),
+                messages("Can you diagnose this page without changing files?"),
+                loopResult,
+                0);
+
+        assertEquals(MutationFailureAnswerRenderer.READ_ONLY_DENIED_MUTATION_REPLACEMENT, out);
+        assertFalse(out.contains("cannot create files"), out);
+        assertFalse(out.contains("copy and paste"), out);
+        assertFalse(out.contains("index.html"), out);
+    }
+
+    @Test
     void invalidMutationSummaryPreservesFailurePolicyReason() {
         var loopResult = new ToolCallLoop.LoopResult(
                 "I updated index.html.",

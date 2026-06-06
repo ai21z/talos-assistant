@@ -74,11 +74,54 @@ public final class TerminalReadOnlyStopAnswer {
                 .anyMatch(toolOutcome -> "talos.read_file".equals(canonicalToolName(toolOutcome.toolName()))
                         && toolOutcome.success()
                         && normalizedTarget.equals(ToolCallSupport.normalizePath(toolOutcome.pathHint())));
-        if (!targetRead) return null;
+        if (!targetRead) {
+            return missingReadTargetAnswer(state, target, normalizedTarget);
+        }
         if (outcome.successesThisIteration() > 0 && outcome.failuresThisIteration() == 0) return null;
         String body = latestSuccessfulToolResultBodyByCanonical(state.messages, "talos.read_file");
         if (body == null || body.isBlank()) return null;
         return "Read " + target + ":\n" + body;
+    }
+
+    private static String missingReadTargetAnswer(
+            LoopState state,
+            String target,
+            String normalizedTarget
+    ) {
+        if (state == null || normalizedTarget == null || normalizedTarget.isBlank()) return null;
+        for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
+            var outcome = state.toolOutcomes.get(i);
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (outcome.success()) continue;
+            if (!normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) continue;
+            String message = outcome.errorMessage() == null ? "" : outcome.errorMessage().strip();
+            if (message.isBlank()) {
+                message = "read_file failed for " + target + ".";
+            }
+            String candidate = candidateSibling(normalizedTarget, message);
+            return "Could not read " + target + ": " + message
+                    + (candidate.isBlank() ? "" : "\nPossible intended sibling: " + candidate);
+        }
+        return null;
+    }
+
+    private static String candidateSibling(String normalizedTarget, String message) {
+        if (normalizedTarget == null || normalizedTarget.isBlank()
+                || message == null || message.isBlank()) {
+            return "";
+        }
+        String lower = normalizedTarget.toLowerCase(Locale.ROOT);
+        String candidate = switch (lower) {
+            case "styles.css" -> "style.css";
+            case "style.css" -> "styles.css";
+            case "scripts.js" -> "script.js";
+            case "script.js" -> "scripts.js";
+            default -> "";
+        };
+        if (candidate.isBlank()) return "";
+        return message.toLowerCase(Locale.ROOT).contains(candidate.toLowerCase(Locale.ROOT))
+                ? candidate
+                : "";
     }
 
     private static String directoryListingStopAnswer(

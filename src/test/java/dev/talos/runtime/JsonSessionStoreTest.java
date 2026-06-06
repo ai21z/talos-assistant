@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.task.StaticWebRequirements;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -97,6 +98,33 @@ class JsonSessionStoreTest {
             assertEquals("#teaser-status", claim.outputSelector());
             assertEquals("STATIC_INTERACTION_GUARD", claim.proofKind());
             assertTrue(loadedContext.renderForPlan().contains("#teaser-button"), loadedContext.renderForPlan());
+        }
+        @Test void roundTrip_preservesActiveTaskContextStaticWebRequirements() {
+            var store = store();
+            ActiveTaskContext context = ActiveTaskContext.pendingMutation(
+                    3,
+                    "trace-static-web",
+                    List.of("index.html", "style.css", "script.js"),
+                    "Missing required static web mutation tools.",
+                    StaticWebRequirements.of(
+                            List.of("Retrocats", "Costanza", "Berlin 22 July 2026"),
+                            java.util.Set.of("tailwind.min.css")));
+            ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+            SessionData original = new SessionData("ctx-static-req", "/tmp/ws", "goal sketch", 1,
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
+                    context, goal);
+
+            store.save(original);
+
+            SessionData loaded = store.load("ctx-static-req").orElseThrow();
+            ActiveTaskContext loadedContext = loaded.activeTaskContext();
+            assertEquals(ActiveTaskContext.Kind.PENDING_MUTATION, loadedContext.kind());
+            assertEquals(List.of("Retrocats", "Costanza", "Berlin 22 July 2026"),
+                    loadedContext.staticWebRequirements().requiredVisibleFacts());
+            assertEquals(java.util.Set.of("tailwind.min.css"),
+                    loadedContext.staticWebRequirements().forbiddenArtifacts());
+            assertTrue(loadedContext.renderForPlan().contains("Berlin 22 July 2026"),
+                    loadedContext.renderForPlan());
         }
         @Test void load_oldSnapshotWithoutActiveContextDefaultsToNone() throws Exception {
             var store = store();
