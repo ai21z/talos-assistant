@@ -1,6 +1,6 @@
 # T700 - Tailwind Build Directive Coherence
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
@@ -64,6 +64,27 @@ Official Tailwind documentation describes `@apply` as a Tailwind directive and d
 - `StaticTaskVerifierTest`: valid generated CSS passes without CDN.
 - `StaticTaskVerifierTest`: remote Tailwind CSS href remains a remote limitation/problem, not a missing local `tailwind.min.css`.
 - `RepairPolicyTest`: Tailwind build-directive problems repair `index.html`/linked CSS/linked JS/expected targets, not forbidden local Tailwind artifacts.
+
+## Completion Evidence
+
+Implemented with RED/GREEN coverage:
+
+- Added `StaticTaskVerifierTest.staticWebVerificationFailsTailwindApplyDirectiveWithoutRuntimeOrBuild`.
+- RED run failed before implementation:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.staticWebVerificationFailsTailwindApplyDirectiveWithoutRuntimeOrBuild" --no-daemon
+```
+
+- `StaticWebTailwindCoherenceVerifier` now reports the specific Tailwind directive set, including `@apply`, and also recognizes current Tailwind build directives such as `@theme`, `@source`, `@utility`, `@variant`, `@custom-variant`, `@reference`, `@config`, `@plugin`, and `@import "tailwindcss"`.
+- GREEN verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.staticWebVerificationFailsTailwindApplyDirectiveWithoutRuntimeOrBuild" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.repair.RepairPolicyTest" --no-daemon
+```
+
+Both GREEN commands passed.
 
 ## Non-Goals
 
