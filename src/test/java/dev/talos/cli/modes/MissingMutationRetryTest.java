@@ -45,4 +45,44 @@ class MissingMutationRetryTest {
         assertFalse(content.contains("VERBOSE_REPAIR_PADDING"), content);
         assertFalse(content.contains("Cross-file coherence checklist"), content);
     }
+
+    @Test
+    void compactStaticRepairContextPreservesRequirementsAndDropsNonControllingSelectorInventory() {
+        ChatMessage compact = MissingMutationRetry.compactStaticVerificationRepairInstructionForRetry(
+                ChatMessage.system("""
+                        [Static verification repair context]
+                        Previous mutation task ended incomplete after static verification.
+
+                        Expected targets: index.html, style.css, script.js
+
+                        [StaticWebRequirements]
+                        requiredVisibleFacts: Retrocats, Costanza, Merri, Rome 15 July 2026
+                        forbiddenArtifacts: tailwind.css, tailwind.min.css
+
+                        Previous static verification problems:
+                        - tailwind.css: local Tailwind artifact is unsupported without an explicit build/runtime path.
+                        - style.css: expected target was not successfully mutated.
+
+                        Repair plan:
+                        Full-file replacement targets: index.html, style.css, script.js
+
+                        [Current static selector facts]
+                        HTML classes: %s
+                        CSS classes: %s
+                        JavaScript selectors: %s
+                        """.formatted(
+                        "class-token ".repeat(250),
+                        "css-token ".repeat(250),
+                        "js-token ".repeat(250))));
+
+        String content = compact.content();
+        assertTrue(content.contains("[StaticWebRequirements]"), content);
+        assertTrue(content.contains("requiredVisibleFacts: Retrocats, Costanza, Merri, Rome 15 July 2026"),
+                content);
+        assertTrue(content.contains("forbiddenArtifacts: tailwind.css, tailwind.min.css"), content);
+        assertTrue(content.contains("Full-file replacement targets: index.html, style.css, script.js"), content);
+        assertFalse(content.contains("[Current static selector facts]"), content);
+        assertFalse(content.contains("class-token"), content);
+        assertTrue(content.length() < 1_800, "compact repair context too large: " + content.length());
+    }
 }

@@ -49,6 +49,14 @@ final class EditFilePreApprovalGuard {
                     "");
         }
         if (state == null) return null;
+        if (state.editFailuresByPath.getOrDefault(normalizedPath, 0) >= 2) {
+            return new Decision(
+                    Kind.DUPLICATE_FAILED_EDIT,
+                    repeatedPathFailureDiagnostic(pathHint),
+                    normalizedPath,
+                    false,
+                    ToolCallSupport.buildCallSignature(call));
+        }
         String callSignature = ToolCallSupport.buildCallSignature(call);
         if (!state.failedCallSignatures.contains(callSignature)) return null;
         boolean emptyEditArguments = ToolCallSupport.hasEmptyEditArguments(call);
@@ -64,6 +72,16 @@ final class EditFilePreApprovalGuard {
                 normalizedPath,
                 emptyEditArguments,
                 callSignature);
+    }
+
+    private static String repeatedPathFailureDiagnostic(String pathHint) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the target file"
+                : "`" + pathHint + "`";
+        return "talos.edit_file has already failed repeatedly for " + target
+                + " in this turn. Do not keep guessing old_string. Call talos.read_file "
+                + "to ground the current bytes, or use talos.write_file with the complete updated file content. "
+                + "No approval was requested and no file was changed.";
     }
 
     private static boolean wasPathReadThisTurn(LoopState state, String pathHint) {

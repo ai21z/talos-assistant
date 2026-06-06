@@ -1,6 +1,7 @@
 package dev.talos.runtime.context;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.task.TaskType;
 
 import java.util.LinkedHashSet;
@@ -29,7 +30,9 @@ public final class ActiveTaskContextPolicy {
             ActiveTaskContext.Kind.PROPOSED_CHANGES,
             ActiveTaskContext.Kind.VERIFIER_FINDINGS,
             ActiveTaskContext.Kind.DENIED_MUTATION,
-            ActiveTaskContext.Kind.PARTIAL_MUTATION
+            ActiveTaskContext.Kind.PENDING_MUTATION,
+            ActiveTaskContext.Kind.PARTIAL_MUTATION,
+            ActiveTaskContext.Kind.VERIFIED_MUTATION
     );
 
     private static final Set<String> SUPPRESSION_PHRASES = Set.of(
@@ -127,6 +130,17 @@ public final class ActiveTaskContextPolicy {
                     true);
         }
 
+        if (isStaticWebRedesignContinuation(userRequest, savedGoal)
+                && savedContext.hasTargets()
+                && isConsumable(savedContext.kind())) {
+            return new Decision(
+                    contextualizedContract(userRequest, savedContext),
+                    savedContext,
+                    savedGoal,
+                    savedContext,
+                    true);
+        }
+
         return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), savedContext, false);
     }
 
@@ -157,19 +171,53 @@ public final class ActiveTaskContextPolicy {
                 || DEICTIC_PROPOSAL_APPLY.matcher(lower).matches();
     }
 
+    private static boolean isStaticWebRedesignContinuation(String userRequest, ArtifactGoal savedGoal) {
+        if (savedGoal == null || savedGoal.artifactKind() != ArtifactGoal.ArtifactKind.STATIC_WEB) {
+            return false;
+        }
+        String lower = normalized(userRequest).replaceAll("[.!?]+$", "");
+        if (isStatusQuestion(lower)) return false;
+        if (lower.startsWith("what ")
+                || lower.startsWith("why ")
+                || lower.startsWith("how ")
+                || lower.startsWith("which ")) {
+            return false;
+        }
+        return lower.contains("make it better")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("more modern")
+                || lower.contains("more polished")
+                || lower.contains("polished and complete")
+                || lower.contains("still bad")
+                || lower.contains("according to my intent")
+                || lower.contains("make the changes in tailwind")
+                || lower.contains("repair anything unverified")
+                || (lower.contains("edit") && lower.contains("better"))
+                || (lower.contains("modify") && lower.contains("files"));
+    }
+
     private static boolean isConsumable(ActiveTaskContext.Kind kind) {
         return CONSUMABLE_KINDS.contains(kind);
     }
 
     private static TaskContract contextualizedContract(String userRequest, ActiveTaskContext context) {
+        StaticWebRequirements requirements = context.staticWebRequirements();
+        TaskType taskType = context.kind() == ActiveTaskContext.Kind.PENDING_MUTATION
+                && context.operation() == ActiveTaskContext.Operation.CREATE
+                ? TaskType.FILE_CREATE
+                : TaskType.FILE_EDIT;
         return new TaskContract(
-                TaskType.FILE_EDIT,
+                taskType,
                 true,
                 true,
                 true,
                 new LinkedHashSet<>(context.targets()),
                 Set.of(),
-                contextualizedRequest(userRequest, context));
+                requirements.forbiddenArtifacts(),
+                contextualizedRequest(userRequest, context),
+                "active-static-web-context",
+                requirements);
     }
 
     private static String contextualizedRequest(String userRequest, ActiveTaskContext context) {

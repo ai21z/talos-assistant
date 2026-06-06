@@ -1,5 +1,7 @@
 package dev.talos.runtime.capability;
 
+import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
@@ -27,6 +29,7 @@ public final class StaticWebCapabilityProfile {
     public static boolean shouldVerifyCoherence(TaskContract contract, Path workspace, Set<String> mutatedPaths) {
         if (contract == null) return false;
         if (hasOnlyExplicitNonWebMutationTargets(contract)) return false;
+        if (hasLiteralContentExpectation(contract)) return false;
         String request = contract.originalUserRequest();
         if (looksWebGuideDocumentTask(request)) return false;
         if (hasExactHtmlCssJsExpectedTargets(contract)
@@ -35,6 +38,15 @@ public final class StaticWebCapabilityProfile {
                 || looksBroadWebTask(contract)
                 || looksFunctionalWebTask(contract)
                 || looksStyledWebTask(contract, mutatedPaths)) {
+            return true;
+        }
+        if (looksExistingWebSurfaceMutation(contract, workspace, mutatedPaths)) {
+            return true;
+        }
+        String lower = request == null ? "" : request.toLowerCase(Locale.ROOT);
+        if (contract.mutationRequested()
+                && mentionsVisualDesignIntent(lower)
+                && mutatesSmallWebSurface(workspace, mutatedPaths)) {
             return true;
         }
         return looksGenericMutationFollowUp(request) && mutatesSmallWebSurface(workspace, mutatedPaths);
@@ -80,6 +92,11 @@ public final class StaticWebCapabilityProfile {
 
     public static boolean looksStyledWebTask(TaskContract contract, Set<String> mutatedPaths) {
         if (contract == null || !contract.mutationRequested()) return false;
+        if (mutatedPaths != null
+                && !mutatedPaths.isEmpty()
+                && mutatedPaths.stream().noneMatch(StaticWebCapabilityProfile::isSmallWebFile)) {
+            return false;
+        }
         String request = contract.originalUserRequest();
         if (request == null || request.isBlank()) return false;
         String lower = request.toLowerCase(Locale.ROOT);
@@ -107,7 +124,9 @@ public final class StaticWebCapabilityProfile {
         if (looksNarrowStaticWebEdit(lower)) return false;
         boolean broadWebIntent = looksBroadWebTask(contract)
                 || looksStyledWebTask(contract, Set.of())
-                || looksFunctionalWebTask(contract);
+                || looksFunctionalWebTask(contract)
+                || looksExistingWebRewriteIntent(lower)
+                || looksContextualStaticWebRewriteIntent(lower);
         if (!broadWebIntent) return false;
         return contract.type() == TaskType.FILE_CREATE
                 || lower.contains("build")
@@ -122,11 +141,42 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("modern")
                 || lower.contains("landing page")
                 || lower.contains("website")
+                || lower.contains("site")
                 || lower.contains("webpage")
                 || lower.contains("web page")
                 || lower.contains("frontend")
                 || lower.contains("rewrite")
-                || lower.contains("redesign");
+                || lower.contains("redesign")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("make it better");
+    }
+
+    private static boolean looksExistingWebRewriteIntent(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return mentionsWebSurface(lower)
+                && (lower.contains("rewrite")
+                || lower.contains("redesign")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("improve")
+                || lower.contains("better"));
+    }
+
+    private static boolean looksContextualStaticWebRewriteIntent(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return (lower.contains("active task context") || lower.contains("static web"))
+                && (lower.contains("rewrite")
+                || lower.contains("redesign")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("make it better")
+                || lower.contains("more modern")
+                || lower.contains("tailwind")
+                || lower.contains("according to my intent")
+                || lower.contains("still bad")
+                || lower.contains("improve")
+                || lower.contains("better"));
     }
 
     public static boolean isStructuralProblem(String problem) {
@@ -155,6 +205,12 @@ public final class StaticWebCapabilityProfile {
         Set<String> targets = new LinkedHashSet<>();
         String combinedProblems = String.join("\n", problems == null ? List.of() : problems)
                 .toLowerCase(Locale.ROOT);
+        String conversation = messages == null ? "" : messages.stream()
+                .filter(message -> message != null && message.content() != null)
+                .map(ChatMessage::content)
+                .reduce("", (left, right) -> left + "\n" + right)
+                .toLowerCase(Locale.ROOT);
+        String evidence = combinedProblems + "\n" + conversation;
         if (combinedProblems.contains("html")
                 || combinedProblems.contains("form")
                 || combinedProblems.contains("button")
@@ -166,29 +222,38 @@ public final class StaticWebCapabilityProfile {
         if (combinedProblems.contains("css")
                 || combinedProblems.contains("style.css")
                 || combinedProblems.contains("styles.css")) {
-            targets.add("styles.css");
+            targets.add(preferredCssTarget(evidence));
         }
         if (combinedProblems.contains("javascript")
                 || combinedProblems.contains("script.js")
                 || combinedProblems.contains("scripts.js")
                 || combinedProblems.contains("placeholder")) {
-            targets.add("scripts.js");
+            targets.add(preferredScriptTarget(evidence));
         }
 
-        String conversation = messages == null ? "" : messages.stream()
-                .filter(message -> message != null && message.content() != null)
-                .map(ChatMessage::content)
-                .reduce("", (left, right) -> left + "\n" + right)
-                .toLowerCase(Locale.ROOT);
         if ((conversation.contains("3-file") || conversation.contains("three-file")
                 || conversation.contains("three file"))
                 && (conversation.contains("webpage") || conversation.contains("web page")
                 || conversation.contains("website") || conversation.contains("page"))) {
             targets.add("index.html");
-            targets.add("styles.css");
-            targets.add("scripts.js");
+            targets.add(preferredCssTarget(evidence));
+            targets.add(preferredScriptTarget(evidence));
         }
         return targets.stream().sorted().toList();
+    }
+
+    private static String preferredCssTarget(String evidence) {
+        String lower = evidence == null ? "" : evidence.toLowerCase(Locale.ROOT);
+        if (lower.contains("style.css")) return "style.css";
+        if (lower.contains("styles.css")) return "styles.css";
+        return "styles.css";
+    }
+
+    private static String preferredScriptTarget(String evidence) {
+        String lower = evidence == null ? "" : evidence.toLowerCase(Locale.ROOT);
+        if (lower.contains("script.js")) return "script.js";
+        if (lower.contains("scripts.js")) return "scripts.js";
+        return "scripts.js";
     }
 
     public static String profileFact(CapabilityProfile profile) {
@@ -407,6 +472,9 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("polished")
                 || lower.contains("good looking")
                 || lower.contains("cool looking")
+                || lower.contains("look better")
+                || lower.contains("looks better")
+                || lower.contains("tailwind")
                 || containsWholeWord(lower, "style");
     }
 
@@ -520,6 +588,46 @@ public final class StaticWebCapabilityProfile {
                 || lower.equals("apply the changes")
                 || lower.equals("fix it")
                 || lower.equals("edit it");
+    }
+
+    private static boolean looksExistingWebSurfaceMutation(
+            TaskContract contract,
+            Path root,
+            Set<String> mutatedPaths
+    ) {
+        if (contract == null || !contract.mutationRequested()) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        if (!mentionsWebSurface(lower)) return false;
+        if (looksCssOnlyVerifyConstraint(contract, lower, mutatedPaths)) return false;
+        return mutatesSmallWebSurface(root, mutatedPaths);
+    }
+
+    private static boolean hasLiteralContentExpectation(TaskContract contract) {
+        return TaskExpectationResolver.resolve(contract).stream()
+                .anyMatch(LiteralContentExpectation.class::isInstance);
+    }
+
+    private static boolean looksCssOnlyVerifyConstraint(
+            TaskContract contract,
+            String lower,
+            Set<String> mutatedPaths
+    ) {
+        if (contract == null || lower == null || lower.isBlank()) return false;
+        boolean namesHtmlConstraint = lower.contains("index.html")
+                && (lower.contains("still works")
+                || lower.contains("still work")
+                || lower.contains("keeps working")
+                || lower.contains("keep working")
+                || lower.contains("continues to work"));
+        if (!namesHtmlConstraint) return false;
+        boolean cssOnlyExpected = !contract.expectedTargets().isEmpty()
+                && contract.expectedTargets().stream().allMatch(target -> hasExtension(target, ".css"));
+        boolean cssOnlyMutated = mutatedPaths != null
+                && !mutatedPaths.isEmpty()
+                && mutatedPaths.stream().allMatch(path -> hasExtension(path, ".css"));
+        return cssOnlyExpected || cssOnlyMutated;
     }
 
     private static boolean mutatesSmallWebSurface(Path root, Set<String> mutatedPaths) {

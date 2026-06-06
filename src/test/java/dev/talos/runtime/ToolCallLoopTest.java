@@ -951,8 +951,8 @@ class ToolCallLoopTest {
                     "The stale retry should stop after the model ignores the reread requirement");
             assertEquals(2, result.toolsInvoked(),
                     "The ignored stale retry is short-circuited before tool execution");
-            assertEquals(2, approvalRequests[0],
-                    "Only the two real edit attempts should reach approval");
+            assertEquals(1, approvalRequests[0],
+                    "Only the valid exact edit should reach approval; stale exact edits are rejected before approval");
             assertEquals(1, result.mutatingToolSuccesses());
             assertEquals(2, result.failedCalls());
             assertTrue(result.failureDecision().shouldStop());
@@ -1013,7 +1013,7 @@ class ToolCallLoopTest {
 
             assertEquals(3, result.iterations());
             assertEquals(4, result.toolsInvoked());
-            assertEquals(3, approvalRequests[0]);
+            assertEquals(2, approvalRequests[0]);
             assertEquals(2, result.mutatingToolSuccesses());
             assertFalse(result.failureDecision().shouldStop());
             assertEquals("alpha-updated\nbeta-fixed\n", Files.readString(index));
@@ -3327,6 +3327,87 @@ class ToolCallLoopTest {
             assertEquals("# Fixture\n", Files.readString(ws.resolve("README.md")),
                     "wrong-target expected-progress attempts must remain blocked before approval.");
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void expectedTargetProgressDirectoryWriteAttemptRepromptsToRemainingStaticWebTarget() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-directory-progress-repair-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 7);
+
+            String request = "Create the full synthwave frontend now with exactly index.html, style.css, and script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String indexHtml = """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>Neon Static</title>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <main class="hero">
+                        <h1>Neon Static</h1>
+                        <button id="playBtn" type="button">Play demo</button>
+                        <p id="status">Ready</p>
+                      </main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String styleCss = """
+                    body { margin: 0; font-family: system-ui, sans-serif; background: #120019; color: #fff; }
+                    .hero { min-height: 100vh; display: grid; place-items: center; text-align: center; }
+                    """;
+            String scriptJs = """
+                    document.getElementById('playBtn').addEventListener('click', () => {
+                      document.getElementById('status').textContent = 'Synthwave engaged';
+                    });
+                    """;
+            String partialWrites = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss));
+            String directoryWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"./","content":"wrong target"}}
+                    """;
+            String remainingScript = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(scriptJs));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(directoryWrite, remainingScript, "done")))
+                    .build();
+
+            ToolCallLoop.LoopResult result;
+            try {
+                TurnUserRequestCapture.set(request);
+                TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+                result = loop.run(partialWrites, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
+            assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
+            assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> "talos.write_file".equals(outcome.toolName())
+                                    && "./".equals(outcome.pathHint())
+                                    && !outcome.success()
+                                    && outcome.errorMessage().contains("Target outside expected targets before approval")),
+                    "write_file(./) must be rejected before execution with a target-scope diagnostic");
         } finally {
             deleteRecursive(ws);
         }

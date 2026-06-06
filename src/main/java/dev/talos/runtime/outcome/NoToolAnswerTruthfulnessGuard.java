@@ -1,6 +1,7 @@
 package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.policy.ActionObligation;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -42,6 +43,12 @@ public final class NoToolAnswerTruthfulnessGuard {
             + "I can read, list, and search files in this workspace when the task calls "
             + "for it. I did not inspect files in this turn, so I cannot give an "
             + "evidence-backed workspace answer yet.";
+
+    public static final String MUTATION_CAPABILITY_CORRECTION =
+            "[Capability correction: Talos can create and edit files in the current workspace "
+            + "on mutation-capable turns, subject to policy and approval.]\n\n"
+            + "No file tool was called in this turn. If you want a workspace change, ask Talos "
+            + "to create, edit, update, or fix the file or site directly.";
 
     private static final Set<String> EVIDENCE_REQUEST_MARKERS = Set.of(
             "read the",
@@ -134,6 +141,24 @@ public final class NoToolAnswerTruthfulnessGuard {
             List<ChatMessage> messages
     ) {
         if (!containsNegativeLocalAccessClaim(answer)) return false;
+        return looksLikeLocalWorkspaceTurn(plan, messages, answer);
+    }
+
+    public static String correctNegativeMutationCapabilityClaimIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        if (!shouldCorrectNegativeMutationCapabilityClaim(answer, plan, messages)) return answer;
+        return MUTATION_CAPABILITY_CORRECTION;
+    }
+
+    public static boolean shouldCorrectNegativeMutationCapabilityClaim(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        if (!ResponseObligationVerifier.containsMutationCapabilityDeflection(answer)) return false;
         return looksLikeLocalWorkspaceTurn(plan, messages, answer);
     }
 

@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
@@ -299,6 +300,10 @@ final class MissingMutationRetry {
         String expectedTargets = firstRepairContextValue(content, "Expected targets:");
         String missingTargets = firstRepairContextValue(content, "Missing expected targets:");
         String fullWriteTargets = firstRepairContextValue(content, "Full-file replacement targets:");
+        String staticWebRequirements = repairContextSectionKeyValues(
+                content,
+                "[StaticWebRequirements]",
+                4);
         List<String> problems = repairContextSectionBullets(
                 content,
                 "Previous static verification problems:",
@@ -332,6 +337,11 @@ final class MissingMutationRetry {
         if (!missingTargets.isBlank()) {
             out.append("\nMissing expected targets: ").append(missingTargets).append('\n');
         }
+        if (!staticWebRequirements.isBlank()) {
+            out.append("\n[StaticWebRequirements]\n")
+                    .append(staticWebRequirements)
+                    .append('\n');
+        }
         if (!similarTargets.isEmpty()) {
             out.append("\nSimilar changed targets that do not satisfy missing expected targets:\n");
             similarTargets.forEach(line -> out.append(line).append('\n'));
@@ -349,7 +359,7 @@ final class MissingMutationRetry {
             out.append("\nCSS selector repair constraint:\n");
             cssSelectorConstraint.forEach(line -> out.append(line).append('\n'));
         }
-        if (!currentSelectorFacts.isBlank()) {
+        if (!currentSelectorFacts.isBlank() && selectorDiagnosticsAreControlling(problems, cssSelectorConstraint)) {
             out.append("\n[Current static selector facts]\n")
                     .append(currentSelectorFacts)
                     .append('\n');
@@ -357,6 +367,25 @@ final class MissingMutationRetry {
         out.append("Preserve exact target spelling; script.js and scripts.js are different paths.\n")
                 .append("After tool-backed changes, answer only from tool results and static verification.");
         return ChatMessage.system(out.toString());
+    }
+
+    private static boolean selectorDiagnosticsAreControlling(
+            List<String> problems,
+            List<String> cssSelectorConstraint
+    ) {
+        if (cssSelectorConstraint != null && !cssSelectorConstraint.isEmpty()) return true;
+        if (problems == null || problems.isEmpty()) return false;
+        for (String problem : problems) {
+            String lower = problem == null ? "" : problem.toLowerCase(Locale.ROOT);
+            if (lower.contains("selector")
+                    || lower.contains("class selectors")
+                    || lower.contains("missing class")
+                    || lower.contains("missing ids")
+                    || lower.contains("duplicate id")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static ToolCallLoop.LoopResult mergeEvidence(
@@ -414,6 +443,9 @@ final class MissingMutationRetry {
         Optional<WorkspaceOperationIntent.Intent> workspaceOperation = WorkspaceOperationIntent.detect(contract);
         if (workspaceOperation.isPresent()) {
             return workspaceOperation.get().toolNames();
+        }
+        if (StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract)) {
+            return List.of("talos.write_file");
         }
         return RepairPolicy.fullRewriteTargetsFromRepairContext(messages).isEmpty()
                 ? List.of("talos.write_file", "talos.edit_file")
@@ -566,6 +598,40 @@ final class MissingMutationRetry {
         return String.join("\n", out).strip();
     }
 
+    private static String repairContextSectionKeyValues(
+            String content,
+            String sectionHeader,
+            int maxLines
+    ) {
+        if (content == null || sectionHeader == null || sectionHeader.isBlank() || maxLines <= 0) {
+            return "";
+        }
+        String sectionLower = sectionHeader.toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        boolean inSection = false;
+        for (String rawLine : content.split("\\R")) {
+            String line = rawLine.strip();
+            if (!inSection) {
+                if (line.toLowerCase(Locale.ROOT).equals(sectionLower)) {
+                    inSection = true;
+                }
+                continue;
+            }
+            if (line.isBlank()) {
+                if (!out.isEmpty()) break;
+                continue;
+            }
+            if (!line.contains(":")) {
+                break;
+            }
+            out.add(line);
+            if (out.size() >= maxLines) {
+                break;
+            }
+        }
+        return String.join("\n", out).strip();
+    }
+
     private static String compactMutationRetryFrame(
             CurrentTurnPlan plan,
             List<ToolSpec> retryToolSpecs,
@@ -591,6 +657,7 @@ final class MissingMutationRetry {
                 .append("tools: ").append(String.join(", ", allowedTools)).append('\n')
                 .append("Current request only. Prose/manual snippets do not change files.\n");
         appendCompactRetryExpectedTargets(frame, contract);
+        appendCompactRetryStaticWebRequirements(frame, contract);
         appendCompactRetryExpectations(frame, plan);
         if (!request.isBlank()) {
             frame.append("[CurrentRequest]\n")
@@ -609,6 +676,28 @@ final class MissingMutationRetry {
                 .append("requiredTargets: ").append(String.join(", ", targets)).append('\n')
                 .append("Exact paths required; similar names do not count.\n")
                 .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n");
+    }
+
+    private static void appendCompactRetryStaticWebRequirements(StringBuilder frame, TaskContract contract) {
+        if (frame == null
+                || contract == null
+                || contract.staticWebRequirements().isEmpty()) {
+            return;
+        }
+        var requirements = contract.staticWebRequirements();
+        frame.append("[StaticWebRequirements]\n");
+        if (!requirements.requiredVisibleFacts().isEmpty()) {
+            frame.append("requiredVisibleFacts: ")
+                    .append(String.join(", ", requirements.requiredVisibleFacts()))
+                    .append('\n')
+                    .append("Preserve these facts as visible site content; do not invent replacements.\n");
+        }
+        if (!requirements.forbiddenArtifacts().isEmpty()) {
+            frame.append("forbiddenArtifacts: ")
+                    .append(String.join(", ", requirements.forbiddenArtifacts().stream().sorted().toList()))
+                    .append('\n')
+                    .append("Do not create, edit, or rely on these forbidden local artifacts.\n");
+        }
     }
 
     private static List<String> orderedExpectedTargets(TaskContract contract) {

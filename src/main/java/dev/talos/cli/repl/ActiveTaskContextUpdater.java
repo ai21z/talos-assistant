@@ -8,6 +8,7 @@ import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.PromptAuditRedactor;
@@ -46,6 +47,7 @@ public final class ActiveTaskContextUpdater {
 
         TurnFacts facts = TurnFacts.from(result);
         List<String> targets = facts.targets();
+        StaticWebRequirements requirements = staticWebRequirements(userInput, facts, preservedContext);
 
         if (facts.approvalDeniedMutationAttempt()) {
             ActiveTaskContext context = ActiveTaskContext.deniedMutation(
@@ -63,12 +65,49 @@ public final class ActiveTaskContextUpdater {
                     targets,
                     facts.verifierFindings(),
                     facts.verificationStatus(),
-                    requiredVerificationClaims(facts, userInput));
+                    requiredVerificationClaims(facts, userInput),
+                    requirements);
             return active(context);
         }
 
         if (!targets.isEmpty() && facts.fullyVerifiedMutation()) {
+            if (looksLikeStaticWebTargets(targets)) {
+                ActiveTaskContext context = ActiveTaskContext.verifiedMutation(
+                        result.turnNumber(),
+                        facts.traceId(),
+                        targets,
+                        facts.completionStatus(),
+                        requirements);
+                return active(context);
+            }
             return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
+        }
+
+        if (!targets.isEmpty()
+                && facts.successfulMutation()
+                && looksLikeStaticWebTargets(targets)) {
+            ActiveTaskContext context = ActiveTaskContext.partialMutation(
+                    result.turnNumber(),
+                    facts.traceId(),
+                    targets,
+                    facts.completionStatus(),
+                    requirements);
+            return active(context);
+        }
+
+        if (!targets.isEmpty()
+                && facts.mutationAllowed()
+                && !facts.anySuccessfulMutation()
+                && !facts.approvalDeniedMutationAttempt()
+                && looksLikeStaticWebTargets(targets)
+                && !looksLikeProposalIntent(userInput)) {
+            ActiveTaskContext context = ActiveTaskContext.pendingMutation(
+                    result.turnNumber(),
+                    facts.traceId(),
+                    targets,
+                    "No required static-web mutation completed.",
+                    requirements);
+            return active(context);
         }
 
         if (!targets.isEmpty()
@@ -95,6 +134,19 @@ public final class ActiveTaskContextUpdater {
 
     private static Update active(ActiveTaskContext context) {
         return new Update(context, ArtifactGoal.fromActiveContext(context));
+    }
+
+    private static StaticWebRequirements staticWebRequirements(
+            String userInput,
+            TurnFacts facts,
+            ActiveTaskContext preservedContext) {
+        StaticWebRequirements current = StaticWebRequirements.fromRequest(
+                userInput,
+                facts == null ? java.util.Set.of() : new LinkedHashSet<>(facts.forbiddenTargets()));
+        StaticWebRequirements preserved = preservedContext == null
+                ? StaticWebRequirements.none()
+                : preservedContext.staticWebRequirements();
+        return preserved.merge(current);
     }
 
     private static String proposalSummary(Result result) {
@@ -145,6 +197,21 @@ public final class ActiveTaskContextUpdater {
         return explicitProposal || (noMutationYet && changeIntent);
     }
 
+    private static boolean looksLikeStaticWebTargets(List<String> targets) {
+        if (targets == null || targets.isEmpty()) return false;
+        boolean html = false;
+        boolean css = false;
+        boolean js = false;
+        for (String target : targets) {
+            String lower = target == null ? "" : target.toLowerCase(Locale.ROOT);
+            html = html || lower.endsWith(".html") || lower.endsWith(".htm");
+            css = css || lower.endsWith(".css");
+            js = js || lower.endsWith(".js") || lower.endsWith(".jsx")
+                    || lower.endsWith(".ts") || lower.endsWith(".tsx");
+        }
+        return html && (css || js);
+    }
+
     private static List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaims(
             TurnFacts facts,
             String userInput) {
@@ -178,9 +245,11 @@ public final class ActiveTaskContextUpdater {
             String mutationStatus,
             String completionStatus,
             List<String> verifierFindings,
+            List<String> forbiddenTargets,
             int requiredClaimCount,
             int unsatisfiedRequiredClaimCount,
             boolean mutationAllowed,
+            boolean anySuccessfulMutation,
             boolean successfulMutation,
             boolean approvalDeniedMutationAttempt
     ) {
@@ -200,6 +269,7 @@ public final class ActiveTaskContextUpdater {
                     .toList();
             boolean successfulMutation = !mutatingCalls.isEmpty()
                     && mutatingCalls.stream().allMatch(TurnRecord.ToolCallSummary::success);
+            boolean anySuccessfulMutation = mutatingCalls.stream().anyMatch(TurnRecord.ToolCallSummary::success);
             boolean deniedMutation = audit.approvalsDenied() > 0
                     && (mutationAllowed(policyTrace, localTrace)
                     || !mutatingCalls.isEmpty());
@@ -214,9 +284,11 @@ public final class ActiveTaskContextUpdater {
                     mutationStatus(localTrace),
                     completionStatus(localTrace),
                     verifierFindings(localTrace),
+                    forbiddenTargets(policyTrace, localTrace),
                     requiredClaimCount(localTrace),
                     unsatisfiedRequiredClaimCount(localTrace),
                     mutationAllowed(policyTrace, localTrace),
+                    anySuccessfulMutation,
                     successfulMutation,
                     deniedMutation);
         }
@@ -300,6 +372,15 @@ public final class ActiveTaskContextUpdater {
             if (summary == null || summary.isBlank()) return List.of();
             List<String> out = new ArrayList<>();
             out.add(summary);
+            return List.copyOf(out);
+        }
+
+        private static List<String> forbiddenTargets(
+                TurnPolicyTrace policyTrace,
+                LocalTurnTrace localTrace) {
+            LinkedHashSet<String> out = new LinkedHashSet<>();
+            addAll(out, policyTrace == null ? List.of() : policyTrace.forbiddenTargets());
+            addAll(out, localTrace == null ? List.of() : localTrace.taskContract().forbiddenTargets());
             return List.copyOf(out);
         }
 

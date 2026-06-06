@@ -38,6 +38,7 @@ class ReadEvidenceStateAccountingTest {
             assertFalse(state.staleEditFailuresByPath.containsKey("docs/notes.md"));
             assertFalse(state.staleEditRepairPromptedPaths.contains("docs/notes.md"));
             assertEquals(null, state.staleEditRereadIgnoredPath);
+            assertEquals("1 | # Notes", state.readFileBodiesThisTurn.get("docs/notes.md"));
             assertEquals(Set.of("docs/notes.md"), TurnSourceEvidenceCapture.readPaths());
         } finally {
             TurnSourceEvidenceCapture.clear();
@@ -59,6 +60,7 @@ class ReadEvidenceStateAccountingTest {
         assertFalse(state.pathsReadThisTurn.contains("src"));
         assertEquals("src/Main.java:7: TODO", state.successfulReadCalls.get(signature));
         assertEquals("src/Main.java:7: TODO", state.successfulReadCallBodies.get(signature));
+        assertTrue(state.readFileBodiesThisTurn.isEmpty());
     }
 
     @Test

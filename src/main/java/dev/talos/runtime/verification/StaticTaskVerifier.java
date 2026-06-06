@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -180,7 +181,14 @@ public final class StaticTaskVerifier {
         facts.addAll(exactEditVerification.facts());
         problems.addAll(exactEditVerification.problems());
         TaskSpecificVerifierRegistry.Result taskSpecificVerification =
-                TaskSpecificVerifierRegistry.verify(root, contract, profile, mutatedPaths, facts, problems);
+                TaskSpecificVerifierRegistry.verify(
+                        root,
+                        contract,
+                        profile,
+                        mutatedPaths,
+                        facts,
+                        problems,
+                        loopResult.readFileBodies());
         webCoherenceRequired = taskSpecificVerification.webCoherenceRequired();
         SourceDerivedArtifactVerifier.Result sourceDerivedVerification =
                 taskSpecificVerification.sourceDerivedVerification();
@@ -226,7 +234,8 @@ public final class StaticTaskVerifier {
             CapabilityProfile profile,
             Set<String> mutatedPaths,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            Map<String, String> readFileBodies
     ) {
         List<String> primary = obviousPrimaryFiles(root);
         if (primary.isEmpty()) {
@@ -305,6 +314,15 @@ public final class StaticTaskVerifier {
         List<String> staticWebProblems = new ArrayList<>();
         staticWebProblems.addAll(selectors.linkageProblems());
         staticWebProblems.addAll(selectors.contentProblems());
+        staticWebProblems.addAll(StaticWebTailwindCoherenceVerifier.problems(
+                root,
+                contract,
+                selectors,
+                mutatedPaths));
+        StaticWebContentPreservationVerifier.Result contentPreservation =
+                StaticWebContentPreservationVerifier.verify(contract, selectors, readFileBodies);
+        facts.addAll(contentPreservation.facts());
+        staticWebProblems.addAll(contentPreservation.problems());
         staticWebProblems.addAll(selectors.selectorProblems());
         List<String> buttonBehaviorProblems = selectors.buttonResultBehaviorProblems(contract.originalUserRequest());
         staticWebProblems.addAll(buttonBehaviorProblems);

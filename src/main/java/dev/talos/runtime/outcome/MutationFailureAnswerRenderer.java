@@ -2,6 +2,7 @@ package dev.talos.runtime.outcome;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -437,6 +438,8 @@ public final class MutationFailureAnswerRenderer {
         String cleaned = String.join("\n", kept).strip();
         if (cleaned.isBlank()) return "";
         if (looksLikeOnlyMutationPreparation(cleaned)) return "";
+        if (ResponseObligationVerifier.containsMutationCapabilityDeflection(cleaned)) return "";
+        if (looksLikeManualSnippetFallback(cleaned)) return "";
         return cleaned;
     }
 
@@ -456,6 +459,16 @@ public final class MutationFailureAnswerRenderer {
                 || lower.equals("i prepared the update")
                 || lower.equals("i prepared these changes.")
                 || lower.equals("i prepared these changes");
+    }
+
+    private static boolean looksLikeManualSnippetFallback(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("copy and paste")
+                || lower.contains("copy/paste")
+                || lower.contains("manually create")
+                || lower.contains("manual creation")
+                || lower.contains("respective files");
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {

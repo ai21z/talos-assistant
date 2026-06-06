@@ -17,6 +17,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskContractResolverTest {
 
+    private static final String RETROCATS_AUDIT_PROMPT =
+            "Create a complete modern dark synthwave static website for a band called Retrocats. "
+                    + "Use exactly index.html, style.css, and script.js as the local files. "
+                    + "Use Tailwind correctly only through the official browser CDN or through generated CSS. "
+                    + "Do not create a local tailwind.min.css file, no broken tailwind.min.css, "
+                    + "no placeholder Tailwind file, and no unprocessed @tailwind directives. "
+                    + "The site must preserve these required visible facts: Retrocats, Costanza, Merri, "
+                    + "formed in 2024, analog synth sounds, electric guitars, 80s rock and metal blended "
+                    + "with synthwave, Cassette Love, Nine-zero vhs, Future tense, Past Perfect Vibes, "
+                    + "Dust to Dust, Gold for the old, Life span, Rome 15 July 2026, Barcelona 18 July 2026, "
+                    + "Berlin 22 July 2026. Make it visually strong: dark base, pink/orange synthwave "
+                    + "accents, band hero, albums, top songs, concerts, and a small interactive JavaScript enhancement.";
+
     private static final String T61_B_RETRY_PROMPT =
             "This is a retry after the denied attempt. Edit README.md now using talos.write_file. "
                     + "The complete file must contain exactly two lines: first line T61-B exact README; "
@@ -159,6 +172,78 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void tailwindNegativeLocalArtifactIsForbiddenNotExpected() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use Tailwind correctly with the CDN. Make the Retrocats site better with no broken tailwind.min.css.");
+
+        assertTrue(contract.mutationAllowed());
+        assertFalse(contract.expectedTargets().contains("tailwind.min.css"),
+                contract.expectedTargets().toString());
+        assertTrue(contract.forbiddenTargets().contains("tailwind.min.css"),
+                contract.forbiddenTargets().toString());
+    }
+
+    @Test
+    void genericLocalTailwindArtifactBanForbidsCommonLocalTailwindCssArtifacts() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create the Retrocats site with valid Tailwind CDN only. No local Tailwind artifacts, "
+                        + "no placeholder Tailwind file, and do not create tailwind.css.");
+
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.forbiddenTargets().contains("tailwind.css"),
+                contract.forbiddenTargets().toString());
+        assertTrue(contract.forbiddenTargets().contains("tailwind.min.css"),
+                contract.forbiddenTargets().toString());
+        assertFalse(contract.forbiddenTargets().contains("style.css"),
+                contract.forbiddenTargets().toString());
+    }
+
+    @Test
+    void exactRetrocatsAuditPromptIsStaticWebCreationWithScopedTailwindForbiddenTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(RETROCATS_AUDIT_PROMPT);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertEquals(Set.of("tailwind.css", "tailwind.min.css"), contract.forbiddenTargets());
+        assertTrue(contract.staticWebRequirements().requiredVisibleFacts().contains("Retrocats"),
+                contract.staticWebRequirements().toString());
+        assertTrue(contract.staticWebRequirements().requiredVisibleFacts().contains("Costanza"),
+                contract.staticWebRequirements().toString());
+        assertTrue(contract.staticWebRequirements().requiredVisibleFacts().contains("Berlin 22 July 2026"),
+                contract.staticWebRequirements().toString());
+        assertEquals(Set.of("tailwind.css", "tailwind.min.css"),
+                contract.staticWebRequirements().forbiddenArtifacts());
+    }
+
+    @Test
+    void exactStaticWebFileListKeepsScriptRequiredWhenJavaScriptEnhancementRequested() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Make the website much better now. Read the current index.html, style.css, and script.js first, "
+                        + "then rewrite the existing files completely if needed. Preserve every required Retrocats "
+                        + "fact from my original brief. Keep the Tailwind setup valid: CDN is okay for this local "
+                        + "demo, but no local broken tailwind.min.css and no @tailwind directives without a build.");
+
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertEquals(Set.of("tailwind.min.css"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void genericNoBrokenCssDoesNotForbidTheActualStylesheet() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Make sure style.css is not broken while improving the page.");
+
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.expectedTargets().contains("style.css"),
+                contract.expectedTargets().toString());
+        assertFalse(contract.forbiddenTargets().contains("style.css"),
+                contract.forbiddenTargets().toString());
+    }
+
+    @Test
     void documentGuideAboutWebPageDoesNotInferStaticWebOutputTargets() {
         for (String input : List.of(
                 "Create a PDF file that talks about how to build a synthwave band's web page.",
@@ -233,6 +318,97 @@ class TaskContractResolverTest {
         assertEquals(TaskType.FILE_CREATE, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void longFormWebsiteBriefEndingInCreateQuestionBecomesFileCreateContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Ok cool Talos! Lets begin then. I want a cool modern looking webpage for a "
+                        + "synthwave band called \"Retrocats\". They play synthwave with analog synth "
+                        + "sounds and electric guitars. They like dark colors with orange and pink inside. "
+                        + "They have albums, top songs, a bio, and upcoming concerts. "
+                        + "Can you create that web page?");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void capabilityOnlyWebCreationQuestionStaysReadOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "I want to make 2 web pages. Can you help me with that? Is this in your skills?");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+    }
+
+    @Test
+    void confirmationAfterConcreteAssistantMutationPlanInheritsMutationContract() {
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("The site is too plain. Make it look like a synthwave band page."),
+                ChatMessage.assistant("""
+                        I can update the static site files:
+                        - index.html
+                        - style.css
+                        - script.js
+
+                        Would you like me to proceed?
+                        """),
+                ChatMessage.user("Yes proceed please!")));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertEquals("confirmation-follow-up-inherits-assistant-mutation-plan",
+                contract.classificationReason());
+    }
+
+    @Test
+    void confirmationAfterConversationDoesNotAuthorizeMutation() {
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("What can you do?"),
+                ChatMessage.assistant("I can inspect files and help with workspace tasks."),
+                ChatMessage.user("yes")));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void revertYourChangesBecomesCheckpointRestoreContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("ok revert your changes");
+
+        assertEquals(TaskType.CHECKPOINT_RESTORE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of(), contract.expectedTargets());
+        assertEquals("checkpoint-restore-request", contract.classificationReason());
+    }
+
+    @Test
+    void undoPreviousChangesBecomesCheckpointRestoreContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Undo the previous changes please.");
+
+        assertEquals(TaskType.CHECKPOINT_RESTORE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of(), contract.expectedTargets());
+        assertEquals("checkpoint-restore-request", contract.classificationReason());
     }
 
     @Test
@@ -1333,6 +1509,55 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void vagueDesignFollowUpAfterStaticWebCreationKeepsStaticWebTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create a modern synthwave band website with CSS styling and JavaScript interaction."));
+        messages.add(ChatMessage.assistant("""
+                Created index.html, style.css, and script.js.
+
+                Verification: STATIC_WEB checked the generated files.
+                """));
+        messages.add(ChatMessage.user("ok just edit the site to look better"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void broadIntentFollowUpAfterStaticWebCreationKeepsStaticWebTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Create index.html, style.css, and script.js for Retrocats."));
+        messages.add(ChatMessage.assistant("Created index.html, style.css, and script.js."));
+        messages.add(ChatMessage.user("modify the files according to my intent, it is still bad"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void unrelatedBetterQuestionAfterStaticWebCreationStaysReadOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Create a small band website."));
+        messages.add(ChatMessage.assistant("Created index.html, style.css, and script.js."));
+        messages.add(ChatMessage.user("what is a better name for the band?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
     void currentTurnAssistantToolOutputDoesNotCreateContextualStaticWebTargets() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
@@ -1481,6 +1706,55 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void finalPassAfterStaticVerificationFailureInheritsStaticWebRepairContract() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - styles.css: expected target was not successfully mutated.
+                - HTML does not link JavaScript file: `scripts.js`
+                - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user(
+                "Run a final pass, inspect and repair anything remaining, and leave it in the best verified state."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void explanationQuestionAfterStaticVerificationFailureStaysReadOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - styles.css: expected target was not successfully mutated.
+                - HTML does not link JavaScript file: `scripts.js`
+                """));
+        messages.add(ChatMessage.user("What went wrong?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertTrue(contract.expectedTargets().isEmpty());
     }
 
     @Test

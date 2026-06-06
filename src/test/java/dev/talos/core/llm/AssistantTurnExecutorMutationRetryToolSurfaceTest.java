@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AssistantTurnExecutorMutationRetryToolSurfaceTest {
 
     @Test
-    void missingMutationRetryUsesOnlyWriteAndEditTools() {
+    void staticWebMissingMutationRetryUsesOnlyWriteFileTool() {
         RecordingResolver resolver = new RecordingResolver(List.of(
                 "Done. The files are complete.",
                 "I still will not call tools."));
@@ -47,7 +47,7 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
         assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
         assertEquals(
-                List.of("talos.edit_file", "talos.write_file"),
+                List.of("talos.write_file"),
                 sortedToolNames(resolver.requests.get(1)));
     }
 
@@ -167,7 +167,7 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertTrue(retryPrompt.contains("script.js and scripts.js are different target paths"), retryPrompt);
         assertTrue(retryPrompt.contains("Create a complete static BMI calculator"), retryPrompt);
         assertEquals(
-                List.of("talos.edit_file", "talos.write_file"),
+                List.of("talos.write_file"),
                 sortedToolNames(retry));
     }
 
@@ -255,6 +255,37 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
         assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
         assertEquals(List.of("talos.write_file"), sortedToolNames(resolver.requests.get(1)));
+    }
+
+    @Test
+    void staticWebCreationMissingMutationRetryUsesWriteFileAndCarriesRequirements() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "I can describe the site, but I will not call tools.",
+                "Still no tool calls."));
+        Context ctx = context(resolver);
+        String prompt = "Create a complete modern dark synthwave static website for a band called Retrocats. "
+                + "Use exactly index.html, style.css, and script.js as the local files. "
+                + "Do not create a local tailwind.min.css file. "
+                + "The site must preserve these required visible facts: Retrocats, Costanza, "
+                + "Berlin 22 July 2026.";
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(prompt)
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
+        assertEquals(List.of("talos.write_file"), sortedToolNames(resolver.requests.get(1)));
+        String retryPrompt = joinedMessageContent(resolver.requests.get(1));
+        assertTrue(retryPrompt.contains("[StaticWebRequirements]"), retryPrompt);
+        assertTrue(retryPrompt.contains("Retrocats, Costanza, Berlin 22 July 2026"), retryPrompt);
+        assertTrue(retryPrompt.contains("forbiddenArtifacts: tailwind.min.css"), retryPrompt);
     }
 
     @Test

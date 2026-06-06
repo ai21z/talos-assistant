@@ -11,7 +11,7 @@
   "approvalPolicy": "APPROVE_ALL",
   "userPrompt": "Rewrite styles.css so index.html still works.",
   "scriptedResponses": [
-    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body {\\n  background: linear-gradient(135deg, #120022, #071a3d);\\n  color: #ffffff;\\n}\\n.card {\\n  border: 1px solid #00e5ff;\\n  padding: 2rem;\\n}\\n\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"styles.css\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body {\\n  background: linear-gradient(135deg, #120022, #071a3d);\\n  color: #ffffff;\\n}\\n.card {\\n  border: 1px solid #00e5ff;\\n  padding: 2rem;\\n}\\n\"}}\n```",
     "Updated styles.css and kept index.html working."
   ]
 }

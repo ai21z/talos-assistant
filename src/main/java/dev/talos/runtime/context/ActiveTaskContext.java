@@ -1,6 +1,7 @@
 package dev.talos.runtime.context;
 
 import dev.talos.runtime.trace.PromptAuditRedactor;
+import dev.talos.runtime.task.StaticWebRequirements;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -20,10 +21,11 @@ public record ActiveTaskContext(
         String previousOutcomeStatus,
         List<String> verifierFindings,
         List<ActiveTaskContext.RequiredVerificationClaim> requiredVerificationClaims,
+        StaticWebRequirements staticWebRequirements,
         String blockedReason,
         String suppressionReason) {
 
-    public static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
     public static final int MAX_TARGETS = 5;
     public static final int MAX_PROPOSAL_CHARS = 600;
     public static final int MAX_FINDINGS = 5;
@@ -63,6 +65,7 @@ public record ActiveTaskContext(
                 previousOutcomeStatus,
                 verifierFindings,
                 List.of(),
+                StaticWebRequirements.none(),
                 blockedReason,
                 suppressionReason);
     }
@@ -78,6 +81,7 @@ public record ActiveTaskContext(
         previousOutcomeStatus = normalizeText(previousOutcomeStatus, Integer.MAX_VALUE);
         verifierFindings = normalizeFindings(verifierFindings);
         requiredVerificationClaims = normalizeRequiredClaims(requiredVerificationClaims);
+        staticWebRequirements = staticWebRequirements == null ? StaticWebRequirements.none() : staticWebRequirements;
         blockedReason = normalizeText(blockedReason, MAX_PROPOSAL_CHARS);
         suppressionReason = normalizeText(suppressionReason, MAX_PROPOSAL_CHARS);
     }
@@ -119,7 +123,15 @@ public record ActiveTaskContext(
 
     public enum State { NONE, ACTIVE, SUPPRESSED, CLEARED, EXPIRED }
 
-    public enum Kind { NONE, PROPOSED_CHANGES, VERIFIER_FINDINGS, DENIED_MUTATION, PARTIAL_MUTATION, VERIFIED_MUTATION }
+    public enum Kind {
+        NONE,
+        PROPOSED_CHANGES,
+        VERIFIER_FINDINGS,
+        DENIED_MUTATION,
+        PENDING_MUTATION,
+        PARTIAL_MUTATION,
+        VERIFIED_MUTATION
+    }
 
     public enum Operation { NONE, PROPOSE_EDIT, APPLY_EDIT, REPAIR, CREATE, VERIFY, ANSWER_ONLY }
 
@@ -138,6 +150,7 @@ public record ActiveTaskContext(
                 "",
                 List.of(),
                 List.of(),
+                StaticWebRequirements.none(),
                 "",
                 "");
     }
@@ -161,6 +174,7 @@ public record ActiveTaskContext(
                 "",
                 List.of(),
                 List.of(),
+                StaticWebRequirements.none(),
                 "",
                 "");
     }
@@ -195,6 +209,34 @@ public record ActiveTaskContext(
                 outcomeStatus,
                 findings,
                 requiredClaims,
+                StaticWebRequirements.none(),
+                "",
+                "");
+    }
+
+    public static ActiveTaskContext verifierFindings(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            List<String> findings,
+            String outcomeStatus,
+            List<RequiredVerificationClaim> requiredClaims,
+            StaticWebRequirements requirements) {
+        return new ActiveTaskContext(
+                SCHEMA_VERSION,
+                State.ACTIVE,
+                Kind.VERIFIER_FINDINGS,
+                turnNumber,
+                traceId,
+                turnNumber,
+                turnNumber + 3,
+                targets,
+                Operation.REPAIR,
+                "",
+                outcomeStatus,
+                findings,
+                requiredClaims,
+                requirements,
                 "",
                 "");
     }
@@ -218,7 +260,117 @@ public record ActiveTaskContext(
                 "NO_FILES_CHANGED",
                 List.of(),
                 List.of(),
+                StaticWebRequirements.none(),
                 blockedReason,
+                "");
+    }
+
+    public static ActiveTaskContext pendingMutation(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String blockedReason,
+            StaticWebRequirements requirements) {
+        return new ActiveTaskContext(
+                SCHEMA_VERSION,
+                State.ACTIVE,
+                Kind.PENDING_MUTATION,
+                turnNumber,
+                traceId,
+                turnNumber,
+                turnNumber + 3,
+                targets,
+                Operation.CREATE,
+                "",
+                "NO_FILES_CHANGED",
+                List.of(),
+                List.of(),
+                requirements,
+                blockedReason,
+                "");
+    }
+
+    public static ActiveTaskContext partialMutation(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String outcomeStatus) {
+        return appliedMutation(
+                Kind.PARTIAL_MUTATION,
+                turnNumber,
+                traceId,
+                targets,
+                outcomeStatus,
+                StaticWebRequirements.none());
+    }
+
+    public static ActiveTaskContext partialMutation(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String outcomeStatus,
+            StaticWebRequirements requirements) {
+        return appliedMutation(
+                Kind.PARTIAL_MUTATION,
+                turnNumber,
+                traceId,
+                targets,
+                outcomeStatus,
+                requirements);
+    }
+
+    public static ActiveTaskContext verifiedMutation(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String outcomeStatus) {
+        return appliedMutation(
+                Kind.VERIFIED_MUTATION,
+                turnNumber,
+                traceId,
+                targets,
+                outcomeStatus,
+                StaticWebRequirements.none());
+    }
+
+    public static ActiveTaskContext verifiedMutation(
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String outcomeStatus,
+            StaticWebRequirements requirements) {
+        return appliedMutation(
+                Kind.VERIFIED_MUTATION,
+                turnNumber,
+                traceId,
+                targets,
+                outcomeStatus,
+                requirements);
+    }
+
+    private static ActiveTaskContext appliedMutation(
+            Kind kind,
+            int turnNumber,
+            String traceId,
+            List<String> targets,
+            String outcomeStatus,
+            StaticWebRequirements requirements) {
+        return new ActiveTaskContext(
+                SCHEMA_VERSION,
+                State.ACTIVE,
+                kind,
+                turnNumber,
+                traceId,
+                turnNumber,
+                turnNumber + 3,
+                targets,
+                Operation.APPLY_EDIT,
+                "",
+                outcomeStatus,
+                List.of(),
+                List.of(),
+                requirements,
+                "",
                 "");
     }
 
@@ -267,6 +419,9 @@ public record ActiveTaskContext(
                             .map(RequiredVerificationClaim::renderForPlan)
                             .toList());
         }
+        if (!staticWebRequirements.isEmpty()) {
+            sb.append(", ").append(staticWebRequirements.renderForPlan());
+        }
         if (!blockedReason.isBlank()) sb.append(", blocked=").append(blockedReason);
         if (!suppressionReason.isBlank()) sb.append(", reason=").append(suppressionReason);
         sb.append('}');
@@ -288,6 +443,7 @@ public record ActiveTaskContext(
                 previousOutcomeStatus,
                 verifierFindings,
                 requiredVerificationClaims,
+                staticWebRequirements,
                 blockedReason,
                 reason);
     }

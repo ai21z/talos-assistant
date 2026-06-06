@@ -21,10 +21,19 @@ public final class ResponseObligationVerifier {
             "can't modify files within your workspace",
             "cannot create files within your workspace",
             "can't create files within your workspace",
+            "cannot create files in this workspace",
+            "can't create files in this workspace",
+            "do not have the capability to directly create or write files",
+            "don't have the capability to directly create or write files",
+            "currently don't have the capability to directly create or write files",
+            "cannot directly create or write files",
+            "can't directly create or write files",
             "i can provide code snippets",
             "i can provide you with code snippets",
             "you can manually create",
-            "you can create the files manually"
+            "you can create the files manually",
+            "copy and paste these snippets",
+            "copy and paste this snippet"
     );
 
     private ResponseObligationVerifier() {}

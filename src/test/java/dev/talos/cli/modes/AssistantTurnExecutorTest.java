@@ -3004,19 +3004,14 @@ class AssistantTurnExecutorTest {
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+                assertTrue(out.text().contains("invalid mutation arguments"), out.text());
+                assertTrue(out.text().contains("target file not found before approval"), out.text());
                 assertTrue(out.text().contains("bmi_calculator.js"), out.text());
                 assertFalse(out.text().contains("No file change is required"), out.text());
                 assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("complete"),
                         out.text());
-                assertEquals("BLOCKED", trace.outcome().status());
-                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
-                assertTrue(trace.events().stream()
-                                .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
-                                        && "FAILED".equals(event.data().get("status"))
-                                        && "CONDITIONAL_REVIEW_FAILED_MUTATION".equals(
-                                                event.data().get("failureKind"))),
-                        "Trace should record a typed conditional-review failed-mutation breach.");
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("FAILED", trace.outcome().classification());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -6191,7 +6186,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void mutationRetryApprovalDenialUsesDeniedMutationSummary() {
+        void mutationRetryApprovalDenialUsesDeniedMutationSummary(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<div class=\"hero-content\">\n");
             var registry = new dev.talos.tools.ToolRegistry();
             registry.register(new dev.talos.tools.TalosTool() {
                 @Override public String name() { return "talos.edit_file"; }
@@ -6214,6 +6210,7 @@ class AssistantTurnExecutorTest {
                             "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"index.html\","
                                     + "\"old_string\":\"<div class=\\\"hero-content\\\">\","
                                     + "\"new_string\":\"<div class=\\\"hero-content cta-button\\\">\"}}")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
                     .build();
@@ -6225,12 +6222,13 @@ class AssistantTurnExecutorTest {
                     0, 0, false, 0, List.of(), 0, 0, 0, 0);
 
             var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
-                    "raw malformed tool call", messages, loopResult, WS, ctx);
+                    "raw malformed tool call", messages, loopResult, workspace, ctx);
 
             assertEquals(0, result.mutationsInRetry());
             assertNotNull(result.extraSummary());
-            assertTrue(result.answer().contains("No file changes were applied because approval was denied for:"));
-            assertTrue(result.answer().contains("index.html: approval denied"));
+            assertTrue(result.answer().contains("No file changes were applied because approval was denied for:"),
+                    result.answer());
+            assertTrue(result.answer().contains("index.html: approval denied"), result.answer());
             assertFalse(result.answer().contains("Tool loop stopped because the requested mutation was not approved."),
                     "retry-path denial should use the same denied-mutation summary as the main tool loop");
         }
@@ -8837,6 +8835,23 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().startsWith("I can't run that command check"), out.text());
             assertTrue(out.text().contains("approved command profile"), out.text());
             assertFalse(out.text().contains("I inspected the workspace"), out.text());
+        }
+
+        @Test
+        void checkpointRestoreRequestReturnsDeterministicSlashCommandHandoff() {
+            var ctx = scriptedContext("I cannot revert the changes because no backup exists.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("ok revert your changes"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Checkpoint restore is available"), out.text());
+            assertTrue(out.text().contains("/checkpoint list"), out.text());
+            assertTrue(out.text().contains("/checkpoint restore <id>"), out.text());
+            assertTrue(out.text().contains("approval-gated"), out.text());
+            assertFalse(out.text().contains("no backup exists"), out.text());
         }
 
         @Test

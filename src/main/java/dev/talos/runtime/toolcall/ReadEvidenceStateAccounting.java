@@ -23,6 +23,9 @@ public final class ReadEvidenceStateAccounting {
         }
         if (isReadFileTool(call) && pathHint != null) {
             recordSuccessfulReadFile(state, pathHint);
+            state.readFileBodiesThisTurn.put(
+                    ToolCallSupport.normalizePath(pathHint),
+                    result.output() == null ? "" : result.output());
             TurnSourceEvidenceCapture.recordRead(pathHint);
         }
         if (ToolCallSupport.isReadOnlyTool(call.toolName())) {

@@ -4,6 +4,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.StaticWebRequirements;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import org.junit.jupiter.api.Test;
 
@@ -100,6 +101,32 @@ class CurrentTurnCapabilityFrameTest {
         assertFalse(frame.contains("[ActiveTaskContext]"));
         assertFalse(frame.contains("activeTaskContext:"));
         assertFalse(frame.contains("artifactGoal:"));
+    }
+
+    @Test
+    void renderIncludesStaticWebRequirementsWhenContractCarriesDurableFacts() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of("tailwind.min.css"),
+                "Make this Retrocats website more polished.",
+                "active-static-web-context",
+                StaticWebRequirements.of(
+                        List.of("Retrocats", "Costanza", "Berlin 22 July 2026"),
+                        Set.of("tailwind.min.css")));
+
+        String frame = CurrentTurnCapabilityFrame.render(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"));
+
+        assertTrue(frame.contains("[StaticWebRequirements]"), frame);
+        assertTrue(frame.contains("requiredVisibleFacts: Retrocats, Costanza, Berlin 22 July 2026"), frame);
+        assertTrue(frame.contains("forbiddenArtifacts: tailwind.min.css"), frame);
     }
 
     @Test

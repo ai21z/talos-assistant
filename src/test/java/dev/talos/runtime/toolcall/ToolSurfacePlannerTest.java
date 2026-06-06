@@ -13,6 +13,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
+import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -244,6 +245,63 @@ class ToolSurfacePlannerTest {
                                         + "landing page. Adjust styles.css as needed. Make #teaser-button update "
                                         + "#teaser-status with a visible teaser message."),
                         ExecutionPhase.APPLY));
+    }
+
+    @Test
+    void contextualBroadExistingStaticWebRewriteUsesWriteFileOnlySurface() {
+        var messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create a synthwave band website."),
+                ChatMessage.assistant("Created index.html, style.css, and script.js, but verification was incomplete."),
+                ChatMessage.user("Rewrite the existing site to look better and make it feel more like the band."));
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromMessages(messages),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("static web full-file apply surface", plan.reason());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+    }
+
+    @Test
+    void vagueStaticWebRedesignFollowUpUsesWriteFileOnlySurface() {
+        var messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create a synthwave band website with CSS styling and JavaScript interaction."),
+                ChatMessage.assistant("Created index.html, style.css, and script.js."),
+                ChatMessage.user("ok just edit the site to look better"));
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromMessages(messages),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("static web full-file apply surface", plan.reason());
+        assertEquals(
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.write_file"),
+                names);
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
+    void checkpointRestoreIntentExposesNoModelTools() {
+        var contract = TaskContractResolver.fromUserRequest("ok revert your changes");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.APPLY, registry());
+
+        assertEquals("checkpoint restore direct answer", plan.reason());
+        assertEquals(List.of(), plan.nativeToolNames());
+        assertEquals(List.of(), ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.APPLY));
     }
 
     @Test

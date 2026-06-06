@@ -1518,6 +1518,10 @@ public final class AssistantTurnExecutor {
         if (unsupportedCommand != null) {
             return unsupportedCommand;
         }
+        String checkpointRestore = checkpointRestoreAnswerIfNeeded(contract);
+        if (checkpointRestore != null) {
+            return checkpointRestore;
+        }
         String sessionUncertainty = sessionUncertaintyAnswerIfNeeded(ctx, contract);
         if (sessionUncertainty != null) {
             return sessionUncertainty;
@@ -1550,6 +1554,16 @@ public final class AssistantTurnExecutor {
         return "I can't run that command check because no approved command profile was specified. "
                 + "Talos can only run bounded approved command profiles, such as Gradle test/check/build profiles, "
                 + "when the request names a supported profile.";
+    }
+
+    private static String checkpointRestoreAnswerIfNeeded(TaskContract contract) {
+        if (contract == null || contract.type() != TaskType.CHECKPOINT_RESTORE) {
+            return null;
+        }
+        return """
+                Checkpoint restore is available through Talos's local checkpoint command.
+                I did not restore files from this natural-language turn.
+                Run `/checkpoint list` to see available checkpoint IDs, then run `/checkpoint restore <id>` to restore one. Checkpoint restore remains approval-gated.""";
     }
 
     private static String sessionUncertaintyAnswerIfNeeded(Context ctx, TaskContract contract) {

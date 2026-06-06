@@ -74,6 +74,66 @@ class TerminalReadOnlyStopAnswerTest {
     }
 
     @Test
+    void rendersMissingReadTargetInsteadOfModelProse() {
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("read styles.css"),
+                ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                        "call-1", "talos.read_file", java.util.Map.of("path", "styles.css")))),
+                ChatMessage.toolResult("call-1", """
+                        [tool_result: talos.read_file]
+                        [error] File not found: styles.css
+                        Files in ./: index.html, script.js, style.css
+                        [/tool_result]""")
+        ));
+        LoopState state = state(messages, Path.of("."));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.read_file",
+                "styles.css",
+                false,
+                false,
+                false,
+                "",
+                "File not found: styles.css\nFiles in ./: index.html, script.js, style.css",
+                null,
+                dev.talos.tools.ToolError.NOT_FOUND));
+
+        String answer = TerminalReadOnlyStopAnswer.tryAnswer(state, failedReadOutcome());
+
+        assertEquals("""
+                Could not read styles.css: File not found: styles.css
+                Files in ./: index.html, script.js, style.css
+                Possible intended sibling: style.css""", answer);
+    }
+
+    @Test
+    void successfulReadTargetRenderingIsUnchanged() {
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Read notes.md"),
+                ChatMessage.assistantWithToolCalls("", List.of(new ChatMessage.NativeToolCall(
+                        "call-1", "talos.read_file", java.util.Map.of("path", "notes.md")))),
+                ChatMessage.toolResult("call-1", """
+                        [tool_result: talos.read_file]
+                        1 | grounded note
+                        [/tool_result]""")
+        ));
+        LoopState state = state(messages, Path.of("."));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.read_file",
+                "notes.md",
+                true,
+                false,
+                false,
+                "read notes.md",
+                ""));
+
+        assertEquals("""
+                Read notes.md:
+                1 | grounded note""", TerminalReadOnlyStopAnswer.tryAnswer(state, outcome(0)));
+    }
+
+    @Test
     void reportsUnsupportedDocumentWithoutLeakingModelProse() {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
@@ -146,5 +206,10 @@ class TerminalReadOnlyStopAnswerTest {
     private static ToolCallExecutionStage.IterationOutcome outcome(int successes) {
         return new ToolCallExecutionStage.IterationOutcome(
                 0, List.of(), 0, false, false, false, successes);
+    }
+
+    private static ToolCallExecutionStage.IterationOutcome failedReadOutcome() {
+        return new ToolCallExecutionStage.IterationOutcome(
+                0, List.of(), 1, false, false, false, 0);
     }
 }

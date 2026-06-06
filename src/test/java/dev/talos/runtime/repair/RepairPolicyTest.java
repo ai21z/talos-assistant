@@ -2,13 +2,17 @@ package dev.talos.runtime.repair;
 
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -83,6 +87,141 @@ class RepairPolicyTest {
                 plan.instruction());
         assertTrue(plan.instruction().contains("cross-check all HTML/CSS/JS files before emitting tool calls"),
                 plan.instruction());
+    }
+
+    @Test
+    void staticRepairPlanDoesNotTargetForbiddenTailwindArtifact() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("""
+                Create a complete Retrocats static website using exactly index.html, style.css, and script.js.
+                Do not create a local tailwind.min.css file, no broken tailwind.min.css, no placeholder Tailwind file.
+                """));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML references missing CSS file: `tailwind.min.css`;
+                index.html: Tailwind utility classes are used, but no Tailwind CDN, local build configuration, or generated CSS definitions were found.]
+
+                Remaining static verification problems:
+                - HTML references missing CSS file: `tailwind.min.css`
+                - index.html: Tailwind utility classes are used, but no Tailwind CDN, local build configuration, or generated CSS definitions were found.
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - style.css: Updated style.css
+                - script.js: Updated script.js
+                """));
+        messages.add(ChatMessage.user("Final pass: inspect the current files and repair anything unverified."));
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of("tailwind.min.css"),
+                "Final pass: inspect the current files and repair anything unverified.",
+                "test-static-web-tailwind-repair");
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertFalse(plan.steps().stream()
+                        .anyMatch(step -> "tailwind.min.css".equals(step.targetPath())),
+                plan.instruction());
+        String fullTargetsLine = plan.instruction().lines()
+                .filter(line -> line.startsWith("Full-file replacement targets:"))
+                .findFirst()
+                .orElse("");
+        assertFalse(fullTargetsLine.contains("tailwind.min.css"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("index.html"), plan.instruction());
+    }
+
+    @Test
+    void staticRepairPlanMapsForbiddenTailwindCssArtifactToWritableSiteTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("""
+                Create a complete Retrocats static website using exactly index.html, style.css, and script.js.
+                Use Tailwind through the official browser CDN only. No local Tailwind artifacts.
+                """));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - tailwind.css: local Tailwind artifact is unsupported without an explicit build/runtime path.]
+
+                Remaining static verification problems:
+                - tailwind.css: local Tailwind artifact is unsupported without an explicit build/runtime path.
+                - index.html: Tailwind utility classes are used, but no accepted Tailwind runtime was found.
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - style.css: Updated style.css
+                - tailwind.css: Updated tailwind.css
+                - script.js: Updated script.js
+                """));
+        messages.add(ChatMessage.user("Final pass: inspect the current files and repair anything unverified."));
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of("tailwind.css", "tailwind.min.css"),
+                "Final pass: inspect the current files and repair anything unverified.",
+                "test-static-web-tailwind-repair");
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertFalse(plan.steps().stream()
+                        .anyMatch(step -> "tailwind.css".equals(step.targetPath())
+                                || "tailwind.min.css".equals(step.targetPath())),
+                plan.instruction());
+        String fullTargetsLine = plan.instruction().lines()
+                .filter(line -> line.startsWith("Full-file replacement targets:"))
+                .findFirst()
+                .orElse("");
+        assertFalse(fullTargetsLine.contains("tailwind.css"), plan.instruction());
+        assertFalse(fullTargetsLine.contains("tailwind.min.css"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("index.html"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("style.css"), plan.instruction());
+        assertTrue(fullTargetsLine.contains("script.js"), plan.instruction());
+    }
+
+    @Test
+    void selectorRepairFactsAreCompactedForLargeClassInventories(@TempDir Path workspace) throws Exception {
+        StringBuilder classes = new StringBuilder("hero cta-button");
+        for (int i = 0; i < 160; i++) {
+            classes.append(' ').append("layout-token-").append(i);
+        }
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main class="%s">Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """.formatted(classes));
+        Files.writeString(workspace.resolve("style.css"), ".missing-button { color: #ff4fd8; }\n");
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('.cta-button');\n");
+        String instruction = """
+                [Static verification repair context]
+                Expected targets: index.html, style.css, script.js
+
+                Previous static verification problems:
+                - CSS references missing class selectors: `.missing-button`
+
+                Repair plan:
+                Full-file replacement targets: style.css
+                """;
+
+        String enriched = RepairPolicy.enrichSelectorFactsForRepairContext(instruction, workspace);
+
+        assertTrue(enriched.contains("[Current static selector facts]"), enriched);
+        assertTrue(enriched.contains("CSS references missing class selectors: `.missing-button`"), enriched);
+        assertTrue(enriched.contains("cta-button"), enriched);
+        assertFalse(enriched.contains("layout-token-159"), enriched);
+        assertTrue(enriched.length() < 2_800, "selector repair context too large: " + enriched.length());
     }
 
     @Test

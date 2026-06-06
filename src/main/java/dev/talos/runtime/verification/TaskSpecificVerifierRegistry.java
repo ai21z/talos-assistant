@@ -7,6 +7,7 @@ import dev.talos.runtime.task.TaskContract;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 final class TaskSpecificVerifierRegistry {
@@ -22,10 +23,11 @@ final class TaskSpecificVerifierRegistry {
             CapabilityProfile profile,
             Set<String> mutatedPaths,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            Map<String, String> readFileBodies
     ) {
         VerifierProfile verifierProfile = profile == null ? VerifierProfile.NONE : profile.verifierProfile();
-        Context context = new Context(root, contract, profile, mutatedPaths, facts, problems);
+        Context context = new Context(root, contract, profile, mutatedPaths, facts, problems, readFileBodies);
         for (Lane lane : LANES) {
             if (lane.supports(verifierProfile)) return lane.verify(context);
         }
@@ -58,7 +60,8 @@ final class TaskSpecificVerifierRegistry {
             CapabilityProfile profile,
             Set<String> mutatedPaths,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            Map<String, String> readFileBodies
     ) {}
 
     private interface Lane {
@@ -105,7 +108,8 @@ final class TaskSpecificVerifierRegistry {
                     context.profile(),
                     context.mutatedPaths(),
                     context.facts(),
-                    context.problems());
+                    context.problems(),
+                    context.readFileBodies());
             return new Result(true, SourceDerivedArtifactVerifier.Result.notRequired(), report);
         }
     }

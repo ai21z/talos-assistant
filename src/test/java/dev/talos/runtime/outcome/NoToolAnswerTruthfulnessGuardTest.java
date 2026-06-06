@@ -32,6 +32,22 @@ class NoToolAnswerTruthfulnessGuardTest {
     }
 
     @Test
+    void workspaceMutationCapabilityDenialGetsCapabilityCorrection() {
+        CurrentTurnPlan plan = plan(
+                TaskType.READ_ONLY_QA,
+                false,
+                "Why can't you make it?");
+        List<ChatMessage> messages = List.of(ChatMessage.user("Why can't you make it?"));
+
+        String answer = NoToolAnswerTruthfulnessGuard.correctNegativeMutationCapabilityClaimIfNeeded(
+                "I currently don't have the capability to directly create or write files into your workspace.",
+                plan,
+                messages);
+
+        assertEquals(NoToolAnswerTruthfulnessGuard.MUTATION_CAPABILITY_CORRECTION, answer);
+    }
+
+    @Test
     void streamingNoToolMutationNarrativeIsReplaced() {
         CurrentTurnPlan plan = plan(
                 TaskType.FILE_EDIT,

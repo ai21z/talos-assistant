@@ -42,6 +42,18 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
+    void staticWebExpectedTargetProgressNarrowsToolsToWriteFileOnly() {
+        LoopState state = loopState(
+                broadTools(),
+                List.of(ChatMessage.user(
+                        "Create a complete website. Use exactly index.html, style.css, and script.js.")));
+
+        List<ToolSpec> tools = ToolRepromptRequestBuilder.toolSpecs(state, false, true);
+
+        assertEquals(List.of("talos.write_file"), toolNames(tools));
+    }
+
+    @Test
     void narrowingPreservesOriginalToolsWhenNoRequestedToolsAreAvailable() {
         List<ToolSpec> readOnlyTools = List.of(tool("talos.read_file"), tool("talos.list_dir"));
         LoopState state = loopState(readOnlyTools, List.of(ChatMessage.user("Fix README.md.")));

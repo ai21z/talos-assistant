@@ -272,6 +272,58 @@ class TurnProcessorTest {
     }
 
     @Test
+    void editFileOldStringAbsentFailsBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("style.css"), """
+                body {
+                    background-color: #2C2C2C;
+                    color: #FFFFFF;
+                }
+                """);
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "style.css",
+                        "old_string", "body { background-color: #121212; }",
+                        "new_string", "body { background-color: #000000; }")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("Call talos.read_file first"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertTrue(Files.readString(workspace.resolve("style.css")).contains("#2C2C2C"));
+    }
+
+    @Test
+    void editFileNonUniqueOldStringFailsBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("style.css"), """
+                .card { color: white; }
+                .card { color: white; }
+                """);
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "style.css",
+                        "old_string", ".card { color: white; }",
+                        "new_string", ".card { color: pink; }")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("old_string appears 2 times"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
     void validWriteFileStillRequestsApproval(@TempDir Path workspace) {
         AtomicInteger approvals = new AtomicInteger();
         var tp = processorWithFileToolsAndApprovalCounter(approvals);

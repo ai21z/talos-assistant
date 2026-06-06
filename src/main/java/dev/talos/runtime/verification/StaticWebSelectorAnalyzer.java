@@ -21,6 +21,7 @@ final class StaticWebSelectorAnalyzer {
             "<link\\b[^>]*\\bhref\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_SCRIPT_SRC = Pattern.compile(
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
+    private static final Pattern URI_SCHEME = Pattern.compile("^[a-z][a-z0-9+.-]*:.*");
     private static final Pattern CSS_BLOCK_COMMENT = Pattern.compile("(?s)/\\*.*?\\*/");
     private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
@@ -547,6 +548,7 @@ final class StaticWebSelectorAnalyzer {
             String value = matcher.group(2);
             if (value == null || value.isBlank()) continue;
             String normalized = value.replace('\\', '/').strip();
+            if (!isLocalWorkspaceAssetReference(normalized)) continue;
             int query = normalized.indexOf('?');
             if (query >= 0) normalized = normalized.substring(0, query);
             int hash = normalized.indexOf('#');
@@ -556,6 +558,22 @@ final class StaticWebSelectorAnalyzer {
             out.add(slash >= 0 ? normalized.substring(slash + 1) : normalized);
         }
         return out;
+    }
+
+    private static boolean isLocalWorkspaceAssetReference(String value) {
+        if (value == null || value.isBlank()) return false;
+        String lower = value.strip().toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://")
+                || lower.startsWith("https://")
+                || lower.startsWith("//")
+                || lower.startsWith("data:")
+                || lower.startsWith("mailto:")
+                || lower.startsWith("tel:")
+                || lower.startsWith("#")
+                || lower.startsWith("javascript:")) {
+            return false;
+        }
+        return !URI_SCHEME.matcher(lower).matches();
     }
 
     private static String pickLinkedPreferredOrPrimary(
