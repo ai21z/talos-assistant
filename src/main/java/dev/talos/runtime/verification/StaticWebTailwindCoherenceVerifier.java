@@ -31,15 +31,17 @@ final class StaticWebTailwindCoherenceVerifier {
         List<String> out = new ArrayList<>();
         boolean tailwindRuntime = hasTailwindRuntime(selectors.html());
         boolean tailwindBuild = hasTailwindBuild(root);
-        if (containsTailwindDirective(selectors.css()) && !tailwindRuntime && !tailwindBuild) {
+        String linkedCssDirectives = tailwindDirectiveSummary(selectors.css());
+        if (!linkedCssDirectives.isBlank() && !tailwindRuntime && !tailwindBuild) {
             out.add(selectors.cssFile()
-                    + ": Tailwind directives are unprocessed; no Tailwind CDN or local build configuration was found.");
+                    + ": Tailwind directives (" + linkedCssDirectives
+                    + ") are unprocessed; no Tailwind CDN or local build configuration was found.");
         }
         Set<String> tailwindUtilities = tailwindLikeUtilityClasses(selectors.html());
         if (!tailwindUtilities.isEmpty()
                 && !tailwindRuntime
                 && !tailwindBuild
-                && !containsTailwindDirective(selectors.css())
+                && linkedCssDirectives.isBlank()
                 && !cssDefinesAnyUtility(selectors.css(), tailwindUtilities)) {
             out.add(selectors.htmlFile()
                     + ": Tailwind utility classes are used, but no Tailwind CDN, local build configuration, "
@@ -77,15 +79,20 @@ final class StaticWebTailwindCoherenceVerifier {
             if (localTailwindArtifact || forbiddenTailwindArtifact) {
                 out.add(normalized
                         + ": local Tailwind artifact is unsupported without an explicit build-backed local artifact request.");
-                if (containsTailwindDirective(css) && !tailwindRuntime && !tailwindBuild) {
+                String directives = tailwindDirectiveSummary(css);
+                if (!directives.isBlank() && !tailwindRuntime && !tailwindBuild) {
                     out.add(normalized
-                            + ": Tailwind directives are unprocessed; no Tailwind CDN or local build configuration was found.");
+                            + ": Tailwind directives (" + directives
+                            + ") are unprocessed; no Tailwind CDN or local build configuration was found.");
                 }
-            } else if (containsTailwindDirective(css)) {
+            } else {
+                String directives = tailwindDirectiveSummary(css);
+                if (directives.isBlank()) continue;
                 out.add(normalized + ": Tailwind CSS file is not linked from HTML.");
                 if (!tailwindRuntime && !tailwindBuild) {
                     out.add(normalized
-                            + ": Tailwind directives are unprocessed; no Tailwind CDN or local build configuration was found.");
+                            + ": Tailwind directives (" + directives
+                            + ") are unprocessed; no Tailwind CDN or local build configuration was found.");
                 }
             }
         }
@@ -141,11 +148,35 @@ final class StaticWebTailwindCoherenceVerifier {
     }
 
     private static boolean containsTailwindDirective(String css) {
-        if (css == null || css.isBlank()) return false;
+        return !tailwindDirectiveSummary(css).isBlank();
+    }
+
+    private static String tailwindDirectiveSummary(String css) {
+        if (css == null || css.isBlank()) return "";
         String lower = css.toLowerCase(Locale.ROOT);
-        return lower.contains("@tailwind base")
-                || lower.contains("@tailwind components")
-                || lower.contains("@tailwind utilities");
+        LinkedHashSet<String> directives = new LinkedHashSet<>();
+        addDirectiveIfPresent(directives, lower, "@tailwind base");
+        addDirectiveIfPresent(directives, lower, "@tailwind components");
+        addDirectiveIfPresent(directives, lower, "@tailwind utilities");
+        addDirectiveIfPresent(directives, lower, "@apply");
+        addDirectiveIfPresent(directives, lower, "@theme");
+        addDirectiveIfPresent(directives, lower, "@source");
+        addDirectiveIfPresent(directives, lower, "@utility");
+        addDirectiveIfPresent(directives, lower, "@variant");
+        addDirectiveIfPresent(directives, lower, "@custom-variant");
+        addDirectiveIfPresent(directives, lower, "@reference");
+        addDirectiveIfPresent(directives, lower, "@config");
+        addDirectiveIfPresent(directives, lower, "@plugin");
+        if (lower.contains("@import \"tailwindcss\"") || lower.contains("@import 'tailwindcss'")) {
+            directives.add("@import tailwindcss");
+        }
+        return String.join(", ", directives);
+    }
+
+    private static void addDirectiveIfPresent(Set<String> directives, String lower, String directive) {
+        if (lower != null && lower.contains(directive)) {
+            directives.add(directive);
+        }
     }
 
     private static Set<String> tailwindLikeUtilityClasses(String html) {

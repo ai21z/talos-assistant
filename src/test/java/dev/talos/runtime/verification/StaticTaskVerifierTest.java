@@ -1897,6 +1897,41 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void staticWebVerificationFailsTailwindApplyDirectiveWithoutRuntimeOrBuild() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body>
+                    <main><h1>Retrocats</h1><button type="button">Play</button></main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), """
+                body { margin: 0; }
+                button {
+                  @apply focus:outline-none focus:ring-2 focus:ring-pink-300;
+                }
+                """);
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing Retrocats website with Tailwind styling.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("@apply") && p.contains("Tailwind") && p.contains("unprocessed")),
+                result.problems().toString());
+    }
+
+    @Test
     void staticWebVerificationAllowsTailwindCdnRuntime() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
