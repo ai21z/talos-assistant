@@ -1,6 +1,6 @@
 # T217 - Static Selector Repair Writes Must Reject Preserved Missing Selectors Before Apply
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
