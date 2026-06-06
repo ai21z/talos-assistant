@@ -1,6 +1,7 @@
 package dev.talos.core.context;
 
 import dev.talos.runtime.SessionMemory;
+import dev.talos.runtime.TurnRecord;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
@@ -98,6 +99,7 @@ class ConversationCompactionTest {
             assertFalse(result.succeeded());
             assertEquals("prior sketch", result.sketch());
             assertEquals("empty-output", result.reason());
+            assertEquals(ConversationCompactor.CompactionResult.Category.BLANK_OUTPUT, result.category());
         }
 
         @Test
@@ -152,6 +154,7 @@ class ConversationCompactionTest {
             assertFalse(result.succeeded());
             assertEquals("prior sketch", result.sketch());
             assertTrue(result.reason().contains("trivial"), result.reason());
+            assertEquals(ConversationCompactor.CompactionResult.Category.INTEGRITY_REJECT, result.category());
         }
 
         @Test
@@ -170,6 +173,7 @@ class ConversationCompactionTest {
             assertFalse(result.succeeded());
             assertEquals("prior sketch", result.sketch());
             assertTrue(result.reason().contains("critical-evidence"), result.reason());
+            assertEquals(ConversationCompactor.CompactionResult.Category.INTEGRITY_REJECT, result.category());
         }
 
         @Test
@@ -189,6 +193,7 @@ class ConversationCompactionTest {
             assertTrue(result.sketch().contains("index.html"));
             assertTrue(result.sketch().contains("talos.write_file"));
             assertTrue(result.sketch().contains("verification failed"));
+            assertEquals(ConversationCompactor.CompactionResult.Category.SUCCESS, result.category());
         }
 
         @Test
@@ -331,6 +336,21 @@ class ConversationCompactionTest {
             assertNotNull(buffer);
             assertFalse(buffer.contains("q1"));
             assertTrue(buffer.contains("q2"));
+        }
+
+        @Test
+        void pruneOldest_preservesStructuredToolEvidence() {
+            SessionMemory mem = new SessionMemory();
+            mem.update("q1", "a1");
+            mem.update("q2", "a2");
+            mem.recordToolEvidence(1, List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true)));
+
+            mem.pruneOldest(2);
+
+            assertEquals(1, mem.toolEvidence().size());
+            SessionMemory.ToolEvidence evidence = mem.toolEvidence().getFirst();
+            assertEquals("talos.write_file", evidence.toolName());
+            assertEquals("index.html", evidence.pathHint());
         }
 
         @Test
@@ -563,6 +583,34 @@ class ConversationCompactionTest {
 
             assertEquals("prior sketch", cm.sketch());
             assertEquals(before, mem.getTurns());
+        }
+
+        @Test
+        void maybeCompact_integrityRejectsDoNotTripLlmFailureBreaker() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+            AtomicInteger attempts = new AtomicInteger();
+
+            for (int i = 0; i < 4; i++) {
+                assertFalse(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                            attempts.incrementAndGet();
+                            return ConversationCompactor.CompactionResult.integrityRejected(
+                                    existingSketch, "critical-evidence-missing:index.html");
+                        },
+                        ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                        ConversationManager.HISTORY_BUDGET_FRACTION));
+            }
+
+            assertTrue(cm.maybeCompactWith((existingSketch, oldTurns) -> {
+                        attempts.incrementAndGet();
+                        return ConversationCompactor.CompactionResult.succeeded("recovered sketch");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+
+            assertEquals(5, attempts.get(), "integrity rejects should not consume the LLM failure breaker");
+            assertEquals("recovered sketch", cm.sketch());
         }
 
         @Test

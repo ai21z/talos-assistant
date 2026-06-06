@@ -126,16 +126,20 @@ Progress note, 2026-06-06:
   - Trivial compaction outputs such as `summary omitted` / `no context` are
     rejected for substantive old turns, preserving the prior sketch and verbatim
     history.
-  - Critical operational anchors represented in history, including
-    `talos.*` tool names, checkpoint ids, verification/approval/blocking
-    phrases, and relevant file targets, must survive the sketch or compaction
-    fails closed.
+  - Critical prose anchors represented in compacted `ChatMessage` history,
+    including file targets, checkpoint-like ids, and verification/approval/
+    blocking phrases, must survive the sketch or compaction fails closed.
+    Structured runtime `toolEvidence` is durable session evidence and is not
+    protected by requiring the compacted prose sketch to re-echo tool names.
   - `ConversationManager` now refuses malformed stored histories that are not
     complete user/assistant pairs before invoking the compactor or pruning.
   - Prompt audit history policy now reports `INCLUDED_COMPACTED` when compacted
     conversation context is injected, making compaction visible in
     prompt-debug and `/last trace` prompt-audit summaries.
   - T709a's failure gate and session-local circuit breaker remain in place.
+  - Follow-up `T711` tracks the remaining richer trace/debug status work and the
+    explicit distinction between prose-anchor integrity and durable operational
+    evidence.
 
 Initial direction:
 
@@ -245,3 +249,6 @@ Completed evidence, 2026-06-06:
 
 - Candidate live audit for long-session context behavior after deterministic
   tests are green.
+- `T711 - Compaction Operational Evidence And Trace Status` remains the follow-up
+  for richer compaction status fields and any future operational-evidence
+  integration beyond prose-anchor integrity.
