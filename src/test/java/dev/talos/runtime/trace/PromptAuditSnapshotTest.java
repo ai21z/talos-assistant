@@ -140,6 +140,63 @@ class PromptAuditSnapshotTest {
     }
 
     @Test
+    void compactedConversationContextIsVisibleInHistoryPolicy() {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.assistant("[Conversation context] User is working on the Retrocats static site."),
+                ChatMessage.user("Continue the site."));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromMessages(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        Set.of("index.html"),
+                        Set.of(),
+                        "Continue the site."),
+                ExecutionPhase.APPLY,
+                ExecutionPhase.APPLY,
+                ActionObligation.MUTATING_TOOL_REQUIRED,
+                messages,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+
+        assertEquals("INCLUDED_COMPACTED", snapshot.historyPolicy());
+        assertTrue(snapshot.renderCompact().contains("history: INCLUDED_COMPACTED messages=1"));
+    }
+
+    @Test
+    void ordinaryConversationHistoryRemainsVisibleAsIncluded() {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("Old request"),
+                ChatMessage.assistant("Old answer"),
+                ChatMessage.user("Continue."));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromMessages(
+                new TaskContract(
+                        TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        Set.of(),
+                        Set.of(),
+                        "Continue."),
+                ExecutionPhase.INSPECT,
+                ExecutionPhase.INSPECT,
+                ActionObligation.NONE,
+                messages,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+
+        assertEquals("INCLUDED", snapshot.historyPolicy());
+        assertEquals(2, snapshot.historyMessageCount());
+    }
+
+    @Test
     void currentTurnFramePreviewPreservesDirectAnswerPolicyDirectives() {
         CurrentTurnPlan plan = CurrentTurnPlan.create(
                 new TaskContract(

@@ -63,24 +63,29 @@ public record PromptMessageLayout(
         }
 
         int historyCount = 0;
+        boolean compactedHistoryIncluded = false;
         if (currentUserIndex > 0) {
             for (int i = 0; i < currentUserIndex; i++) {
                 ChatMessage message = messages.get(i);
                 String role = message == null ? "" : safe(message.role());
                 if ("user".equals(role) || "assistant".equals(role)) {
                     historyCount++;
+                    if ("assistant".equals(role) && isConversationContext(message.content())) {
+                        compactedHistoryIncluded = true;
+                    }
                 }
             }
         }
 
         boolean injected = frameIndex >= 0;
         String placement = placement(frameIndex, currentUserIndex, historyCount, messages);
+        String historyPolicy = historyPolicy(historyCount, compactedHistoryIncluded);
         return new PromptMessageLayout(
                 systemCount,
                 historyCount,
                 userCount,
                 messages.size(),
-                historyCount > 0 ? "INCLUDED" : "SUPPRESSED",
+                historyPolicy,
                 injected,
                 placement,
                 injected ? PromptAuditRedactor.hash(frame) : "",
@@ -119,6 +124,15 @@ public record PromptMessageLayout(
         return content != null
                 && (content.startsWith("[CurrentTurnCapability]")
                 || content.startsWith("[TaskContract]"));
+    }
+
+    private static boolean isConversationContext(String content) {
+        return content != null && content.startsWith("[Conversation context]");
+    }
+
+    private static String historyPolicy(int historyCount, boolean compactedHistoryIncluded) {
+        if (historyCount <= 0) return "SUPPRESSED";
+        return compactedHistoryIncluded ? "INCLUDED_COMPACTED" : "INCLUDED";
     }
 
     private static String safe(String value) {

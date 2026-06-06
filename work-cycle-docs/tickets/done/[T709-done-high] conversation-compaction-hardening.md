@@ -1,6 +1,6 @@
 # T709 - Conversation Compaction Hardening
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-06
 
@@ -114,6 +114,29 @@ Progress note, 2026-06-06:
   deterministic summary integrity/redaction checks, and visible compaction
   status in trace/debug.
 
+Progress note, 2026-06-06:
+
+- T709b completed the remaining deterministic hardening slice:
+  - Compaction prompts now sanitize prior sketches and old turn text before
+    sending them to the compaction LLM, so user-supplied secret-like values and
+    private-document canaries are not reintroduced through the summarization
+    call.
+  - `CompactionIntegrityPolicy` now sanitizes returned sketches through the
+    shared safety sanitizer before a summary can be accepted.
+  - Trivial compaction outputs such as `summary omitted` / `no context` are
+    rejected for substantive old turns, preserving the prior sketch and verbatim
+    history.
+  - Critical operational anchors represented in history, including
+    `talos.*` tool names, checkpoint ids, verification/approval/blocking
+    phrases, and relevant file targets, must survive the sketch or compaction
+    fails closed.
+  - `ConversationManager` now refuses malformed stored histories that are not
+    complete user/assistant pairs before invoking the compactor or pruning.
+  - Prompt audit history policy now reports `INCLUDED_COMPACTED` when compacted
+    conversation context is injected, making compaction visible in
+    prompt-debug and `/last trace` prompt-audit summaries.
+  - T709a's failure gate and session-local circuit breaker remain in place.
+
 Initial direction:
 
 - Preserve a recent tail verbatim.
@@ -177,8 +200,9 @@ Refactor scope:
   session until reset.
 - Summary verification/probe or deterministic consistency check exists.
 - Prompt-debug/trace exposes compaction status.
-- Tests cover normal compaction, repeated failure breaker, redaction, and
-  preservation of critical evidence.
+- Tests cover normal compaction, repeated failure breaker, redaction, malformed
+  pair preservation, compaction-prompt redaction, and preservation of critical
+  evidence.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or
   outcome truth.
 
@@ -196,6 +220,15 @@ Commands:
 ```powershell
 .\gradlew.bat test --tests "dev.talos.core.context.*" --tests "dev.talos.runtime.*Session*" --no-daemon
 .\gradlew.bat check --no-daemon
+```
+
+Completed evidence, 2026-06-06:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.context.ConversationCompactionTest" --tests "dev.talos.runtime.trace.PromptAuditSnapshotTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.core.context.*" --tests "dev.talos.runtime.trace.*" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.*Session*" --no-daemon
+.\gradlew.bat test --tests "dev.talos.core.context.*" --tests "dev.talos.runtime.trace.*" --tests "dev.talos.runtime.*Session*" --no-daemon
 ```
 
 ## Work-Test Cycle Notes

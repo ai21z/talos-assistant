@@ -1,6 +1,7 @@
 package dev.talos.core.context;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,6 +78,10 @@ public final class ConversationCompactor {
             return new CompactionResult(sketch, true, "success");
         }
 
+        public static CompactionResult succeeded(String sketch, String reason) {
+            return new CompactionResult(sketch, true, reason == null || reason.isBlank() ? "success" : reason);
+        }
+
         public static CompactionResult skipped(String existingSketch, String reason) {
             return new CompactionResult(existingSketch, false, reason);
         }
@@ -126,8 +131,14 @@ public final class ConversationCompactor {
             if (sketch.length() > MAX_SKETCH_CHARS) {
                 sketch = sketch.substring(0, MAX_SKETCH_CHARS);
             }
-            LOG.info("Conversation compacted: {} turns → {} char sketch", oldTurns.size(), sketch.length());
-            return CompactionResult.succeeded(sketch);
+            CompactionIntegrityPolicy.Result integrity =
+                    CompactionIntegrityPolicy.validate(existingSketch, oldTurns, sketch);
+            if (!integrity.succeeded()) {
+                LOG.warn("Compaction sketch rejected by integrity policy: reason={}", integrity.reason());
+                return CompactionResult.failed(existingSketch, integrity.reason());
+            }
+            LOG.info("Conversation compacted: {} turns → {} char sketch", oldTurns.size(), integrity.sketch().length());
+            return CompactionResult.succeeded(integrity.sketch(), integrity.reason());
         } catch (Exception e) {
             LOG.warn("Compaction LLM call failed, keeping existing sketch (exception={})",
                     e.getClass().getSimpleName());
@@ -144,7 +155,7 @@ public final class ConversationCompactor {
         StringBuilder sb = new StringBuilder();
 
         if (existingSketch != null && !existingSketch.isBlank()) {
-            sb.append("Prior summary:\n").append(existingSketch.strip()).append("\n\n");
+            sb.append("Prior summary:\n").append(safePromptText(existingSketch.strip())).append("\n\n");
         }
 
         sb.append("Recent conversation turns to incorporate:\n\n");
@@ -155,7 +166,7 @@ public final class ConversationCompactor {
                 case "assistant" -> "Assistant";
                 default -> msg.role();
             };
-            String content = msg.content();
+            String content = safePromptText(msg.content());
             // Truncate very long individual messages
             if (content != null && content.length() > 2000) {
                 content = content.substring(0, 2000) + "…";
@@ -169,6 +180,11 @@ public final class ConversationCompactor {
             prompt = prompt.substring(prompt.length() - MAX_INPUT_CHARS);
         }
         return prompt;
+    }
+
+    private static String safePromptText(String text) {
+        String sanitized = ProtectedContentSanitizer.sanitizeText(text);
+        return sanitized == null ? "" : sanitized;
     }
 }
 
