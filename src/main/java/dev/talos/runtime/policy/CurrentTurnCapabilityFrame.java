@@ -81,6 +81,7 @@ public final class CurrentTurnCapabilityFrame {
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
         appendSourceEvidenceTargets(frame, contract, mutationAllowed);
         appendStaticWebRequirements(frame, contract, mutationAllowed);
+        appendStaticWebRewriteGroundingGuidance(frame, contract, mutationAllowed, visibleTools);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendProposalApplyGuidance(frame, activeTaskContext, artifactGoal, mutationAllowed);
         appendTaskExpectations(frame, taskExpectations);
@@ -278,6 +279,78 @@ public final class CurrentTurnCapabilityFrame {
                     .append('\n')
                     .append("Do not create, edit, or rely on these forbidden local artifacts.\n");
         }
+    }
+
+    private static void appendStaticWebRewriteGroundingGuidance(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed,
+            List<String> visibleTools
+    ) {
+        if (!mutationAllowed || contract == null || !contract.verificationRequired()) return;
+        if (contract.type() != TaskType.FILE_EDIT && contract.type() != TaskType.FILE_CREATE) return;
+        if (visibleTools == null
+                || !visibleTools.contains("talos.read_file")
+                || !visibleTools.contains("talos.write_file")) {
+            return;
+        }
+        List<String> targets = contract.expectedTargets().stream()
+                .filter(CurrentTurnCapabilityFrame::isSmallStaticWebFile)
+                .sorted()
+                .toList();
+        if (targets.isEmpty()) return;
+        if (!looksLikeStaticWebRewriteContext(contract, targets)) return;
+
+        frame.append("[StaticWebRewriteGrounding]\n")
+                .append("Before any talos.write_file full-file rewrite of an existing required static-web target, ")
+                .append("read the exact existing target first in this turn.\n")
+                .append("Read first when rewriting: ")
+                .append(String.join(", ", targets))
+                .append('\n')
+                .append("Do not call talos.write_file for an existing required static-web target until its ")
+                .append("current bytes were read in this turn. After readback, write the complete corrected ")
+                .append("file content for that exact path.\n");
+    }
+
+    private static boolean isSmallStaticWebFile(String target) {
+        if (target == null || target.isBlank()) return false;
+        String lower = target.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".html")
+                || lower.endsWith(".htm")
+                || lower.endsWith(".css")
+                || lower.endsWith(".js")
+                || lower.endsWith(".jsx")
+                || lower.endsWith(".ts")
+                || lower.endsWith(".tsx");
+    }
+
+    private static boolean looksLikeStaticWebRewriteContext(TaskContract contract, List<String> targets) {
+        String reason = contract.classificationReason() == null
+                ? ""
+                : contract.classificationReason().toLowerCase(java.util.Locale.ROOT);
+        String request = contract.originalUserRequest() == null
+                ? ""
+                : contract.originalUserRequest().toLowerCase(java.util.Locale.ROOT);
+        boolean activeStaticWebContext = reason.contains("static-web")
+                || reason.contains("active-static-web-context")
+                || request.contains("active task context")
+                || request.contains("artifactgoal{kind=static_web");
+        boolean rewriteLanguage = request.contains("make it better")
+                || request.contains("look better")
+                || request.contains("looks better")
+                || request.contains("more modern")
+                || request.contains("more polished")
+                || request.contains("polished and complete")
+                || request.contains("repair anything unverified")
+                || request.contains("rewrite")
+                || request.contains("redesign")
+                || request.contains("tailwind")
+                || request.contains("according to my intent")
+                || request.contains("still bad");
+        boolean fullStaticSurface = targets.stream().anyMatch(target -> target.endsWith(".html") || target.endsWith(".htm"))
+                && targets.stream().anyMatch(target -> target.endsWith(".css"))
+                && targets.stream().anyMatch(target -> target.endsWith(".js"));
+        return activeStaticWebContext || rewriteLanguage || fullStaticSurface;
     }
 
     private static List<String> orderedSourceEvidenceTargets(TaskContract contract) {

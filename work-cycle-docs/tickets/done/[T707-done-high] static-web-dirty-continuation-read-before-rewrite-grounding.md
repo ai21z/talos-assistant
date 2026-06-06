@@ -1,6 +1,6 @@
 # T707 - Static-Web Dirty Continuation Read-Before-Rewrite Grounding
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-06
 
@@ -31,6 +31,18 @@ The trace resolved `FILE_EDIT`, `STATIC_WEB`, mutation allowed, verification req
 - Status-only questions remain read-only.
 - A regression test proves the dirty continuation prompt reaches a read-grounded tool path or produces a targeted read-first retry rather than repeated blocked writes.
 
+## Completion Evidence
+
+- Added current-turn frame regression:
+  `CurrentTurnCapabilityFrameTest.renderIncludesReadBeforeRewriteGuidanceForDirtyStaticWebContinuation`.
+- Added `[StaticWebRewriteGrounding]` frame guidance for static-web rewrite continuations with required small web targets and visible `talos.read_file` / `talos.write_file`.
+- Existing `StaticWebRewriteGroundingGuard` behavior remains intact.
+- Verification:
+  - `.\gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.StaticWebRewriteGroundingGuardTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.runtime.policy.*" --tests "dev.talos.runtime.context.*" --tests "dev.talos.runtime.toolcall.*" --no-daemon`
+  - `.\gradlew.bat check --no-daemon`
+
 ## Test Plan
 
 - Add an executor/tool-loop test using an existing static-web workspace and the dirty continuation prompt.
@@ -40,4 +52,3 @@ The trace resolved `FILE_EDIT`, `STATIC_WEB`, mutation allowed, verification req
 ## Notes
 
 This is not T705 and not visual verification. It is the next runtime repair-convergence issue after T702/T703/T705.
-

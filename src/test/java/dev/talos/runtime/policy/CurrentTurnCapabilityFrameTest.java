@@ -1,5 +1,8 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ActiveTaskContextPolicy;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -127,6 +130,45 @@ class CurrentTurnCapabilityFrameTest {
         assertTrue(frame.contains("[StaticWebRequirements]"), frame);
         assertTrue(frame.contains("requiredVisibleFacts: Retrocats, Costanza, Berlin 22 July 2026"), frame);
         assertTrue(frame.contains("forbiddenArtifacts: tailwind.min.css"), frame);
+    }
+
+    @Test
+    void renderIncludesReadBeforeRewriteGuidanceForDirtyStaticWebContinuation() {
+        ActiveTaskContext saved = ActiveTaskContext.partialMutation(
+                2,
+                "trace-retrocats",
+                List.of("index.html", "style.css", "script.js"),
+                "FAILED",
+                StaticWebRequirements.of(
+                        List.of("Retrocats", "Life span"),
+                        Set.of("tailwind.css", "tailwind.min.css")));
+        String userRequest = "Make this Retrocats website even more polished and complete. "
+                + "Use Tailwind correctly, preserve facts, and repair anything unverified.";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                decision.taskContract(),
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.read_file", "talos.write_file"),
+                List.of(),
+                decision.planContext().renderForPlan(),
+                decision.artifactGoal().renderForPlan(),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(decision.consumed(), "dirty static-web continuation should consume saved context");
+        assertTrue(frame.contains("[StaticWebRewriteGrounding]"), frame);
+        assertTrue(frame.contains("Before any talos.write_file full-file rewrite"), frame);
+        assertTrue(frame.contains("read the exact existing target first in this turn"), frame);
+        assertTrue(frame.contains("Read first when rewriting: index.html, script.js, style.css"), frame);
+        assertTrue(frame.contains("Do not call talos.write_file for an existing required static-web target"), frame);
     }
 
     @Test
