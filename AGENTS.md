@@ -67,6 +67,22 @@ Proof comes from:
 
 The final answer is the least trusted artifact. It must be judged against evidence.
 
+## Repo-Local Work-Cycle Skill
+
+For normal work in this repository, load and follow:
+
+```text
+work-cycle-docs/skills/talos-work-cycle/SKILL.md
+```
+
+Use it before Talos tickets, implementation, audits, installed-product tests,
+release gates, backlog review, or progress analysis. The only exception is when
+the user explicitly says the task is outside the Talos work-test cycle.
+
+If this skill and `AGENTS.md` conflict, `AGENTS.md` wins. The skill exists to
+make ticket-track and work-test-cycle discipline visible and repeatable, not to
+override project policy.
+
 ## Branch And Version Discipline
 
 Use the current checked-out branch for implementation work unless the user explicitly names another branch.

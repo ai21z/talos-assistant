@@ -1,7 +1,7 @@
 # T124 - Approved Protected Read Answer Postcondition
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 

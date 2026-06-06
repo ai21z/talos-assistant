@@ -1,7 +1,7 @@
 # T125 - Prompt-Debug Protected Content Redaction Policy
 
 Severity: medium
-Status: open
+Status: done
 
 ## Problem
 
