@@ -82,7 +82,8 @@ public final class RepairPolicy {
                     "static repair context skipped: targets did not overlap with current task targets");
         }
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
-        boolean tailwindCoherenceRepair = problems.stream().anyMatch(RepairPolicy::isTailwindCoherenceProblem);
+        boolean frontendFrameworkCoherenceRepair =
+                problems.stream().anyMatch(RepairPolicy::isFrontendFrameworkCoherenceProblem);
         List<RepairPlanStep> steps = planSteps(
                 problems,
                 expectedTargets,
@@ -93,7 +94,7 @@ public final class RepairPolicy {
                 problems,
                 expectedTargets,
                 steps,
-                structuralWebRepair || tailwindCoherenceRepair,
+                structuralWebRepair || frontendFrameworkCoherenceRepair,
                 missingExpectedTargets,
                 similarWrongTargets);
 
@@ -212,8 +213,9 @@ public final class RepairPolicy {
         Set<String> targets = new LinkedHashSet<>();
         Set<String> forbiddenKeys = normalizedTargetKeys(forbiddenTargets);
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
-        boolean tailwindCoherenceRepair = problems.stream().anyMatch(RepairPolicy::isTailwindCoherenceProblem);
-        boolean siteCoherenceRepair = structuralWebRepair || tailwindCoherenceRepair;
+        boolean frontendFrameworkCoherenceRepair =
+                problems.stream().anyMatch(RepairPolicy::isFrontendFrameworkCoherenceProblem);
+        boolean siteCoherenceRepair = structuralWebRepair || frontendFrameworkCoherenceRepair;
         Set<String> verifierSpecificTargets = verifierSpecificStructuralRepairTargets(problems, expectedTargets);
         if (structuralWebRepair && !verifierSpecificTargets.isEmpty()) {
             targets.addAll(verifierSpecificTargets);
@@ -263,6 +265,35 @@ public final class RepairPolicy {
                 || lower.contains("runtime")
                 || lower.contains("build")
                 || lower.contains("utility class"));
+    }
+
+    private static boolean isFrontendFrameworkCoherenceProblem(String problem) {
+        if (problem == null || problem.isBlank()) return false;
+        if (isTailwindCoherenceProblem(problem)) return true;
+        String lower = problem.toLowerCase(Locale.ROOT);
+        boolean namesFramework = containsFrameworkToken(problem, "bootstrap")
+                || containsFrameworkToken(problem, "alpine")
+                || containsFrameworkToken(problem, "htmx")
+                || containsFrameworkToken(problem, "react")
+                || containsFrameworkToken(problem, "vue");
+        if (!namesFramework) return false;
+        return lower.contains("artifact")
+                || lower.contains("placeholder")
+                || lower.contains("cdn")
+                || lower.contains("runtime")
+                || lower.contains("build")
+                || lower.contains("framework");
+    }
+
+    private static boolean containsFrameworkToken(String value, String frameworkName) {
+        if (value == null || value.isBlank() || frameworkName == null || frameworkName.isBlank()) {
+            return false;
+        }
+        return Pattern.compile("(?i)(?<![A-Za-z0-9_-])"
+                        + Pattern.quote(frameworkName)
+                        + "(?![A-Za-z0-9_-])")
+                .matcher(value)
+                .find();
     }
 
     private static Set<String> withoutForbiddenTargets(

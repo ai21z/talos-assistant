@@ -319,6 +319,10 @@ public final class StaticTaskVerifier {
                 contract,
                 selectors,
                 mutatedPaths));
+        staticWebProblems.addAll(StaticWebFrontendFrameworkAssetVerifier.problems(
+                root,
+                contract,
+                mutatedPaths));
         StaticWebContentPreservationVerifier.Result contentPreservation =
                 StaticWebContentPreservationVerifier.verify(contract, selectors, readFileBodies);
         facts.addAll(contentPreservation.facts());

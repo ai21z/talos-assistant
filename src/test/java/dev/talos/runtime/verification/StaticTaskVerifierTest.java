@@ -1965,6 +1965,42 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void remoteBootstrapCssHrefIsNotTreatedAsMissingLocalStylesheet() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body><main class="container py-5">Retrocats</main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { margin: 0; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a complete Retrocats static website with Bootstrap CDN only. No local framework artifacts.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertFalse(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("HTML references missing CSS file")
+                                && problem.contains("bootstrap.min.css")),
+                result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(fact -> fact.contains("cdn.jsdelivr.net")
+                                && fact.contains("bootstrap.min.css")),
+                result.facts().toString());
+    }
+
+    @Test
     void staticWebVerificationAllowsGeneratedCssForUtilityClasses() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -2055,6 +2091,38 @@ class StaticTaskVerifierTest {
         assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
         assertTrue(result.problems().stream()
                         .anyMatch(p -> p.contains("tailwind.css") && p.contains("local Tailwind artifact")),
+                result.problems().toString());
+    }
+
+    @Test
+    void staticWebVerificationFailsLocalBootstrapPlaceholderFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="bootstrap.css">
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body><main>Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("bootstrap.css"), "/* Bootstrap placeholder file */\n");
+        Files.writeString(workspace.resolve("style.css"), "body { margin: 0; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create the Retrocats site with Bootstrap CDN only. No local framework artifacts.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("bootstrap.css", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("bootstrap.css") && p.contains("local Bootstrap artifact")),
                 result.problems().toString());
     }
 

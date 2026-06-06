@@ -199,6 +199,36 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void genericLocalBootstrapArtifactBanForbidsBootstrapArtifactsNotProjectCss() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create the Retrocats site with Bootstrap CDN only. No local framework artifacts, "
+                        + "no placeholder Bootstrap file, and do not create bootstrap.css. Use style.css for custom CSS.");
+
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.forbiddenTargets().contains("bootstrap.css"),
+                contract.forbiddenTargets().toString());
+        assertTrue(contract.forbiddenTargets().contains("bootstrap.min.css"),
+                contract.forbiddenTargets().toString());
+        assertFalse(contract.forbiddenTargets().contains("style.css"),
+                contract.forbiddenTargets().toString());
+    }
+
+    @Test
+    void reactiveLanguageDoesNotForbidReactFrameworkArtifacts() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create a reactive Retrocats static page with index.html and style.css. "
+                        + "No local framework artifacts. Use style.css for custom CSS.");
+
+        assertTrue(contract.mutationAllowed());
+        assertFalse(contract.forbiddenTargets().contains("react.js"),
+                contract.forbiddenTargets().toString());
+        assertFalse(contract.forbiddenTargets().contains("react-dom.js"),
+                contract.forbiddenTargets().toString());
+        assertFalse(contract.forbiddenTargets().contains("style.css"),
+                contract.forbiddenTargets().toString());
+    }
+
+    @Test
     void exactRetrocatsAuditPromptIsStaticWebCreationWithScopedTailwindForbiddenTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(RETROCATS_AUDIT_PROMPT);
 

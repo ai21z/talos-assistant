@@ -1,6 +1,6 @@
 # T696 - Static-Web Durable Requirements Continuation
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
@@ -94,6 +94,20 @@ obligation visible in that turn.
 - If a user explicitly replaces the target set or requirements, the new explicit
   contract can supersede the old one and the trace must show why.
 
+## Implementation Evidence
+
+- `ActiveTaskContextUpdater` now preserves a richer active static-web target
+  set when a later continuation/failed turn reports only a subset and the user
+  has not explicitly replaced the target set.
+- Existing `StaticWebRequirements`, `ActiveTaskContext`,
+  `JsonSessionStore`, `ActiveTaskContextPolicy`, current-turn frame rendering,
+  and static-web content preservation carriers remain in use.
+- Focused tests passed:
+  `ActiveTaskContextUpdaterTest`,
+  `ActiveTaskContextPolicyTest`,
+  `JsonSessionStoreTest`, and
+  `CurrentTurnCapabilityFrameTest`.
+
 ## Regression Tests
 
 - `ActiveTaskContextPolicyTest`: dirty continuation with a stored Retrocats
@@ -111,4 +125,3 @@ obligation visible in that turn.
 - No automatic rollback.
 - No broad inference of facts from arbitrary chat history; use explicit
   required-fact spans and safe read evidence only.
-

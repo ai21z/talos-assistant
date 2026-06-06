@@ -1,6 +1,6 @@
 # T697 - External Frontend Framework Asset Coherence
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
@@ -80,6 +80,22 @@ another one-off verifier for every library.
   Tailwind-only by construction.
 - Existing Tailwind tests continue to pass.
 
+## Implementation Evidence
+
+- `StaticWebFrontendFrameworkAssetVerifier` adds non-Tailwind local framework
+  artifact checks for Bootstrap, Alpine, HTMX, React, and Vue placeholder/local
+  artifact filenames.
+- `TaskContractResolver` expands named local framework artifact bans into
+  framework-specific forbidden targets without forbidding normal project CSS
+  such as `style.css`.
+- `RepairPolicy` treats known frontend framework coherence problems as
+  site-coherence repair, so forbidden framework artifacts map back to writable
+  site files.
+- Focused tests passed:
+  `TaskContractResolverTest`,
+  `StaticTaskVerifierTest`, and
+  `RepairPolicyTest`.
+
 ## Regression Tests
 
 - Static verifier: valid remote runtime accepted with limitation wording.
@@ -97,4 +113,3 @@ another one-off verifier for every library.
 - No automatic dependency installation or bundler execution.
 - No claim that remote CDN use is production-ready; local demo acceptance should
   still surface an appropriate limitation.
-
