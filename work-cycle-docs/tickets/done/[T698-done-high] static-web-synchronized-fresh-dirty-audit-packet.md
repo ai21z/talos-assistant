@@ -1,6 +1,6 @@
 # T698 - Static-Web Synchronized Fresh/Dirty Audit Packet
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
@@ -76,6 +76,37 @@ fresh/dirty audit gate.
 - Artifact canary scan runs for the audit root.
 - The packet explicitly states whether it is release-grade or exploratory.
 
+## Completion Evidence
+
+Completed in synchronized audit root:
+
+`local/TalosTestOUTPUT/test02-11-post-t697-t698-sync-audit-20260606-131440/`
+
+Preflight:
+
+- `git diff --check` passed before the audit.
+- `.\gradlew.bat check --no-daemon` passed before the audit.
+- `.\gradlew.bat installDist --no-daemon` passed before the audit.
+- Installed binary reported `Talos 0.9.9 - Java 21.0.9+10-LTS - Windows 11 amd64`.
+
+Audit packet:
+
+- Qwen fresh and dirty lanes completed.
+- GPT-OSS fresh and dirty lanes completed.
+- Approval synchronization was real: the runner sent approval only after observing an `Allow?` prompt.
+- `LIVE-AUDIT.md`, `FINDINGS.md`, and `MATRIX.csv` are populated.
+- Prompt-debug, `/last trace`, final files, diffs, and approval logs are present under the audit root.
+
+Findings created:
+
+- `T699 - Dirty Static-Web Workspace-Surface Target Binding`
+- `T700 - Tailwind Build Directive Coherence`
+- `T701 - Static-Web Status Answers Use Last Verification State`
+
+Result:
+
+The audit packet is complete and release-grade as evidence, but it is not a product pass. It found P1 static-web reliability/truthfulness issues.
+
 ## Regression/Runbook Checks
 
 - Add or update the runbook script so transcript capture cannot silently leave
@@ -89,4 +120,3 @@ fresh/dirty audit gate.
 - No product-code behavior change.
 - No replacement for the broader full prompt-bank audit tickets `T280`,
   `T284`, `T306`, and `T312`.
-
