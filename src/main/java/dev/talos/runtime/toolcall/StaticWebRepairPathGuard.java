@@ -18,13 +18,17 @@ final class StaticWebRepairPathGuard {
         if (!contract.expectedTargets().stream().allMatch(StaticWebCapabilityProfile::isSmallWebFile)) {
             return null;
         }
-        if (!isRootOrDirectoryPath(pathHint)) return null;
         List<String> expected = contract.expectedTargets().stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(path -> !path.isBlank())
                 .sorted(Comparator.naturalOrder())
                 .toList();
         if (expected.isEmpty()) return null;
+        String attempted = ToolCallSupport.normalizePath(pathHint);
+        if (!isRootOrDirectoryPath(pathHint)
+                && expected.stream().anyMatch(target -> target.equalsIgnoreCase(attempted))) {
+            return null;
+        }
         String display = pathHint == null || pathHint.isBlank() ? "(empty path)" : pathHint.strip();
         return "Target outside expected targets before approval: `" + display
                 + "` is outside the current expected target set: "

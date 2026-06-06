@@ -2,7 +2,9 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
@@ -27,7 +29,10 @@ import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
 import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -291,6 +296,35 @@ class ToolSurfacePlannerTest {
                 names);
         assertFalse(names.contains("talos.edit_file"), names.toString());
         assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
+    void dirtyWorkspaceStaticWebPolishUsesWriteFileOnlySurface(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main>Retrocats</main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('retrocats');\n");
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromUserRequest(
+                        "Make this Retrocats website even more polished and complete. "
+                                + "Use Tailwind correctly, preserve facts, and repair anything unverified."),
+                workspace);
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.APPLY, registry());
+
+        assertEquals("static web full-file apply surface", plan.reason());
+        assertEquals(
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.write_file"),
+                plan.nativeToolNames());
+        assertFalse(plan.nativeToolNames().contains("talos.edit_file"), plan.nativeToolNames().toString());
+        assertFalse(plan.nativeToolNames().contains("talos.apply_workspace_batch"), plan.nativeToolNames().toString());
+        assertFalse(plan.nativeToolNames().contains("talos.move_path"), plan.nativeToolNames().toString());
+        assertFalse(plan.nativeToolNames().contains("talos.rename_path"), plan.nativeToolNames().toString());
     }
 
     @Test
