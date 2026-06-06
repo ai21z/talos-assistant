@@ -20,6 +20,7 @@ import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
+import dev.talos.runtime.outcome.RuntimeVerificationStatusAnswer;
 import dev.talos.runtime.outcome.UnsupportedDocumentAnswerGuard;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
@@ -1525,6 +1526,15 @@ public final class AssistantTurnExecutor {
         String sessionUncertainty = sessionUncertaintyAnswerIfNeeded(ctx, contract);
         if (sessionUncertainty != null) {
             return sessionUncertainty;
+        }
+        ChangeSummaryContext changeSummaryContext = ctx == null || ctx.memory() == null
+                ? null
+                : ctx.memory().changeSummaryContext();
+        String runtimeVerificationStatus = RuntimeVerificationStatusAnswer.renderIfNeeded(
+                userRequest,
+                changeSummaryContext);
+        if (runtimeVerificationStatus != null) {
+            return runtimeVerificationStatus;
         }
         String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
         if (runtimeMetaEvidence != null) {

@@ -1656,9 +1656,9 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("No approval was requested")
                     .assertAnswerNotContains("iteration limit reached")
                     .assertAnswerNotContains("This response should not be reached")
-                    .assertFileContains("index.html", "<button type=\"submit\">Calculate BMI</button")
-                    .assertFileContains("styles.css", "calculator-container")
-                    .assertFileContains("script.js", "bmi-form");
+                    .assertFileContains("index.html", "<h1>Night Drive</h1>")
+                    .assertFileContains("style.css", "background: #111")
+                    .assertFileContains("script.js", "night-drive");
         }
     }
 

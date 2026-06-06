@@ -9158,6 +9158,74 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void verificationStatusQuestionUsesLatestRuntimeVerifierFailureNotModelOverclaim() {
+            SessionMemory memory = new SessionMemory();
+            memory.setChangeSummaryContext(new ChangeSummaryContext(
+                    ChangeSummaryContext.SCHEMA_VERSION,
+                    List.of(
+                            new ChangeSummaryContext.FileChange(
+                                    "index.html",
+                                    "talos.write_file",
+                                    41,
+                                    "trc-retrocats",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "TASK_INCOMPLETE"),
+                            new ChangeSummaryContext.FileChange(
+                                    "style.css",
+                                    "talos.write_file",
+                                    41,
+                                    "trc-retrocats",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "TASK_INCOMPLETE")),
+                    List.of("script.js"),
+                    "FAILED",
+                    "TASK_INCOMPLETE",
+                    List.of(
+                            "style.css: Tailwind directives (@apply) are unprocessed without a Tailwind build or runtime.",
+                            "script.js: expected target was not successfully mutated.")));
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("The static verification indicates that everything is present and working."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Is it verified now? What, if anything, is still unverified?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("No. Latest Talos-recorded verification is not verified complete."),
+                    out.text());
+            assertTrue(out.text().contains("verifier=FAILED"), out.text());
+            assertTrue(out.text().contains("completion=TASK_INCOMPLETE"), out.text());
+            assertTrue(out.text().contains("script.js"), out.text());
+            assertTrue(out.text().contains("@apply"), out.text());
+            assertTrue(out.text().contains("runtime mutation history"), out.text());
+            assertFalse(out.text().contains("indicates that everything is present"), out.text());
+        }
+
+        @Test
+        void verificationStatusQuestionWithoutLoadedVerifierStateDoesNotInferSuccess() {
+            var ctx = Context.builder(new Config())
+                    .memory(new SessionMemory())
+                    .llm(LlmClient.scripted("Yes, it is verified now."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Is it verified now?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("No loaded prior verifier state is available"),
+                    out.text());
+            assertTrue(out.text().contains("did not run post-apply verification"), out.text());
+            assertFalse(out.text().contains("Yes, it is verified"), out.text());
+        }
+
+        @Test
         void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
             var ctx = scriptedContext("Yes, it is done now.");
             var messages = new ArrayList<ChatMessage>();

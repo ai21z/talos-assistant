@@ -326,6 +326,7 @@ public final class ToolCallExecutionStage {
             String staticWebRepairPathDiagnostic =
                     StaticWebRepairPathGuard.diagnostic(effective, currentTaskContract, pathHint);
             if (staticWebRepairPathDiagnostic != null) {
+                pathPolicyBlockedThisIter = true;
                 if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
                     failuresThisIter++;
                 }
@@ -336,6 +337,10 @@ public final class ToolCallExecutionStage {
                         "FAILED",
                         staticWebRepairPathDiagnostic,
                         "STATIC_WEB_REPAIR_DIRECTORY_TARGET_BEFORE_APPROVAL");
+                LocalTurnTraceCapture.recordToolCallBlocked(
+                        "tool_loop",
+                        effective,
+                        staticWebRepairPathDiagnostic);
                 state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
                         effective,
                         pathHint,

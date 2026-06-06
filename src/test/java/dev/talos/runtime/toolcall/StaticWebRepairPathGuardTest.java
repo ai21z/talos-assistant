@@ -9,12 +9,37 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StaticWebRepairPathGuardTest {
 
     @Test
-    void rejectsNonExpectedFileWriteBeforeApprovalForStaticWebTargetSet() {
+    void rejectsRootDirectoryWriteBeforeApprovalForStaticWebTargetSet() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                "Make this Retrocats website even more polished and complete.",
+                "workspace-static-web-surface-targets");
+        ToolCall call = new ToolCall(
+                "talos.write_file",
+                Map.of("path", "./", "content", "Placeholder"));
+
+        String diagnostic = StaticWebRepairPathGuard.diagnostic(call, contract, "./");
+
+        assertNotNull(diagnostic);
+        assertTrue(diagnostic.contains("Target outside expected targets before approval"), diagnostic);
+        assertTrue(diagnostic.contains("index.html"), diagnostic);
+        assertTrue(diagnostic.contains("style.css"), diagnostic);
+        assertTrue(diagnostic.contains("script.js"), diagnostic);
+    }
+
+    @Test
+    void leavesOrdinaryOffTargetFilesToExpectedTargetPolicy() {
         TaskContract contract = new TaskContract(
                 TaskType.FILE_EDIT,
                 true,
@@ -30,10 +55,6 @@ class StaticWebRepairPathGuardTest {
 
         String diagnostic = StaticWebRepairPathGuard.diagnostic(call, contract, "README.md");
 
-        assertNotNull(diagnostic);
-        assertTrue(diagnostic.contains("Target outside expected targets before approval"), diagnostic);
-        assertTrue(diagnostic.contains("index.html"), diagnostic);
-        assertTrue(diagnostic.contains("style.css"), diagnostic);
-        assertTrue(diagnostic.contains("script.js"), diagnostic);
+        assertNull(diagnostic);
     }
 }
