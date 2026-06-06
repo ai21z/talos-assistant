@@ -1,6 +1,6 @@
 {
   "name": "empty edit args cross-path stop",
-  "fixture": "broken-bmi-site",
+  "fixture": "mini-site",
   "v1Pack": true,
   "claims": [
     "repeated-empty-edit-args-across-paths-stop-before-iteration-cap",
@@ -8,12 +8,12 @@
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
-  "userPrompt": "Repair this broken BMI website. Use the file edit tool.",
+  "userPrompt": "Edit index.html, style.css, and script.js by calling talos.edit_file with precise old_string/new_string patches.",
   "scriptedResponses": [
-    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"public/script.js\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"script.js\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
     "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```",
-    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"script.js\",\"old_string\":\"const form = document.getElementById('bmi-form');\\n\"}}\n```",
-    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"styles.css\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<h1>Night Drive</h1>\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"style.css\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
     "This response should not be reached."
   ]
 }

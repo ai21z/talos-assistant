@@ -24,9 +24,7 @@ final class StaticWebRepairPathGuard {
                 .sorted(Comparator.naturalOrder())
                 .toList();
         if (expected.isEmpty()) return null;
-        String attempted = ToolCallSupport.normalizePath(pathHint);
-        if (!isRootOrDirectoryPath(pathHint)
-                && expected.stream().anyMatch(target -> target.equalsIgnoreCase(attempted))) {
+        if (!isRootOrDirectoryPath(pathHint)) {
             return null;
         }
         String display = pathHint == null || pathHint.isBlank() ? "(empty path)" : pathHint.strip();

@@ -1,6 +1,6 @@
 # T701 - Static-Web Status Answers Use Last Verification State
 
-Status: open
+Status: done
 Severity: high
 
 ## Problem
@@ -50,10 +50,16 @@ That contradicted the latest verifier state. The previous static-web turn had fa
 
 ## Tests
 
-- CLI/repl or outcome-rendering test: after a failed static-web turn, status-only follow-up renders the failed verifier summary.
-- Read-only answer guard test: model-authored "static verification indicates success" is replaced or annotated when latest verification failed.
-- Session/new-process test: if no prior verifier state is loaded, status answer says no loaded prior verification state is available instead of claiming success.
-- Regression test for no mutation tools on status prompt remains green.
+- Added `AssistantTurnExecutorTest.verificationStatusQuestionUsesLatestRuntimeVerifierFailureNotModelOverclaim`.
+  It seeds failed runtime verifier state, scripts an LLM success overclaim, and verifies the final answer is runtime-owned.
+- Added `AssistantTurnExecutorTest.verificationStatusQuestionWithoutLoadedVerifierStateDoesNotInferSuccess`.
+  It verifies a direct status question with no loaded verifier state says no prior verifier state is available instead of inferring success.
+- Focused commands:
+  - `.\gradlew.bat test --tests "*verificationStatusQuestionUsesLatestRuntimeVerifierFailureNotModelOverclaim" --tests "*verificationStatusQuestionWithoutLoadedVerifierStateDoesNotInferSuccess" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest" --tests "dev.talos.runtime.task.WorkspaceTargetReconcilerTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.runtime.toolcall.StaticWebRepairPathGuardTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.repair.RepairPolicyTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon`
+  - `.\gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.structuralWebRepairContinuesUntilPlannedWriteTargets" --tests "dev.talos.harness.JsonScenarioPackTest.scopedTargetLimiterBlocksForbiddenTarget" --tests "dev.talos.harness.JsonScenarioPackTest.emptyEditArgsAcrossPathsStop" --no-daemon`
+  - `.\gradlew.bat check --no-daemon`
 
 ## Non-Goals
 
