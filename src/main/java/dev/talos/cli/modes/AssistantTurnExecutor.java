@@ -1530,11 +1530,13 @@ public final class AssistantTurnExecutor {
         ChangeSummaryContext changeSummaryContext = ctx == null || ctx.memory() == null
                 ? null
                 : ctx.memory().changeSummaryContext();
-        String runtimeVerificationStatus = RuntimeVerificationStatusAnswer.renderIfNeeded(
-                userRequest,
-                changeSummaryContext);
-        if (runtimeVerificationStatus != null) {
-            return runtimeVerificationStatus;
+        if (contract == null || !contract.mutationAllowed()) {
+            String runtimeVerificationStatus = RuntimeVerificationStatusAnswer.renderIfNeeded(
+                    userRequest,
+                    changeSummaryContext);
+            if (runtimeVerificationStatus != null) {
+                return runtimeVerificationStatus;
+            }
         }
         String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
         if (runtimeMetaEvidence != null) {

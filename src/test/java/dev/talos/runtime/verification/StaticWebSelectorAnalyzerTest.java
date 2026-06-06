@@ -131,4 +131,50 @@ class StaticWebSelectorAnalyzerTest {
         assertTrue(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.missing-card`")),
                 facts.selectorProblems().toString());
     }
+
+    @Test
+    void jsCreatedClassesSatisfyCssSelectorsWithoutInventingInitialHtmlClasses() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <main id="app">Retrocats</main>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                .hero { min-height: 100vh; }
+                .featured { color: #ff66cc; }
+                .stage-card { border: 1px solid #ff7a18; }
+                .unused-card { padding: 1rem; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                const hero = document.createElement('section');
+                hero.className = 'hero';
+                hero.className += ' featured';
+                const card = document.createElement('div');
+                card.setAttribute('class', 'stage-card active');
+                document.getElementById('app').append(hero, card);
+                """);
+
+        StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyze(
+                workspace.toAbsolutePath().normalize(),
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of());
+
+        assertNotNull(facts);
+        assertTrue(facts.jsDynamicClasses().contains("hero"), facts.jsDynamicClasses().toString());
+        assertTrue(facts.jsDynamicClasses().contains("featured"), facts.jsDynamicClasses().toString());
+        assertTrue(facts.jsDynamicClasses().contains("stage-card"), facts.jsDynamicClasses().toString());
+        assertFalse(facts.htmlClasses().contains("hero"), facts.htmlClasses().toString());
+        assertFalse(facts.htmlClasses().contains("stage-card"), facts.htmlClasses().toString());
+        assertFalse(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.hero`")),
+                facts.selectorProblems().toString());
+        assertFalse(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.stage-card`")),
+                facts.selectorProblems().toString());
+        assertTrue(facts.selectorProblems().stream().anyMatch(problem -> problem.contains("`.unused-card`")),
+                facts.selectorProblems().toString());
+    }
 }

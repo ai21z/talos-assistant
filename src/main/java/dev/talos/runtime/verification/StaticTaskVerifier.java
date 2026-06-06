@@ -87,7 +87,29 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        return verifyInternal(workspace, contract, loopResult, extraMutationSuccesses, true);
+        return verifyInternal(
+                workspace,
+                contract,
+                loopResult,
+                extraMutationSuccesses,
+                true,
+                StaticWebRenderVerifier.unavailableRunner());
+    }
+
+    static TaskVerificationEvidence verifyWithEvidence(
+            Path workspace,
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            StaticWebRenderVerifier.RenderRunner renderRunner
+    ) {
+        return verifyInternal(
+                workspace,
+                contract,
+                loopResult,
+                extraMutationSuccesses,
+                true,
+                renderRunner);
     }
 
     public static TaskVerificationResult verifyWithoutTraceEvents(
@@ -96,7 +118,13 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        return verifyInternal(workspace, contract, loopResult, extraMutationSuccesses, false).compatibilityResult();
+        return verifyInternal(
+                workspace,
+                contract,
+                loopResult,
+                extraMutationSuccesses,
+                false,
+                StaticWebRenderVerifier.unavailableRunner()).compatibilityResult();
     }
 
     private static TaskVerificationEvidence verifyInternal(
@@ -104,7 +132,8 @@ public final class StaticTaskVerifier {
             TaskContract contract,
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses,
-            boolean recordExpectationTrace
+            boolean recordExpectationTrace,
+            StaticWebRenderVerifier.RenderRunner renderRunner
     ) {
         if (loopResult == null) {
             return TaskVerificationEvidence.postApply(
@@ -188,7 +217,8 @@ public final class StaticTaskVerifier {
                         mutatedPaths,
                         facts,
                         problems,
-                        loopResult.readFileBodies());
+                        loopResult.readFileBodies(),
+                        renderRunner);
         webCoherenceRequired = taskSpecificVerification.webCoherenceRequired();
         SourceDerivedArtifactVerifier.Result sourceDerivedVerification =
                 taskSpecificVerification.sourceDerivedVerification();
@@ -236,6 +266,27 @@ public final class StaticTaskVerifier {
             List<String> facts,
             List<String> problems,
             Map<String, String> readFileBodies
+    ) {
+        return verifySmallWebWorkspace(
+                root,
+                contract,
+                profile,
+                mutatedPaths,
+                facts,
+                problems,
+                readFileBodies,
+                StaticWebRenderVerifier.unavailableRunner());
+    }
+
+    static VerificationReport verifySmallWebWorkspace(
+            Path root,
+            TaskContract contract,
+            CapabilityProfile profile,
+            Set<String> mutatedPaths,
+            List<String> facts,
+            List<String> problems,
+            Map<String, String> readFileBodies,
+            StaticWebRenderVerifier.RenderRunner renderRunner
     ) {
         List<String> primary = obviousPrimaryFiles(root);
         if (primary.isEmpty()) {
@@ -342,6 +393,13 @@ public final class StaticTaskVerifier {
                 StaticWebRemoteAssetVerifier.verify(contract, selectors);
         interactionReport = VerificationReport.merge(interactionReport, remoteAssetVerification.report());
         staticWebProblems.addAll(remoteAssetVerification.blockingProblems());
+        VerificationReport renderReport = StaticWebRenderVerifier.verify(root, contract, selectors, renderRunner);
+        interactionReport = VerificationReport.merge(interactionReport, renderReport);
+        if (renderReport.verifierResults().stream()
+                .anyMatch(result -> result.proofKind() == ProofKind.RENDER_COMPARISON
+                        && result.verdict() == VerificationVerdict.FAILED)) {
+            staticWebProblems.addAll(renderReport.problems());
+        }
         if (!interactionReport.hasRequiredClaims()
                 && StaticWebInteractionVerifier.looksLikeStaticVerificationRepairWithoutBinding(
                 contract.originalUserRequest())) {

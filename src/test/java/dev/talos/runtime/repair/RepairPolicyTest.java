@@ -67,6 +67,8 @@ class RepairPolicyTest {
                 plan.instruction());
         assertTrue(plan.instruction().contains("Do not use talos.edit_file for these structural web repair targets"),
                 plan.instruction());
+        assertTrue(plan.instruction().contains("Before rewriting an existing full-file target, read it in this turn"),
+                plan.instruction());
     }
 
     @Test

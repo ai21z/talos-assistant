@@ -1994,6 +1994,13 @@ class StaticTaskVerifierTest {
         assertTrue(result.problems().stream()
                         .anyMatch(problem -> problem.contains("Tailwind utility classes")),
                 result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("remote Tailwind stylesheet")
+                                && problem.contains("not accepted Tailwind browser runtime/build evidence")),
+                result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("no Tailwind CDN")),
+                result.problems().toString());
         assertTrue(result.facts().stream()
                         .anyMatch(limitation -> limitation.contains("cdn.jsdelivr.net")
                                 && limitation.contains("tailwind.min.css")),
@@ -2558,6 +2565,90 @@ class StaticTaskVerifierTest {
                                 && limit.contains("styles.css")
                                 && limit.contains("https://images.example.test")),
                 evidence.report().limitations().toString());
+    }
+
+    @Test
+    void failedFirstViewportRenderBlocksStaticWebCompletion() throws Exception {
+        writeCompleteStaticWebsite();
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Create a complete modern dark synthwave static website for a band called Retrocats."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0,
+                (root, input) -> StaticWebRenderVerifier.RenderRunResult.failed(
+                        1366,
+                        768,
+                        List.of("First viewport rendered as mostly blank black pixels."),
+                        List.of()));
+
+        assertEquals(TaskVerificationStatus.FAILED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertTrue(evidence.compatibilityResult().problems().stream()
+                        .anyMatch(problem -> problem.contains("mostly blank")),
+                evidence.compatibilityResult().problems().toString());
+        assertFalse(evidence.report().authoritativeProofKinds().contains(ProofKind.RENDER_COMPARISON.name()),
+                evidence.report().authoritativeProofKinds().toString());
+    }
+
+    @Test
+    void unavailableFirstViewportRenderSurfacesLimitationWithoutVisualProof() throws Exception {
+        writeCompleteStaticWebsite();
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Create a complete modern dark synthwave static website for a band called Retrocats."),
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertFalse(evidence.report().authoritativeProofKinds().contains(ProofKind.RENDER_COMPARISON.name()),
+                evidence.report().authoritativeProofKinds().toString());
+        assertTrue(evidence.report().limitations().stream()
+                        .anyMatch(limit -> limit.contains("First-viewport render verification was unavailable")),
+                evidence.report().limitations().toString());
+    }
+
+    @Test
+    void pureInteractionVerificationDoesNotGainRenderProof() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update scripts.js so #teaser-button updates #teaser-status when clicked."),
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().summary());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
+                evidence.report().authoritativeProofKinds().toString());
+        assertFalse(evidence.report().authoritativeProofKinds().contains(ProofKind.RENDER_COMPARISON.name()),
+                evidence.report().authoritativeProofKinds().toString());
     }
 
     @Test
@@ -3820,6 +3911,88 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void staticWebRewritePreservesRequiredDateFactsAcrossSimplePunctuation() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Retrocats</title>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <h1>Retrocats</h1>
+                    <ul>
+                      <li>Rome - 15 July 2026</li>
+                      <li>Barcelona – 18 July 2026</li>
+                      <li>Berlin: 22 July 2026</li>
+                    </ul>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { background: #111; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ok');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing Retrocats website. Preserve the band facts: "
+                        + "Rome 15 July 2026, Barcelona 18 July 2026, Berlin 22 July 2026.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.facts().stream()
+                        .anyMatch(fact -> fact.contains("Required static-web content facts were preserved")),
+                result.facts().toString());
+    }
+
+    @Test
+    void staticWebRewriteReportsWeakJavaScriptStringEvidenceWithoutSatisfyingVisibleFacts() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Retrocats</title>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <h1>Retrocats</h1>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), "body { background: #111; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                const bio = '<p>Costanza, Merri</p>';
+                console.log(bio);
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Rewrite the existing Retrocats website. Preserve the band facts: Costanza, Merri.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.facts().stream()
+                        .anyMatch(fact -> fact.contains("linked JavaScript string evidence")
+                                && fact.contains("Costanza")
+                                && fact.contains("Merri")),
+                result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("required content facts missing")
+                                && problem.contains("Costanza")
+                                && problem.contains("Merri")),
+                result.problems().toString());
+    }
+
+    @Test
     void staticWebRewriteFailsWhenDurableRequiredFactsAreDroppedFromFollowUp() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -4000,6 +4173,38 @@ class StaticTaskVerifierTest {
                 button { padding: 0.5rem 0.75rem; }
                 """);
         Files.writeString(workspace.resolve("script.js"), script);
+    }
+
+    private void writeCompleteStaticWebsite() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Retrocats</title>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="hero">
+                      <h1>Retrocats</h1>
+                      <p>Costanza and Merri formed Retrocats in 2024.</p>
+                    </main>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                .hero {
+                  min-height: 100vh;
+                  color: #ffffff;
+                  background: linear-gradient(135deg, #05000a, #ff2ea6);
+                }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.addEventListener('DOMContentLoaded', () => {
+                  document.body.dataset.ready = 'true';
+                });
+                """);
     }
 
     private static ToolCallLoop.ToolOutcome successfulEdit(String path, VerificationStatus verificationStatus) {

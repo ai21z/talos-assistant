@@ -9226,6 +9226,60 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void staticWebRepairActionWithUnverifiedLanguageDoesNotShortCircuitToStatusAnswer(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <main>Retrocats</main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("style.css"), "body { background: #050505; }\n");
+            Files.writeString(workspace.resolve("script.js"), "console.log('Retrocats');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .memory(new SessionMemory())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "Inspected index.html for the repair pass.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Make this Retrocats website even more polished and complete. "
+                            + "Use Tailwind correctly, preserve facts, and repair anything unverified."));
+
+            TurnAuditCapture.begin();
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                var audit = TurnAuditCapture.end();
+
+                assertTrue(audit.policyTrace().mutationAllowed(), audit.policyTrace().toString());
+                assertTrue(audit.policyTrace().verificationRequired(), audit.policyTrace().toString());
+                assertTrue(audit.policyTrace().expectedTargets().contains("index.html"),
+                        audit.policyTrace().toString());
+                assertFalse(out.text().startsWith("No loaded prior verifier state is available"), out.text());
+                assertTrue(out.text().contains("talos.read_file"), out.text());
+            } finally {
+                if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            }
+        }
+
+        @Test
         void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
             var ctx = scriptedContext("Yes, it is done now.");
             var messages = new ArrayList<ChatMessage>();

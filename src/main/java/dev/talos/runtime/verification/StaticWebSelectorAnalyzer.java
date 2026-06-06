@@ -35,6 +35,12 @@ final class StaticWebSelectorAnalyzer {
     private static final Pattern JS_CLASSLIST_DYNAMIC_CLASS = Pattern.compile(
             "classList\\s*\\.\\s*(?:add|toggle)\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern JS_CLASSNAME_ASSIGNMENT = Pattern.compile(
+            "\\.\\s*className\\s*(?:\\+?=)\\s*(['\"])(.*?)\\1",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern JS_SET_ATTRIBUTE_CLASS = Pattern.compile(
+            "\\.\\s*setAttribute\\s*\\(\\s*(['\"])class\\1\\s*,\\s*(['\"])(.*?)\\2\\s*\\)",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern JS_RESULT_CLICKED_TEXT_ASSIGNMENT = Pattern.compile(
             "(?:querySelector\\s*\\(\\s*['\"]#result['\"]\\s*\\)"
                     + "|getElementById\\s*\\(\\s*['\"]result['\"]\\s*\\))"
@@ -519,9 +525,27 @@ final class StaticWebSelectorAnalyzer {
         Matcher matcher = JS_CLASSLIST_DYNAMIC_CLASS.matcher(js);
         while (matcher.find()) {
             String cls = matcher.group(1);
-            if (cls != null && !cls.isBlank()) out.add(cls);
+            addClassTokens(out, cls);
+        }
+        Matcher className = JS_CLASSNAME_ASSIGNMENT.matcher(js);
+        while (className.find()) {
+            addClassTokens(out, className.group(2));
+        }
+        Matcher setAttribute = JS_SET_ATTRIBUTE_CLASS.matcher(js);
+        while (setAttribute.find()) {
+            addClassTokens(out, setAttribute.group(3));
         }
         return out;
+    }
+
+    private static void addClassTokens(Set<String> out, String value) {
+        if (out == null || value == null || value.isBlank()) return;
+        for (String token : value.strip().split("\\s+")) {
+            String normalized = token.strip();
+            if (normalized.matches("[A-Za-z_][A-Za-z0-9_-]*")) {
+                out.add(normalized);
+            }
+        }
     }
 
     private static Set<String> extractJsIds(String js) {
