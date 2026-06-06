@@ -18,6 +18,8 @@ final class StaticWebTailwindCoherenceVerifier {
             "\\bclass\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern HTML_SCRIPT_SRC = Pattern.compile(
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern HTML_LINK_HREF = Pattern.compile(
+            "<link\\b[^>]*\\bhref\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     private StaticWebTailwindCoherenceVerifier() {}
 
@@ -31,11 +33,13 @@ final class StaticWebTailwindCoherenceVerifier {
         List<String> out = new ArrayList<>();
         boolean tailwindRuntime = hasTailwindRuntime(selectors.html());
         boolean tailwindBuild = hasTailwindBuild(root);
+        boolean remoteTailwindStylesheet = hasRemoteTailwindStylesheet(selectors.html());
         String linkedCssDirectives = tailwindDirectiveSummary(selectors.css());
         if (!linkedCssDirectives.isBlank() && !tailwindRuntime && !tailwindBuild) {
             out.add(selectors.cssFile()
                     + ": Tailwind directives (" + linkedCssDirectives
-                    + ") are unprocessed; no Tailwind CDN or local build configuration was found.");
+                    + ") are unprocessed; "
+                    + missingDirectiveRuntimeEvidence(remoteTailwindStylesheet));
         }
         Set<String> tailwindUtilities = tailwindLikeUtilityClasses(selectors.html());
         if (!tailwindUtilities.isEmpty()
@@ -44,10 +48,17 @@ final class StaticWebTailwindCoherenceVerifier {
                 && linkedCssDirectives.isBlank()
                 && !cssDefinesAnyUtility(selectors.css(), tailwindUtilities)) {
             out.add(selectors.htmlFile()
-                    + ": Tailwind utility classes are used, but no Tailwind CDN, local build configuration, "
-                    + "or generated CSS definitions were found.");
+                    + ": Tailwind utility classes are used, but "
+                    + missingUtilityRuntimeEvidence(remoteTailwindStylesheet));
         }
-        out.addAll(orphanTailwindProblems(root, contract, selectors, mutatedPaths, tailwindRuntime, tailwindBuild));
+        out.addAll(orphanTailwindProblems(
+                root,
+                contract,
+                selectors,
+                mutatedPaths,
+                tailwindRuntime,
+                tailwindBuild,
+                remoteTailwindStylesheet));
         return out;
     }
 
@@ -57,7 +68,8 @@ final class StaticWebTailwindCoherenceVerifier {
             StaticWebSelectorAnalyzer.Facts selectors,
             Collection<String> mutatedPaths,
             boolean tailwindRuntime,
-            boolean tailwindBuild
+            boolean tailwindBuild,
+            boolean remoteTailwindStylesheet
     ) {
         if (mutatedPaths == null || mutatedPaths.isEmpty()) return List.of();
         List<String> out = new ArrayList<>();
@@ -83,7 +95,8 @@ final class StaticWebTailwindCoherenceVerifier {
                 if (!directives.isBlank() && !tailwindRuntime && !tailwindBuild) {
                     out.add(normalized
                             + ": Tailwind directives (" + directives
-                            + ") are unprocessed; no Tailwind CDN or local build configuration was found.");
+                            + ") are unprocessed; "
+                            + missingDirectiveRuntimeEvidence(remoteTailwindStylesheet));
                 }
             } else {
                 String directives = tailwindDirectiveSummary(css);
@@ -92,7 +105,8 @@ final class StaticWebTailwindCoherenceVerifier {
                 if (!tailwindRuntime && !tailwindBuild) {
                     out.add(normalized
                             + ": Tailwind directives (" + directives
-                            + ") are unprocessed; no Tailwind CDN or local build configuration was found.");
+                            + ") are unprocessed; "
+                            + missingDirectiveRuntimeEvidence(remoteTailwindStylesheet));
                 }
             }
         }
@@ -127,6 +141,43 @@ final class StaticWebTailwindCoherenceVerifier {
             }
         }
         return false;
+    }
+
+    private static boolean hasRemoteTailwindStylesheet(String html) {
+        if (html == null || html.isBlank()) return false;
+        Matcher matcher = HTML_LINK_HREF.matcher(html);
+        while (matcher.find()) {
+            String href = matcher.group(2);
+            if (href == null || href.isBlank()) continue;
+            String lower = href.strip().toLowerCase(Locale.ROOT);
+            if (lower.startsWith("//")) {
+                lower = "https:" + lower;
+            }
+            if ((lower.startsWith("http://") || lower.startsWith("https://"))
+                    && lower.contains("tailwind")
+                    && lower.contains(".css")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String missingDirectiveRuntimeEvidence(boolean remoteTailwindStylesheet) {
+        if (remoteTailwindStylesheet) {
+            return "a remote Tailwind stylesheet is linked, but it is not accepted Tailwind "
+                    + "browser runtime/build evidence; no local build configuration was found.";
+        }
+        return "no accepted Tailwind browser runtime or local build configuration was found.";
+    }
+
+    private static String missingUtilityRuntimeEvidence(boolean remoteTailwindStylesheet) {
+        if (remoteTailwindStylesheet) {
+            return "a remote Tailwind stylesheet is linked, but it is not accepted Tailwind "
+                    + "browser runtime/build evidence; no local build configuration or generated CSS "
+                    + "definitions were found.";
+        }
+        return "no accepted Tailwind browser runtime, local build configuration, or generated CSS "
+                + "definitions were found.";
     }
 
     private static boolean hasTailwindBuild(Path root) {

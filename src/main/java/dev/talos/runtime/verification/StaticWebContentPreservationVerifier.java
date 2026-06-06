@@ -24,6 +24,10 @@ final class StaticWebContentPreservationVerifier {
     private static final Pattern VISIBLE_TEXT_ELEMENT = Pattern.compile(
             "(?is)<(?:title|h[1-6]|p|li|td|th|figcaption|blockquote|span|a|button)[^>]*>"
                     + "(.*?)</(?:title|h[1-6]|p|li|td|th|figcaption|blockquote|span|a|button)>");
+    private static final Pattern JS_SINGLE_QUOTED_STRING = Pattern.compile(
+            "'((?:\\\\.|[^'\\\\]){1,240})'", Pattern.DOTALL);
+    private static final Pattern JS_DOUBLE_QUOTED_STRING = Pattern.compile(
+            "\"((?:\\\\.|[^\"\\\\]){1,240})\"", Pattern.DOTALL);
 
     private StaticWebContentPreservationVerifier() {}
 
@@ -48,12 +52,24 @@ final class StaticWebContentPreservationVerifier {
         if (requiredFacts.isEmpty()) return Result.none();
 
         String visibleSiteText = normalizeVisibleText(selectors.html());
+        String linkedJavaScriptText = normalizeJavaScriptStringText(selectors.js());
         List<String> missing = requiredFacts.stream()
                 .filter(fact -> !visibleSiteText.contains(normalizeComparable(fact)))
                 .toList();
+        List<String> weakJavaScriptEvidence = missing.stream()
+                .filter(fact -> {
+                    String comparable = normalizeComparable(fact);
+                    return !comparable.isBlank() && linkedJavaScriptText.contains(comparable);
+                })
+                .toList();
+        List<String> facts = new ArrayList<>();
+        if (!weakJavaScriptEvidence.isEmpty()) {
+            facts.add("linked JavaScript string evidence contains required fact text not present in initial HTML: "
+                    + String.join(", ", weakJavaScriptEvidence) + ".");
+        }
         if (!missing.isEmpty()) {
             return new Result(
-                    List.of(),
+                    facts,
                     List.of(selectors.htmlFile()
                             + ": required content facts missing after static-web rewrite: "
                             + String.join(", ", missing) + "."));
@@ -178,11 +194,43 @@ final class StaticWebContentPreservationVerifier {
         return normalizeComparable(stripHtml(html));
     }
 
+    private static String normalizeJavaScriptStringText(String js) {
+        if (js == null || js.isBlank()) return "";
+        StringBuilder out = new StringBuilder();
+        appendJavaScriptStringText(out, JS_SINGLE_QUOTED_STRING.matcher(js));
+        appendJavaScriptStringText(out, JS_DOUBLE_QUOTED_STRING.matcher(js));
+        return normalizeComparable(stripHtml(out.toString()));
+    }
+
+    private static void appendJavaScriptStringText(StringBuilder out, Matcher matcher) {
+        while (matcher.find()) {
+            String value = matcher.group(1);
+            if (value == null || value.isBlank()) continue;
+            out.append(' ').append(unescapeJavaScriptString(value));
+        }
+    }
+
+    private static String unescapeJavaScriptString(String value) {
+        if (value == null || value.isBlank()) return "";
+        return value
+                .replace("\\n", " ")
+                .replace("\\r", " ")
+                .replace("\\t", " ")
+                .replace("\\'", "'")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+    }
+
     private static String normalizeComparable(String value) {
         if (value == null || value.isBlank()) return "";
         return value.toLowerCase(Locale.ROOT)
-                .replace("&amp;", "&")
+                .replace("&amp;", " and ")
                 .replace("&nbsp;", " ")
+                .replace("&ndash;", " ")
+                .replace("&mdash;", " ")
+                .replace("&#8211;", " ")
+                .replace("&#8212;", " ")
+                .replaceAll("[\\p{Punct}\\p{Pd}]+", " ")
                 .replaceAll("\\s+", " ")
                 .strip();
     }

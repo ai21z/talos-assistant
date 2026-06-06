@@ -501,6 +501,8 @@ public final class RepairPolicy {
                     .append("with complete corrected file content. Do not use talos.edit_file ")
                     .append("for these structural web repair targets; partial edits are too brittle ")
                     .append("for these verifier findings. ");
+            out.append("Before rewriting an existing full-file target, read it in this turn with talos.read_file. ")
+                    .append("If talos.read_file reports NOT_FOUND for a required target, create it with complete content. ");
             if (structuralWebRepair) {
                 out.append(StaticWebCapabilityProfile.repairCoherenceGuidance(fullWriteTargets))
                         .append("\n\n");

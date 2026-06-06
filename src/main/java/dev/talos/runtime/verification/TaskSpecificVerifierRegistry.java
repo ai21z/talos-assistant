@@ -24,10 +24,19 @@ final class TaskSpecificVerifierRegistry {
             Set<String> mutatedPaths,
             List<String> facts,
             List<String> problems,
-            Map<String, String> readFileBodies
+            Map<String, String> readFileBodies,
+            StaticWebRenderVerifier.RenderRunner renderRunner
     ) {
         VerifierProfile verifierProfile = profile == null ? VerifierProfile.NONE : profile.verifierProfile();
-        Context context = new Context(root, contract, profile, mutatedPaths, facts, problems, readFileBodies);
+        Context context = new Context(
+                root,
+                contract,
+                profile,
+                mutatedPaths,
+                facts,
+                problems,
+                readFileBodies,
+                renderRunner);
         for (Lane lane : LANES) {
             if (lane.supports(verifierProfile)) return lane.verify(context);
         }
@@ -61,7 +70,8 @@ final class TaskSpecificVerifierRegistry {
             Set<String> mutatedPaths,
             List<String> facts,
             List<String> problems,
-            Map<String, String> readFileBodies
+            Map<String, String> readFileBodies,
+            StaticWebRenderVerifier.RenderRunner renderRunner
     ) {}
 
     private interface Lane {
@@ -109,7 +119,8 @@ final class TaskSpecificVerifierRegistry {
                     context.mutatedPaths(),
                     context.facts(),
                     context.problems(),
-                    context.readFileBodies());
+                    context.readFileBodies(),
+                    context.renderRunner());
             return new Result(true, SourceDerivedArtifactVerifier.Result.notRequired(), report);
         }
     }
