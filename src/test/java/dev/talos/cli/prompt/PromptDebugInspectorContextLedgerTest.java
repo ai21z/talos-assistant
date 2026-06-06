@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -54,5 +55,27 @@ class PromptDebugInspectorContextLedgerTest {
         assertTrue(formatted.contains("WITHHELD_FROM_MODEL"));
         assertTrue(formatted.contains("PRIVATE_DOCUMENT_EXTRACTED_TEXT"));
         assertFalse(formatted.contains("Eleni Nikolaou"), formatted);
+    }
+
+    @Test
+    void promptDebugShowsCompactionStatusDiagnosticWhenAvailable() {
+        PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
+                "CHAT_REQUEST",
+                "llama_cpp",
+                "qwen2.5-coder:14b",
+                false,
+                Instant.parse("2026-06-06T12:00:00Z"),
+                List.of(),
+                List.of(),
+                null,
+                "")
+                .withDiagnostics(Map.of(
+                        "compactionStatus",
+                        "status=FAILED category=INTEGRITY_REJECT reason=critical-evidence-missing:index.html"));
+
+        String formatted = PromptDebugInspector.format(snapshot);
+
+        assertTrue(formatted.contains("- Compaction: status=FAILED category=INTEGRITY_REJECT"), formatted);
+        assertTrue(formatted.contains("critical-evidence-missing:index.html"), formatted);
     }
 }

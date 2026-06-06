@@ -1,12 +1,13 @@
 # T711 - Compaction Operational Evidence And Trace Status
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-06
 
 ## Evidence Summary
 
-- Source: static code review of T709b commit `717d6aab`
+- Source: static code review of T709b commit `717d6aab`, T711 implementation
+  commit `5ca4659c`, and current T711 trace/debug completion slice
 - Branch: `v0.9.0-beta-dev`
 - Talos version: `0.9.9`
 - Reviewed files:
@@ -26,7 +27,7 @@ for long-session truthfulness: tool calls, approvals/denials, checkpoint ids,
 verification failures, compacted-history status, and failure reasons.
 ```
 
-Observed behavior:
+Initial observed behavior:
 
 ```text
 T709/T709b is fail-safe for prose history and sketch redaction, but the critical
@@ -57,9 +58,10 @@ Why this level:
 ```text
 No immediate data-loss defect was found. T709a prevents destructive pruning on
 failed compaction, and toolEvidence is not pruned by compaction. The remaining
-risk is truthfulness and reliability: the ticket wording overstates operational
-evidence protection, and integrity rejections can trip the same breaker used for
-LLM/transport failures.
+risk was truthfulness and reliability: ticket wording overstated operational
+evidence protection, deterministic integrity rejections needed to be separated
+from LLM/output failures, and prompt-debug/local trace needed richer compaction
+status fields.
 ```
 
 ## Confirmed Findings
@@ -86,27 +88,28 @@ stored prose. The real protection for tool evidence is separate storage, not the
 integrity policy.
 ```
 
-### F2 - Integrity rejections share the LLM failure breaker
+### F2 - Integrity rejections needed a separate result category
 
 Evidence:
 
-- `ConversationManager.maybeCompactWith(...)` increments
+- Before T711, `ConversationManager.maybeCompactWith(...)` incremented
   `consecutiveCompactionFailures` for every `!result.succeeded()`.
-- `CompactionIntegrityPolicy` returns failure for deterministic integrity
-  rejections such as `trivial-summary` and `critical-evidence-missing:*`.
-- After three failures, the session breaker skips compaction attempts.
+- Deterministic integrity rejections such as `trivial-summary` and
+  `critical-evidence-missing:*` should not consume the breaker intended for
+  LLM/output failures.
+- T711 now records explicit compaction result categories and only counts
+  `LLM_FAILURE` / `BLANK_OUTPUT` toward the breaker.
 
 Impact:
 
 ```text
-This is safe short-term because old turns are preserved, but it can disable
-compaction for the session. Long sessions remain bounded by SessionMemory caps,
-so the risk is not literal unbounded growth; the risk is bounded,
-unsummarized history that can eventually age out by hard cap without a compact
-sketch.
+The old behavior was safe short-term because old turns were preserved, but it
+could disable compaction for the session. T711 keeps the failure circuit breaker
+for actual LLM/output failures while allowing deterministic integrity rejections
+to remain visible without consuming that breaker.
 ```
 
-### F3 - Compaction trace/debug status is only partial
+### F3 - Compaction trace/debug status was only partial
 
 Evidence:
 
@@ -121,8 +124,10 @@ Evidence:
 Impact:
 
 ```text
-The current implementation provides useful visibility that compacted history was
-included, but it does not fully satisfy rich compaction status visibility.
+T711 adds a compact status carrier for the latest compaction attempt and renders
+it through prompt-debug/local trace audit metadata: status, category, reason,
+failure count, summarized old-turn count, preserved-tail count, and integrity
+status.
 ```
 
 ## Goal
@@ -156,8 +161,8 @@ Progress note, 2026-06-06:
 - Implemented slice: `CompactionResult` now carries a result category, and
   deterministic integrity rejections no longer consume the LLM/output failure
   breaker.
-- T711 remains open for richer trace/debug status fields unless a later batch
-  deliberately narrows and closes that criterion.
+- The final T711 slice adds richer trace/debug status fields and closes this
+  ticket.
 
 1. Explicitly separate prose-anchor integrity from durable operational evidence:
    - `CompactionIntegrityPolicy` checks represented `ChatMessage` prose only;
@@ -175,7 +180,7 @@ Progress note, 2026-06-06:
    - malformed local history.
 4. Do not let deterministic integrity rejections blindly trip the same breaker
    intended for repeated LLM/transport failures.
-5. Expose compaction status in prompt-debug/local trace in a later focused slice:
+5. Expose compaction status in prompt-debug/local trace:
    - attempted/skipped;
    - reason;
    - failure count;
@@ -245,8 +250,7 @@ Refactor scope:
 - Integrity rejections are distinguishable from LLM/transport failures and do
   not blindly trip the same breaker.
 - Prompt-debug/local trace exposes compacted-history status beyond the
-  `INCLUDED_COMPACTED` label, or this remaining criterion is explicitly left
-  open with this ticket.
+  `INCLUDED_COMPACTED` label.
 - Existing T709a guarantees remain intact: no prune on failed compaction,
   repeated LLM failures trip a session breaker, and `clear()` resets the breaker.
 - Tests cover prose-only compaction, `SessionMemory.toolEvidence` preservation,
@@ -262,7 +266,7 @@ Required deterministic tests:
   breaker, or increments a distinct counter with distinct trace status.
 - Unit test: repeated actual LLM/transport failures still trip the breaker.
 - Trace/prompt-debug test: compaction attempt reason and result category are
-  visible. This remains open if not implemented in the current slice.
+  visible.
 - Regression test: T709 prompt/sketch redaction and data-loss gate still pass.
 
 Commands:
@@ -281,7 +285,7 @@ Completed slice evidence, 2026-06-06:
 .\gradlew.bat check --no-daemon
 ```
 
-Implemented in this slice:
+Implemented in T711 result-category slice:
 
 - `CompactionResult` now carries an explicit result category.
 - `INTEGRITY_REJECT` no longer consumes the LLM/output failure breaker.
@@ -291,10 +295,36 @@ Implemented in this slice:
 - T709's done ticket now cross-references T711 for richer trace/debug status and
   any future operational-evidence integration.
 
-Still open:
+Completed trace/debug slice evidence, 2026-06-06:
 
-- Prompt-debug/local trace fields for compaction reason, count, summarized-turn
-  count, preserved-tail count, and integrity status.
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.context.ConversationCompactionTest" --tests "dev.talos.runtime.trace.PromptAuditSnapshotTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.prompt.PromptDebugInspectorContextLedgerTest" --tests "dev.talos.core.llm.LlmClientPromptDebugCaptureTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.core.context.*" --tests "dev.talos.runtime.trace.*" --tests "dev.talos.runtime.*Session*" --tests "dev.talos.cli.prompt.*" --tests "dev.talos.core.llm.LlmClientPromptDebugCaptureTest" --tests "dev.talos.cli.repl.slash.ExplainLastTurnCommandTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.trace.PromptAuditSnapshotTest.compactionStatusReasonIsRedactedInPromptAudit" --no-daemon
+```
+
+Implemented in final T711 slice:
+
+- Added `ConversationCompactionStatus` as the compact trace/debug metadata
+  carrier for latest compaction attempt status.
+- `ConversationManager` records latest compaction status for success,
+  integrity rejection, LLM/output failure, and failure-breaker skip.
+- `PromptAuditSnapshot.renderCompact()` and `/last trace` prompt-audit rendering
+  now include compaction status beyond the `INCLUDED_COMPACTED` history label.
+- Prompt audit trace events carry `compactionStatus` for saved local trace
+  artifacts.
+- Prompt-debug captures now carry turn diagnostics, and `/prompt-debug last`
+  renders compaction status when available.
+- Compaction-status reasons pass through prompt-audit secret-like redaction
+  before being rendered or serialized.
+
+Still out of scope:
+
+- Feeding `SessionMemory.toolEvidence` into `CompactionIntegrityPolicy` remains
+  deferred until there is a concrete sketch-as-sole-carrier need.
+- Vector memory, threshold tuning, and broad session-store rewrites remain out
+  of scope.
 
 ## Known Risks
 
