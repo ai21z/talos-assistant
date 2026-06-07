@@ -1,6 +1,6 @@
 # T708 - Hierarchical Project Memory
 
-Status: in-progress
+Status: done
 Priority: high
 Created: 2026-06-06
 
@@ -190,9 +190,24 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Unit test: memory tier ordering and truncation.
-- Integration/executor test: current-turn frame includes visible memory metadata.
-- Trace assertion: loaded memory source/tier/redaction recorded.
+- Unit test: memory tier ordering, budget selection, suppression, protected-path
+  exclusion, and import non-expansion.
+- Integration/executor test: project-memory frame is inserted after the base
+  system message and before history/current-turn frame, and workspace memory is
+  loaded for eligible workspace turns.
+- Trace/prompt-debug assertion: project-memory status, source tier, trust,
+  path, truncation, hash/count metadata, and redaction-safe details are visible.
+
+Verified implementation, 2026-06-07:
+
+- Added deterministic read-only project-memory loading under
+  `dev.talos.runtime.context`.
+- Added `PROJECT_MEMORY` context ledger source and
+  `LOCAL_USER_CONFIGURATION` execution boundary for global user memory.
+- Added `[ProjectMemory]` prompt rendering as untrusted local context.
+- Added prompt-audit, prompt-debug, and `/last trace` visibility.
+- Kept memory reload-only and non-persistent; no vector memory, no includes,
+  no foreign agent memory files, and no autonomous writes.
 
 Commands:
 

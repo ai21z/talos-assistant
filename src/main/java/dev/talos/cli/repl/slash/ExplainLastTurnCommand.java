@@ -330,6 +330,7 @@ public final class ExplainLastTurnCommand implements Command {
                 .append(" messages=").append(audit.historyMessageCount())
                 .append('\n');
         sb.append("    compaction: ").append(blankDefault(audit.compactionStatus(), "NOT_DERIVED")).append('\n');
+        sb.append("    projectMemory: ").append(blankDefault(audit.projectMemoryStatus(), "NOT_DERIVED")).append('\n');
         sb.append("    currentTurnFrame: ")
                 .append(audit.currentTurnFrameInjected() ? "injected " : "not-injected ")
                 .append(blankDefault(audit.currentTurnFramePlacement(), "UNKNOWN"));

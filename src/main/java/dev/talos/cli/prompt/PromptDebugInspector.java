@@ -103,6 +103,20 @@ public final class PromptDebugInspector {
         if (compactionStatus != null && !compactionStatus.isBlank()) {
             out.append("- Compaction: ").append(compactionStatus).append('\n');
         }
+        String projectMemoryStatus = diagnostics.get("projectMemoryStatus");
+        if (projectMemoryStatus != null && !projectMemoryStatus.isBlank()) {
+            out.append("- Project memory: ").append(projectMemoryStatus).append('\n');
+        }
+        String projectMemoryDetails = diagnostics.get("projectMemoryDetails");
+        if (projectMemoryDetails != null && !projectMemoryDetails.isBlank()) {
+            out.append("\n## Project Memory\n\n");
+            for (String line : projectMemoryDetails.split("\\R")) {
+                if (!line.isBlank()) {
+                    out.append("- ").append(line.strip()).append('\n');
+                }
+            }
+            out.append('\n');
+        }
     }
 
     private static void appendContextLedger(StringBuilder out) {

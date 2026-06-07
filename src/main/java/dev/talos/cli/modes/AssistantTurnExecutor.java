@@ -220,7 +220,8 @@ public final class AssistantTurnExecutor {
         injectProjectMemoryInstruction(messages, projectMemory);
         injectTaskContractInstruction(messages, currentTurnPlan, true);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract(), workspace);
-        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, ctx);
+        recordProjectMemoryDiagnostics(projectMemory);
+        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, ctx, projectMemory);
         recordPromptDebugDiagnostics(promptAudit);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
@@ -1028,12 +1029,22 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             Context ctx
     ) {
+        return recordPromptAudit(plan, messages, ctx, null);
+    }
+
+    private static PromptAuditSnapshot recordPromptAudit(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx,
+            ProjectMemoryContext projectMemory
+    ) {
         PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
                 plan,
                 messages,
                 ctx == null || ctx.conversationManager() == null
                         ? null
-                        : ctx.conversationManager().lastCompactionStatus());
+                        : ctx.conversationManager().lastCompactionStatus(),
+                projectMemory == null ? PromptAuditSnapshot.NOT_DERIVED : projectMemory.renderDiagnostic());
         LocalTurnTraceCapture.recordPromptAudit(snapshot);
         return snapshot;
     }
@@ -1045,6 +1056,15 @@ public final class AssistantTurnExecutor {
             return;
         }
         PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
+    }
+
+    private static void recordProjectMemoryDiagnostics(ProjectMemoryContext projectMemory) {
+        if (projectMemory == null) return;
+        PromptDebugCapture.putTurnDiagnostic("projectMemoryStatus", projectMemory.renderDiagnostic());
+        String details = projectMemory.renderDebugDetails();
+        if (!details.isBlank()) {
+            PromptDebugCapture.putTurnDiagnostic("projectMemoryDetails", details);
+        }
     }
 
     private static void emitPromptAuditIfEnabled(PromptAuditSnapshot snapshot, Context ctx) {
