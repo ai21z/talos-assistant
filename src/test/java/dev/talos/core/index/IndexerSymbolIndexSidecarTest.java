@@ -61,6 +61,49 @@ class IndexerSymbolIndexSidecarTest {
         });
     }
 
+    @Test
+    void nonForceReindexRestoresMissingSymbolSidecarForUnchangedFiles() throws Exception {
+        withIsolatedHome(() -> {
+            Files.createDirectories(workspace.resolve("src"));
+            Files.writeString(workspace.resolve("src/PublicService.java"), "public class PublicService {}\n");
+
+            Indexer indexer = new Indexer(vectorsDisabledConfig());
+            indexer.index(workspace, false);
+            Path sidecar = SymbolIndexStore.symbolsFile(indexer.indexDirFor(workspace));
+            assertTrue(Files.isRegularFile(sidecar));
+            Files.delete(sidecar);
+
+            indexer.index(workspace, false);
+
+            List<SymbolHit> hits = SymbolIndexStore.load(indexer.indexDirFor(workspace));
+            assertTrue(hits.stream().anyMatch(hit -> hit.symbol().equals("PublicService")),
+                    "missing talos-symbols.json must be rebuilt even when Lucene chunks are unchanged");
+        });
+    }
+
+    @Test
+    void missingSidecarMigrationStillExcludesProtectedPathSymbols() throws Exception {
+        withIsolatedHome(() -> {
+            Files.createDirectories(workspace.resolve("src"));
+            Files.writeString(workspace.resolve("src/PublicService.java"), "public class PublicService {}\n");
+            Files.createDirectories(workspace.resolve("protected"));
+            Files.writeString(workspace.resolve("protected/SecretService.java"), "public class SecretService {}\n");
+
+            Indexer indexer = new Indexer(vectorsDisabledConfig());
+            indexer.index(workspace, false);
+            Path sidecar = SymbolIndexStore.symbolsFile(indexer.indexDirFor(workspace));
+            Files.delete(sidecar);
+
+            indexer.index(workspace, false);
+
+            List<SymbolHit> hits = SymbolIndexStore.load(indexer.indexDirFor(workspace));
+            assertTrue(hits.stream().anyMatch(hit -> hit.symbol().equals("PublicService")),
+                    "public symbols should be restored during sidecar migration");
+            assertTrue(hits.stream().noneMatch(hit -> hit.symbol().equals("SecretService")),
+                    "sidecar migration must preserve protected-path exclusion");
+        });
+    }
+
     private void withIsolatedHome(ThrowingRunnable action) throws Exception {
         String previousHome = System.getProperty("user.home");
         Path home = Path.of("build", "tmp", "test-homes")
