@@ -204,6 +204,9 @@ public final class ProjectMemoryLoader {
             String decoded = decodeUtf8(bytes);
             TextSlice slice = slice(decoded);
             String sanitized = ProtectedContentPolicy.sanitizeText(slice.text());
+            if (sanitized.isBlank()) {
+                return ReadDecision.skip(candidate.decision("WITHHELD_FROM_MODEL", "BLANK_AFTER_SANITIZATION"));
+            }
             truncated = truncated || slice.truncated();
             ProjectMemorySource source = new ProjectMemorySource(
                     candidate.tier(),

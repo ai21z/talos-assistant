@@ -5,10 +5,23 @@ import dev.talos.runtime.task.TaskType;
 
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** Conservative current-turn policy for loading project-memory files. */
 final class ProjectMemoryPolicy {
     private ProjectMemoryPolicy() {}
+
+    private static final Pattern PROJECT_MEMORY_OPT_OUT = Pattern.compile(
+            "(?i)(?:"
+                    + "\\b(?:do\\s+not|don't|dont)\\s+"
+                    + "(?:load|use|read|include|apply)\\s+"
+                    + "(?:the\\s+)?(?:project\\s+memory|talos\\.md|\\.talos/rules\\.md|memory\\s+files?)\\b"
+                    + "|\\bignore\\s+(?:the\\s+)?"
+                    + "(?:project\\s+memory|talos\\.md|\\.talos/rules\\.md|memory\\s+files?)\\b"
+                    + "|\\b(?:answer|respond|continue|proceed|work)?\\s*without\\s+"
+                    + "(?:using\\s+|loading\\s+|reading\\s+|including\\s+)?"
+                    + "(?:project\\s+memory|talos\\.md|\\.talos/rules\\.md|memory\\s+files?)\\b"
+                    + ")");
 
     record Decision(boolean load, String reason) {}
 
@@ -21,6 +34,9 @@ final class ProjectMemoryPolicy {
             return new Decision(false, "NO_TASK_CONTRACT");
         }
         String userRequest = contract.originalUserRequest() == null ? "" : contract.originalUserRequest();
+        if (looksProjectMemoryOptOut(userRequest)) {
+            return new Decision(false, "USER_OPTED_OUT_PROJECT_MEMORY");
+        }
         if (looksPrivacyOrProtectedTurn(userRequest)) {
             return new Decision(false, "PRIVACY_OR_PROTECTED_TURN");
         }
@@ -43,6 +59,12 @@ final class ProjectMemoryPolicy {
                     : new Decision(false, "NON_WORKSPACE_QA");
         }
         return new Decision(false, "UNSUPPORTED_TASK_TYPE");
+    }
+
+    private static boolean looksProjectMemoryOptOut(String value) {
+        if (value == null || value.isBlank()) return false;
+        String normalized = value.replace('\\', '/');
+        return PROJECT_MEMORY_OPT_OUT.matcher(normalized).find();
     }
 
     private static boolean looksPrivacyOrProtectedTurn(String value) {

@@ -45,6 +45,8 @@ public final class SessionMemory implements ConversationMemory {
     private String buffer;
     private final List<ChatMessage> turns = new ArrayList<>();
     private final List<ToolEvidence> toolEvidence = new ArrayList<>();
+    private int rawTurnMessagesEvictedWithoutSketch;
+    private int toolEvidenceEntriesEvicted;
     private ActiveTaskContext activeTaskContext;
     private ArtifactGoal artifactGoal;
     private ChangeSummaryContext changeSummaryContext;
@@ -57,6 +59,11 @@ public final class SessionMemory implements ConversationMemory {
             pathHint = pathHint == null ? "" : pathHint;
         }
     }
+
+    public record RetentionEvictionStats(
+            int rawTurnMessagesEvictedWithoutSketch,
+            int toolEvidenceEntriesEvicted
+    ) {}
 
     public record FailedWorkspaceSwitch(String requestedWorkspace, String currentWorkspace) {
         public FailedWorkspaceSwitch {
@@ -107,6 +114,10 @@ public final class SessionMemory implements ConversationMemory {
         return List.copyOf(toolEvidence);
     }
 
+    public synchronized RetentionEvictionStats retentionEvictionStats() {
+        return new RetentionEvictionStats(rawTurnMessagesEvictedWithoutSketch, toolEvidenceEntriesEvicted);
+    }
+
     public synchronized FailedWorkspaceSwitch failedWorkspaceSwitch() {
         return failedWorkspaceSwitch;
     }
@@ -154,6 +165,8 @@ public final class SessionMemory implements ConversationMemory {
         buffer = null;
         turns.clear();
         toolEvidence.clear();
+        rawTurnMessagesEvictedWithoutSketch = 0;
+        toolEvidenceEntriesEvicted = 0;
         clearActiveTaskContext();
         changeSummaryContext = ChangeSummaryContext.none();
         clearFailedWorkspaceSwitch();
@@ -187,7 +200,9 @@ public final class SessionMemory implements ConversationMemory {
         // Prune oldest turns (remove in pairs) if we exceed the limit
         while (turns.size() > MAX_TURNS) {
             turns.removeFirst();
+            rawTurnMessagesEvictedWithoutSketch++;
             if (!turns.isEmpty()) turns.removeFirst();
+            rawTurnMessagesEvictedWithoutSketch++;
         }
     }
 
@@ -231,6 +246,7 @@ public final class SessionMemory implements ConversationMemory {
         }
         while (toolEvidence.size() > MAX_TURNS * 4) {
             toolEvidence.removeFirst();
+            toolEvidenceEntriesEvicted++;
         }
     }
 }
