@@ -123,3 +123,29 @@ Focused installed-product evidence exists for the T719/T720 slice:
 
 This does not close T280. It was a focused evidence-hygiene and P21 wording
 audit, not a full two-model prompt-bank or versioned release-candidate packet.
+
+## 2026-06-07 0.10.0 release-gate reconciliation
+
+Scope decision: the `0.10.0` beta decision must include PDF/DOCX/XLSX text
+extraction claims, while image/OCR, PowerPoint, browser-render proof, Qodana
+triage, public MSI/signing, and architecture-cycle cleanup remain outside the
+next audit batch.
+
+Ticket relationship: T280 is the mandate for the current-candidate two-model
+live audit. T284 is the results/evidence packet for the same gate. Do not delete
+or close either ticket until the current `talosVersion=0.10.0` candidate has a
+release-grade pass/fail report.
+
+Existing `current-two-model-audit-20260607-204059` evidence is useful milestone
+evidence, but it ran on commit `5014076` / installed Talos `0.9.9` and is not a
+release close for HEAD `afde6472` / `0.10.0`.
+
+Next audit must:
+
+- run Qwen and GPT-OSS against the current installed `0.10.0` candidate;
+- use isolated homes/workspaces;
+- capture `/last trace`, `/prompt-debug last`, `/prompt-debug save`, provider
+  bodies, final file state, diffs, and approval evidence;
+- use synchronized/manual approval handling for approval-sensitive prompts;
+- include PDF/DOCX/XLSX beta-core extraction probes and truthfulness review;
+- use redacted final-workspace snapshots for release-clean artifact scans.

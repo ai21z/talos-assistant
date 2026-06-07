@@ -119,6 +119,16 @@ Dependency evidence:
 - `DocumentExtractionPreflight` and `/status --verbose` now expose whether Image OCR is disabled, unavailable, or backed by a resolved local command without running that command.
 - The live-audit script can run `-UseRealOcr` later for v1 image/OCR work.
 
+## 2026-06-07 0.10.0 beta-scope reconciliation
+
+Scope decision: PDF/DOCX/XLS/XLSX extraction remains in beta scope for `0.10.0`;
+image/OCR remains v1. T300 therefore remains a beta-core release gate for
+resource limits and truthful partial/truncated extraction behavior, but not for
+OCR throughput.
+
+The next full audit should record whether document extraction limits and
+limitations are visible in status, trace, and final answers for the beta formats.
+
 Runtime evidence:
 
 - Extracted text is capped by `DocumentExtractionService`.
