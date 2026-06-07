@@ -22,7 +22,9 @@ public final class SymbolExtractor {
             "^\\s*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default|strictfp)\\s+)*"
                     + "(?:<[^;{}()]+>\\s+)?"
                     + "[A-Za-z_$][A-Za-z0-9_$<>\\[\\],.?]*(?:\\s+[A-Za-z_$][A-Za-z0-9_$<>\\[\\],.?]*)*\\s+"
-                    + "([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\([^;{}]*\\)\\s*(?:\\{|;|$)");
+                    + "([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\([^;{}]*\\)\\s*"
+                    + "(?:throws\\s+[A-Za-z_$][A-Za-z0-9_$.]*(?:\\s*,\\s*[A-Za-z_$][A-Za-z0-9_$.]*)*\\s*)?"
+                    + "(?:\\{|;|$)");
     private static final Pattern JS_CLASS = Pattern.compile(
             "\\b(?:export\\s+default\\s+|export\\s+)?(?:abstract\\s+)?class\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b");
     private static final Pattern JS_INTERFACE = Pattern.compile(
