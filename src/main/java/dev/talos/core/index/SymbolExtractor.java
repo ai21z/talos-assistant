@@ -19,8 +19,10 @@ public final class SymbolExtractor {
             "\\b(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\\s+)*"
                     + "(class|interface|record|enum|@interface)\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b");
     private static final Pattern JAVA_METHOD = Pattern.compile(
-            "\\b(?:(?:public|protected|private|static|final|synchronized|abstract|native|default|strictfp)\\s+)+"
-                    + "[A-Za-z_$][A-Za-z0-9_$<>\\[\\],.?\\s]*\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\([^;{}]*\\)");
+            "^\\s*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default|strictfp)\\s+)*"
+                    + "(?:<[^;{}()]+>\\s+)?"
+                    + "[A-Za-z_$][A-Za-z0-9_$<>\\[\\],.?]*(?:\\s+[A-Za-z_$][A-Za-z0-9_$<>\\[\\],.?]*)*\\s+"
+                    + "([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\([^;{}]*\\)\\s*(?:\\{|;|$)");
     private static final Pattern JS_CLASS = Pattern.compile(
             "\\b(?:export\\s+default\\s+|export\\s+)?(?:abstract\\s+)?class\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\b");
     private static final Pattern JS_INTERFACE = Pattern.compile(
@@ -52,11 +54,12 @@ public final class SymbolExtractor {
             inBlockComment = stripped.inBlockComment();
             String line = stripped.line();
             if (line.isBlank()) continue;
+            String scanLine = maskStringLiteralContent(line);
 
             switch (format) {
-                case JAVA, KOTLIN, SCALA, GROOVY -> extractJavaLike(relPath, line, i + 1, hits);
-                case JAVASCRIPT, TYPESCRIPT -> extractJavaScriptLike(relPath, line, i + 1, hits);
-                case PYTHON -> extractPython(relPath, line, i + 1, hits);
+                case JAVA, KOTLIN, SCALA, GROOVY -> extractJavaLike(relPath, scanLine, line, i + 1, hits);
+                case JAVASCRIPT, TYPESCRIPT -> extractJavaScriptLike(relPath, scanLine, line, i + 1, hits);
+                case PYTHON -> extractPython(relPath, scanLine, line, i + 1, hits);
                 default -> {
                     // Unsupported code formats still fall back to no symbol hits.
                 }
@@ -71,8 +74,8 @@ public final class SymbolExtractor {
                 .toList();
     }
 
-    private static void extractJavaLike(String path, String line, int lineNumber, Map<String, SymbolHit> hits) {
-        var typeMatcher = JAVA_TYPE.matcher(line);
+    private static void extractJavaLike(String path, String scanLine, String signatureLine, int lineNumber, Map<String, SymbolHit> hits) {
+        var typeMatcher = JAVA_TYPE.matcher(scanLine);
         if (typeMatcher.find()) {
             SymbolKind kind = switch (typeMatcher.group(1)) {
                 case "class" -> SymbolKind.CLASS;
@@ -82,44 +85,44 @@ public final class SymbolExtractor {
                 case "@interface" -> SymbolKind.ANNOTATION;
                 default -> SymbolKind.CLASS;
             };
-            add(hits, new SymbolHit(path, typeMatcher.group(2), kind, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, typeMatcher.group(2), kind, lineNumber, lineNumber, signatureLine.strip()));
             return;
         }
 
-        if (looksLikeControlFlow(line)) return;
-        var methodMatcher = JAVA_METHOD.matcher(line);
+        if (looksLikeControlFlow(scanLine)) return;
+        var methodMatcher = JAVA_METHOD.matcher(scanLine);
         if (methodMatcher.find()) {
-            add(hits, new SymbolHit(path, methodMatcher.group(1), SymbolKind.METHOD, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, methodMatcher.group(1), SymbolKind.METHOD, lineNumber, lineNumber, signatureLine.strip()));
         }
     }
 
-    private static void extractJavaScriptLike(String path, String line, int lineNumber, Map<String, SymbolHit> hits) {
-        var classMatcher = JS_CLASS.matcher(line);
+    private static void extractJavaScriptLike(String path, String scanLine, String signatureLine, int lineNumber, Map<String, SymbolHit> hits) {
+        var classMatcher = JS_CLASS.matcher(scanLine);
         if (classMatcher.find()) {
-            add(hits, new SymbolHit(path, classMatcher.group(1), SymbolKind.CLASS, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, classMatcher.group(1), SymbolKind.CLASS, lineNumber, lineNumber, signatureLine.strip()));
         }
-        var interfaceMatcher = JS_INTERFACE.matcher(line);
+        var interfaceMatcher = JS_INTERFACE.matcher(scanLine);
         if (interfaceMatcher.find()) {
-            add(hits, new SymbolHit(path, interfaceMatcher.group(1), SymbolKind.INTERFACE, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, interfaceMatcher.group(1), SymbolKind.INTERFACE, lineNumber, lineNumber, signatureLine.strip()));
         }
-        var functionMatcher = JS_FUNCTION.matcher(line);
+        var functionMatcher = JS_FUNCTION.matcher(scanLine);
         if (functionMatcher.find()) {
-            add(hits, new SymbolHit(path, functionMatcher.group(1), SymbolKind.FUNCTION, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, functionMatcher.group(1), SymbolKind.FUNCTION, lineNumber, lineNumber, signatureLine.strip()));
         }
-        var arrowMatcher = JS_ARROW_FUNCTION.matcher(line);
+        var arrowMatcher = JS_ARROW_FUNCTION.matcher(scanLine);
         if (arrowMatcher.find()) {
-            add(hits, new SymbolHit(path, arrowMatcher.group(1), SymbolKind.FUNCTION, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, arrowMatcher.group(1), SymbolKind.FUNCTION, lineNumber, lineNumber, signatureLine.strip()));
         }
     }
 
-    private static void extractPython(String path, String line, int lineNumber, Map<String, SymbolHit> hits) {
-        var classMatcher = PY_CLASS.matcher(line);
+    private static void extractPython(String path, String scanLine, String signatureLine, int lineNumber, Map<String, SymbolHit> hits) {
+        var classMatcher = PY_CLASS.matcher(scanLine);
         if (classMatcher.find()) {
-            add(hits, new SymbolHit(path, classMatcher.group(1), SymbolKind.CLASS, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, classMatcher.group(1), SymbolKind.CLASS, lineNumber, lineNumber, signatureLine.strip()));
         }
-        var functionMatcher = PY_FUNCTION.matcher(line);
+        var functionMatcher = PY_FUNCTION.matcher(scanLine);
         if (functionMatcher.find()) {
-            add(hits, new SymbolHit(path, functionMatcher.group(1), SymbolKind.FUNCTION, lineNumber, lineNumber, line.strip()));
+            add(hits, new SymbolHit(path, functionMatcher.group(1), SymbolKind.FUNCTION, lineNumber, lineNumber, signatureLine.strip()));
         }
     }
 
@@ -135,7 +138,8 @@ public final class SymbolExtractor {
                 || trimmed.startsWith("switch(")
                 || trimmed.startsWith("catch ")
                 || trimmed.startsWith("catch(")
-                || trimmed.startsWith("return ");
+                || trimmed.startsWith("return ")
+                || trimmed.startsWith("new ");
     }
 
     private static void add(Map<String, SymbolHit> hits, SymbolHit hit) {
@@ -203,6 +207,35 @@ public final class SymbolExtractor {
             quote = 0;
         }
         return new CommentStripped(out.toString(), block);
+    }
+
+    private static String maskStringLiteralContent(String line) {
+        // Line-local by design: multiline template literal state is outside this
+        // lightweight regex scanner and remains documented as a T717 limitation.
+        StringBuilder out = new StringBuilder(line.length());
+        char quote = 0;
+        boolean escaped = false;
+        for (int index = 0; index < line.length(); index++) {
+            char ch = line.charAt(index);
+            if (quote != 0) {
+                out.append(ch == quote && !escaped ? ch : ' ');
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (ch == '"' || ch == '\'' || ch == '`') {
+                quote = ch;
+                out.append(ch);
+                continue;
+            }
+            out.append(ch);
+        }
+        return out.toString();
     }
 
     private record CommentStripped(String line, boolean inBlockComment) {}
