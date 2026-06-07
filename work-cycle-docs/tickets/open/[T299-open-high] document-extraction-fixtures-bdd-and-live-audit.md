@@ -119,6 +119,17 @@ Remaining blockers:
 
 New deterministic sink tests now prove the configured ordinary private-document fact canary class is redacted by prompt-debug/provider-body rendering, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace sanitizer helpers.
 
+## 2026-06-07 0.10.0 beta-scope reconciliation
+
+Scope decision: PDF/DOCX/XLS/XLSX extraction is beta scope for the `0.10.0`
+decision, so the next full prompt-bank audit must include these formats. This
+does not add image/OCR or PowerPoint to beta; those remain v1/deferred.
+
+T299 remains open because generated and canonical fixtures are useful but not a
+complete release-grade corpus. The next audit should at minimum prove current
+small-fixture behavior for PDF/DOCX/XLSX under both Qwen and GPT-OSS, with
+prompt-debug/provider-body/trace/session artifact canary review.
+
 This deterministic sink suite did not replace live audit by itself. The later focused and private-folder live audits now use generated private-document fixtures containing ordinary private facts and run targeted artifact scanning over generated audit roots. Larger real-world fixture coverage remains open.
 
 ## 2026-05-17 Model-loop provenance update

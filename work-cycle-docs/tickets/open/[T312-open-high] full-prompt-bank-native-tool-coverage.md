@@ -107,6 +107,21 @@ Fresh focused evidence:
   - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=local/manual-testing/t306-t313-sync-rebaseline-20260520-221208/artifacts" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/t306-t313-sync-rebaseline-20260520-221208" --no-daemon` passed with 32 scripted scenarios and artifact scan PASS.
   - This is not a fresh two-model full prompt-bank pass. T312 remains open for lane-labeled GPT-OSS/Qwen evidence under the current fail-closed TalosBench runner.
 
+## 2026-06-07 0.10.0 coverage reconciliation
+
+Native-tool prompt-bank coverage is present in docs and deterministic coverage
+checks, but T312 remains open until the current `0.10.0` candidate has a
+lane-labeled Qwen/GPT-OSS evidence packet.
+
+The next run must cover or explicitly exclude every current native tool named
+above, plus the current beta capability families. Because beta scope includes
+PDF/DOCX/XLSX text extraction, the full prompt-bank evidence must include those
+formats and their private-mode/model-handoff limitations. Image/OCR and
+PowerPoint remain deferred and must be explicitly excluded from beta claims.
+
+Historical TalosBench passes and synchronized scripted runs are retained as
+useful regression evidence. They do not close T312 for `0.10.0`.
+
 ## User Impact
 
 Without this coverage guard, a future release report can claim "full native tool

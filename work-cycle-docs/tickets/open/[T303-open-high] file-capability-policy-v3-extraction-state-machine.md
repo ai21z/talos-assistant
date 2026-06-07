@@ -143,3 +143,14 @@ Remaining blockers:
 
 - Dynamic outcomes need more detail for encrypted/password-protected/corrupt/limit-exceeded cases.
 - Docs/tests should eventually be generated from the policy to prevent drift.
+
+## 2026-06-07 0.10.0 beta-scope reconciliation
+
+Scope decision: PDF/DOCX/XLS/XLSX extraction is in scope for the `0.10.0` beta
+decision, so T303 remains a document-beta release gate for consistent static
+capability and dynamic outcome reporting. Image/OCR and PowerPoint remain
+deferred unless a future ticket explicitly changes beta scope.
+
+The next full audit should verify that beta-format extraction failures are
+reported as concrete dynamic outcomes where available, not as generic
+unsupported-format or guessed-content answers.

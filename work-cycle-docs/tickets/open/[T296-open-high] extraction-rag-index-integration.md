@@ -95,6 +95,16 @@ dev.talos.cli.launcher.RagIndexCmdPrivateModeTest.rag_index_command_refuses_priv
 
 Remaining work: chunk/citation provenance still needs richer page/sheet/cell metadata, and live-audit artifact evidence still needs to prove private-document fact canaries do not survive prompt-debug/provider-body/session/trace/log surfaces.
 
+## 2026-06-07 0.10.0 beta-scope reconciliation
+
+Scope decision: PDF/DOCX/XLS/XLSX text extraction is in scope for the `0.10.0`
+beta decision. This keeps T296 as a release gate for extraction-backed RAG and
+artifact safety. Image/OCR and PowerPoint remain outside current beta claims.
+
+The next full audit should include PDF/DOCX/XLSX extraction prompts and
+private-mode/model-handoff checks, but broader private-paperwork positioning
+remains excluded until the private-folder release gates pass.
+
 ## Rollback / migration notes
 
 Changing extraction/index metadata should force rebuild. If rebuild is unsafe or disabled in private mode, retrieval should refuse with a clear message.

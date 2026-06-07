@@ -72,6 +72,25 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
 - 2026-05-20 T295 rerun expanded the manual PTY/JLine packet to cover private-document per-turn denial and approval. The packet remains `MANUAL_REQUIRED` until a completed true-terminal transcript is supplied and validated.
 - 2026-05-20 GPT-OSS live synchronized rerun completed the T295 private-document scenarios before failing later at `mutation-append-line-verified`. The live-runner now supports repeatable optional denial steps for private-document handoff prompts so live-model retries do not falsely fail the large-corpus denial scenario. The later append-line live failure is tracked in T330.
 
+## 2026-06-07 0.10.0 remaining scope clarification
+
+The synchronized approval runner is implemented and has scripted, live-slice,
+CLI-smoke, and manual true-PTY evidence from earlier audit waves. The remaining
+T306 gap for `0.10.0` is not "build a runner from scratch." It is release-grade
+integration of approval-sensitive prompt-bank cases into the current-candidate
+audit packet.
+
+For the next audit:
+
+- approval-sensitive prompts must not use blind redirected approval input;
+- the report must label each case as safe redirected stdin, synchronized
+  approval, or manual/PTY evidence;
+- PDF/DOCX/XLSX private-mode and send-to-model extraction cases remain in scope
+  because beta includes those extraction capabilities;
+- T719 redacted snapshots must be used for release-clean packet scans;
+- Qodana, MSI packaging, and architecture-cycle cleanup are intentionally not
+  part of this T306 run.
+
 ## Evidence from tests/audits
 
 - Scripted private-folder bank: `capability-live-audit-20260518-004603`.

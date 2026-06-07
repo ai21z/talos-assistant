@@ -135,4 +135,19 @@ Regression coverage:
 
 T269 and T320 are closed by this matrix/test slice. Keep T301 open only for broader release-report drift prevention and any future generated/docs consistency checks.
 
+## 2026-06-07 0.10.0 beta-scope reconciliation
+
+Scope decision: PDF/DOCX/XLS/XLSX extraction is in scope for the `0.10.0` beta
+decision. Current release/audit wording must therefore distinguish:
+
+- beta text extraction for PDF/DOCX/XLS/XLSX with limitations;
+- no private-paperwork safety claim;
+- no image/OCR beta claim;
+- no PowerPoint beta claim;
+- no browser/render-proof claim for static web unless a browser audit supplies
+  that evidence.
+
+T301 remains open to verify the release packet and live-audit reports do not
+drift from that scope.
+
 

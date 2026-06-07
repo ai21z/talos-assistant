@@ -144,3 +144,26 @@ prompt-bank completion:
 
 Keep this ticket open for full two-model prompt-bank execution/classification
 and final clean-candidate evidence.
+
+## 2026-06-07 0.10.0 results-scope reconciliation
+
+T284 is the results record for the T280 audit mandate, not an independent
+replacement for T280. Keep this ticket open until a current-candidate
+`0.10.0` two-model audit writes pass/fail results for Qwen and GPT-OSS.
+
+The next results packet must explicitly state:
+
+- branch, commit, and `talosVersion`;
+- exact installed executable invoked;
+- model/backend/profile per lane;
+- which prompt-bank cases were safe redirected stdin, synchronized approval, or
+  manual/PTY;
+- which native tools were probed or explicitly excluded;
+- PDF/DOCX/XLSX extraction outcomes and limitation wording;
+- canary scan roots, including redacted final-workspace snapshots instead of
+  raw protected fixture copies;
+- every failure classified as runtime-owned, model-authored, backend-owned,
+  audit-owned, or mixed.
+
+Historical 2026-05 and `0.9.9` artifacts may be cited as prior evidence only.
+They must not be presented as closure evidence for the `0.10.0` candidate.

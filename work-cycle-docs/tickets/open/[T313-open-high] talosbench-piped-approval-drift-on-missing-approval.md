@@ -142,6 +142,18 @@ This does not weaken the T313 rule. Approval-sensitive redirected-stdin
 TalosBench runs still fail closed by default; true PTY evidence came from a real
 interactive terminal transcript, not piped approval input.
 
+## 2026-06-07 0.10.0 audit rule
+
+For the next `0.10.0` full prompt-bank audit, approval-sensitive evidence must
+come from synchronized approval handling or manual/PTY capture. Redirected stdin
+may still be used for safe non-approval cases, but the report must label that
+lane separately and must not treat pre-fed approval input as release-grade
+approval evidence.
+
+This ticket remains open until the `0.10.0` audit packet proves that approval
+tokens cannot drift into subsequent user turns for any approval-sensitive case
+used in release evidence.
+
 ## Open questions
 
 - Should approval-sensitive TalosBench cases be split into a separate synchronized runner instead of overloading the current PowerShell runner?
