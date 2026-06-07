@@ -103,6 +103,10 @@ public final class PromptDebugInspector {
         if (compactionStatus != null && !compactionStatus.isBlank()) {
             out.append("- Compaction: ").append(compactionStatus).append('\n');
         }
+        String memoryRetentionStatus = diagnostics.get("memoryRetentionStatus");
+        if (memoryRetentionStatus != null && !memoryRetentionStatus.isBlank()) {
+            out.append("- Memory retention (cumulative this session): ").append(memoryRetentionStatus).append('\n');
+        }
         String projectMemoryStatus = diagnostics.get("projectMemoryStatus");
         if (projectMemoryStatus != null && !projectMemoryStatus.isBlank()) {
             out.append("- Project memory: ").append(projectMemoryStatus).append('\n');

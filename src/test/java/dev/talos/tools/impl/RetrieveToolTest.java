@@ -2,6 +2,8 @@ package dev.talos.tools.impl;
 
 import dev.talos.core.Config;
 import dev.talos.core.context.ContextResult;
+import dev.talos.core.index.SymbolHit;
+import dev.talos.core.index.SymbolKind;
 import dev.talos.spi.types.ChunkMetadata;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
@@ -147,6 +149,41 @@ class RetrieveToolTest {
         assertTrue(r.success());
         assertFalse(r.output().contains("DO_NOT_LEAK_T267_ENV"));
         assertTrue(r.output().contains("[redacted") || r.output().contains("protected content"));
+    }
+
+    @Test
+    void retrieve_renders_symbolHitEvidenceBeforeSnippets(@TempDir Path workspace) {
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                return new Prepared(
+                        List.of(new ContextResult.Snippet(
+                                "src/RetrocatsService.java#0",
+                                "public class RetrocatsService {}",
+                                ChunkMetadata.empty())),
+                        List.of("src/RetrocatsService.java"),
+                        null,
+                        null,
+                        List.of(new SymbolHit(
+                                "src/RetrocatsService.java",
+                                "RetrocatsService",
+                                SymbolKind.CLASS,
+                                1,
+                                1,
+                                "public class RetrocatsService")));
+            }
+        });
+
+        ToolResult r = tool.execute(new ToolCall("talos.retrieve", Map.of("query", "RetrocatsService")),
+                testContext(workspace));
+
+        assertTrue(r.success());
+        assertTrue(r.output().contains("Symbol signature matches (not full file contents):"));
+        assertFalse(r.output().contains("exact code evidence"));
+        assertTrue(r.output().contains("RetrocatsService"));
+        assertTrue(r.output().contains("CLASS"));
+        assertTrue(r.output().contains("src/RetrocatsService.java:1"));
+        assertTrue(r.output().indexOf("Symbol signature matches") < r.output().indexOf("Found 1 snippet result"));
     }
 }
 

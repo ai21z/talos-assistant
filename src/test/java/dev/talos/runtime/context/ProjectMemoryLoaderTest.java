@@ -94,6 +94,69 @@ class ProjectMemoryLoaderTest {
     }
 
     @Test
+    void explicitProjectMemoryOptOutSuppressesLoadingForCurrentTurn() throws Exception {
+        Path userHome = tempDir.resolve("home");
+        Path workspace = tempDir.resolve("workspace");
+        Files.createDirectories(userHome.resolve(".talos"));
+        Files.createDirectories(workspace);
+        Files.writeString(userHome.resolve(".talos").resolve("TALOS.md"),
+                "Global memory that must be suppressed.", StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("TALOS.md"),
+                "Workspace memory that must be suppressed.", StandardCharsets.UTF_8);
+
+        ProjectMemoryLoader loader = new ProjectMemoryLoader(ProjectMemoryLimits.defaults());
+
+        ProjectMemoryContext readOnly = loader.load(new ProjectMemoryRequest(
+                workspace,
+                userHome,
+                contract(TaskType.READ_ONLY_QA, false,
+                        "Explain this project, but do not load project memory.", Set.of())));
+        ProjectMemoryContext mutation = loader.load(new ProjectMemoryRequest(
+                workspace,
+                userHome,
+                contract(TaskType.FILE_EDIT, true,
+                        "Update README.md, but ignore TALOS.md for this turn.", Set.of("README.md"))));
+
+        assertEquals(ProjectMemoryStatus.SUPPRESSED, readOnly.status());
+        assertEquals("USER_OPTED_OUT_PROJECT_MEMORY", readOnly.reason());
+        assertTrue(readOnly.includedSources().isEmpty());
+        assertFalse(readOnly.renderForPrompt().contains("Workspace memory"));
+
+        assertEquals(ProjectMemoryStatus.SUPPRESSED, mutation.status());
+        assertEquals("USER_OPTED_OUT_PROJECT_MEMORY", mutation.reason());
+        assertTrue(mutation.includedSources().isEmpty());
+        assertFalse(mutation.renderForPrompt().contains("Global memory"));
+    }
+
+    @Test
+    void genericMemoryCodePhrasesDoNotSuppressProjectMemory() throws Exception {
+        Path userHome = tempDir.resolve("home");
+        Path workspace = tempDir.resolve("workspace");
+        Files.createDirectories(userHome);
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("TALOS.md"),
+                "Repo memory: use Java 21.", StandardCharsets.UTF_8);
+
+        ProjectMemoryLoader loader = new ProjectMemoryLoader(ProjectMemoryLimits.defaults());
+
+        ProjectMemoryContext leak = loader.load(new ProjectMemoryRequest(
+                workspace,
+                userHome,
+                contract(TaskType.FILE_EDIT, true,
+                        "Fix the memory leak in src/App.java.", Set.of("src/App.java"))));
+        ProjectMemoryContext cache = loader.load(new ProjectMemoryRequest(
+                workspace,
+                userHome,
+                contract(TaskType.READ_ONLY_QA, false,
+                        "Explain the in-memory cache used by this project.", Set.of())));
+
+        assertEquals(ProjectMemoryStatus.LOADED, leak.status());
+        assertTrue(leak.renderForPrompt().contains("Repo memory: use Java 21."), leak.renderForPrompt());
+        assertEquals(ProjectMemoryStatus.LOADED, cache.status());
+        assertTrue(cache.renderForPrompt().contains("Repo memory: use Java 21."), cache.renderForPrompt());
+    }
+
+    @Test
     void budgetKeepsSpecificWorkspaceMemoryOverBroadGlobalMemory() throws Exception {
         Path userHome = tempDir.resolve("home");
         Path workspace = tempDir.resolve("workspace");
@@ -123,6 +186,31 @@ class ProjectMemoryLoaderTest {
         assertTrue(context.decisions().stream().anyMatch(decision ->
                 decision.tier() == ProjectMemoryTier.USER_GLOBAL
                         && decision.decisionReason().equals("BUDGET_DROPPED_LEAST_SPECIFIC")));
+    }
+
+    @Test
+    void blankSanitizedMemorySourceIsSkippedWithAuditableDecision() throws Exception {
+        Path userHome = tempDir.resolve("home");
+        Path workspace = tempDir.resolve("workspace");
+        Files.createDirectories(userHome);
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("TALOS.md"),
+                "   \r\n\t\n", StandardCharsets.UTF_8);
+
+        ProjectMemoryContext context = new ProjectMemoryLoader(ProjectMemoryLimits.defaults())
+                .load(new ProjectMemoryRequest(
+                        workspace,
+                        userHome,
+                        contract(TaskType.WORKSPACE_EXPLAIN, false, "Explain this project", Set.of())));
+
+        assertEquals(ProjectMemoryStatus.EMPTY, context.status());
+        assertTrue(context.includedSources().isEmpty());
+        assertFalse(context.renderForPrompt().contains("[Source]"), context.renderForPrompt());
+        assertTrue(context.decisions().stream().anyMatch(decision ->
+                decision.pathHint().equals("TALOS.md")
+                        && decision.action().equals("WITHHELD_FROM_MODEL")
+                        && decision.decisionReason().equals("BLANK_AFTER_SANITIZATION")),
+                context.decisions().toString());
     }
 
     @Test

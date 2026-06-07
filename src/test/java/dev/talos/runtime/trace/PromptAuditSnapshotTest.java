@@ -242,6 +242,40 @@ class PromptAuditSnapshotTest {
     }
 
     @Test
+    void renderCompactIncludesMemoryRetentionStatusWhenAvailable() {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("Continue."));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        Set.of(),
+                        Set.of(),
+                        "Continue."),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
+                plan,
+                messages,
+                null,
+                PromptAuditSnapshot.NOT_DERIVED,
+                "rawTurnMessagesEvictedWithoutSketch=20 toolEvidenceEntriesEvicted=5");
+
+        assertTrue(snapshot.memoryRetentionStatus().contains("rawTurnMessagesEvictedWithoutSketch=20"),
+                snapshot.memoryRetentionStatus());
+        assertTrue(snapshot.memoryRetentionStatus().contains("toolEvidenceEntriesEvicted=5"),
+                snapshot.memoryRetentionStatus());
+        assertTrue(snapshot.renderCompact().contains("memoryRetentionCumulative: rawTurnMessagesEvictedWithoutSketch=20"),
+                snapshot.renderCompact());
+    }
+
+    @Test
     void compactionStatusReasonIsRedactedInPromptAudit() throws Exception {
         List<ChatMessage> messages = List.of(
                 ChatMessage.system("system"),

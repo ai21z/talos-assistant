@@ -1044,18 +1044,32 @@ public final class AssistantTurnExecutor {
                 ctx == null || ctx.conversationManager() == null
                         ? null
                         : ctx.conversationManager().lastCompactionStatus(),
-                projectMemory == null ? PromptAuditSnapshot.NOT_DERIVED : projectMemory.renderDiagnostic());
+                projectMemory == null ? PromptAuditSnapshot.NOT_DERIVED : projectMemory.renderDiagnostic(),
+                memoryRetentionStatus(ctx));
         LocalTurnTraceCapture.recordPromptAudit(snapshot);
         return snapshot;
     }
 
     private static void recordPromptDebugDiagnostics(PromptAuditSnapshot snapshot) {
-        if (snapshot == null
-                || snapshot.compactionStatus().isBlank()
-                || PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.compactionStatus())) {
-            return;
+        if (snapshot == null) return;
+        if (!snapshot.compactionStatus().isBlank()
+                && !PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.compactionStatus())) {
+            PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
         }
-        PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
+        if (!snapshot.memoryRetentionStatus().isBlank()
+                && !PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.memoryRetentionStatus())) {
+            PromptDebugCapture.putTurnDiagnostic("memoryRetentionStatus", snapshot.memoryRetentionStatus());
+        }
+    }
+
+    private static String memoryRetentionStatus(Context ctx) {
+        if (ctx == null || ctx.memory() == null) return PromptAuditSnapshot.NOT_DERIVED;
+        SessionMemory.RetentionEvictionStats stats = ctx.memory().retentionEvictionStats();
+        if (stats.rawTurnMessagesEvictedWithoutSketch() == 0 && stats.toolEvidenceEntriesEvicted() == 0) {
+            return "NONE";
+        }
+        return "rawTurnMessagesEvictedWithoutSketch=" + stats.rawTurnMessagesEvictedWithoutSketch()
+                + " toolEvidenceEntriesEvicted=" + stats.toolEvidenceEntriesEvicted();
     }
 
     private static void recordProjectMemoryDiagnostics(ProjectMemoryContext projectMemory) {

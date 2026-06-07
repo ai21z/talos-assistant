@@ -39,7 +39,8 @@ class LocalTurnTracePromptAuditRecorderTest {
                 "currentTurnFrameInjected", true,
                 "currentTurnFramePlacement", "AFTER_HISTORY_BEFORE_USER",
                 "historyPolicy", "INCLUDED",
-                "compactionStatus", "NOT_DERIVED"), event.data());
+                "compactionStatus", "NOT_DERIVED",
+                "memoryRetentionStatus", "NOT_DERIVED"), event.data());
     }
 
     @Test
@@ -79,6 +80,7 @@ class LocalTurnTracePromptAuditRecorderTest {
         assertTrue(recorderSource.contains("currentTurnFrameInjected"), recorderSource);
         assertTrue(recorderSource.contains("currentTurnFramePlacement"), recorderSource);
         assertTrue(recorderSource.contains("historyPolicy"), recorderSource);
+        assertTrue(recorderSource.contains("memoryRetentionStatus"), recorderSource);
     }
 
     private static PromptAuditSnapshot promptAuditSnapshot() {

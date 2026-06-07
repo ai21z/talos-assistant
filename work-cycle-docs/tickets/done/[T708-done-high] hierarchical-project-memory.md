@@ -206,6 +206,9 @@ Verified implementation, 2026-06-07:
   `LOCAL_USER_CONFIGURATION` execution boundary for global user memory.
 - Added `[ProjectMemory]` prompt rendering as untrusted local context.
 - Added prompt-audit, prompt-debug, and `/last trace` visibility.
+- Visibility split: `/last trace` renders compact project-memory status, while
+  prompt-debug renders per-source tier/trust/path/hash/count/truncation details
+  plus the sanitized prompt content that was sent to the model.
 - Kept memory reload-only and non-persistent; no vector memory, no includes,
   no foreign agent memory files, and no autonomous writes.
 

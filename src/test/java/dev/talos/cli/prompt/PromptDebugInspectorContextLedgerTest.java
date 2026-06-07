@@ -107,4 +107,31 @@ class PromptDebugInspectorContextLedgerTest {
         assertTrue(formatted.contains("tier=REPO_ROOT trust=WORKSPACE_PROVIDED path=TALOS.md"));
         assertFalse(formatted.contains("DO_NOT_LEAK_7F39"), formatted);
     }
+
+    @Test
+    void promptDebugLabelsMemoryRetentionAsCumulativeWithoutChangingDiagnosticKey() {
+        PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
+                "CHAT_REQUEST",
+                "llama_cpp",
+                "qwen2.5-coder:14b",
+                false,
+                Instant.parse("2026-06-07T12:00:00Z"),
+                List.of(
+                        ChatMessage.system("sys"),
+                        ChatMessage.user("Continue.")),
+                List.of(),
+                null,
+                "")
+                .withDiagnostics(Map.of(
+                        "memoryRetentionStatus",
+                        "rawTurnMessagesEvictedWithoutSketch=20 toolEvidenceEntriesEvicted=5"));
+
+        String formatted = PromptDebugInspector.format(snapshot);
+
+        assertTrue(formatted.contains(
+                "- Memory retention (cumulative this session): rawTurnMessagesEvictedWithoutSketch=20"),
+                formatted);
+        assertFalse(formatted.contains("- Memory retention: rawTurnMessagesEvictedWithoutSketch=20"),
+                formatted);
+    }
 }

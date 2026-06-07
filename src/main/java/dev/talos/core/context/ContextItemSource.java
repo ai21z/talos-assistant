@@ -6,6 +6,7 @@ public enum ContextItemSource {
     SYSTEM_FRAME,
     TOOL_RESULT,
     RAG_SNIPPET,
+    SYMBOL_HIT,
     SESSION_MEMORY,
     PROJECT_MEMORY,
     COMMAND_OUTPUT,
