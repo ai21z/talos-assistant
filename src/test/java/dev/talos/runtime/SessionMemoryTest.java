@@ -210,5 +210,44 @@ class SessionMemoryTest {
         assertTrue(turns.stream().anyMatch(m -> "q109".equals(m.content())),
                 "Most recent turn should be present");
     }
+
+    @Test void hardCapEvictionIsAccountedAsUnsummarizedRawTurnLoss() {
+        var mem = new SessionMemory();
+
+        for (int i = 0; i < 110; i++) {
+            mem.update("q" + i, "a" + i);
+        }
+
+        SessionMemory.RetentionEvictionStats stats = mem.retentionEvictionStats();
+        assertEquals(20, stats.rawTurnMessagesEvictedWithoutSketch());
+        assertEquals(0, stats.toolEvidenceEntriesEvicted());
+    }
+
+    @Test void compactionPruneDoesNotCountAsUnsummarizedHardCapEviction() {
+        var mem = new SessionMemory();
+        mem.update("q1", "a1");
+        mem.update("q2", "a2");
+
+        mem.pruneOldest(2);
+
+        assertEquals(0, mem.retentionEvictionStats().rawTurnMessagesEvictedWithoutSketch());
+    }
+
+    @Test void toolEvidenceFifoEvictionIsAccountedAndCleared() {
+        var mem = new SessionMemory();
+
+        for (int i = 0; i < 805; i++) {
+            mem.recordToolEvidence(i, List.of(new TurnRecord.ToolCallSummary("talos.read_file", "file" + i + ".txt", true)));
+        }
+
+        assertEquals(800, mem.toolEvidence().size());
+        assertEquals(5, mem.retentionEvictionStats().toolEvidenceEntriesEvicted());
+        assertEquals(5, mem.toolEvidence().getFirst().turnNumber());
+
+        mem.clear();
+
+        assertEquals(0, mem.retentionEvictionStats().rawTurnMessagesEvictedWithoutSketch());
+        assertEquals(0, mem.retentionEvictionStats().toolEvidenceEntriesEvicted());
+    }
 }
 

@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.rag.RagService;
+import dev.talos.core.index.SymbolHit;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.*;
@@ -32,7 +33,7 @@ public final class RetrieveTool implements TalosTool {
     }
 
     @Override public String name() { return NAME; }
-    @Override public String description() { return "Search the indexed workspace using hybrid retrieval (BM25 + vector)."; }
+    @Override public String description() { return "Search the indexed workspace using symbol signatures, BM25, and vector retrieval."; }
 
     @Override
     public ToolDescriptor descriptor() {
@@ -72,12 +73,13 @@ public final class RetrieveTool implements TalosTool {
         try {
             RagService.Prepared prepared = ragService.prepare(ws, query, topK);
 
-            if (prepared.snippets().isEmpty()) {
+            if (prepared.snippets().isEmpty() && prepared.symbolHits().isEmpty()) {
                 return ToolResult.ok("No results found for: " + query);
             }
 
             var sb = new StringBuilder();
-            sb.append("Found ").append(prepared.snippets().size()).append(" result(s):\n\n");
+            appendSymbolHits(sb, prepared.symbolHits(), ws);
+            sb.append("Found ").append(prepared.snippets().size()).append(" snippet result(s):\n\n");
             int protectedSnippets = 0;
             int redactedSnippets = 0;
 
@@ -119,9 +121,36 @@ public final class RetrieveTool implements TalosTool {
         }
     }
 
+    private static void appendSymbolHits(StringBuilder sb, List<SymbolHit> symbolHits, Path workspace) {
+        if (symbolHits == null || symbolHits.isEmpty()) return;
+        sb.append("Symbol signature matches (not full file contents):\n");
+        for (SymbolHit hit : symbolHits) {
+            Path hitPath = workspace.resolve(hit.path()).normalize();
+            if (ProtectedWorkspacePaths.isProtectedPath(workspace, hitPath)) {
+                sb.append(" - [protected symbol omitted]\n");
+                continue;
+            }
+            sb.append(" - ")
+                    .append(hit.kind().name())
+                    .append(" ")
+                    .append(hit.symbol())
+                    .append(" @ ")
+                    .append(hit.path());
+            if (hit.lineStart() > 0) {
+                sb.append(":").append(hit.lineStart());
+            }
+            if (!hit.signature().isBlank()) {
+                String safeSignature = ProtectedContentSanitizer.sanitizeText(hit.signature());
+                sb.append(" - ").append(truncate(safeSignature, 180).replace('\n', ' '));
+            }
+            sb.append("\n");
+        }
+        sb.append("\n");
+    }
+
     private static String truncate(String s, int max) {
         if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "\n… (truncated)";
+        return s.length() <= max ? s : s.substring(0, max) + "\n... (truncated)";
     }
 }
 

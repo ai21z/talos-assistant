@@ -8,6 +8,8 @@ import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.index.Indexer;
 import dev.talos.core.index.LuceneStore;
+import dev.talos.core.index.SymbolHit;
+import dev.talos.core.index.SymbolIndexStore;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.cache.CacheDb;
@@ -29,6 +31,7 @@ import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolProtocolText;
+import dev.talos.spi.types.ChunkMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,20 +58,32 @@ public class RagService {
         private final List<String> citations;
         private final RetrievalTrace trace; // nullable — absent on error path
         private final String errorReason;   // nullable — set when retrieval failed
+        private final List<SymbolHit> symbolHits;
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
-            this(snippets, citations, null, null);
+            this(snippets, citations, null, null, List.of());
         }
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace) {
-            this(snippets, citations, trace, null);
+            this(snippets, citations, trace, null, List.of());
         }
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace, String errorReason) {
+            this(snippets, citations, trace, errorReason, List.of());
+        }
+
+        public Prepared(
+                List<ContextResult.Snippet> snippets,
+                List<String> citations,
+                RetrievalTrace trace,
+                String errorReason,
+                List<SymbolHit> symbolHits
+        ) {
             this.snippets    = (snippets == null ? List.of() : List.copyOf(snippets));
             this.citations   = (citations == null ? List.of() : List.copyOf(citations));
             this.trace       = trace;
             this.errorReason = errorReason;
+            this.symbolHits  = (symbolHits == null ? List.of() : List.copyOf(symbolHits));
         }
         /** Typed snippets with structured metadata. */
         public List<ContextResult.Snippet> snippets() { return snippets; }
@@ -81,6 +96,8 @@ public class RagService {
             return Collections.unmodifiableList(out);
         }
         public List<String> citations() { return citations; }
+        /** Symbol signature evidence found before semantic/vector recall. */
+        public List<SymbolHit> symbolHits() { return symbolHits; }
         /** Pipeline trace, or null if retrieval failed before pipeline execution. */
         public RetrievalTrace trace() { return trace; }
         /** Non-null when retrieval failed; describes the failure reason. */
@@ -177,6 +194,8 @@ public class RagService {
         }
 
         Path indexDir = indexer.indexDirFor(ws);
+        SymbolIndexStore.QueryResult symbolQuery = SymbolIndexStore.queryDetailed(indexDir, query, k);
+        List<SymbolHit> symbolHits = symbolQuery.hits();
         List<ContextResult.Snippet> snippets = new ArrayList<>();
         List<String> citations = new ArrayList<>();
         RetrievalTrace trace = null;
@@ -204,6 +223,29 @@ public class RagService {
             RetrievalResult result = pipeline.execute(request);
 
             trace = result.trace();
+            if (symbolQuery.sidecarStatus() == SymbolIndexStore.LoadStatus.CORRUPT) {
+                trace.record("symbol-sidecar", 0L, 0, 0, "skipped: corrupt symbol sidecar");
+            }
+            if (!symbolHits.isEmpty()) {
+                trace.route("CODE_SYMBOL_FIRST");
+                for (SymbolHit hit : symbolHits) {
+                    trace.recordEvidence(
+                            "SYMBOL_HIT",
+                            hit.path(),
+                            hit.kind().name() + " " + hit.symbol(),
+                            hit.lineStart(),
+                            "symbol signature match");
+                    ContextLedgerCapture.record(
+                            ContextItem.fromText(
+                                    ContextItemSource.SYMBOL_HIT,
+                                    ExecutionBoundary.RAG_INDEX,
+                                    ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                                    hit.path(),
+                                    hit.signature(),
+                                    0),
+                            ContextDecision.includedInModel("CODE_SYMBOL_HIT_AVAILABLE"));
+                }
+            }
             LOG.debug("Retrieval pipeline trace:\n{}", SafeLogFormatter.value(trace.summary()));
 
             // Build typed snippets from pipeline results
@@ -232,10 +274,10 @@ public class RagService {
             // Log the failure so it's visible in debug/audit, but don't explode the CLI
             String reason = SafeLogFormatter.throwableMessage(e);
             LOG.warn("Retrieval pipeline failed: {}", reason);
-            return new Prepared(snippets, citations, trace, reason);
+            return new Prepared(snippets, citations, trace, reason, symbolHits);
         }
 
-        return new Prepared(snippets, citations, trace);
+        return new Prepared(snippets, citations, trace, null, symbolHits);
     }
 
     /**
@@ -310,7 +352,7 @@ public class RagService {
 
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
-            ContextResult packed = packer.pack(sys, question, List.of(), prepared.snippets());
+            ContextResult packed = packer.pack(sys, question, symbolEvidenceSnippets(prepared.symbolHits()), prepared.snippets());
 
             // Warn if trimming occurred
             if (packed.wasTrimmed()) {
@@ -360,10 +402,13 @@ public class RagService {
         if (Files.exists(indexDir) && Files.isDirectory(indexDir)) {
             // Try to verify it's a valid Lucene index by attempting to open it
             try (LuceneStore store = new LuceneStore(indexDir, 0)) {
-                if (indexer.isPolicyMetadataCurrent(workspace)) {
+                SymbolIndexStore.LoadResult sidecar = SymbolIndexStore.loadDetailed(indexDir);
+                if (indexer.isPolicyMetadataCurrent(workspace)
+                        && sidecar.status() == SymbolIndexStore.LoadStatus.LOADED) {
                     return;
                 }
-                LOG.warn("RAG index was built before the current privacy/file-capability policy; rebuilding.");
+                LOG.warn("RAG index metadata or symbol sidecar is stale/missing/corrupt; rebuilding. sidecarStatus={}",
+                        sidecar.status());
                 indexer.invalidateIndex(workspace);
             } catch (Exception e) {
                 // Index exists but is corrupted - log and proceed to rebuild
@@ -395,5 +440,33 @@ public class RagService {
         } finally {
             indexingNow.set(false);
         }
+    }
+
+    static List<ContextResult.Snippet> symbolEvidenceSnippets(List<SymbolHit> symbolHits) {
+        if (symbolHits == null || symbolHits.isEmpty()) return List.of();
+        List<ContextResult.Snippet> snippets = new ArrayList<>();
+        for (SymbolHit hit : symbolHits) {
+            if (hit == null || hit.path().isBlank() || hit.symbol().isBlank()) continue;
+            StringBuilder text = new StringBuilder();
+            text.append("[Symbol signature match - not full file contents]\n")
+                    .append(hit.kind().name())
+                    .append(" ")
+                    .append(hit.symbol())
+                    .append(" at ")
+                    .append(hit.path());
+            if (hit.lineStart() > 0) {
+                text.append(":").append(hit.lineStart());
+            }
+            if (!hit.signature().isBlank()) {
+                text.append("\nSignature: ")
+                        .append(ProtectedContentSanitizer.sanitizeText(hit.signature()));
+            }
+            String path = hit.path() + "#symbol-" + hit.lineStart();
+            snippets.add(new ContextResult.Snippet(
+                    path,
+                    text.toString(),
+                    new ChunkMetadata(null, hit.lineStart(), hit.lineEnd(), "Symbol signature match")));
+        }
+        return snippets;
     }
 }
