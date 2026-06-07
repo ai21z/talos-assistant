@@ -167,3 +167,26 @@ The next results packet must explicitly state:
 
 Historical 2026-05 and `0.9.9` artifacts may be cited as prior evidence only.
 They must not be presented as closure evidence for the `0.10.0` candidate.
+
+## 2026-06-08 Candidate 0.10.0 Audit Evidence
+
+Audit root:
+`local/manual-testing/candidate-0.10.0-full-two-model-20260608-000026`.
+
+Result: valid evidence, not a product pass.
+
+- Branch/commit/version: `v0.9.0-beta-dev` /
+  `ad69a8d6b0027061b04d955283fbc44d619644fc` / `0.10.0`.
+- Safe redirected TalosBench lane passed non-approval cases for Qwen and
+  GPT-OSS. Approval-sensitive cases were correctly marked `MANUAL_REQUIRED`.
+- Added beta-scope document extraction lane with valid canonical PDF/DOCX/XLSX
+  fixtures for both models. Both used `talos.read_file`,
+  `DOCUMENT_EXTRACTION`, `PARSER_EXTRACTION`, and reported format limitations.
+- Model-facing artifact canary scan passed for the audit root.
+- Synchronized approval lanes failed before full completion:
+  - Qwen failed `t325-python-command-boundary` before approval due unsupported
+    `apply_workspace_batch` `write_file` operations. Tracked as T721.
+  - GPT-OSS failed `static-web-selector-script-only-verified` before approval
+    due placeholder `write_file(path="?")`. Tracked as T722.
+
+Keep this ticket open. The current evidence blocks an open-beta release claim.
