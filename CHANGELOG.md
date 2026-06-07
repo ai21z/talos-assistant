@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-07
+
 ### Added
 - Added ArchUnit (`com.tngtech.archunit:archunit-junit5`) bytecode-level
   architecture guards in `dev.talos.architecture.LayeredArchitectureTest`,
@@ -41,6 +43,9 @@
   ↛ `cli`; `runtime.toolcall` ↛ `cli.repl`; `tools` ↛ `cli`; and `spi` ↛ `app`.
   Documented hard guards, report-only findings, accepted exceptions, and
   candidate future guards in `docs/architecture/11-architecture-guardrails.md`.
+- [T719-done-high] Added a redacted audit snapshot utility and Gradle task for
+  canary-clean milestone/manual audit packets, so release-clean scans can use
+  sanitized final workspace evidence instead of raw fixture snapshots.
 
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
@@ -76,6 +81,9 @@
   the 2026-05-15 candidate declaration.
 - Strengthened candidate provenance by making placeholder changelog text a hard
   local validation failure instead of a manual review hazard.
+- [T720-done-medium] Reworded conditional static-web no-change answers as
+  diagnostic inspection, keeping `Verification: NOT_RUN` truthful for
+  inspection-only turns.
 
 ## [0.9.9] - 2026-05-15
 
