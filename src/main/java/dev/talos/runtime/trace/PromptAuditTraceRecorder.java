@@ -15,6 +15,7 @@ final class PromptAuditTraceRecorder {
                 "currentTurnFrameInjected", snapshot.currentTurnFrameInjected(),
                 "currentTurnFramePlacement", snapshot.currentTurnFramePlacement(),
                 "historyPolicy", snapshot.historyPolicy(),
-                "compactionStatus", snapshot.compactionStatus())));
+                "compactionStatus", snapshot.compactionStatus(),
+                "memoryRetentionStatus", snapshot.memoryRetentionStatus())));
     }
 }

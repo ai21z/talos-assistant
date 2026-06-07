@@ -56,12 +56,13 @@ Blocker level:
 Why this level:
 
 ```text
-No immediate data-loss defect was found. T709a prevents destructive pruning on
-failed compaction, and toolEvidence is not pruned by compaction. The remaining
-risk was truthfulness and reliability: ticket wording overstated operational
-evidence protection, deterministic integrity rejections needed to be separated
-from LLM/output failures, and prompt-debug/local trace needed richer compaction
-status fields.
+No immediate compaction-prune data-loss defect was found. T709a prevents
+destructive pruning on failed compaction, and toolEvidence is not pruned by
+compaction. Separately, `SessionMemory` has bounded hard-cap/FIFO eviction
+channels. The remaining risk was truthfulness and reliability: ticket wording
+overstated operational evidence protection, deterministic integrity rejections
+needed to be separated from LLM/output failures, and prompt-debug/local trace
+needed richer compaction status fields.
 ```
 
 ## Confirmed Findings
@@ -149,11 +150,13 @@ truthful and explicit without weakening T709a's data-loss gate.
 
 Progress note, 2026-06-06:
 
-- Primary path selected: honest scoping rather than feeding durable
+- Primary path selected: honest scoping rather than feeding separately stored
   `toolEvidence` into the prose sketch gate.
-- Reason: `SessionMemory.toolEvidence` is already durable and is not pruned by
+- Reason: `SessionMemory.toolEvidence` is stored separately and is not pruned by
   `SessionMemory.pruneOldest(...)`; forcing sketches to re-echo tool names would
-  add brittleness without improving the authoritative evidence store.
+  add brittleness without improving the authoritative evidence store. It remains
+  bounded by SessionMemory's FIFO retention cap, so "durable" must not be read as
+  "retained forever."
 - Turn-number plumbing is the real cost of a future evidence-fed gate:
   `CompactionIntegrityPolicy.validate(...)` receives a bare `List<ChatMessage>`,
   while `SessionMemory.toolEvidence` is keyed by turn number. Do not add that
@@ -164,9 +167,10 @@ Progress note, 2026-06-06:
 - The final T711 slice adds richer trace/debug status fields and closes this
   ticket.
 
-1. Explicitly separate prose-anchor integrity from durable operational evidence:
+1. Explicitly separate prose-anchor integrity from structured operational evidence:
    - `CompactionIntegrityPolicy` checks represented `ChatMessage` prose only;
-   - `SessionMemory.toolEvidence` remains the durable tool-call evidence store;
+   - `SessionMemory.toolEvidence` remains the separate tool-call evidence store
+     for retained session evidence;
    - ticket and code wording must not imply that the prose sketch gate protects
      real runtime tool evidence.
 2. Do not require all prose anchors verbatim. Prefer evidence-class preservation:
@@ -246,7 +250,7 @@ Refactor scope:
 - Tool evidence preservation claims are removed from prose-sketch wording unless
   a later ticket explicitly feeds aligned operational evidence into the gate.
 - Tests prove `SessionMemory.pruneOldest(...)` preserves structured
-  `toolEvidence`, so the true durable evidence mechanism is covered.
+  `toolEvidence`, so the retained operational-evidence mechanism is covered.
 - Integrity rejections are distinguishable from LLM/transport failures and do
   not blindly trip the same breaker.
 - Prompt-debug/local trace exposes compacted-history status beyond the

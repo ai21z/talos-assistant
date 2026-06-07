@@ -38,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
@@ -47,7 +48,7 @@ public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
     private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int INDEX_METADATA_SCHEMA_VERSION = 2;
+    private static final int INDEX_METADATA_SCHEMA_VERSION = 3;
 
     private final Config cfg;
     private volatile IndexingStats lastRunStats;
@@ -166,6 +167,14 @@ public class Indexer {
             LOG.info("Matched {} files after include/exclude filters.", files.size());
         }
 
+        final Path indexDir = indexDirFor(rootPath);
+        final Map<String, List<SymbolHit>> existingSymbolsByPath = symbolsByPath(SymbolIndexStore.load(indexDir));
+        final ConcurrentHashMap<String, List<SymbolHit>> refreshedSymbolsByPath = new ConcurrentHashMap<>();
+        final Set<String> currentRelPaths = ConcurrentHashMap.newKeySet();
+        for (Path file : files) {
+            currentRelPaths.add(rootPath.relativize(file).toString().replace('\\', '/'));
+        }
+
         // Vectors toggle (BM25-only fallback if disabled or probe fails)
         boolean vecEnabled = true;
         Object vectorsObj = rag.get("vectors");
@@ -202,7 +211,7 @@ public class Indexer {
             // Effectively-final reference for lambdas
             final CachingEmbeddings embForTasks = useVectors ? cachedEmb : null;
 
-            try (var store = new LuceneStore(indexDirFor(rootPath), vectorDim)) {
+            try (var store = new LuceneStore(indexDir, vectorDim)) {
                 int chunkChars = CfgUtil.intAt(rag, "chunk_chars", 1200);
                 int overlap    = CfgUtil.intAt(rag, "chunk_overlap", 150);
 
@@ -233,6 +242,7 @@ public class Indexer {
                             String text = parseIndexableText(rootPath, p);
                             stats.addParseTime(System.currentTimeMillis() - parseStart);
                             stats.incrementFilesEmbedded();
+                            refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
 
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
 
@@ -338,6 +348,7 @@ public class Indexer {
 
                 long commitStart = System.currentTimeMillis();
                 store.commit();
+                writeMergedSymbolIndex(indexDir, existingSymbolsByPath, refreshedSymbolsByPath, currentRelPaths);
                 writePolicyMetadata(rootPath);
                 stats.addCommitTime(System.currentTimeMillis() - commitStart);
 
@@ -364,6 +375,34 @@ public class Indexer {
     private static List<String> firstNonEmptyStrList(List<String> a, List<String> b) {
         if (a != null && !a.isEmpty()) return a;
         return (b == null) ? List.of() : b;
+    }
+
+    private static Map<String, List<SymbolHit>> symbolsByPath(List<SymbolHit> hits) {
+        Map<String, List<SymbolHit>> byPath = new LinkedHashMap<>();
+        if (hits == null) return byPath;
+        for (SymbolHit hit : hits) {
+            if (hit == null || hit.path().isBlank()) continue;
+            byPath.computeIfAbsent(hit.path(), ignored -> new ArrayList<>()).add(hit);
+        }
+        return byPath;
+    }
+
+    private static void writeMergedSymbolIndex(
+            Path indexDir,
+            Map<String, List<SymbolHit>> existingSymbolsByPath,
+            Map<String, List<SymbolHit>> refreshedSymbolsByPath,
+            Set<String> currentRelPaths
+    ) throws IOException {
+        List<SymbolHit> merged = new ArrayList<>();
+        for (String path : currentRelPaths) {
+            List<SymbolHit> refreshed = refreshedSymbolsByPath.get(path);
+            if (refreshed != null) {
+                merged.addAll(refreshed);
+            } else {
+                merged.addAll(existingSymbolsByPath.getOrDefault(path, List.of()));
+            }
+        }
+        SymbolIndexStore.writeAll(indexDir, merged);
     }
 
     /**

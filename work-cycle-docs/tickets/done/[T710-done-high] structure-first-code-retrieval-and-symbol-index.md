@@ -1,8 +1,9 @@
 # T710 - Structure-First Code Retrieval And Symbol Index
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-06
+Completed: 2026-06-07
 
 ## Evidence Summary
 
@@ -114,6 +115,27 @@ Initial direction:
   insufficient.
 - Preserve private/protected-path filters.
 
+Implementation refinement, 2026-06-07:
+
+- Implement in slices:
+  1. deterministic symbol extraction and persisted symbol-hit evidence;
+  2. symbol-first retrieval evidence in `RagService` / `talos.retrieve`;
+  3. trace/debug visibility for retrieval route and evidence type.
+- Reuse the existing `Indexer` walk, include/exclude config, protected-path
+  filters, and policy metadata. Do not add a second raw filesystem crawler.
+- Keep vectors as an optional secondary recall signal. The current shipped YAML
+  enables vectors, while `Config.ensureDefaults()` only defaults them to false
+  when the key is absent; this ticket is therefore about route/evidence order,
+  not a vector-default toggle.
+- Avoid a broad parser dependency in this slice. Start with conservative,
+  deterministic symbol extraction and auditable line/kind evidence; Tree-sitter
+  or LSP-backed indexing can be a later ticket if the regex extractor proves too
+  weak.
+- Completed implementation adds a persisted symbol sidecar, retrieval trace
+  route/evidence rows, `talos.retrieve` symbol-hit rendering, and a direct
+  `RagService.ask` bridge that pins exact symbol evidence into model context
+  before ordinary snippets.
+
 ## Architecture Metadata
 
 Capability:
@@ -186,6 +208,18 @@ Commands:
 .\gradlew.bat test --tests "dev.talos.core.index.*" --tests "dev.talos.core.retrieval.*" --tests "dev.talos.core.rag.*" --no-daemon
 .\gradlew.bat check --no-daemon
 ```
+
+Completed evidence, 2026-06-07:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.index.SymbolExtractorTest" --tests "dev.talos.core.index.SymbolIndexStoreTest" --tests "dev.talos.core.rag.RagServiceSymbolRetrievalTest" --tests "dev.talos.tools.impl.RetrieveToolTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.core.index.*" --tests "dev.talos.core.retrieval.*" --tests "dev.talos.core.rag.*" --tests "dev.talos.tools.impl.RetrieveToolTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.architecture.*" --no-daemon
+.\gradlew.bat check --no-daemon
+git diff --check
+```
+
+Result: all listed Gradle commands passed; `git diff --check` passed.
 
 ## Work-Test Cycle Notes
 

@@ -1,6 +1,6 @@
 # T708 - Hierarchical Project Memory
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-06
 
@@ -115,6 +115,21 @@ Initial direction:
 - Add explicit redaction and protected-path behavior before including memory in
   model context.
 
+Implementation scope update, 2026-06-07:
+
+- Implement as three gated slices: discovery/policy, prompt rendering, then
+  trace/prompt-debug hardening.
+- Memory is read-only and reloaded each eligible turn. It is not persisted into
+  session summaries and is not a user-profile inference layer.
+- Supported files in this ticket are limited to Talos-owned Markdown memory
+  files: `TALOS.md`, `.talos/rules.md`, and bounded top-level
+  `%USERPROFILE%/.talos/memory/*.md`.
+- No include/import expansion, no foreign `external assistant.md`/`GEMINI.md` support, no
+  semantic rule interpreter, and no vector memory in this ticket.
+- Memory content must be rendered as untrusted context. It must not be treated
+  as approval, runtime policy, verifier evidence, or proof that the workspace
+  was inspected.
+
 ## Architecture Metadata
 
 Capability:
@@ -175,9 +190,27 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Unit test: memory tier ordering and truncation.
-- Integration/executor test: current-turn frame includes visible memory metadata.
-- Trace assertion: loaded memory source/tier/redaction recorded.
+- Unit test: memory tier ordering, budget selection, suppression, protected-path
+  exclusion, and import non-expansion.
+- Integration/executor test: project-memory frame is inserted after the base
+  system message and before history/current-turn frame, and workspace memory is
+  loaded for eligible workspace turns.
+- Trace/prompt-debug assertion: project-memory status, source tier, trust,
+  path, truncation, hash/count metadata, and redaction-safe details are visible.
+
+Verified implementation, 2026-06-07:
+
+- Added deterministic read-only project-memory loading under
+  `dev.talos.runtime.context`.
+- Added `PROJECT_MEMORY` context ledger source and
+  `LOCAL_USER_CONFIGURATION` execution boundary for global user memory.
+- Added `[ProjectMemory]` prompt rendering as untrusted local context.
+- Added prompt-audit, prompt-debug, and `/last trace` visibility.
+- Visibility split: `/last trace` renders compact project-memory status, while
+  prompt-debug renders per-source tier/trust/path/hash/count/truncation details
+  plus the sanitized prompt content that was sent to the model.
+- Kept memory reload-only and non-persistent; no vector memory, no includes,
+  no foreign agent memory files, and no autonomous writes.
 
 Commands:
 

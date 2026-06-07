@@ -16,6 +16,10 @@ import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
+import dev.talos.runtime.context.ProjectMemoryContext;
+import dev.talos.runtime.context.ProjectMemoryLimits;
+import dev.talos.runtime.context.ProjectMemoryLoader;
+import dev.talos.runtime.context.ProjectMemoryRequest;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
@@ -212,9 +216,12 @@ public final class AssistantTurnExecutor {
                 activeDecisionUpdatesTurnSurface || workspaceBoundaryReplayedRequest);
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
+        ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
+        injectProjectMemoryInstruction(messages, projectMemory);
         injectTaskContractInstruction(messages, currentTurnPlan, true);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract(), workspace);
-        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, ctx);
+        recordProjectMemoryDiagnostics(projectMemory);
+        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, ctx, projectMemory);
         recordPromptDebugDiagnostics(promptAudit);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
@@ -1022,23 +1029,56 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             Context ctx
     ) {
+        return recordPromptAudit(plan, messages, ctx, null);
+    }
+
+    private static PromptAuditSnapshot recordPromptAudit(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx,
+            ProjectMemoryContext projectMemory
+    ) {
         PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
                 plan,
                 messages,
                 ctx == null || ctx.conversationManager() == null
                         ? null
-                        : ctx.conversationManager().lastCompactionStatus());
+                        : ctx.conversationManager().lastCompactionStatus(),
+                projectMemory == null ? PromptAuditSnapshot.NOT_DERIVED : projectMemory.renderDiagnostic(),
+                memoryRetentionStatus(ctx));
         LocalTurnTraceCapture.recordPromptAudit(snapshot);
         return snapshot;
     }
 
     private static void recordPromptDebugDiagnostics(PromptAuditSnapshot snapshot) {
-        if (snapshot == null
-                || snapshot.compactionStatus().isBlank()
-                || PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.compactionStatus())) {
-            return;
+        if (snapshot == null) return;
+        if (!snapshot.compactionStatus().isBlank()
+                && !PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.compactionStatus())) {
+            PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
         }
-        PromptDebugCapture.putTurnDiagnostic("compactionStatus", snapshot.compactionStatus());
+        if (!snapshot.memoryRetentionStatus().isBlank()
+                && !PromptAuditSnapshot.NOT_DERIVED.equals(snapshot.memoryRetentionStatus())) {
+            PromptDebugCapture.putTurnDiagnostic("memoryRetentionStatus", snapshot.memoryRetentionStatus());
+        }
+    }
+
+    private static String memoryRetentionStatus(Context ctx) {
+        if (ctx == null || ctx.memory() == null) return PromptAuditSnapshot.NOT_DERIVED;
+        SessionMemory.RetentionEvictionStats stats = ctx.memory().retentionEvictionStats();
+        if (stats.rawTurnMessagesEvictedWithoutSketch() == 0 && stats.toolEvidenceEntriesEvicted() == 0) {
+            return "NONE";
+        }
+        return "rawTurnMessagesEvictedWithoutSketch=" + stats.rawTurnMessagesEvictedWithoutSketch()
+                + " toolEvidenceEntriesEvicted=" + stats.toolEvidenceEntriesEvicted();
+    }
+
+    private static void recordProjectMemoryDiagnostics(ProjectMemoryContext projectMemory) {
+        if (projectMemory == null) return;
+        PromptDebugCapture.putTurnDiagnostic("projectMemoryStatus", projectMemory.renderDiagnostic());
+        String details = projectMemory.renderDebugDetails();
+        if (!details.isBlank()) {
+            PromptDebugCapture.putTurnDiagnostic("projectMemoryDetails", details);
+        }
     }
 
     private static void emitPromptAuditIfEnabled(PromptAuditSnapshot snapshot, Context ctx) {
@@ -1162,6 +1202,22 @@ public final class AssistantTurnExecutor {
         injectTaskContractInstruction(messages, plan, false);
     }
 
+    static void injectProjectMemoryInstruction(List<ChatMessage> messages, ProjectMemoryContext projectMemory) {
+        if (messages == null || messages.isEmpty() || projectMemory == null) return;
+        messages.removeIf(AssistantTurnExecutor::isProjectMemoryInstruction);
+        String rendered = projectMemory.renderForPrompt();
+        if (rendered.isBlank()) return;
+
+        int insertAt = 0;
+        for (int i = 0; i < messages.size(); i++) {
+            if ("system".equals(messages.get(i).role())) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        messages.add(insertAt, ChatMessage.system(rendered));
+    }
+
     private static void injectTaskContractInstruction(
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
@@ -1235,6 +1291,11 @@ public final class AssistantTurnExecutor {
 
     private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         return ToolSurfacePlanner.defaultVisibleToolNames(contract, phase);
+    }
+
+    private static ProjectMemoryContext loadProjectMemory(Path workspace, TaskContract contract) {
+        return new ProjectMemoryLoader(ProjectMemoryLimits.defaults())
+                .load(new ProjectMemoryRequest(workspace, null, contract));
     }
 
     static void injectStaticVerificationRepairInstruction(
@@ -1351,6 +1412,13 @@ public final class AssistantTurnExecutor {
                 && message.content() != null
                 && (message.content().startsWith("[TaskContract]")
                 || message.content().startsWith("[CurrentTurnCapability]"));
+    }
+
+    private static boolean isProjectMemoryInstruction(ChatMessage message) {
+        return message != null
+                && "system".equals(message.role())
+                && message.content() != null
+                && message.content().startsWith("[ProjectMemory]");
     }
 
     private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {

@@ -436,6 +436,113 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void traceViewIncludesProjectMemoryPromptAuditStatus() {
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-project-memory-last",
+                        "sid",
+                        1,
+                        "2026-06-07T12:00:00Z")
+                .promptAudit(new dev.talos.runtime.trace.PromptAuditSnapshot(
+                        1,
+                        "WORKSPACE_EXPLAIN",
+                        false,
+                        false,
+                        "INSPECT",
+                        "INSPECT",
+                        "INSPECT_REQUIRED",
+                        "WORKSPACE_INSPECTION_REQUIRED",
+                        "NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "INCLUDED",
+                        0,
+                        true,
+                        "AFTER_HISTORY_BEFORE_USER",
+                        "frame-hash",
+                        "[CurrentTurnCapability]",
+                        3,
+                        1,
+                        4,
+                        "prompt-hash",
+                        List.of("talos.list_dir", "talos.read_file"),
+                        List.of("talos.list_dir", "talos.read_file"),
+                        List.of(),
+                        dev.talos.runtime.trace.TraceRedactionMode.DEFAULT,
+                        "NOT_DERIVED",
+                        "status=LOADED reason=WORKSPACE_EXPLAIN included=1 decisions=1 truncated=0 tiers=REPO_ROOT"))
+                .build();
+        TurnRecord turn = record(
+                1,
+                "Explain this project.",
+                "I will inspect it.",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("projectMemory: status=LOADED"), text);
+        assertTrue(text.contains("tiers=REPO_ROOT"), text);
+    }
+
+    @Test
+    void traceViewLabelsMemoryRetentionAsCumulative() {
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-memory-retention-last",
+                        "sid",
+                        1,
+                        "2026-06-07T12:00:00Z")
+                .promptAudit(new dev.talos.runtime.trace.PromptAuditSnapshot(
+                        1,
+                        "READ_ONLY_QA",
+                        false,
+                        false,
+                        "INSPECT",
+                        "INSPECT",
+                        "NONE",
+                        "NONE_OR_NOT_DERIVED",
+                        "NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "INCLUDED",
+                        2,
+                        true,
+                        "AFTER_HISTORY_BEFORE_USER",
+                        "frame-hash",
+                        "[CurrentTurnCapability]",
+                        3,
+                        1,
+                        4,
+                        "prompt-hash",
+                        List.of("talos.read_file"),
+                        List.of("talos.read_file"),
+                        List.of(),
+                        dev.talos.runtime.trace.TraceRedactionMode.DEFAULT,
+                        "NOT_DERIVED",
+                        "NOT_DERIVED",
+                        "rawTurnMessagesEvictedWithoutSketch=20 toolEvidenceEntriesEvicted=5"))
+                .build();
+        TurnRecord turn = record(
+                1,
+                "Continue.",
+                "Done.",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("memoryRetentionCumulative: rawTurnMessagesEvictedWithoutSketch=20"), text);
+        assertFalse(text.contains("memoryRetention: rawTurnMessagesEvictedWithoutSketch=20"), text);
+    }
+
+    @Test
     void traceViewUsesLocalOutcomeForBlockedNoToolMutation() {
         TurnRecord turn = record(
                 11,

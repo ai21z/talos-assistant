@@ -129,8 +129,9 @@ Progress note, 2026-06-06:
   - Critical prose anchors represented in compacted `ChatMessage` history,
     including file targets, checkpoint-like ids, and verification/approval/
     blocking phrases, must survive the sketch or compaction fails closed.
-    Structured runtime `toolEvidence` is durable session evidence and is not
-    protected by requiring the compacted prose sketch to re-echo tool names.
+    Structured runtime `toolEvidence` is stored separately and is not pruned by
+    compaction. It is still bounded by `SessionMemory` retention caps, so the
+    compacted prose sketch is not required to re-echo tool names.
   - `ConversationManager` now refuses malformed stored histories that are not
     complete user/assistant pairs before invoking the compactor or pruning.
   - Prompt audit history policy now reports `INCLUDED_COMPACTED` when compacted
@@ -138,8 +139,8 @@ Progress note, 2026-06-06:
     prompt-debug and `/last trace` prompt-audit summaries.
   - T709a's failure gate and session-local circuit breaker remain in place.
   - Follow-up `T711` tracks the remaining richer trace/debug status work and the
-    explicit distinction between prose-anchor integrity and durable operational
-    evidence.
+    explicit distinction between prose-anchor integrity and structured
+    operational evidence.
 
 Initial direction:
 
