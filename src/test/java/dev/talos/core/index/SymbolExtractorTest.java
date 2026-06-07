@@ -62,6 +62,44 @@ class SymbolExtractorTest {
     }
 
     @Test
+    void extractsJavaMethodsWithThrowsClauses() {
+        String source = """
+                package demo;
+
+                public final class ThrowingService {
+                    public void load() throws java.io.IOException {
+                    }
+
+                    String read() throws java.io.IOException, IllegalStateException {
+                        return "ok";
+                    }
+                }
+
+                interface CloseableStage {
+                    void close() throws Exception;
+                }
+                """;
+
+        List<SymbolHit> hits = SymbolExtractor.extract("src/main/java/demo/ThrowingService.java", source);
+
+        assertTrue(hits.stream().anyMatch(hit ->
+                hit.symbol().equals("load")
+                        && hit.kind() == SymbolKind.METHOD
+                        && hit.lineStart() == 4
+                        && hit.signature().equals("public void load() throws java.io.IOException {")));
+        assertTrue(hits.stream().anyMatch(hit ->
+                hit.symbol().equals("read")
+                        && hit.kind() == SymbolKind.METHOD
+                        && hit.lineStart() == 7
+                        && hit.signature().equals("String read() throws java.io.IOException, IllegalStateException {")));
+        assertTrue(hits.stream().anyMatch(hit ->
+                hit.symbol().equals("close")
+                        && hit.kind() == SymbolKind.METHOD
+                        && hit.lineStart() == 13
+                        && hit.signature().equals("void close() throws Exception;")));
+    }
+
+    @Test
     void extractsJavaScriptAndPythonSymbols() {
         List<SymbolHit> jsHits = SymbolExtractor.extract("src/site/app.js", """
                 export class StageDirector {
