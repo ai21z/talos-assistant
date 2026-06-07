@@ -157,9 +157,9 @@ public final class ConditionalReviewFixPolicy {
                 ? ""
                 : "Tool-read files this turn: " + String.join(", ", readFiles) + ".\n";
         return "[Conditional review result: No file change was needed.]\n\n"
-                + "Runtime static verification found no obvious HTML/CSS/JavaScript blocker "
+                + "Runtime static diagnostic inspection found no obvious HTML/CSS/JavaScript blocker "
                 + "for this review-and-fix request.\n"
-                + "Runtime verification checked files: " + String.join(", ", diagnostics.primaryFiles()) + ".\n"
+                + "Diagnostic inspection checked files: " + String.join(", ", diagnostics.primaryFiles()) + ".\n"
                 + readEvidence
                 + "No files were changed.";
     }

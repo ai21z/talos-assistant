@@ -252,11 +252,27 @@ Optional but useful:
 
 - provider request/response index
 - trace assertion index
-- final workspace snapshot or selected file hashes
+- redacted final workspace snapshot or selected file hashes
 - local source cross-reference notes
 
 Raw transcripts stay under ignored local evidence paths unless redacted evidence
 is explicitly promoted into tracked docs or tickets.
+
+Do not copy raw fixture workspaces into a release-clean scanned artifact root.
+The standard fixtures intentionally contain fake protected markers. Use the
+redacted snapshot task when final workspace state needs to be packaged:
+
+```powershell
+.\gradlew.bat writeRedactedAuditSnapshot `
+  "-PauditSnapshotWorkspace=local/manual-workspaces/<audit-id>/<model-workspace>" `
+  "-PauditSnapshotOutput=local/manual-testing/<audit-id>/artifacts/<model>/redacted-final-workspace" `
+  "-PauditSnapshotLabel=<model>-final" `
+  --no-daemon
+```
+
+The broad canary scan should target model-facing artifacts and redacted
+snapshots. Raw fixture roots may be scanned only with explicit fixture
+allowlists or may be excluded from release-clean packet scans.
 
 ## Pass And Fail Gates
 

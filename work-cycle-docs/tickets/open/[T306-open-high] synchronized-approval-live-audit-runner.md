@@ -454,3 +454,18 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - `src/main/java/dev/talos/cli/repl/TalosBootstrap.java`
 - `src/main/java/dev/talos/cli/repl/slash/PrivacyCommand.java`
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java`
+
+## 2026-06-07 T719/T720 focused audit note
+
+T719 adds a reusable redacted audit snapshot path for manual/milestone packets:
+
+```powershell
+.\gradlew.bat writeRedactedAuditSnapshot "-PauditSnapshotWorkspace=<workspace>" "-PauditSnapshotOutput=<output>" "-PauditSnapshotLabel=<label>" --no-daemon
+```
+
+The focused audit `local/manual-testing/t719-t720-focused-p21-audit-20260607-220219`
+used redacted snapshots and passed `checkRuntimeArtifactCanaries` over the
+model-facing artifacts and sanitized packet roots. This improves artifact
+hygiene for future synchronized/manual packets, but T306 remains open for the
+broader synchronized approval/live-audit runner coverage and release-grade
+prompt-bank execution.

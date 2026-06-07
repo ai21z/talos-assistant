@@ -2945,10 +2945,13 @@ class AssistantTurnExecutorTest {
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertTrue(out.text().contains("No file change was needed"), out.text());
+                assertTrue(out.text().contains("Runtime static diagnostic inspection"), out.text());
+                assertFalse(out.text().contains("Runtime static verification found"), out.text());
                 assertTrue(out.text().contains("No files were changed"), out.text());
                 assertFalse(out.text().contains("repair/fix turn inspected files but did not change them"),
                         out.text());
                 assertFalse(out.text().contains("[Action obligation failed:"), out.text());
+                assertEquals("NOT_RUN", trace.verification().status());
                 assertEquals(0, trace.events().stream()
                         .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
                         .filter(event -> "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind")))
@@ -3082,8 +3085,10 @@ class AssistantTurnExecutorTest {
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertTrue(out.text().contains("No file change was needed"), out.text());
+                assertTrue(out.text().contains("Runtime static diagnostic inspection"), out.text());
+                assertFalse(out.text().contains("Runtime static verification found"), out.text());
                 assertTrue(out.text().contains(
-                        "Runtime verification checked files: index.html, styles.css, scripts.js"),
+                        "Diagnostic inspection checked files: index.html, styles.css, scripts.js"),
                         out.text());
                 assertTrue(out.text().contains(
                         "Tool-read files this turn: index.html, script.js"),
@@ -3096,6 +3101,7 @@ class AssistantTurnExecutorTest {
                         .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
                         .filter(event -> "SATISFIED_BY_INSPECTION".equals(event.data().get("status")))
                         .count());
+                assertEquals("NOT_RUN", trace.verification().status());
             } finally {
                 LocalTurnTraceCapture.clear();
             }

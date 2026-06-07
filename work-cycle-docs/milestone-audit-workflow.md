@@ -163,6 +163,23 @@ Do not commit raw transcripts unless the team explicitly decides a redacted
 artifact belongs in source control. Ticket evidence may point at local transcript
 paths.
 
+For release-clean artifact packets, do not copy raw fixture workspaces or raw
+`initial-workspace` / `final-workspace` directories into the scanned artifact
+root. Those fixture roots intentionally contain fake protected markers. Instead,
+write a redacted workspace snapshot:
+
+```powershell
+.\gradlew.bat writeRedactedAuditSnapshot `
+  "-PauditSnapshotWorkspace=local/manual-workspaces/<audit-id>/<model-workspace>" `
+  "-PauditSnapshotOutput=local/manual-testing/<audit-id>/artifacts/<model>/redacted-final-workspace" `
+  "-PauditSnapshotLabel=<model>-final" `
+  --no-daemon
+```
+
+Then scan model-facing artifacts plus redacted snapshots. Raw fixture
+workspaces may still be kept locally, but they must be excluded from
+release-clean scans or explicitly allowlisted as controlled fixtures.
+
 ## Findings Discipline
 
 Findings must distinguish:

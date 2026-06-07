@@ -108,3 +108,18 @@ This closes the missing true-terminal evidence lane for this audit wave. This
 ticket remains open for final clean-candidate verification and release-level
 two-model prompt-bank reconciliation, because the working tree is still dirty
 and this pass is not a versioned candidate packet.
+
+## 2026-06-07 T719/T720 focused audit note
+
+Focused installed-product evidence exists for the T719/T720 slice:
+
+- Audit root: `local/manual-testing/t719-t720-focused-p21-audit-20260607-220219`.
+- Installed Talos reported `Talos 0.9.9`.
+- Redacted audit snapshots were generated and scanned.
+- Combined artifact canary scan passed:
+  `local/manual-testing/t719-t720-focused-p21-audit-20260607-220219/CANARY-SCAN-ALL.txt`.
+- GPT-OSS and a Qwen explicit-read path exercised the conditional no-change
+  branch with `SATISFIED_BY_INSPECTION` and `Verification: NOT_RUN`.
+
+This does not close T280. It was a focused evidence-hygiene and P21 wording
+audit, not a full two-model prompt-bank or versioned release-candidate packet.

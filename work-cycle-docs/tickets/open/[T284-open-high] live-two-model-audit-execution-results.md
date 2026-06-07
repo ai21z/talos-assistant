@@ -126,3 +126,21 @@ absence of raw protected/private canaries in scanned artifacts.
 Remaining blocker: rerun final clean verification before using this as
 release-candidate evidence. This is still a dirty stabilization branch, not a
 versioned candidate packet.
+
+## 2026-06-07 T719/T720 focused audit note
+
+T719/T720 added focused installed-product evidence, but it is not full live
+prompt-bank completion:
+
+- Audit root: `local/manual-testing/t719-t720-focused-p21-audit-20260607-220219`.
+- GPT-OSS exercised the no-change conditional static-web review path with
+  diagnostic wording, no old "Runtime static verification" wording,
+  `SATISFIED_BY_INSPECTION`, and `Verification: NOT_RUN`.
+- Qwen required an explicit-read variant to exercise the same no-change branch;
+  the fresh no-history P21 prompt instead attempted `bmi_calculator.html` and
+  was blocked before approval.
+- Redacted snapshot artifacts and model-facing audit artifacts passed the
+  combined canary scan recorded in `CANARY-SCAN-ALL.txt`.
+
+Keep this ticket open for full two-model prompt-bank execution/classification
+and final clean-candidate evidence.

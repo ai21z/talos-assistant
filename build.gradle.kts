@@ -1005,6 +1005,37 @@ tasks.register<JavaExec>("checkRuntimeArtifactCanaries") {
     })
 }
 
+tasks.register<JavaExec>("writeRedactedAuditSnapshot") {
+    description = "Writes a canary-safe redacted workspace snapshot for manual/live audit packets."
+    group = "verification"
+    dependsOn(tasks.classes)
+    mainClass.set("dev.talos.runtime.policy.RedactedAuditSnapshotCli")
+    classpath = sourceSets["main"].runtimeClasspath
+    doFirst {
+        val workspace = providers.gradleProperty("auditSnapshotWorkspace").orNull
+        val output = providers.gradleProperty("auditSnapshotOutput").orNull
+        if (workspace.isNullOrBlank() || output.isNullOrBlank()) {
+            throw GradleException(
+                "writeRedactedAuditSnapshot requires " +
+                    "-PauditSnapshotWorkspace=<dir> -PauditSnapshotOutput=<dir> " +
+                    "[-PauditSnapshotLabel=<name>]"
+            )
+        }
+    }
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val workspace = providers.gradleProperty("auditSnapshotWorkspace")
+            .orElse("")
+            .get()
+        val output = providers.gradleProperty("auditSnapshotOutput")
+            .orElse("")
+            .get()
+        val label = providers.gradleProperty("auditSnapshotLabel")
+            .orElse("snapshot")
+            .get()
+        listOf("--workspace", workspace, "--output", output, "--label", label)
+    })
+}
+
 tasks.register<JavaExec>("runSynchronizedApprovalAudit") {
     description = "Runs the synchronized approval audit bank in scripted or live mode and writes reviewable artifacts."
     group = "verification"
