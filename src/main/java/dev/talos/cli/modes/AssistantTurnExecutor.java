@@ -16,6 +16,10 @@ import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
+import dev.talos.runtime.context.ProjectMemoryContext;
+import dev.talos.runtime.context.ProjectMemoryLimits;
+import dev.talos.runtime.context.ProjectMemoryLoader;
+import dev.talos.runtime.context.ProjectMemoryRequest;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
@@ -212,6 +216,8 @@ public final class AssistantTurnExecutor {
                 activeDecisionUpdatesTurnSurface || workspaceBoundaryReplayedRequest);
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
+        ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
+        injectProjectMemoryInstruction(messages, projectMemory);
         injectTaskContractInstruction(messages, currentTurnPlan, true);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract(), workspace);
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages, ctx);
@@ -1162,6 +1168,22 @@ public final class AssistantTurnExecutor {
         injectTaskContractInstruction(messages, plan, false);
     }
 
+    static void injectProjectMemoryInstruction(List<ChatMessage> messages, ProjectMemoryContext projectMemory) {
+        if (messages == null || messages.isEmpty() || projectMemory == null) return;
+        messages.removeIf(AssistantTurnExecutor::isProjectMemoryInstruction);
+        String rendered = projectMemory.renderForPrompt();
+        if (rendered.isBlank()) return;
+
+        int insertAt = 0;
+        for (int i = 0; i < messages.size(); i++) {
+            if ("system".equals(messages.get(i).role())) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        messages.add(insertAt, ChatMessage.system(rendered));
+    }
+
     private static void injectTaskContractInstruction(
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
@@ -1235,6 +1257,11 @@ public final class AssistantTurnExecutor {
 
     private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         return ToolSurfacePlanner.defaultVisibleToolNames(contract, phase);
+    }
+
+    private static ProjectMemoryContext loadProjectMemory(Path workspace, TaskContract contract) {
+        return new ProjectMemoryLoader(ProjectMemoryLimits.defaults())
+                .load(new ProjectMemoryRequest(workspace, null, contract));
     }
 
     static void injectStaticVerificationRepairInstruction(
@@ -1351,6 +1378,13 @@ public final class AssistantTurnExecutor {
                 && message.content() != null
                 && (message.content().startsWith("[TaskContract]")
                 || message.content().startsWith("[CurrentTurnCapability]"));
+    }
+
+    private static boolean isProjectMemoryInstruction(ChatMessage message) {
+        return message != null
+                && "system".equals(message.role())
+                && message.content() != null
+                && message.content().startsWith("[ProjectMemory]");
     }
 
     private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {
