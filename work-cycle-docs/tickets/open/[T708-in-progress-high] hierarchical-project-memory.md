@@ -1,6 +1,6 @@
 # T708 - Hierarchical Project Memory
 
-Status: open
+Status: in-progress
 Priority: high
 Created: 2026-06-06
 
@@ -114,6 +114,21 @@ Initial direction:
 - Surface loaded memory tier/source in prompt-debug and `/last trace`.
 - Add explicit redaction and protected-path behavior before including memory in
   model context.
+
+Implementation scope update, 2026-06-07:
+
+- Implement as three gated slices: discovery/policy, prompt rendering, then
+  trace/prompt-debug hardening.
+- Memory is read-only and reloaded each eligible turn. It is not persisted into
+  session summaries and is not a user-profile inference layer.
+- Supported files in this ticket are limited to Talos-owned Markdown memory
+  files: `TALOS.md`, `.talos/rules.md`, and bounded top-level
+  `%USERPROFILE%/.talos/memory/*.md`.
+- No include/import expansion, no foreign `CLAUDE.md`/`GEMINI.md` support, no
+  semantic rule interpreter, and no vector memory in this ticket.
+- Memory content must be rendered as untrusted context. It must not be treated
+  as approval, runtime policy, verifier evidence, or proof that the workspace
+  was inspected.
 
 ## Architecture Metadata
 
