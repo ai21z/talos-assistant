@@ -67,6 +67,26 @@ public record ProjectMemoryContext(
                 + " tiers=" + (tiers.isBlank() ? "none" : tiers);
     }
 
+    public String renderDebugDetails() {
+        if (decisions.isEmpty()) return "";
+        StringBuilder out = new StringBuilder();
+        for (ProjectMemoryDecision decision : decisions) {
+            out.append("tier=").append(decision.tier())
+                    .append(" trust=").append(decision.trust())
+                    .append(" path=").append(decision.pathHint())
+                    .append(" action=").append(decision.action())
+                    .append(" reason=").append(decision.decisionReason())
+                    .append(" hash=").append(decision.contentHash().isBlank() ? "none" : decision.contentHash())
+                    .append(" chars=").append(decision.chars())
+                    .append(" bytes=").append(decision.bytes())
+                    .append(" lines=").append(decision.lines())
+                    .append(" tokens=").append(decision.estimatedTokens())
+                    .append(" truncated=").append(decision.truncated())
+                    .append('\n');
+        }
+        return out.toString().strip();
+    }
+
     private static int renderOrder(ProjectMemoryTier tier) {
         return switch (tier == null ? ProjectMemoryTier.WORKSPACE_ROOT : tier) {
             case USER_GLOBAL -> 0;

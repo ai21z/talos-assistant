@@ -210,6 +210,38 @@ class PromptAuditSnapshotTest {
     }
 
     @Test
+    void renderCompactIncludesProjectMemoryStatusWhenAvailable() {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.system("[ProjectMemory]\nSources: 1\nRepo memory: Project Helios."),
+                ChatMessage.system("[CurrentTurnCapability]\ntype: WORKSPACE_EXPLAIN"),
+                ChatMessage.user("Explain this project."));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.WORKSPACE_EXPLAIN,
+                        false,
+                        false,
+                        false,
+                        Set.of(),
+                        Set.of(),
+                        "Explain this project."),
+                ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of());
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(
+                plan,
+                messages,
+                null,
+                "status=LOADED reason=WORKSPACE_EXPLAIN included=1 decisions=1 truncated=0 tiers=REPO_ROOT");
+
+        assertTrue(snapshot.projectMemoryStatus().contains("status=LOADED"), snapshot.projectMemoryStatus());
+        assertTrue(snapshot.projectMemoryStatus().contains("tiers=REPO_ROOT"), snapshot.projectMemoryStatus());
+        assertTrue(snapshot.renderCompact().contains("projectMemory: status=LOADED"), snapshot.renderCompact());
+    }
+
+    @Test
     void compactionStatusReasonIsRedactedInPromptAudit() throws Exception {
         List<ChatMessage> messages = List.of(
                 ChatMessage.system("system"),

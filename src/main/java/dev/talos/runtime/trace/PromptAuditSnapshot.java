@@ -37,7 +37,8 @@ public record PromptAuditSnapshot(
         List<String> promptTools,
         List<String> blockedTools,
         TraceRedactionMode redactionMode,
-        String compactionStatus
+        String compactionStatus,
+        String projectMemoryStatus
 ) {
     public static final String NONE_OR_NOT_DERIVED = "NONE_OR_NOT_DERIVED";
     public static final String NOT_DERIVED = "NOT_DERIVED";
@@ -63,6 +64,67 @@ public record PromptAuditSnapshot(
         blockedTools = blockedTools == null ? List.of() : List.copyOf(blockedTools);
         redactionMode = redactionMode == null ? TraceRedactionMode.DEFAULT : redactionMode;
         compactionStatus = redactedAuditField(compactionStatus, NOT_DERIVED);
+        projectMemoryStatus = redactedAuditField(projectMemoryStatus, NOT_DERIVED);
+    }
+
+    public PromptAuditSnapshot(
+            int schemaVersion,
+            String taskType,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            String phaseInitial,
+            String phaseFinal,
+            String actionObligation,
+            String evidenceObligation,
+            String outputObligation,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            String historyPolicy,
+            int historyMessageCount,
+            boolean currentTurnFrameInjected,
+            String currentTurnFramePlacement,
+            String currentTurnFrameHash,
+            String currentTurnFramePreviewRedacted,
+            int systemMessageCount,
+            int userMessageCount,
+            int totalMessageCount,
+            String promptHash,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            TraceRedactionMode redactionMode,
+            String compactionStatus
+    ) {
+        this(
+                schemaVersion,
+                taskType,
+                mutationAllowed,
+                verificationRequired,
+                phaseInitial,
+                phaseFinal,
+                actionObligation,
+                evidenceObligation,
+                outputObligation,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                historyPolicy,
+                historyMessageCount,
+                currentTurnFrameInjected,
+                currentTurnFramePlacement,
+                currentTurnFrameHash,
+                currentTurnFramePreviewRedacted,
+                systemMessageCount,
+                userMessageCount,
+                totalMessageCount,
+                promptHash,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                redactionMode,
+                compactionStatus,
+                NOT_DERIVED);
     }
 
     public PromptAuditSnapshot(
@@ -120,6 +182,7 @@ public record PromptAuditSnapshot(
                 promptTools,
                 blockedTools,
                 redactionMode,
+                NOT_DERIVED,
                 NOT_DERIVED);
     }
 
@@ -151,6 +214,7 @@ public record PromptAuditSnapshot(
                 List.of(),
                 List.of(),
                 TraceRedactionMode.DEFAULT,
+                NOT_DERIVED,
                 NOT_DERIVED);
     }
 
@@ -207,6 +271,7 @@ public record PromptAuditSnapshot(
                 plan.promptTools(),
                 plan.blockedTools(),
                 TraceRedactionMode.DEFAULT,
+                NOT_DERIVED,
                 NOT_DERIVED);
     }
 
@@ -218,6 +283,15 @@ public record PromptAuditSnapshot(
             CurrentTurnPlan plan,
             List<ChatMessage> messages,
             ConversationCompactionStatus compactionStatus
+    ) {
+        return fromPlan(plan, messages, compactionStatus, NOT_DERIVED);
+    }
+
+    public static PromptAuditSnapshot fromPlan(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ConversationCompactionStatus compactionStatus,
+            String projectMemoryStatus
     ) {
         CurrentTurnPlan safePlan = plan == null
                 ? CurrentTurnPlan.compatibility(null, null, List.of(), List.of(), List.of())
@@ -252,7 +326,8 @@ public record PromptAuditSnapshot(
                 safePlan.promptTools(),
                 safePlan.blockedTools(),
                 TraceRedactionMode.DEFAULT,
-                compactionStatus == null ? NOT_DERIVED : compactionStatus.renderCompact());
+                compactionStatus == null ? NOT_DERIVED : compactionStatus.renderCompact(),
+                projectMemoryStatus);
     }
 
     public boolean hasPromptAuditData() {
@@ -261,7 +336,8 @@ public record PromptAuditSnapshot(
                 || currentTurnFrameInjected
                 || !nativeTools.isEmpty()
                 || !promptTools.isEmpty()
-                || !NOT_DERIVED.equals(compactionStatus);
+                || !NOT_DERIVED.equals(compactionStatus)
+                || !NOT_DERIVED.equals(projectMemoryStatus);
     }
 
     public String renderCompact() {
@@ -288,6 +364,7 @@ public record PromptAuditSnapshot(
                 .append(" messages=").append(historyMessageCount)
                 .append('\n');
         sb.append("  compaction: ").append(blankDefault(compactionStatus, NOT_DERIVED)).append('\n');
+        sb.append("  projectMemory: ").append(blankDefault(projectMemoryStatus, NOT_DERIVED)).append('\n');
         sb.append("  currentTurnFrame: ")
                 .append(currentTurnFrameInjected ? "injected " : "not-injected ")
                 .append(blankDefault(currentTurnFramePlacement, "UNKNOWN"));
