@@ -168,11 +168,19 @@ public class Indexer {
         }
 
         final Path indexDir = indexDirFor(rootPath);
-        final Map<String, List<SymbolHit>> existingSymbolsByPath = symbolsByPath(SymbolIndexStore.load(indexDir));
+        final SymbolIndexStore.LoadResult existingSymbolSidecar = SymbolIndexStore.loadDetailed(indexDir);
+        final boolean refreshSymbolsForUnchangedFiles =
+                existingSymbolSidecar.status() != SymbolIndexStore.LoadStatus.LOADED;
+        final Map<String, List<SymbolHit>> existingSymbolsByPath = symbolsByPath(existingSymbolSidecar.hits());
         final ConcurrentHashMap<String, List<SymbolHit>> refreshedSymbolsByPath = new ConcurrentHashMap<>();
         final Set<String> currentRelPaths = ConcurrentHashMap.newKeySet();
         for (Path file : files) {
             currentRelPaths.add(rootPath.relativize(file).toString().replace('\\', '/'));
+        }
+        if (refreshSymbolsForUnchangedFiles) {
+            LOG.info("Symbol sidecar {} for {}; refreshing symbols for unchanged indexable files.",
+                    existingSymbolSidecar.status().name().toLowerCase(Locale.ROOT),
+                    SafeLogFormatter.value(indexDir));
         }
 
         // Vectors toggle (BM25-only fallback if disabled or probe fails)
@@ -229,6 +237,10 @@ public class Indexer {
                             if (!skipHashing) {
                                 String currentHash = Hash.sha256Hex(Files.readAllBytes(p));
                                 if (store.isUpToDate(rel, currentHash)) {
+                                    if (refreshSymbolsForUnchangedFiles) {
+                                        String text = parseIndexableTextWithTiming(rootPath, p, stats);
+                                        refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
+                                    }
                                     LOG.debug("Skipping unchanged file: {}", SafeLogFormatter.value(rel));
                                     stats.incrementFilesSkipped();
                                     return null; // Skip processing
@@ -238,9 +250,7 @@ public class Indexer {
                             }
 
                             // Parse with timing
-                            long parseStart = System.currentTimeMillis();
-                            String text = parseIndexableText(rootPath, p);
-                            stats.addParseTime(System.currentTimeMillis() - parseStart);
+                            String text = parseIndexableTextWithTiming(rootPath, p, stats);
                             stats.incrementFilesEmbedded();
                             refreshedSymbolsByPath.put(rel, SymbolExtractor.extract(rel, text));
 
@@ -578,6 +588,13 @@ public class Indexer {
             throw new IOException("Document extraction unavailable for index status=" + result.status());
         }
         return ParserUtil.smartParse(path);
+    }
+
+    private String parseIndexableTextWithTiming(Path rootPath, Path path, IndexingStats stats) throws IOException {
+        long parseStart = System.currentTimeMillis();
+        String text = parseIndexableText(rootPath, path);
+        stats.addParseTime(System.currentTimeMillis() - parseStart);
+        return text;
     }
 
     private boolean unsupportedAndNotExtractionEnabled(Path path) {
