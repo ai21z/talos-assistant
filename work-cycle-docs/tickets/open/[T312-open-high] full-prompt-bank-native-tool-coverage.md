@@ -228,3 +228,11 @@ Remaining implementation:
 - `tools/manual-eval/talosbench-cases.json`
 - `work-cycle-docs/full-e2e-audit-workflow.md`
 - `work-cycle-docs/full-e2e-audit-operator-prompt.md`
+
+## 2026-06-07 T719/T720 focused audit note
+
+The T719/T720 audit updated artifact-hygiene and conditional static-web
+diagnostic wording only. It did not expand native-tool prompt-bank coverage and
+does not close any T312 acceptance criteria. Future full prompt-bank runs should
+use the new `writeRedactedAuditSnapshot` task for release-clean final workspace
+evidence instead of copying raw fixture snapshots into scanned artifact roots.

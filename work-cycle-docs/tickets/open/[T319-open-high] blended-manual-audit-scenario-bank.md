@@ -59,3 +59,19 @@ The first bank covers:
 
 - Do not replace unit tests with manual audits.
 - Do not claim a full audit if registered native tools are skipped.
+
+## 2026-06-07 focused audit note
+
+The T719/T720 focused P21 audit surfaced a useful blended-scenario variant:
+
+- In a fresh Qwen session with no prior creation history, the deictic prompt
+  `Review the BMI calculator you just created...` did not exercise the intended
+  no-change diagnostic branch. Qwen attempted an invalid
+  `bmi_calculator.html` edit and the runtime blocked it before approval.
+- An explicit-read Qwen variant did exercise the intended no-change branch and
+  produced the corrected diagnostic-inspection wording with
+  `SATISFIED_BY_INSPECTION` and `Verification: NOT_RUN`.
+
+This is not a T720 regression. It belongs in blended/manual scenario design as
+evidence that deictic prompts without sufficient session/workspace context can
+probe model/tool-loop convergence separately from deterministic policy wording.
