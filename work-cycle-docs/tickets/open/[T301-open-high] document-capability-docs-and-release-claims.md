@@ -174,4 +174,56 @@ wording, but the broader release-claim drift-prevention work remains open until
 the final beta decision packet reconciles README, reports, tickets, and any
 published capability matrix.
 
+## 2026-06-08 WS5 provider-body quality review
+
+New evidence:
+
+```text
+work-cycle-docs/reports/current-0.10.0-ws5-provider-body-quality-review.md
+```
+
+The WS5 review supports the current narrow release-claim wording:
+
+- PDF/DOCX/XLS/XLSX text extraction has small-fixture two-model evidence with
+  format limitations.
+- Private-mode document extraction withholds extracted private document content
+  from model context by default.
+- `/show` local-display output is not model handoff and redacts the configured
+  private value.
+- No reviewed evidence supports image/OCR, PowerPoint, sensitive private
+  paperwork safety, or browser/render-proof claims.
+
+Keep T301 open until the final beta decision packet reconciles README, current
+reports, tickets, and published capability wording against the final evidence
+set.
+
+## 2026-06-08 WS7 release-claim reconciliation slice
+
+Reviewed README, `docs/public-installation.md`, the landing page, and current
+0.10.0 reports against the post-T734 and WS5 evidence. Current capability
+wording stays narrow:
+
+- PDF/DOCX/XLS/XLSX are text-extraction claims with limitations.
+- Image/OCR and PowerPoint remain frozen out of beta claims.
+- Private paperwork is explicitly not an approved beta product claim.
+- Static-web/browser wording does not claim browser render proof without a
+  separate browser audit.
+- Public install wording says the winget path is planned/not live until signed
+  GitHub Release assets and a winget manifest exist.
+
+Found and fixed one stale public-facing detail: `site/index.html` screen-reader
+text for the startup screenshot still said `TALOS v0.9.9`; it now says
+`TALOS v0.10.0`. `site/test/site.test.js` now rejects the stale `TALOS v0.9.9`
+hero text.
+
+Targeted verification passed:
+
+```powershell
+npm --prefix site test
+.\gradlew.bat test --tests "dev.talos.docs.ReadmePrivacyCopyTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+```
+
+Keep T301 open until the final beta packet is produced from a committed SHA and
+all public release artifacts/claims are reconciled against that packet.
+
 

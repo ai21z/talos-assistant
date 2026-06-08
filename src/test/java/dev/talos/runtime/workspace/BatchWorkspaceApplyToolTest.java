@@ -74,6 +74,18 @@ class BatchWorkspaceApplyToolTest {
     }
 
     @Test
+    void descriptorDocumentsRequiredOperationJsonKeysForModels() {
+        String schema = new BatchWorkspaceApplyTool().descriptor().parametersSchema();
+
+        assertTrue(schema.contains("copy_path"), schema);
+        assertTrue(schema.contains("from"), schema);
+        assertTrue(schema.contains("to"), schema);
+        assertTrue(schema.contains("rename_path"), schema);
+        assertTrue(schema.contains("new_name"), schema);
+        assertTrue(schema.contains("delete_path"), schema);
+    }
+
+    @Test
     void deletePathBatchPlanIsDestructiveForApprovalAndCheckpointing() {
         var call = new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
                 [{"op":"delete_path","path":"docs/old-plan.md"}]

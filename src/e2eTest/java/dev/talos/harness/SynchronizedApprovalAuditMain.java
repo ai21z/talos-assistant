@@ -40,8 +40,42 @@ public final class SynchronizedApprovalAuditMain {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final DateTimeFormatter AUDIT_ID_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final List<String> WORKSPACE_OPERATION_SCENARIOS = List.of(
+            "workspace-mkdir-approved",
+            "workspace-copy-path-approved",
+            "workspace-move-path-approved",
+            "workspace-rename-path-approved",
+            "workspace-delete-path-approved",
+            "workspace-batch-apply-approved");
+    private static final List<String> SCRIPTED_SCENARIO_FILTERS = scriptedScenarioFilters();
+    private static final List<String> LIVE_SCENARIO_FILTERS = liveScenarioFilters();
 
     private SynchronizedApprovalAuditMain() {
+    }
+
+    private static List<String> scriptedScenarioFilters() {
+        List<String> filters = new ArrayList<>();
+        filters.add("static-web-selector-script-only-verified");
+        filters.add("t325-python-command-boundary");
+        filters.addAll(WORKSPACE_OPERATION_SCENARIOS);
+        filters.add("static-web-selector-script-only-malformed-fails");
+        return List.copyOf(filters);
+    }
+
+    private static List<String> liveScenarioFilters() {
+        List<String> filters = new ArrayList<>();
+        filters.add("static-web-selector-script-only-verified");
+        filters.add("t325-python-command-boundary");
+        filters.addAll(WORKSPACE_OPERATION_SCENARIOS);
+        return List.copyOf(filters);
+    }
+
+    static List<String> supportedScriptedScenarioNames() {
+        return SCRIPTED_SCENARIO_FILTERS;
+    }
+
+    static List<String> supportedLiveScenarioNames() {
+        return LIVE_SCENARIO_FILTERS;
     }
 
     public enum RunMode {
@@ -227,6 +261,12 @@ public final class SynchronizedApprovalAuditMain {
                         args.artifactsRoot(), args.workspacesRoot(), client));
                 bundles.add(runPythonCommandBoundaryExpectedFilesCreated(
                         args.artifactsRoot(), args.workspacesRoot(), client));
+                bundles.add(runWorkspaceMkdirApproved(args.artifactsRoot(), args.workspacesRoot(), client));
+                bundles.add(runWorkspaceCopyPathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
+                bundles.add(runWorkspaceMovePathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
+                bundles.add(runWorkspaceRenamePathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
+                bundles.add(runWorkspaceDeletePathApproved(args.artifactsRoot(), args.workspacesRoot(), client));
+                bundles.add(runWorkspaceBatchApplyApproved(args.artifactsRoot(), args.workspacesRoot(), client));
                 List<ArtifactCanaryScanner.Finding> findings =
                         ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(args.artifactsRoot()), List.of());
                 Path summary = args.artifactsRoot().resolve("SYNCHRONIZED-APPROVAL-AUDIT.md");
@@ -255,6 +295,20 @@ public final class SynchronizedApprovalAuditMain {
                     runStaticWebSelectorScriptOnlyVerified(artifactsRoot, workspacesRoot);
             case "t325-python-command-boundary" ->
                     runPythonCommandBoundaryExpectedFilesCreated(artifactsRoot, workspacesRoot);
+            case "workspace-mkdir-approved" ->
+                    runWorkspaceMkdirApproved(artifactsRoot, workspacesRoot);
+            case "workspace-copy-path-approved" ->
+                    runWorkspaceCopyPathApproved(artifactsRoot, workspacesRoot);
+            case "workspace-move-path-approved" ->
+                    runWorkspaceMovePathApproved(artifactsRoot, workspacesRoot);
+            case "workspace-rename-path-approved" ->
+                    runWorkspaceRenamePathApproved(artifactsRoot, workspacesRoot);
+            case "workspace-delete-path-approved" ->
+                    runWorkspaceDeletePathApproved(artifactsRoot, workspacesRoot);
+            case "workspace-batch-apply-approved" ->
+                    runWorkspaceBatchApplyApproved(artifactsRoot, workspacesRoot);
+            case "static-web-selector-script-only-malformed-fails" ->
+                    runStaticWebSelectorMalformedFails(artifactsRoot, workspacesRoot);
             default -> throw new IllegalArgumentException("unsupported synchronized approval scenario: "
                     + scenarioFilter);
         };
@@ -270,6 +324,18 @@ public final class SynchronizedApprovalAuditMain {
                     runStaticWebSelectorScriptOnlyVerified(artifactsRoot, workspacesRoot, client);
             case "t325-python-command-boundary" ->
                     runPythonCommandBoundaryExpectedFilesCreated(artifactsRoot, workspacesRoot, client);
+            case "workspace-mkdir-approved" ->
+                    runWorkspaceMkdirApproved(artifactsRoot, workspacesRoot, client);
+            case "workspace-copy-path-approved" ->
+                    runWorkspaceCopyPathApproved(artifactsRoot, workspacesRoot, client);
+            case "workspace-move-path-approved" ->
+                    runWorkspaceMovePathApproved(artifactsRoot, workspacesRoot, client);
+            case "workspace-rename-path-approved" ->
+                    runWorkspaceRenamePathApproved(artifactsRoot, workspacesRoot, client);
+            case "workspace-delete-path-approved" ->
+                    runWorkspaceDeletePathApproved(artifactsRoot, workspacesRoot, client);
+            case "workspace-batch-apply-approved" ->
+                    runWorkspaceBatchApplyApproved(artifactsRoot, workspacesRoot, client);
             default -> throw new IllegalArgumentException("unsupported synchronized approval scenario: "
                     + scenarioFilter);
         };
@@ -1371,6 +1437,58 @@ public final class SynchronizedApprovalAuditMain {
         return bundle;
     }
 
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runStaticWebSelectorMalformedFails(
+            Path artifactsRoot,
+            Path workspacesRoot) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "static-web-selector-script-only-malformed-fails");
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head><link rel="stylesheet" href="styles.css"></head>
+                <body>
+                  <button class="cta-button">Run</button>
+                  <p id="result">Waiting</p>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """, StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("styles.css"),
+                ".cta-button { color: red; }\n", StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.missing-button').addEventListener('click', () => {
+                  document.querySelector('#result').textContent = 'Clicked';
+                });
+                """, StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "static-web-selector-script-only-malformed-fails",
+                workspace,
+                checkpointConfig(),
+                "Make script.js fix the selector bug by changing .missing-button to .cta-button. "
+                        + "Do not change anything else.",
+                List.of(
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
+                                + "\"content\":\"document.querySelector('.cta-button').addEventListener('click', () => {\\n"
+                                + "  document.querySelector('#result').textC;\\n"
+                                + "});\\n\"}}",
+                        "The selector bug is fixed."),
+                List.of(ScriptedApprovalGate.Step.approve("talos.write_file", "script.js")));
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        String verificationStatus = result.trace() == null ? "" : result.trace().verification().status();
+        String verificationSummary = result.trace() == null ? "" : result.trace().verification().summary();
+        IOException failure = new IOException("malformed static web selector rewrite was rejected: "
+                + verificationStatus + " " + verificationSummary);
+        if (!"FAILED".equals(verificationStatus)
+                || !verificationSummary.contains("Replacement verification failed.")) {
+            writeFailureMarker(bundle, failure);
+            throw failure;
+        }
+        writeFailureMarker(bundle, failure);
+        throw failure;
+    }
+
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runMutationSimilarTargetScriptOnlyVerified(
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
@@ -1607,6 +1725,33 @@ public final class SynchronizedApprovalAuditMain {
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceMkdirApproved(
+            Path artifactsRoot,
+            Path workspacesRoot,
+            LlmClient client) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "workspace-mkdir-approved");
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "workspace-mkdir-approved",
+                workspace,
+                checkpointConfig(),
+                "Create docs/reports with talos.mkdir.",
+                List.of(),
+                List.of(ScriptedApprovalGate.Step.approve("talos.mkdir", "docs/reports")));
+        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        try {
+            requireToolUsed(result, "talos.mkdir", "live mkdir scenario did not use talos.mkdir");
+            if (!Files.isDirectory(workspace.resolve("docs").resolve("reports"))) {
+                throw new IOException("live mkdir scenario did not create docs/reports directory");
+            }
+        } catch (IOException e) {
+            writeFailureMarker(bundle, e);
+            throw e;
+        }
+        return bundle;
+    }
+
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceCopyPathApproved(
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
@@ -1627,6 +1772,35 @@ public final class SynchronizedApprovalAuditMain {
         requireFileContent(workspace.resolve("source-copy.md"), "copy source\n",
                 "copy scenario did not create source-copy.md");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceCopyPathApproved(
+            Path artifactsRoot,
+            Path workspacesRoot,
+            LlmClient client) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "workspace-copy-path-approved");
+        Files.writeString(workspace.resolve("source.md"), "copy source\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "workspace-copy-path-approved",
+                workspace,
+                checkpointConfig(),
+                "Use talos.copy_path to copy source.md to source-copy.md. Perform only that workspace operation.",
+                List.of(),
+                List.of(ScriptedApprovalGate.Step.approve("talos.copy_path", "source.md")));
+        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        try {
+            requireToolUsed(result, "talos.copy_path", "live copy scenario did not use talos.copy_path");
+            requireFileContent(workspace.resolve("source.md"), "copy source\n",
+                    "live copy scenario removed source.md");
+            requireFileContent(workspace.resolve("source-copy.md"), "copy source\n",
+                    "live copy scenario did not create source-copy.md");
+        } catch (IOException e) {
+            writeFailureMarker(bundle, e);
+            throw e;
+        }
+        return bundle;
     }
 
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceMovePathApproved(
@@ -1650,6 +1824,36 @@ public final class SynchronizedApprovalAuditMain {
         requireFileContent(workspace.resolve("moved.md"), "move source\n",
                 "move scenario did not create moved.md");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceMovePathApproved(
+            Path artifactsRoot,
+            Path workspacesRoot,
+            LlmClient client) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "workspace-move-path-approved");
+        Files.writeString(workspace.resolve("move-me.md"), "move source\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "workspace-move-path-approved",
+                workspace,
+                checkpointConfig(),
+                "Use talos.move_path to move move-me.md to moved.md. Perform only that workspace operation.",
+                List.of(),
+                List.of(ScriptedApprovalGate.Step.approve("talos.move_path", "move-me.md")));
+        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        try {
+            requireToolUsed(result, "talos.move_path", "live move scenario did not use talos.move_path");
+            if (Files.exists(workspace.resolve("move-me.md"))) {
+                throw new IOException("live move scenario left move-me.md in place");
+            }
+            requireFileContent(workspace.resolve("moved.md"), "move source\n",
+                    "live move scenario did not create moved.md");
+        } catch (IOException e) {
+            writeFailureMarker(bundle, e);
+            throw e;
+        }
+        return bundle;
     }
 
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceRenamePathApproved(
@@ -1676,6 +1880,36 @@ public final class SynchronizedApprovalAuditMain {
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceRenamePathApproved(
+            Path artifactsRoot,
+            Path workspacesRoot,
+            LlmClient client) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "workspace-rename-path-approved");
+        Files.writeString(workspace.resolve("rename-me.md"), "rename source\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "workspace-rename-path-approved",
+                workspace,
+                checkpointConfig(),
+                "Use talos.rename_path to rename rename-me.md to renamed.md. Perform only that workspace operation.",
+                List.of(),
+                List.of(ScriptedApprovalGate.Step.approve("talos.rename_path", "rename-me.md")));
+        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        try {
+            requireToolUsed(result, "talos.rename_path", "live rename scenario did not use talos.rename_path");
+            if (Files.exists(workspace.resolve("rename-me.md"))) {
+                throw new IOException("live rename scenario left rename-me.md in place");
+            }
+            requireFileContent(workspace.resolve("renamed.md"), "rename source\n",
+                    "live rename scenario did not create renamed.md");
+        } catch (IOException e) {
+            writeFailureMarker(bundle, e);
+            throw e;
+        }
+        return bundle;
+    }
+
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceDeletePathApproved(
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
@@ -1695,6 +1929,34 @@ public final class SynchronizedApprovalAuditMain {
             throw new IOException("delete scenario left delete-me.tmp in place");
         }
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceDeletePathApproved(
+            Path artifactsRoot,
+            Path workspacesRoot,
+            LlmClient client) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "workspace-delete-path-approved");
+        Files.writeString(workspace.resolve("delete-me.tmp"), "delete source\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "workspace-delete-path-approved",
+                workspace,
+                checkpointConfig(),
+                "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation.",
+                List.of(),
+                List.of(ScriptedApprovalGate.Step.approve("talos.delete_path", "delete-me.tmp")));
+        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        try {
+            requireToolUsed(result, "talos.delete_path", "live delete scenario did not use talos.delete_path");
+            if (Files.exists(workspace.resolve("delete-me.tmp"))) {
+                throw new IOException("live delete scenario left delete-me.tmp in place");
+            }
+        } catch (IOException e) {
+            writeFailureMarker(bundle, e);
+            throw e;
+        }
+        return bundle;
     }
 
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceBatchApplyApproved(
@@ -1720,6 +1982,37 @@ public final class SynchronizedApprovalAuditMain {
         requireFileContent(workspace.resolve("source-copy.md"), "batch source\n",
                 "batch scenario did not create source-copy.md");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runWorkspaceBatchApplyApproved(
+            Path artifactsRoot,
+            Path workspacesRoot,
+            LlmClient client) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "workspace-batch-apply-approved");
+        Files.writeString(workspace.resolve("source.md"), "batch source\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "workspace-batch-apply-approved",
+                workspace,
+                checkpointConfig(),
+                "Use talos.apply_workspace_batch only. Apply operations_json for exactly this operation: "
+                        + "copy source.md to source-copy.md. Perform only that workspace operation.",
+                List.of(),
+                List.of(ScriptedApprovalGate.Step.approve("talos.apply_workspace_batch", "source.md")));
+        SynchronizedApprovalAuditRunner.Result result = runLiveOrWriteFailureBundle(artifactsRoot, request, client);
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+        try {
+            requireToolUsed(result, "talos.apply_workspace_batch",
+                    "live batch scenario did not use talos.apply_workspace_batch");
+            requireFileContent(workspace.resolve("source.md"), "batch source\n",
+                    "live batch scenario removed source.md");
+            requireFileContent(workspace.resolve("source-copy.md"), "batch source\n",
+                    "live batch scenario did not create source-copy.md");
+        } catch (IOException e) {
+            writeFailureMarker(bundle, e);
+            throw e;
+        }
+        return bundle;
     }
 
     private static Config privateDocumentConfig(boolean allowSendToModel) {
@@ -1794,6 +2087,17 @@ public final class SynchronizedApprovalAuditMain {
     private static void requireReadable(Path path, String message) throws IOException {
         if (!Files.isRegularFile(path) || Files.readString(path).isBlank()) {
             throw new IOException(message + ": " + path.toAbsolutePath().normalize());
+        }
+    }
+
+    private static void requireToolUsed(
+            SynchronizedApprovalAuditRunner.Result result,
+            String toolName,
+            String message
+    ) throws IOException {
+        String traceText = result == null ? "" : result.traceText();
+        if (!traceText.contains("TOOL_EXECUTED " + toolName + " ")) {
+            throw new IOException(message);
         }
     }
 

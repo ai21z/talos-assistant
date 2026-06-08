@@ -876,6 +876,98 @@ class SynchronizedApprovalAuditRunnerTest {
     }
 
     @Test
+    void synchronized_audit_filters_name_workspace_operation_scenarios() {
+        List<String> workspaceOperations = List.of(
+                "workspace-mkdir-approved",
+                "workspace-copy-path-approved",
+                "workspace-move-path-approved",
+                "workspace-rename-path-approved",
+                "workspace-delete-path-approved",
+                "workspace-batch-apply-approved");
+
+        assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames().containsAll(workspaceOperations));
+        assertTrue(SynchronizedApprovalAuditMain.supportedLiveScenarioNames().containsAll(workspaceOperations));
+    }
+
+    @Test
+    void deterministic_audit_entrypoint_can_run_single_workspace_operation_scenarios(@TempDir Path tempDir)
+            throws Exception {
+        for (String scenario : List.of(
+                "workspace-mkdir-approved",
+                "workspace-copy-path-approved",
+                "workspace-move-path-approved",
+                "workspace-rename-path-approved",
+                "workspace-delete-path-approved",
+                "workspace-batch-apply-approved")) {
+            Path artifacts = tempDir.resolve("manual-testing-" + scenario);
+            Path workspaces = tempDir.resolve("manual-workspaces-" + scenario);
+
+            SynchronizedApprovalAuditMain.RunResult run = SynchronizedApprovalAuditMain.run(
+                    new SynchronizedApprovalAuditMain.Arguments(
+                            SynchronizedApprovalAuditMain.RunMode.SCRIPTED,
+                            artifacts,
+                            workspaces,
+                            null,
+                            "",
+                            scenario));
+
+            assertEquals(1, run.bundles().size(), scenario);
+            assertTrue(Files.readString(run.summary()).contains("Scenarios: 1"), scenario);
+            assertTrue(Files.readString(run.summary()).contains(scenario), scenario);
+            assertWorkspaceOperationPostCondition(workspaces.resolve(scenario), scenario);
+        }
+    }
+
+    @Test
+    void malformed_static_web_selector_rewrite_writes_failure_bundle(@TempDir Path tempDir) throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspaces = tempDir.resolve("manual-workspaces");
+
+        IOException error = assertThrows(IOException.class, () ->
+                SynchronizedApprovalAuditMain.run(
+                        new SynchronizedApprovalAuditMain.Arguments(
+                                SynchronizedApprovalAuditMain.RunMode.SCRIPTED,
+                                artifacts,
+                                workspaces,
+                                null,
+                                "",
+                                "static-web-selector-script-only-malformed-fails")));
+
+        assertTrue(error.getMessage().contains("malformed static web selector"), error.getMessage());
+        Path scenarioRoot = artifacts.resolve("static-web-selector-script-only-malformed-fails");
+        assertTrue(Files.isRegularFile(scenarioRoot.resolve("FAILURE.md")), scenarioRoot.toString());
+        String transcript = Files.readString(scenarioRoot.resolve("audit-transcript.json"));
+        assertTrue(transcript.contains("\"verificationStatus\" : \"FAILED\""), transcript);
+        assertTrue(transcript.contains("\"verificationSummary\" : \"Replacement verification failed.\""), transcript);
+        String finalAnswer = Files.readString(scenarioRoot.resolve("final-answer.txt"));
+        assertFalse(finalAnswer.contains("Static web coherence checks passed"), finalAnswer);
+        assertTrue(finalAnswer.contains("Static verification failed"), finalAnswer);
+        assertTrue(finalAnswer.contains("replacement preservation changed content beyond the requested text"),
+                finalAnswer);
+    }
+
+    @Test
+    void missing_synchronized_approval_response_for_mutation_fails_closed_without_mutating() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "status=old\n");
+
+        AssertionError error = assertThrows(AssertionError.class, () ->
+                SynchronizedApprovalAuditRunner.runScripted(
+                        new SynchronizedApprovalAuditRunner.Request(
+                                "missing synchronized mutation approval",
+                                workspace,
+                                checkpointConfig(),
+                                "Replace status=old with status=new in notes.md.",
+                                List.of(
+                                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"notes.md\","
+                                                + "\"content\":\"status=new\\n\"}}",
+                                        "The edit is complete."),
+                                List.of())));
+
+        assertTrue(error.getMessage().contains("Unexpected approval prompt"), error.getMessage());
+        assertEquals("status=old\n", Files.readString(workspace.resolve("notes.md")));
+    }
+
+    @Test
     void synchronized_summary_scores_partial_passed_blocked_call_as_runtime_repair_pass() {
         SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
                 SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
@@ -1106,6 +1198,32 @@ class SynchronizedApprovalAuditRunnerTest {
                 "enabled", Boolean.TRUE,
                 "fail_closed", Boolean.TRUE)));
         return cfg;
+    }
+
+    private static void assertWorkspaceOperationPostCondition(Path workspace, String scenario) throws IOException {
+        switch (scenario) {
+            case "workspace-mkdir-approved" ->
+                    assertTrue(Files.isDirectory(workspace.resolve("docs").resolve("reports")));
+            case "workspace-copy-path-approved" -> {
+                assertEquals("copy source\n", Files.readString(workspace.resolve("source.md")));
+                assertEquals("copy source\n", Files.readString(workspace.resolve("source-copy.md")));
+            }
+            case "workspace-move-path-approved" -> {
+                assertFalse(Files.exists(workspace.resolve("move-me.md")));
+                assertEquals("move source\n", Files.readString(workspace.resolve("moved.md")));
+            }
+            case "workspace-rename-path-approved" -> {
+                assertFalse(Files.exists(workspace.resolve("rename-me.md")));
+                assertEquals("rename source\n", Files.readString(workspace.resolve("renamed.md")));
+            }
+            case "workspace-delete-path-approved" ->
+                    assertFalse(Files.exists(workspace.resolve("delete-me.tmp")));
+            case "workspace-batch-apply-approved" -> {
+                assertEquals("batch source\n", Files.readString(workspace.resolve("source.md")));
+                assertEquals("batch source\n", Files.readString(workspace.resolve("source-copy.md")));
+            }
+            default -> throw new AssertionError("unknown workspace operation scenario: " + scenario);
+        }
     }
 
     private void assertPrivateExtractedDocumentWithheldByDefault(

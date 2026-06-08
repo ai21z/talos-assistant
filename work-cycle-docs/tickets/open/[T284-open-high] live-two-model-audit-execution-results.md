@@ -273,3 +273,30 @@ Keep T284 open for final release reconciliation. The evidence is valid and much
 stronger than the previous failed candidate packet, but true PTY/JLine current
 candidate evidence and full native-tool prompt-bank reconciliation remain
 outside this packet.
+
+## 2026-06-08 WS5 provider-body quality review
+
+Evidence report:
+
+```text
+work-cycle-docs/reports/current-0.10.0-ws5-provider-body-quality-review.md
+```
+
+The report spot-checks the post-T734 capability/private-mode artifacts against
+their prompt-debug/provider-body evidence. It confirms:
+
+- 16/16 document handoff rows across GPT-OSS and Qwen had the expected target
+  extracted/read and the expected handoff state.
+- 8 public document rows recorded `SENT_TO_MODEL` and provider bodies contained
+  the public extracted fixture text.
+- 8 private document/retrieve rows recorded `WITHHELD_PRIVATE_MODE` and
+  provider-body/prompt-debug/output artifacts did not contain configured private
+  document values or protected canaries.
+- Non-document privacy-sensitive rows recorded no raw secret leaks, no raw
+  canary leaks, and no unsupported-overclaim flags in the summary CSV.
+- The refreshed release-clean canary scan passed over the post-T734 model-facing
+  packet roots.
+
+Keep T284 open. The WS5 review strengthens the result packet, but final closure
+still requires the remaining current-candidate PTY/full-native-tool release
+evidence to be reconciled in one final packet.

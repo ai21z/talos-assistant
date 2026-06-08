@@ -162,6 +162,8 @@ describe("Talos landing page static contract", () => {
     ]) {
       assert.match(heroText, new RegExp(escapeRegExp(copy)));
     }
+
+    assert.doesNotMatch(heroText, /TALOS v0\.9\.9\b/);
   });
 
   it("renders TALOS, Greek, and terminal-typed hero phrases as a restrained reveal cycle", () => {

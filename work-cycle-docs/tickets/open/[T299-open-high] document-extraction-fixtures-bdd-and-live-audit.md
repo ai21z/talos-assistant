@@ -216,4 +216,57 @@ PDF/DOCX/XLS/XLSX extraction, but the ticket still requires a larger maintained
 fixture corpus, adversarial/private variants, and broader BDD-style document
 quality evidence beyond generated small fixtures.
 
+## 2026-06-08 WS5 provider-body quality review
+
+New review report:
+
+```text
+work-cycle-docs/reports/current-0.10.0-ws5-provider-body-quality-review.md
+```
+
+The review confirms that, in the post-T734 capability packet, public
+PDF/DOCX/XLSX rows sent extracted public fixture text to the model, while
+private-mode PDF/DOCX/XLSX rows extracted the named private target locally and
+withheld model handoff by default. `/show` private document rows remained
+local-display-only and redacted the configured private value.
+
+This strengthens the small generated beta-core document evidence. It does not
+close T299 because the ticket still requires larger maintained/adversarial
+fixtures and broader document-quality BDD coverage beyond generated tiny
+fixtures.
+
+## 2026-06-08 WS7 adversarial fixture regression slice
+
+Added deterministic adapter coverage for corrupt beta-scope documents and XLS
+parity limitations:
+
+- `corrupt_pdf_reports_corrupt_not_generic_failed`
+- `corrupt_docx_reports_corrupt_not_generic_failed`
+- `xls_text_extraction_skips_hidden_sheets_and_reports_limitation`
+- `xls_formula_cells_report_formula_and_cached_value_policy`
+- `corrupt_xls_reports_corrupt_not_generic_failed`
+
+The tests prove invalid PDF/DOCX files return `DocumentExtractionStatus.CORRUPT`,
+blank `safeText`, a `document-corrupt` warning, and
+`modelHandoffAllowed=false`. They now also prove corrupt `.xls` OLE2/header
+failures classify as `CORRUPT`, hidden `.xls` sheets are skipped with an
+`excel-hidden-sheets` limitation, and `.xls` formula cells report formula text
+plus cached values with a non-recalculation warning. `DocumentExtractionService`
+now classifies common PDF structural failure signals such as missing
+root/trailer/xref/end-of-file and `.xls` invalid OLE2/header signatures as
+corrupt rather than generic extraction failures.
+
+Focused verification passed:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.extract.DocumentExtractionAdaptersTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.core.extract.*" --no-daemon
+.\gradlew.bat test --tests "dev.talos.tools.impl.ReadFileToolTest" --no-daemon
+```
+
+Keep T299 open. This closes a small adversarial-classification and `.xls`
+limitation-parity gap for generated fixtures, but it does not create the larger
+maintained real-world fixture corpus, checked-in protected fixture set, or final
+two-model live release packet required by the ticket.
+
 

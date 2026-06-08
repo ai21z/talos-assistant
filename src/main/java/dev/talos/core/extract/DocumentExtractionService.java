@@ -346,9 +346,16 @@ public final class DocumentExtractionService {
         }
         if (signal.contains("zip")
                 || signal.contains("notoffice")
+                || signal.contains("notole2")
                 || signal.contains("officexml")
                 || signal.contains("invalidformat")
+                || signal.contains("invalid header")
                 || signal.contains("recordformat")
+                || signal.contains("valid ole2")
+                || signal.contains("root object")
+                || signal.contains("trailer")
+                || signal.contains("xref")
+                || signal.contains("end-of-file")
                 || signal.contains("eof")
                 || signal.contains("truncated")
                 || signal.contains("not a valid")) {
