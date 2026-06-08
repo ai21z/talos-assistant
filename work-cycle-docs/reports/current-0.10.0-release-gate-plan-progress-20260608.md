@@ -109,15 +109,31 @@ Result: passed after implementation.
 
 ### WS3 - Current-Candidate PTY Packet
 
-Prepared a manual true PTY/JLine packet:
+Prepared a current-head manual true PTY/JLine packet:
 
 ```text
-local/manual-testing/t312-ws3-pty-manual-20260608-214542/artifacts
-local/manual-workspaces/t312-ws3-pty-manual-20260608-214542/workspace
+local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts
+local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace
 ```
 
-The packet is intentionally `MANUAL_REQUIRED`. Validation failed closed because
-`PTY-MANUAL-AUDIT-RESULT.json` is absent. This is the correct state until a
+The packet is intentionally `MANUAL_REQUIRED`. Validation failed closed on the
+current-head packet because `PTY-MANUAL-AUDIT-RESULT.json` is absent:
+
+```powershell
+.\gradlew.bat validateSynchronizedApprovalPtyManualAudit `
+  "-PptyManualArtifactsRoot=local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts" `
+  "-PptyManualWorkspace=local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace" --no-daemon
+```
+
+Result:
+
+```text
+Status: FAIL
+- PTY-MANUAL-AUDIT-RESULT.json is required; prepared packets are not completed PTY/JLine evidence.
+```
+
+The current-head packet and fixture workspace passed the artifact canary scan
+with the generated fixture allowlist. This is the correct state until a
 maintainer completes the runbook in a real interactive terminal.
 
 ### WS4 - T313 Fail-Closed Regression
@@ -220,6 +236,7 @@ Focused and full checks already run in this in-progress branch:
 .\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t312-ws1-live-workspace-ops-20260608-213656,local/manual-workspaces/t312-ws1-live-workspace-ops-20260608-213656" --no-daemon
 .\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t312-ws1-live-workspace-ops-post-schema-20260608-215206,local/manual-workspaces/t312-ws1-live-workspace-ops-post-schema-20260608-215206" --no-daemon
 .\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958,local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958-capability" --no-daemon
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts,local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace" "-PartifactScanAllowlist=C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\t312-ws3-pty-manual-current-head-20260608-230224\workspace\.env" --no-daemon
 git diff --check
 npm --prefix site test
 .\gradlew.bat test --tests "dev.talos.docs.ReadmePrivacyCopyTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
