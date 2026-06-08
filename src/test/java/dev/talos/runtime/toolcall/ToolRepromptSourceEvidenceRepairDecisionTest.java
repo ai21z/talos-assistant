@@ -105,6 +105,51 @@ class ToolRepromptSourceEvidenceRepairDecisionTest {
         assertFalse(prompt.contains("[Expected target progress]"), prompt);
     }
 
+    @Test
+    void sourceEvidenceAfterReadRepromptsForRemainingExpectedWrites() {
+        ChatMessage.NativeToolCall writeDijkstra = new ChatMessage.NativeToolCall(
+                "write-1",
+                "talos.write_file",
+                Map.of(
+                        "path", "dijkstra.py",
+                        "content", "def shortest_path(graph, start, goal):\n    return 5\n"));
+        ChatMessage.NativeToolCall writeTest = new ChatMessage.NativeToolCall(
+                "write-2",
+                "talos.write_file",
+                Map.of(
+                        "path", "test_dijkstra.py",
+                        "content", "from dijkstra import shortest_path\n\n"
+                                + "def test_sample_graph():\n    assert shortest_path({}, 'A', 'C') == 5\n"));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("", List.of(writeDijkstra, writeTest))),
+                16_384);
+        String request = "Create dijkstra.py and test_dijkstra.py according to problem.md, then run pytest if available.";
+        LoopState state = state(request, recorded.client());
+        state.toolOutcomes.add(failedSourceEvidenceReadBeforeWrite("dijkstra.py"));
+        state.toolOutcomes.add(failedSourceEvidenceReadBeforeWrite("test_dijkstra.py"));
+        state.toolOutcomes.add(readOutcome("problem.md"));
+        state.pathsReadThisTurn.add("problem.md");
+        state.successfulReadCallBodies.put(
+                "talos.read_file:path=problem.md;",
+                "1 | Implement Dijkstra shortest path for a small weighted directed graph.\n"
+                        + "2 | Sample graph A->B cost 2, B->C cost 3, A->C cost 10; expected A to C distance is 5.");
+
+        Optional<Boolean> decision = ToolRepromptSourceEvidenceRepairDecision.tryHandle(state, request);
+
+        assertEquals(Optional.of(true), decision);
+        assertTrue(state.hasPendingActionObligation(), "post-read repair must require the remaining mutation");
+        assertEquals(List.of(writeDijkstra, writeTest), state.currentNativeCalls);
+        assertEquals(1, recorded.requests().size());
+        String prompt = recorded.requests().getFirst().messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(prompt.contains("[SourceEvidencePostReadWriteRepair]"), prompt);
+        assertTrue(prompt.contains("Remaining expected target(s): dijkstra.py, test_dijkstra.py"), prompt);
+        assertTrue(prompt.contains("Implement Dijkstra shortest path"), prompt);
+        assertFalse(prompt.contains("Required exact source evidence phrases"), prompt);
+    }
+
     private LoopState state(String request, List<LlmClient.StreamResult> responses) {
         return state(request, ScriptedNativeLlmClient.recordingWithContextWindow(responses, 16_384).client());
     }

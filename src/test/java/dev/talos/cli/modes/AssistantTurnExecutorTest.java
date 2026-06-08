@@ -1349,6 +1349,71 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void sourceDerivedCreateWritesAfterRuntimeForcesSourceRead(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("problem.md"), """
+                    Implement Dijkstra shortest path for a small weighted directed graph.
+                    Provide a pytest test file for the sample graph A->B cost 2, B->C cost 3, A->C cost 10;
+                    expected A to C distance is 5.
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"dijkstra.py\","
+                                    + "\"content\":\"# placeholder before source read\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"test_dijkstra.py\","
+                                    + "\"content\":\"# placeholder before source read\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"problem.md\"}}",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"dijkstra.py\","
+                                    + "\"content\":\"import heapq\\n\\n"
+                                    + "def shortest_path(graph, start, goal):\\n"
+                                    + "    queue = [(0, start)]\\n"
+                                    + "    seen = set()\\n"
+                                    + "    while queue:\\n"
+                                    + "        dist, node = heapq.heappop(queue)\\n"
+                                    + "        if node == goal:\\n"
+                                    + "            return dist\\n"
+                                    + "        if node in seen:\\n"
+                                    + "            continue\\n"
+                                    + "        seen.add(node)\\n"
+                                    + "        for nxt, cost in graph.get(node, {}).items():\\n"
+                                    + "            heapq.heappush(queue, (dist + cost, nxt))\\n"
+                                    + "    return float('inf')\\n\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"test_dijkstra.py\","
+                                    + "\"content\":\"from dijkstra import shortest_path\\n\\n"
+                                    + "def test_sample_graph():\\n"
+                                    + "    graph = {'A': {'B': 2, 'C': 10}, 'B': {'C': 3}, 'C': {}}\\n"
+                                    + "    assert shortest_path(graph, 'A', 'C') == 5\\n\"}}")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create dijkstra.py and test_dijkstra.py according to problem.md, then run pytest if available. "
+                            + "If Python execution is unavailable, say explicitly that Python/pytest was not run."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("dijkstra.py")), out.text());
+            assertTrue(Files.exists(workspace.resolve("test_dijkstra.py")), out.text());
+            assertTrue(Files.readString(workspace.resolve("dijkstra.py")).contains("def shortest_path"));
+            assertTrue(Files.readString(workspace.resolve("test_dijkstra.py")).contains("expected")
+                            || Files.readString(workspace.resolve("test_dijkstra.py")).contains("== 5"),
+                    Files.readString(workspace.resolve("test_dijkstra.py")));
+            assertFalse(Files.readString(workspace.resolve("dijkstra.py")).contains("placeholder before source read"));
+            assertFalse(out.text().contains("Source-derived artifact write blocked before approval"), out.text());
+        }
+
+        @Test
         void summarizeSourceIntoFileInstructionEchoFailsVerification(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), """
                     - The band is called Neon Harbor.
