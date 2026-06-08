@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -102,6 +103,47 @@ class ToolLoopFinalAnswerFinalizerTest {
     }
 
     @Test
+    void contentWithheldFinalAnswerAddsRuntimePrivacyNoticeWhenModelParaphrases() {
+        String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                "No protected file content was shown.",
+                1,
+                true,
+                List.of("Private document content was read locally but withheld from model context by privacy policy."));
+
+        assertTrue(answer.contains(
+                "Private document content was read locally but withheld from model context by privacy policy."),
+                answer);
+        assertTrue(answer.contains("No protected file content was shown."), answer);
+    }
+
+    @Test
+    void contentWithheldFinalAnswerDoesNotDuplicateExistingRuntimePrivacyNotice() {
+        String notice = "Private document content was read locally but withheld from model context by privacy policy.";
+
+        String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                notice + "\n\nNo protected file content was shown.",
+                1,
+                true,
+                List.of(notice));
+
+        assertEquals(1, countOccurrences(answer, notice), answer);
+    }
+
+    @Test
+    void runtimePrivacyNoticeIsSanitizedBeforeRendering() {
+        String answer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
+                "No protected file content was shown.",
+                1,
+                true,
+                List.of("Private document content was read locally but withheld from model context by privacy policy. "
+                        + "Patient Name: Eleni Nikolaou"));
+
+        assertTrue(answer.contains("withheld from model context"), answer);
+        assertFalse(answer.contains("Eleni Nikolaou"), answer);
+        assertTrue(answer.contains("[redacted-private-document-canary]"), answer);
+    }
+
+    @Test
     void contentNotWithheldDoesNotApplyProtectedContentRedactionInFinalizer() {
         String raw = privateDocumentCanary();
 
@@ -134,5 +176,15 @@ class ToolLoopFinalAnswerFinalizerTest {
                 Tax ID: EL-TAX-483920
                 Invoice Total: 1837.42 EUR
                 """;
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = haystack.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 }

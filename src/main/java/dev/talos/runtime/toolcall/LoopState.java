@@ -65,6 +65,7 @@ public final class LoopState {
     public final Map<String, String> readFileBodiesThisTurn = new HashMap<>();
     public boolean mutationSinceStart;
     public boolean contentWithheldFromModelContext;
+    public final List<String> userVisiblePrivacyNotices = new ArrayList<>();
     public final List<String> pendingMutationSummaries = new ArrayList<>();
     private PendingActionObligation pendingActionObligation;
 
