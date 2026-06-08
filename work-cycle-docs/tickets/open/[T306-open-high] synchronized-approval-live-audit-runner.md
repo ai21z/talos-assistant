@@ -511,3 +511,33 @@ Canary scan: PASS over focused artifact and workspace roots
 
 This is focused synchronized live evidence, not a full prompt-bank closure and
 not true PTY/JLine evidence.
+
+## 2026-06-08 Post-T734 synchronized approval evidence
+
+The current candidate at commit `87f9fc1a019abbaba546e4264d111a0bb848a55b`
+(`talosVersion=0.10.0`) was rebuilt and the synchronized approval live lane was
+rerun for both standard models.
+
+Evidence root:
+`local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958`.
+
+Results:
+
+- Qwen summary:
+  `artifacts/qwen/sync-approval/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+- GPT-OSS summary:
+  `artifacts/gptoss/sync-approval/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+- Qwen: 25 scenarios, artifact scan PASS.
+- GPT-OSS: 25 scenarios, artifact scan PASS.
+- The T734 source-evidence continuation fix removed the earlier Qwen
+  `t325-python-command-boundary` missing-approval failure. The scenario now
+  creates the expected files and is scored
+  `PASS_WITH_READBACK_ONLY_LIMITATION`.
+- GPT-OSS partial traces in `mutation-append-line-verified` and
+  `static-web-selector-script-only-verified` are scored
+  `PASS_WITH_RUNTIME_REPAIR` because runtime repair occurred and final
+  verification passed.
+
+Keep T306 open. The synchronized runner is functioning and current-candidate
+evidence is strong, but this ticket still covers broader prompt-bank
+integration and true PTY/JLine provenance that this packet did not newly rerun.

@@ -150,4 +150,28 @@ decision. Current release/audit wording must therefore distinguish:
 T301 remains open to verify the release packet and live-audit reports do not
 drift from that scope.
 
+## 2026-06-08 Post-T734 release-claim evidence
+
+The current candidate evidence is aligned with the existing beta-scope wording:
+
+- PDF/DOCX/XLS/XLSX text extraction is included in the
+  `current-0.10.0-release-packet-post-t734-20260608-191958-capability`
+  audit.
+- Image/OCR and PowerPoint are explicitly excluded from that audit and remain
+  frozen out of beta claims.
+- Private-mode document extraction rows record `WITHHELD_PRIVATE_MODE` for the
+  named private PDF/DOCX/XLSX targets.
+- The capability report still says the pass is based on
+  process/tool-artifact heuristics and requires maintainer review for
+  prompt-debug/provider-body quality.
+- No evidence in this packet supports private-paperwork safety, visual image
+  understanding, PowerPoint extraction, or browser/render-proof claims.
+- Release-clean artifact scan passed over model-facing artifacts and redacted
+  snapshots.
+
+Keep T301 open. The latest packet supports the current narrow beta extraction
+wording, but the broader release-claim drift-prevention work remains open until
+the final beta decision packet reconciles README, reports, tickets, and any
+published capability matrix.
+
 

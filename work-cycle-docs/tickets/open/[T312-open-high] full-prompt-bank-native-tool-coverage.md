@@ -270,3 +270,39 @@ Evidence root:
 This does not close T312 because the current `0.10.0` full prompt-bank still
 needs lane-labeled Qwen/GPT-OSS coverage for every native tool and beta
 capability family, including PDF/DOCX/XLS/XLSX extraction.
+
+## 2026-06-08 Post-T734 lane-labeled coverage update
+
+Current candidate evidence now exists for commit
+`87f9fc1a019abbaba546e4264d111a0bb848a55b`, `talosVersion=0.10.0`.
+
+Evidence roots:
+
+- `local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958`
+- `local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958-capability`
+- Summary:
+  `work-cycle-docs/reports/current-0.10.0-release-packet-post-t734-results.md`
+
+Results:
+
+- TalosBench safe redirected lanes passed all non-approval cases for Qwen and
+  GPT-OSS, including the non-approval `talos.run_command` command-profile
+  boundary case.
+- TalosBench still marks approval-sensitive native workspace-operation probes
+  and true-PTY probes as `MANUAL_REQUIRED` in the redirected lane, which is the
+  correct fail-closed behavior and not release-grade synchronized evidence by
+  itself.
+- Synchronized approval live lanes passed 25 scenarios for Qwen and GPT-OSS,
+  covering protected reads, private-mode document handoff, mutation approval
+  denial/grant, exact edits, append/replacement verification, similar target
+  handling, static-web selector repair, forbidden sibling blocking, and the
+  Python command-boundary source-derived creation scenario.
+- Capability/private-mode bank covered PDF/DOCX/XLS/XLSX beta document
+  extraction and private-mode withholding for both models.
+- Release-clean artifact scan passed over model-facing artifacts and redacted
+  workspace snapshots.
+
+Keep T312 open. Native-tool documentation/coverage guards exist and the latest
+lane-labeled packet is strong, but every current native tool has not yet been
+proven in a current-commit synchronized/live prompt-bank lane, and true
+PTY/JLine coverage remains outside this packet.
