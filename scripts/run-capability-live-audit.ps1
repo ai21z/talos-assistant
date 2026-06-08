@@ -343,6 +343,7 @@ function Get-ExpectedDocumentTarget {
         "09-private-docx-private-mode" { return "private-report.docx" }
         "10-private-xlsx-private-mode" { return "private-workbook.xlsx" }
         "10-compare-xlsx-text" { return "workbook.xlsx" }
+        "19-private-retrieve-disabled" { return "private-report.pdf" }
         default { return "" }
     }
 }
@@ -472,6 +473,15 @@ Private document content was read locally but withheld from model context by pri
     $handoff = Get-ModelHandoffState "08-private-pdf-private-mode" $target $read $combined
     if ($handoff -ne "WITHHELD_PRIVATE_MODE") {
         throw "Self-test failed: expected WITHHELD_PRIVATE_MODE, got $handoff."
+    }
+
+    $retrieveDisabledTarget = Get-ExpectedDocumentTarget "19-private-retrieve-disabled"
+    if ($retrieveDisabledTarget -ne "private-report.pdf") {
+        throw "Self-test failed: private retrieve-disabled prompt did not map to private-report.pdf."
+    }
+    $retrieveDisabledUnexpected = @(Get-UnexpectedPrivateDocumentTargets @("private-report.pdf") $retrieveDisabledTarget)
+    if ($retrieveDisabledUnexpected.Count -ne 0) {
+        throw "Self-test failed: explicitly requested private retrieve-disabled document was reported as unexpected."
     }
 
     $overReadTargets = @(Get-PrivateDocumentTargetsFromExecutionText ($withheldOutput + "`n  |     target: private-report.docx"))
