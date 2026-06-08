@@ -488,3 +488,26 @@ model-facing artifacts and sanitized packet roots. This improves artifact
 hygiene for future synchronized/manual packets, but T306 remains open for the
 broader synchronized approval/live-audit runner coverage and release-grade
 prompt-bank execution.
+
+## 2026-06-08 T721/T722 focused synchronized live rerun
+
+The synchronized live harness was used to replay the two approval-sensitive
+candidate blockers after T721/T722:
+
+```text
+Audit root: local/manual-testing/t721-t722-focused-postfix-20260608-080618
+Workspace root: local/manual-workspaces/t721-t722-focused-postfix-20260608-080618
+Commit: 1abeb42c229ea9f5a0509b63eb627fd3baf28768
+Version: talosVersion=0.10.0
+Canary scan: PASS over focused artifact and workspace roots
+```
+
+- Qwen `t325-python-command-boundary` completed with one synchronized approval,
+  created `dijkstra.py` and `test_dijkstra.py`, and did not expose
+  `talos.apply_workspace_batch`.
+- GPT-OSS `static-web-selector-script-only-verified` blocked `script-fix.js`
+  before approval, repaired `script.js` through an approved exact edit, verified
+  static-web coherence as `PASSED`, and left `scripts.js` unchanged.
+
+This is focused synchronized live evidence, not a full prompt-bank closure and
+not true PTY/JLine evidence.
