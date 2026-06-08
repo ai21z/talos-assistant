@@ -1,9 +1,10 @@
 # T721 - Exact-Target Multifile Creation Tool Surface Batch Drift
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-08
 Source audit: `local/manual-testing/candidate-0.10.0-full-two-model-20260608-000026`
+Completed: 2026-06-08
 
 ## Problem
 
@@ -66,4 +67,16 @@ approval harness:
 - If a backend emits `apply_workspace_batch` with unsupported `write_file`
   operations, runtime should produce a target-specific retry/failure that does
   not masquerade as an approval failure.
+
+## Implementation Evidence
+
+- `ToolSurfacePlanner` now selects a `source-derived file creation apply surface`
+  for `FILE_CREATE` contracts with concrete expected file targets and source
+  evidence targets. The visible surface is read/search plus `talos.write_file`;
+  workspace batch/organization tools are not exposed for this shape.
+- Regression: `ToolSurfacePlannerTest.sourceDerivedExactFileCreationUsesFileWriteSurface`.
+- Verification:
+  - `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.runtime.toolcall.StaticWebRepairPathGuardTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.*" --no-daemon`
+  - `.\gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon`
 

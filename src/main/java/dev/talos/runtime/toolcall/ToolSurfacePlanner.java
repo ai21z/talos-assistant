@@ -88,6 +88,12 @@ public final class ToolSurfacePlanner {
                         descriptor -> intent.toolNames().contains(descriptor.name()),
                         intent.surfaceReason());
             }
+            if (sourceDerivedFileCreateTargets(contract)) {
+                return select(
+                        registry,
+                        ToolSurfacePlanner::isFileTargetFullWriteApplyOperation,
+                        "source-derived file creation apply surface");
+            }
             if (staticWebFullFileApplyTargets(contract)) {
                 return select(
                         registry,
@@ -135,6 +141,10 @@ public final class ToolSurfacePlanner {
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
             if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 return workspaceOperation.get().toolNames();
+            }
+            if (sourceDerivedFileCreateTargets(contract)) {
+                return List.of("talos.grep", "talos.list_dir",
+                        "talos.read_file", "talos.retrieve", "talos.write_file");
             }
             if (staticWebFullFileApplyTargets(contract)) {
                 return List.of("talos.grep", "talos.list_dir",
@@ -184,6 +194,21 @@ public final class ToolSurfacePlanner {
 
     private static boolean fileEditTargets(TaskContract contract) {
         if (contract == null || contract.type() != TaskType.FILE_EDIT || contract.expectedTargets().isEmpty()) {
+            return false;
+        }
+        for (String target : contract.expectedTargets()) {
+            if (target == null || !FILE_EXTENSION.matcher(target).matches()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sourceDerivedFileCreateTargets(TaskContract contract) {
+        if (contract == null
+                || contract.type() != TaskType.FILE_CREATE
+                || contract.expectedTargets().isEmpty()
+                || contract.sourceEvidenceTargets().isEmpty()) {
             return false;
         }
         for (String target : contract.expectedTargets()) {

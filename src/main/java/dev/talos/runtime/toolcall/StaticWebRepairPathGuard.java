@@ -24,7 +24,7 @@ final class StaticWebRepairPathGuard {
                 .sorted(Comparator.naturalOrder())
                 .toList();
         if (expected.isEmpty()) return null;
-        if (!isRootOrDirectoryPath(pathHint)) {
+        if (!isRootDirectoryOrPlaceholderPath(pathHint)) {
             return null;
         }
         String display = pathHint == null || pathHint.isBlank() ? "(empty path)" : pathHint.strip();
@@ -35,10 +35,11 @@ final class StaticWebRepairPathGuard {
                 + "No approval was requested and no file was changed.";
     }
 
-    private static boolean isRootOrDirectoryPath(String pathHint) {
+    private static boolean isRootDirectoryOrPlaceholderPath(String pathHint) {
         if (pathHint == null || pathHint.isBlank()) return true;
         String raw = pathHint.strip();
         String normalized = ToolCallSupport.normalizePath(raw);
+        if (isPlaceholderPath(raw, normalized)) return true;
         return raw.equals(".")
                 || raw.equals("./")
                 || raw.equals(".\\")
@@ -46,5 +47,15 @@ final class StaticWebRepairPathGuard {
                 || raw.equals("\\")
                 || normalized.isBlank()
                 || normalized.equals(".");
+    }
+
+    private static boolean isPlaceholderPath(String raw, String normalized) {
+        String candidate = normalized == null || normalized.isBlank() ? raw : normalized;
+        if (candidate == null) return false;
+        return switch (candidate.strip().toLowerCase(java.util.Locale.ROOT)) {
+            case "?", "??", "path", "file", "filename", "todo",
+                 "<path>", "<file>", "<filename>", "[path]", "[file]", "[filename]" -> true;
+            default -> false;
+        };
     }
 }

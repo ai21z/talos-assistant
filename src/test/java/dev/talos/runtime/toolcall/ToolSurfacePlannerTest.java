@@ -104,6 +104,26 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void sourceDerivedExactFileCreationUsesFileWriteSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Create dijkstra.py and test_dijkstra.py according to problem.md, "
+                                + "then run pytest if available."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("source-derived file creation apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+    }
+
+    @Test
     void explicitWorkspaceOperationRequestsExposeOnlyMatchingOperationTool() {
         assertWorkspaceOperationSurface(
                 "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.",
@@ -636,9 +656,7 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.APPLY));
 
         assertEquals(
-                List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path", "talos.retrieve",
-                        "talos.write_file"),
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("Summarize long-notes.txt into docs/summary.md."),
                         ExecutionPhase.APPLY));

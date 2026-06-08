@@ -39,6 +39,31 @@ class StaticWebRepairPathGuardTest {
     }
 
     @Test
+    void rejectsPlaceholderWritePathBeforeApprovalForStaticWebTargetSet() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("script.js"),
+                Set.of(),
+                Set.of("scripts.js"),
+                "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. "
+                        + "Do not edit scripts.js.",
+                "explicit-read-then-mutation-request");
+        ToolCall call = new ToolCall(
+                "talos.write_file",
+                Map.of("path", "?", "content", "?"));
+
+        String diagnostic = StaticWebRepairPathGuard.diagnostic(call, contract, "?");
+
+        assertNotNull(diagnostic);
+        assertTrue(diagnostic.contains("Target outside expected targets before approval"), diagnostic);
+        assertTrue(diagnostic.contains("script.js"), diagnostic);
+        assertTrue(diagnostic.contains("Similar filenames are not substitutes"), diagnostic);
+    }
+
+    @Test
     void leavesOrdinaryOffTargetFilesToExpectedTargetPolicy() {
         TaskContract contract = new TaskContract(
                 TaskType.FILE_EDIT,
