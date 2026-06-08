@@ -16,6 +16,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -27,9 +28,11 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -167,6 +170,19 @@ final class MissingMutationRetry {
                             retryLoop,
                             true);
                 } else if (retryLoop.mutatingToolSuccesses() > 0) {
+                    ToolCallLoop.LoopResult continued =
+                            continueRemainingExpectedTargetsAfterPartialRetry(
+                                    safePlan,
+                                    retryLoop,
+                                    workspace,
+                                    ctx,
+                                    chat,
+                                    retryToolNames);
+                    if (continued != retryLoop) {
+                        retryLoop = continued;
+                        mergedAnswer = retryLoop.finalAnswer();
+                        summary = retryLoop.summary();
+                    }
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
                     LocalTurnTraceCapture.recordActionObligation(
@@ -404,6 +420,9 @@ final class MissingMutationRetry {
         List<ChatMessage> mergedMessages = new ArrayList<>();
         if (original.messages() != null) mergedMessages.addAll(original.messages());
         if (retry.messages() != null) mergedMessages.addAll(retry.messages());
+        Map<String, String> mergedReadFileBodies = new LinkedHashMap<>();
+        if (original.readFileBodies() != null) mergedReadFileBodies.putAll(original.readFileBodies());
+        if (retry.readFileBodies() != null) mergedReadFileBodies.putAll(retry.readFileBodies());
         return new ToolCallLoop.LoopResult(
                 retry.finalAnswer(),
                 original.iterations() + retry.iterations(),
@@ -420,7 +439,113 @@ final class MissingMutationRetry {
                 original.cushionFiresB3EditShortCircuit() + retry.cushionFiresB3EditShortCircuit(),
                 original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
                 retry.failureDecision(),
-                mergedOutcomes);
+                mergedOutcomes,
+                mergedReadFileBodies);
+    }
+
+    private static ToolCallLoop.LoopResult continueRemainingExpectedTargetsAfterPartialRetry(
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult retryLoop,
+            Path workspace,
+            Context ctx,
+            ChatFunction chat,
+            List<String> retryToolNames
+    ) {
+        List<String> remainingTargets = remainingExpectedTargetsAfterRetry(plan, retryLoop);
+        if (remainingTargets.isEmpty()) return retryLoop;
+        if (ctx == null || ctx.toolCallLoop() == null || chat == null) return retryLoop;
+
+        List<ToolSpec> continuationToolSpecs = toolSpecs(ctx, retryToolNames);
+        if (continuationToolSpecs.isEmpty()) return retryLoop;
+        List<ChatMessage> continuationMessages = remainingExpectedTargetContinuationMessages(
+                plan,
+                remainingTargets);
+        try {
+            LlmClient.StreamResult continuation =
+                    chat.chat(continuationMessages, plan, continuationToolSpecs);
+            String continuationText = continuation.text() == null ? "" : continuation.text();
+            if (!continuation.hasToolCalls() && !ToolCallParser.containsToolCalls(continuationText)) {
+                return retryLoop;
+            }
+            ToolCallLoop.LoopResult continuationLoop = ctx.toolCallLoop().run(
+                    continuationText,
+                    continuation.toolCalls(),
+                    new ArrayList<>(continuationMessages),
+                    workspace,
+                    ctx);
+            return mergeEvidence(retryLoop, continuationLoop);
+        } catch (Exception e) {
+            LOG.warn("Remaining expected-target continuation after missing-mutation retry failed: {}",
+                    SafeLogFormatter.throwableMessage(e));
+            return retryLoop;
+        }
+    }
+
+    private static List<ChatMessage> remainingExpectedTargetContinuationMessages(
+            CurrentTurnPlan plan,
+            List<String> remainingTargets
+    ) {
+        String request = plan == null || plan.originalUserRequest() == null
+                ? ""
+                : plan.originalUserRequest().strip();
+        String targets = String.join(", ", remainingTargets);
+        StringBuilder frame = new StringBuilder();
+        frame.append("[RemainingExpectedTargetsAfterMutationRetry]\n")
+                .append("A bounded mutation retry changed some files, but required expected target progress ")
+                .append("is still incomplete.\n")
+                .append("Remaining expected target(s): ").append(targets).append('\n')
+                .append("Write or edit only these remaining exact target path(s). ")
+                .append("Similar filenames are not substitutes.\n");
+        if (!request.isBlank()) {
+            frame.append("[CurrentRequest]\n")
+                    .append(request)
+                    .append('\n');
+        }
+        return List.of(
+                ChatMessage.system(COMPACT_MUTATION_RETRY_SYSTEM_PROMPT),
+                ChatMessage.system(frame.toString()),
+                ChatMessage.user("Continue the same mutation task. Remaining expected target(s): "
+                        + targets
+                        + ". Call write_file/edit_file for these remaining exact path(s) only."));
+    }
+
+    private static List<String> remainingExpectedTargetsAfterRetry(
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult retryLoop
+    ) {
+        TaskContract contract = plan == null ? null : plan.taskContract();
+        if (contract == null || contract.expectedTargets().isEmpty()) return List.of();
+        if (retryLoop == null || retryLoop.mutatingToolSuccesses() <= 0) return List.of();
+
+        Set<String> satisfied = new LinkedHashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : retryLoop.toolOutcomes()) {
+            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
+            WorkspaceOperationPlan operationPlan = outcome.workspaceOperationPlan();
+            if (operationPlan != null && !operationPlan.pathEffects().isEmpty()) {
+                for (WorkspaceOperationPlan.PathEffect effect : operationPlan.pathEffects()) {
+                    addSatisfiedExpectedTarget(satisfied, effect.path());
+                }
+            } else {
+                addSatisfiedExpectedTarget(satisfied, outcome.pathHint());
+            }
+        }
+        return orderedExpectedTargets(contract).stream()
+                .filter(target -> !satisfied.contains(expectedTargetKey(target)))
+                .toList();
+    }
+
+    private static void addSatisfiedExpectedTarget(Set<String> satisfied, String path) {
+        String key = expectedTargetKey(path);
+        if (key.isBlank()) return;
+        satisfied.add(key);
+        int slash = key.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < key.length()) {
+            satisfied.add(key.substring(slash + 1));
+        }
+    }
+
+    private static String expectedTargetKey(String path) {
+        return ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
     }
 
     private static List<String> failedMutatingToolTargets(ToolCallLoop.LoopResult retryLoop) {

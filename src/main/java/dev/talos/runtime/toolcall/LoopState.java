@@ -51,6 +51,7 @@ public final class LoopState {
     public final Set<String> oldStringMissRepairPromptedPaths = new HashSet<>();
     public final Set<String> appendLineRepairPromptedPaths = new HashSet<>();
     public final Set<String> expectedTargetScopeRepairPromptedKeys = new HashSet<>();
+    public final Set<String> sourceEvidenceReadRepairPromptedKeys = new HashSet<>();
     public final Set<String> sourceEvidenceExactRepairPromptedKeys = new HashSet<>();
     public final Set<String> pathsMutatedSinceRead = new HashSet<>();
     public final Map<String, Integer> staleEditFailuresByPath = new HashMap<>();
