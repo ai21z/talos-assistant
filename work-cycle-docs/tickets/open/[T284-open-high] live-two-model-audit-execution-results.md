@@ -190,3 +190,43 @@ Result: valid evidence, not a product pass.
     due placeholder `write_file(path="?")`. Tracked as T722.
 
 Keep this ticket open. The current evidence blocks an open-beta release claim.
+
+## 2026-06-08 T721/T722 Focused Rerun Evidence
+
+After T721/T722 were implemented and committed at
+`1abeb42c229ea9f5a0509b63eb627fd3baf28768`, the focused blockers from the
+candidate audit were replayed through the synchronized live harness:
+
+```text
+Audit root: local/manual-testing/t721-t722-focused-postfix-20260608-080618
+Workspace root: local/manual-workspaces/t721-t722-focused-postfix-20260608-080618
+Version: talosVersion=0.10.0
+Built launcher check: build/install/talos/bin/talos.bat --version reported Talos 0.10.0
+Canary scan: PASS over the focused testing and workspace roots
+```
+
+Qwen `t325-python-command-boundary` result:
+
+- Summary: `local/manual-testing/t721-t722-focused-postfix-20260608-080618/qwen-t325/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+- Trace status: `COMPLETE`.
+- Contract: `FILE_CREATE`.
+- Final workspace contains both `dijkstra.py` and `test_dijkstra.py`.
+- Trace used `talos.read_file` and two `talos.write_file` calls.
+- The previous `talos.apply_workspace_batch` blocker did not recur.
+- Verification remained `READBACK_ONLY`, which is expected for this source-derived
+  Python file creation lane; Python/pytest was not run and the final answer says
+  so.
+
+GPT-OSS `static-web-selector-script-only-verified` result:
+
+- Summary: `local/manual-testing/t721-t722-focused-postfix-20260608-080618/gptoss-static-web/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+- Trace status: `PARTIAL`.
+- Verification: `PASSED`.
+- Runtime blocked wrong target `script-fix.js` before approval, then performed an
+  approved exact `talos.edit_file` repair on `script.js`.
+- Final diff changes `.missing-button` to `.cta-button` in `script.js`.
+- `scripts.js` remained unchanged.
+
+This focused rerun reduces the specific T721/T722 blockers, but it does not
+close T284. The full current-candidate Qwen/GPT-OSS prompt-bank result packet is
+still required.

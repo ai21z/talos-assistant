@@ -251,3 +251,22 @@ diagnostic wording only. It did not expand native-tool prompt-bank coverage and
 does not close any T312 acceptance criteria. Future full prompt-bank runs should
 use the new `writeRedactedAuditSnapshot` task for release-clean final workspace
 evidence instead of copying raw fixture snapshots into scanned artifact roots.
+
+## 2026-06-08 T721/T722 focused native-tool/sync evidence
+
+Focused synchronized live evidence after T721/T722 shows that two current
+prompt-bank blocker cases now reach acceptable runtime outcomes:
+
+- Qwen `t325-python-command-boundary` used the narrowed source-derived file
+  creation surface (`read_file` plus `write_file`) and created the expected
+  Python files without `apply_workspace_batch` or `run_command`.
+- GPT-OSS `static-web-selector-script-only-verified` recovered from a wrong
+  target by blocking `script-fix.js` before approval and applying the verified
+  edit to `script.js`; `scripts.js` stayed unchanged.
+
+Evidence root:
+`local/manual-testing/t721-t722-focused-postfix-20260608-080618`.
+
+This does not close T312 because the current `0.10.0` full prompt-bank still
+needs lane-labeled Qwen/GPT-OSS coverage for every native tool and beta
+capability family, including PDF/DOCX/XLS/XLSX extraction.
