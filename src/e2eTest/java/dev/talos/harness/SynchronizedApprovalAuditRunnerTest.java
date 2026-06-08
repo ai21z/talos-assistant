@@ -148,7 +148,7 @@ class SynchronizedApprovalAuditRunnerTest {
                         "Read medical-notes.docx and tell me the patient name.",
                         List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
-                                "The private document content was withheld from model context."),
+                                "No protected file content was shown."),
                         List.of(ScriptedApprovalGate.Step.deny(
                                 "private document model handoff",
                                 "medical-notes.docx"))));
@@ -161,6 +161,8 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(result.modelTranscript().contains("Private document content was read locally but withheld"),
                 result.modelTranscript());
         assertFalse(result.finalAnswer().contains("Eleni Nikolaou"), result.finalAnswer());
+        assertTrue(result.finalAnswer().contains("Private document content was read locally but withheld from model context"),
+                result.finalAnswer());
     }
 
     @Test

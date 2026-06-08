@@ -441,6 +441,9 @@ public final class ToolCallExecutionStage {
                             turnProcessor.approvalGate());
             if (handoffDecision.contentWithheldFromModelContext()) {
                 state.contentWithheldFromModelContext = true;
+                if (!handoffDecision.userVisiblePrivacyNotice().isBlank()) {
+                    state.userVisiblePrivacyNotices.add(handoffDecision.userVisiblePrivacyNotice());
+                }
             }
             ToolResult result = handoffDecision.modelResult();
             recordContextLedgerDecision(

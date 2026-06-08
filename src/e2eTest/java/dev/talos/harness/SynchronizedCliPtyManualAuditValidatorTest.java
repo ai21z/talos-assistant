@@ -115,6 +115,33 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                 result.findings().toString());
     }
 
+    @Test
+    void rejects_privateDocumentDenialTranscriptThatOnlyUsesProtectedReadParaphrase(@TempDir Path tempDir)
+            throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                Path.of("C:/talos/bin/talos.bat"),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript().replace(
+                "The private document content was withheld from model context.",
+                "No protected file content was shown."));
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertFalse(result.passed());
+        assertTrue(result.findings().stream()
+                        .anyMatch(f -> f.contains("completed transcript must show private-document denial")),
+                result.findings().toString());
+    }
+
     private static String completedTranscript() {
         return """
                 # Synchronized CLI PTY/JLine Manual Transcript

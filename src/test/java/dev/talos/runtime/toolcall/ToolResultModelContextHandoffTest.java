@@ -57,6 +57,9 @@ class ToolResultModelContextHandoffTest {
         assertFalse(decision.privateDocumentPerTurnHandoffApproved());
         assertFalse(decision.preservePrivateDocumentModelHandoff());
         assertTrue(decision.contentWithheldFromModelContext());
+        assertTrue(decision.userVisiblePrivacyNotice().contains(
+                        "Protected file content was read after approval but withheld from model context"),
+                decision.userVisiblePrivacyNotice());
         assertFalse(decision.preserveModelResultForToolFormatting());
         assertEquals(ContextDecision.withheldFromModel("APPROVED_PROTECTED_READ_LOCAL_DISPLAY_ONLY"),
                 decision.contextDecision());
@@ -114,6 +117,11 @@ class ToolResultModelContextHandoffTest {
         assertFalse(decision.privateDocumentPerTurnHandoffApproved());
         assertFalse(decision.preservePrivateDocumentModelHandoff());
         assertTrue(decision.contentWithheldFromModelContext());
+        assertTrue(decision.userVisiblePrivacyNotice().contains(
+                        "Private document content was read locally but withheld from model context by privacy policy."),
+                decision.userVisiblePrivacyNotice());
+        assertFalse(decision.userVisiblePrivacyNotice().contains("Alpha Denied"),
+                decision.userVisiblePrivacyNotice());
         assertFalse(decision.preserveModelResultForToolFormatting());
         assertEquals(ContextDecision.withheldFromModel("private mode document extraction local display only"),
                 decision.contextDecision());
@@ -149,6 +157,7 @@ class ToolResultModelContextHandoffTest {
         assertTrue(decision.privateDocumentPerTurnHandoffApproved());
         assertTrue(decision.preservePrivateDocumentModelHandoff());
         assertFalse(decision.contentWithheldFromModelContext());
+        assertTrue(decision.userVisiblePrivacyNotice().isBlank(), decision.userVisiblePrivacyNotice());
         assertTrue(decision.preserveModelResultForToolFormatting());
         assertEquals(ContextDecision.includedInModel("PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED"),
                 decision.contextDecision());

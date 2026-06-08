@@ -365,7 +365,8 @@ public final class ToolCallLoop {
         String finalAnswer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
                 state.currentText,
                 state.totalToolsInvoked,
-                state.contentWithheldFromModelContext);
+                state.contentWithheldFromModelContext,
+                state.userVisiblePrivacyNotices);
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
                 state.iterations, state.totalToolsInvoked, state.failedCalls);

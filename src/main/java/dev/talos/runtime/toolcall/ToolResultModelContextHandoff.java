@@ -27,9 +27,12 @@ public final class ToolResultModelContextHandoff {
             boolean privateDocumentPerTurnHandoffApproved,
             boolean preservePrivateDocumentModelHandoff,
             boolean contentWithheldFromModelContext,
+            String userVisiblePrivacyNotice,
             ContextDecision contextDecision,
             boolean preserveModelResultForToolFormatting) {
         public Decision {
+            userVisiblePrivacyNotice = ProtectedContentPolicy.sanitizeText(
+                    userVisiblePrivacyNotice == null ? "" : userVisiblePrivacyNotice).strip();
             contextDecision = contextDecision == null
                     ? ContextDecision.excludedByPrivacyOrTrustPolicy("TOOL_RESULT_NOT_INCLUDED")
                     : contextDecision;
@@ -92,6 +95,9 @@ public final class ToolResultModelContextHandoff {
                 privateDocumentPerTurnHandoffApproved,
                 preservePrivateDocumentModelHandoff,
                 contentWithheldFromModelContext,
+                contentWithheldFromModelContext && modelResult != null && modelResult.success()
+                        ? modelResult.output()
+                        : "",
                 contextDecision,
                 preserveApprovedProtectedReadResult || preservePrivateDocumentModelHandoff);
     }
