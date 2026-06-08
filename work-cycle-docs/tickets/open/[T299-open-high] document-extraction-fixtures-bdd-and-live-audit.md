@@ -185,4 +185,35 @@ Remaining blockers:
 - Approval grant/deny transcript capture.
 - Per-turn extracted-document send-to-model approval UX/tracing.
 
+## 2026-06-08 Post-T734 beta-core document evidence
+
+The current candidate at commit `87f9fc1a019abbaba546e4264d111a0bb848a55b`
+(`talosVersion=0.10.0`) ran the beta-core capability/private-mode bank:
+
+```text
+local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958-capability
+```
+
+Results:
+
+- 44 prompt turns across GPT-OSS and Qwen passed by process/tool-artifact
+  heuristics.
+- Public PDF/DOCX/XLSX prompts targeted `report.pdf`, `report.docx`, and
+  `workbook.xlsx`, and recorded `SENT_TO_MODEL`.
+- Private-mode PDF/DOCX/XLSX prompts targeted `private-report.pdf`,
+  `private-report.docx`, and `private-workbook.xlsx`, and recorded
+  `WITHHELD_PRIVATE_MODE`.
+- XLS/text comparison used `workbook.xlsx` as the expected document target.
+- The summary CSV recorded no unexpected private document targets, no raw
+  secret leaks, no raw canary leaks, and no unsupported-overclaim flags.
+- Targeted canary scan over the capability artifact and raw fixture roots
+  passed with the script-generated fixture allowlist.
+- Release-clean scan over model-facing artifacts and redacted capability
+  snapshots passed without an allowlist.
+
+Keep T299 open. This is valid small-fixture beta-core evidence for
+PDF/DOCX/XLS/XLSX extraction, but the ticket still requires a larger maintained
+fixture corpus, adversarial/private variants, and broader BDD-style document
+quality evidence beyond generated small fixtures.
+
 

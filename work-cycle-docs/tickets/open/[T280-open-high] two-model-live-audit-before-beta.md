@@ -149,3 +149,42 @@ Next audit must:
 - use synchronized/manual approval handling for approval-sensitive prompts;
 - include PDF/DOCX/XLSX beta-core extraction probes and truthfulness review;
 - use redacted final-workspace snapshots for release-clean artifact scans.
+
+## 2026-06-08 Post-T734 current-candidate evidence update
+
+New current-candidate evidence exists at commit
+`87f9fc1a019abbaba546e4264d111a0bb848a55b`, `talosVersion=0.10.0`, after
+T734 fixed the source-evidence post-read continuation blocker found in the
+first synchronized run.
+
+Evidence roots:
+
+- Main packet:
+  `local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958`.
+- Capability/private-document packet:
+  `local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958-capability`.
+- Summary report:
+  `work-cycle-docs/reports/current-0.10.0-release-packet-post-t734-results.md`.
+
+Results:
+
+- Installed `build/install/talos/bin/talos.bat --version` reported Talos
+  `0.10.0`.
+- Safe redirected TalosBench lanes passed all non-approval cases for Qwen and
+  GPT-OSS; approval-sensitive and true-PTY cases remained lane-labeled
+  `MANUAL_REQUIRED`.
+- Synchronized approval live lanes passed 25 scenarios for Qwen and GPT-OSS,
+  with artifact scan PASS in each summary.
+- Capability/private-mode bank ran 44 turns across both models, including
+  PDF/DOCX/XLS/XLSX beta-core extraction. The summary CSV recorded zero raw
+  secret leaks, zero raw canary leaks, zero unsupported-overclaim flags, zero
+  unexpected private document targets, and zero missing required prompt-debug
+  evidence.
+- Redacted snapshots were generated for sync and capability workspaces.
+- Release-clean model-facing artifact scan passed without an allowlist over
+  the two `local/manual-testing/...` packet roots.
+
+Keep T280 open. This is strong candidate evidence, but the current packet still
+does not provide current-commit true PTY/JLine evidence, and the redirected
+TalosBench lane still labels approval-sensitive/native-operation cases as
+manual-required rather than fully covered.
