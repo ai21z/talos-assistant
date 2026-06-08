@@ -20,6 +20,19 @@ final class ToolRepromptSourceEvidenceRepairDecision {
                     "source-evidence read-before-write repair"));
         }
 
+        Optional<SourceEvidencePostReadWriteRepairPlanner.Plan> postReadWriteRepair =
+                SourceEvidencePostReadWriteRepairPlanner.nextPlan(
+                        state,
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
+                        userTask);
+        if (postReadWriteRepair.isPresent()) {
+            SourceEvidencePostReadWriteRepairPlanner.Plan repair = postReadWriteRepair.get();
+            state.setPendingActionObligation(PendingActionObligation.expectedTargets(repair.remainingTargets()));
+            state.sourceEvidencePostReadWriteRepairPromptedKeys.add(repair.key());
+            return Optional.of(ToolRepromptChatExecutor.execute(state, repair.messages(), repair.tools(), repair.controls(),
+                    "source-evidence post-read write repair"));
+        }
+
         Optional<SourceEvidenceExactRepairPlanner.Plan> sourceEvidenceRepair =
                 SourceEvidenceExactRepairPlanner.nextPlan(
                         state,
