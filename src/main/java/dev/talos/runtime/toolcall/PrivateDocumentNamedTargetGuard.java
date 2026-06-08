@@ -11,9 +11,10 @@ import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 
-/** Blocks private-mode document over-reads outside the current named target set. */
+/** Blocks private/sensitive document over-reads outside the current named target set. */
 final class PrivateDocumentNamedTargetGuard {
     private PrivateDocumentNamedTargetGuard() {}
 
@@ -26,7 +27,6 @@ final class PrivateDocumentNamedTargetGuard {
     ) {
         if (call == null || ctx == null || contract == null || workspace == null) return null;
         if (!"read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) return null;
-        if (!PrivacyConfigFacts.privateMode(ctx.cfg())) return null;
         if (pathHint == null || pathHint.isBlank()) return null;
         if (contract.expectedTargets().isEmpty()) return null;
 
@@ -39,6 +39,10 @@ final class PrivateDocumentNamedTargetGuard {
         if (allowedTargets.isEmpty()) return null;
         String requested = normalizeRequested(workspace, requestedPath, pathHint);
         if (allowedTargets.contains(requested)) return null;
+        if (!PrivacyConfigFacts.privateMode(ctx.cfg())
+                && !looksPrivateOrSensitiveDocumentPath(workspace, requestedPath, requested)) {
+            return null;
+        }
 
         return ProtectedContentPolicy.sanitizeText(
                 "Blocked private document read for `" + requested
@@ -88,6 +92,26 @@ final class PrivateDocumentNamedTargetGuard {
             // Fall through to raw path normalization.
         }
         return normalizeTarget(rawPath);
+    }
+
+    private static boolean looksPrivateOrSensitiveDocumentPath(Path workspace, Path requestedPath, String requested) {
+        if (ProtectedContentPolicy.isProtectedPath(workspace, requestedPath)) return true;
+        if (ProtectedContentPolicy.looksProtectedPathString(requested)) return true;
+        String lower = normalizeTarget(requested).toLowerCase(Locale.ROOT);
+        String filename = lower;
+        int slash = filename.lastIndexOf('/');
+        if (slash >= 0) {
+            filename = filename.substring(slash + 1);
+        }
+        return filename.contains("private")
+                || filename.contains("patient")
+                || filename.contains("medical")
+                || filename.contains("clinic")
+                || filename.contains("health")
+                || filename.contains("personal")
+                || filename.contains("family")
+                || filename.contains("tax")
+                || filename.contains("legal");
     }
 
     private static String normalizeTarget(String path) {

@@ -466,6 +466,54 @@ class ProtectedReadScopeIntegrationTest {
     }
 
     @Test
+    void developer_mode_named_public_workbook_blocks_private_looking_sibling_before_extraction() throws Exception {
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            workbook.createSheet("Budget").createRow(0).createCell(0).setCellValue("Public workbook fact");
+            try (OutputStream out = Files.newOutputStream(workspace.resolve("workbook.xlsx"))) {
+                workbook.write(out);
+            }
+        }
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            workbook.createSheet("Private").createRow(0).createCell(0).setCellValue("Patient Name: Eleni Nikolaou");
+            try (OutputStream out = Files.newOutputStream(workspace.resolve("private-workbook.xlsx"))) {
+                workbook.write(out);
+            }
+        }
+
+        Config cfg = new Config(null);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I did not inspect the private workbook.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        TurnTaskContractCapture.set(readOnlyContract(
+                "Summarize workbook.xlsx.",
+                Set.of("workbook.xlsx"),
+                Set.of()));
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize workbook.xlsx."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"private-workbook.xlsx\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertTrue(transcript.contains("outside the current requested private document target set"), transcript);
+        assertFalse(transcript.contains("Patient Name"), transcript);
+        assertEquals(0, result.readPaths().size(), result.readPaths().toString());
+    }
+
+    @Test
     void private_mode_withheld_document_final_answer_redacts_model_fabricated_private_fact() throws Exception {
         Path docx = workspace.resolve("medical-notes.docx");
         try (XWPFDocument doc = new XWPFDocument()) {
