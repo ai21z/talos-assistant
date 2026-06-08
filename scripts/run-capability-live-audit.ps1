@@ -315,11 +315,13 @@ function Write-AuditWorkspace {
     if ($RealOcrImage) {
         Write-OcrTextPng (Join-Path $Workspace "image.png")
     } else {
-        [System.Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lYQZ0QAAAABJRU5ErkJggg==") |
-            Set-Content -LiteralPath (Join-Path $Workspace "image.png") -Encoding Byte
+        [System.IO.File]::WriteAllBytes(
+            (Join-Path $Workspace "image.png"),
+            [System.Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lYQZ0QAAAABJRU5ErkJggg==")
+        )
     }
     Set-Content -LiteralPath (Join-Path $Workspace "archive.zip") -Encoding UTF8 -Value "fake zip placeholder"
-    Set-Content -LiteralPath (Join-Path $Workspace "binary.bin") -Encoding Byte -Value ([byte[]](0, 1, 2, 3, 4))
+    [System.IO.File]::WriteAllBytes((Join-Path $Workspace "binary.bin"), [byte[]](0, 1, 2, 3, 4))
     Set-Content -LiteralPath (Join-Path $Workspace "index.html") -Encoding UTF8 -Value '<button id="submit">Submit</button><script src="script.js"></script>'
     Set-Content -LiteralPath (Join-Path $Workspace "script.js") -Encoding UTF8 -Value 'document.querySelector(".missing-button").addEventListener("click", () => console.log("clicked"));'
     Set-Content -LiteralPath (Join-Path $Workspace "scripts.js") -Encoding UTF8 -Value 'console.log("similar filename should not be edited");'
@@ -513,6 +515,29 @@ Private document content was read locally but withheld from model context by pri
     $missingPromptDebug.PromptDebugSaved = $false
     if (Test-CapabilityAuditRowPass $missingPromptDebug $true) {
         throw "Self-test failed: missing prompt-debug evidence should remain blocking."
+    }
+
+    $fixtureWorkspace = Join-Path ([System.IO.Path]::GetTempPath()) ("talos-capability-audit-selftest-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        Write-AuditWorkspace $fixtureWorkspace
+        $imagePath = Join-Path $fixtureWorkspace "image.png"
+        $binaryPath = Join-Path $fixtureWorkspace "binary.bin"
+        if (-not (Test-Path -LiteralPath $imagePath)) {
+            throw "Self-test failed: fixture image.png was not created."
+        }
+        if (-not (Test-Path -LiteralPath $binaryPath)) {
+            throw "Self-test failed: fixture binary.bin was not created."
+        }
+        if ((Get-Item -LiteralPath $imagePath).Length -le 0) {
+            throw "Self-test failed: fixture image.png was empty."
+        }
+        if ((Get-Item -LiteralPath $binaryPath).Length -ne 5) {
+            throw "Self-test failed: fixture binary.bin length was not 5 bytes."
+        }
+    } finally {
+        if (Test-Path -LiteralPath $fixtureWorkspace) {
+            Remove-Item -LiteralPath $fixtureWorkspace -Recurse -Force
+        }
     }
 
     Write-Output "Capability audit self-test passed."
