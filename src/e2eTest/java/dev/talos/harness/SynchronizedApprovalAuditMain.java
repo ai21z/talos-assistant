@@ -4,6 +4,8 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -35,6 +37,7 @@ import java.util.Map;
  * rendering and response consumption.
  */
 public final class SynchronizedApprovalAuditMain {
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final DateTimeFormatter AUDIT_ID_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
@@ -54,6 +57,28 @@ public final class SynchronizedApprovalAuditMain {
         public RunResult {
             bundles = bundles == null ? List.of() : List.copyOf(bundles);
             findings = findings == null ? List.of() : List.copyOf(findings);
+        }
+    }
+
+    enum ScenarioScore {
+        PASS,
+        PASS_WITH_RUNTIME_REPAIR,
+        FAIL_REVIEW_REQUIRED
+    }
+
+    record ScenarioEvaluation(
+            String scenario,
+            String traceStatus,
+            String verificationStatus,
+            ScenarioScore score,
+            String reason
+    ) {
+        ScenarioEvaluation {
+            scenario = scenario == null || scenario.isBlank() ? "(unknown)" : scenario;
+            traceStatus = traceStatus == null ? "" : traceStatus;
+            verificationStatus = verificationStatus == null ? "" : verificationStatus;
+            score = score == null ? ScenarioScore.FAIL_REVIEW_REQUIRED : score;
+            reason = reason == null ? "" : reason;
         }
     }
 
@@ -2000,6 +2025,23 @@ public final class SynchronizedApprovalAuditMain {
             out.append("- ").append(bundle.root().getFileName()).append(": ")
                     .append(bundle.summary().toAbsolutePath().normalize()).append('\n');
         }
+        out.append("\n## Scenario Result Scoring\n\n");
+        out.append("| Scenario | Trace | Verification | Score | Reason |\n");
+        out.append("| --- | --- | --- | --- | --- |\n");
+        for (SynchronizedApprovalAuditRunner.ArtifactBundle bundle : bundles) {
+            ScenarioEvaluation evaluation = evaluateBundleForSummary(bundle);
+            out.append("| ")
+                    .append(markdownCell(evaluation.scenario()))
+                    .append(" | ")
+                    .append(markdownCell(evaluation.traceStatus()))
+                    .append(" | ")
+                    .append(markdownCell(evaluation.verificationStatus()))
+                    .append(" | ")
+                    .append(markdownCell(evaluation.score().name()))
+                    .append(" | ")
+                    .append(markdownCell(evaluation.reason()))
+                    .append(" |\n");
+        }
         if (!findings.isEmpty()) {
             out.append("\n## Artifact Scan Findings\n\n");
             for (ArtifactCanaryScanner.Finding finding : findings) {
@@ -2014,6 +2056,102 @@ public final class SynchronizedApprovalAuditMain {
             out.append("This scripted runner does not replace the required two-model live audit or PTY CLI smoke check.\n");
         }
         return out.toString();
+    }
+
+    static ScenarioEvaluation evaluateTranscriptForSummary(String scenario, String transcriptJson) {
+        String safeScenario = scenario == null || scenario.isBlank() ? "(unknown)" : scenario;
+        if (transcriptJson == null || transcriptJson.isBlank()) {
+            return new ScenarioEvaluation(
+                    safeScenario,
+                    "",
+                    "",
+                    ScenarioScore.FAIL_REVIEW_REQUIRED,
+                    "audit transcript is missing");
+        }
+        try {
+            Map<String, Object> transcript = JSON.readValue(
+                    transcriptJson,
+                    new TypeReference<Map<String, Object>>() {});
+            String traceStatus = value(transcript.get("traceStatus"));
+            String verificationStatus = value(transcript.get("verificationStatus"));
+            List<String> eventTypes = stringList(transcript.get("toolEventTypes"));
+            if ("PARTIAL".equals(traceStatus)
+                    && "PASSED".equals(verificationStatus)
+                    && eventTypes.contains("TOOL_CALL_BLOCKED")) {
+                return new ScenarioEvaluation(
+                        safeScenario,
+                        traceStatus,
+                        verificationStatus,
+                        ScenarioScore.PASS_WITH_RUNTIME_REPAIR,
+                        "partial trace contained blocked invalid intermediate tool call; final verification passed");
+            }
+            if ("PARTIAL".equals(traceStatus)) {
+                return new ScenarioEvaluation(
+                        safeScenario,
+                        traceStatus,
+                        verificationStatus,
+                        ScenarioScore.FAIL_REVIEW_REQUIRED,
+                        "partial trace did not have both passed verification and blocked-call repair evidence");
+            }
+            return new ScenarioEvaluation(
+                    safeScenario,
+                    traceStatus,
+                    verificationStatus,
+                    ScenarioScore.PASS,
+                    "scenario did not require partial-repair scoring");
+        } catch (Exception e) {
+            return new ScenarioEvaluation(
+                    safeScenario,
+                    "",
+                    "",
+                    ScenarioScore.FAIL_REVIEW_REQUIRED,
+                    "audit transcript could not be parsed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static ScenarioEvaluation evaluateBundleForSummary(SynchronizedApprovalAuditRunner.ArtifactBundle bundle) {
+        if (bundle == null) {
+            return new ScenarioEvaluation(
+                    "(missing bundle)",
+                    "",
+                    "",
+                    ScenarioScore.FAIL_REVIEW_REQUIRED,
+                    "scenario bundle is missing");
+        }
+        String scenario = bundle.root() == null || bundle.root().getFileName() == null
+                ? "(unknown)"
+                : bundle.root().getFileName().toString();
+        try {
+            return evaluateTranscriptForSummary(scenario, Files.readString(bundle.transcriptJson()));
+        } catch (IOException e) {
+            return new ScenarioEvaluation(
+                    scenario,
+                    "",
+                    "",
+                    ScenarioScore.FAIL_REVIEW_REQUIRED,
+                    "audit transcript could not be read: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static String value(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> raw)) return List.of();
+        List<String> out = new ArrayList<>();
+        for (Object item : raw) {
+            if (item != null) out.add(String.valueOf(item));
+        }
+        return List.copyOf(out);
+    }
+
+    private static String markdownCell(String value) {
+        return ProtectedContentPolicy.sanitizeText(value == null ? "" : value)
+                .replace("|", "\\|")
+                .replace('\r', ' ')
+                .replace('\n', ' ')
+                .strip();
     }
 
     public record Arguments(
