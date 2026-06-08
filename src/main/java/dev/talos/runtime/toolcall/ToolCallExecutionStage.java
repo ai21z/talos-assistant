@@ -181,6 +181,42 @@ public final class ToolCallExecutionStage {
             state.totalToolsInvoked++;
             state.toolNames.add(effective.toolName());
 
+            String privateDocumentNamedTargetDiagnostic =
+                    PrivateDocumentNamedTargetGuard.diagnostic(
+                            effective,
+                            state.ctx,
+                            state.workspace,
+                            currentTaskContract,
+                            pathHint);
+            if (privateDocumentNamedTargetDiagnostic != null) {
+                pathPolicyBlockedThisIter = true;
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
+                ToolResult result = ToolResult.fail(ToolError.invalidParams(privateDocumentNamedTargetDiagnostic));
+                emitToolResult(effective.toolName(), result);
+                LocalTurnTraceCapture.recordActionObligation(
+                        "PRIVATE_DOCUMENT_NAMED_TARGET_SCOPE",
+                        "FAILED",
+                        privateDocumentNamedTargetDiagnostic,
+                        "PRIVATE_DOCUMENT_READ_OUTSIDE_REQUESTED_TARGET_SET");
+                LocalTurnTraceCapture.recordToolCallBlocked(
+                        "tool_loop",
+                        effective,
+                        privateDocumentNamedTargetDiagnostic);
+                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionRead(
+                        effective,
+                        pathHint,
+                        privateDocumentNamedTargetDiagnostic));
+                appendResultMessage(state, parsed.useNativePath(), i,
+                        ToolCallSupport.formatToolResult(effective, result));
+                LOG.debug("Blocked private document read {} for {} before extraction: {}",
+                        effective.toolName(),
+                        SafeLogFormatter.value(pathHint),
+                        SafeLogFormatter.text(privateDocumentNamedTargetDiagnostic));
+                continue;
+            }
+
             SourceDerivedEvidenceGuard.RequiredSourceEvidenceDiagnostic requiredSourceEvidence =
                     SourceDerivedEvidenceGuard.requiredSourceEvidenceDiagnostic(
                             state,

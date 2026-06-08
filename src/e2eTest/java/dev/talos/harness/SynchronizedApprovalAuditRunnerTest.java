@@ -696,6 +696,7 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("Synchronized Approval Scripted Audit"));
         assertTrue(Files.readString(run.summary()).contains("Mode: SCRIPTED"));
         assertTrue(Files.readString(run.summary()).contains("Artifact scan: PASS"));
+        assertTrue(Files.readString(run.summary()).contains("Scenario Result Scoring"));
         assertTrue(Files.readString(run.summary()).contains("protected-read-denied"));
         assertTrue(Files.readString(run.summary()).contains("developer-mode-approved-protected-read-risk"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-approved-protected-read"));
@@ -721,6 +722,7 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("static-web-selector-script-only-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-similar-target-script-only-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-forbidden-sibling-target-blocked-before-approval"));
+        assertTrue(Files.readString(run.summary()).contains("PASS_WITH_RUNTIME_REPAIR"));
         assertTrue(Files.readString(run.summary()).contains("t325-python-command-boundary"));
         assertTrue(Files.readString(run.summary()).contains("workspace-mkdir-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-copy-path-approved"));
@@ -871,6 +873,61 @@ class SynchronizedApprovalAuditRunnerTest {
             assertTrue(Files.exists(bundle.sessionSnapshot()), bundle.sessionSnapshot().toString());
             assertTrue(Files.exists(bundle.turnJsonl()), bundle.turnJsonl().toString());
         }
+    }
+
+    @Test
+    void synchronized_summary_scores_partial_passed_blocked_call_as_runtime_repair_pass() {
+        SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
+                SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
+                        "blocked then repaired",
+                        """
+                                {
+                                  "traceStatus" : "PARTIAL",
+                                  "verificationStatus" : "PASSED",
+                                  "toolEventTypes" : [ "TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED", "VERIFICATION_COMPLETED" ]
+                                }
+                                """);
+
+        assertEquals(
+                SynchronizedApprovalAuditMain.ScenarioScore.PASS_WITH_RUNTIME_REPAIR,
+                evaluation.score());
+        assertTrue(evaluation.reason().contains("final verification passed"), evaluation.reason());
+    }
+
+    @Test
+    void synchronized_summary_keeps_partial_failed_verifier_as_review_required() {
+        SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
+                SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
+                        "partial failed",
+                        """
+                                {
+                                  "traceStatus" : "PARTIAL",
+                                  "verificationStatus" : "FAILED",
+                                  "toolEventTypes" : [ "TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED", "VERIFICATION_COMPLETED" ]
+                                }
+                                """);
+
+        assertEquals(
+                SynchronizedApprovalAuditMain.ScenarioScore.FAIL_REVIEW_REQUIRED,
+                evaluation.score());
+    }
+
+    @Test
+    void synchronized_summary_keeps_partial_without_blocked_repair_evidence_as_review_required() {
+        SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
+                SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
+                        "partial no repair evidence",
+                        """
+                                {
+                                  "traceStatus" : "PARTIAL",
+                                  "verificationStatus" : "PASSED",
+                                  "toolEventTypes" : [ "TOOL_CALL_PARSED", "TOOL_EXECUTED", "VERIFICATION_COMPLETED" ]
+                                }
+                                """);
+
+        assertEquals(
+                SynchronizedApprovalAuditMain.ScenarioScore.FAIL_REVIEW_REQUIRED,
+                evaluation.score());
     }
 
     @Test

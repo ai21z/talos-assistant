@@ -47,6 +47,23 @@ final class ToolOutcomeFactory {
                 workspaceOperationPlan);
     }
 
+    static ToolCallLoop.ToolOutcome failedPreExecutionRead(
+            ToolCall call,
+            String pathHint,
+            String diagnosticError
+    ) {
+        return new ToolCallLoop.ToolOutcome(
+                toolName(call),
+                pathHint,
+                false,
+                false,
+                false,
+                "",
+                diagnosticError,
+                null,
+                ToolError.INVALID_PARAMS);
+    }
+
     static ToolCallLoop.ToolOutcome executed(
             ToolCall call,
             String pathHint,

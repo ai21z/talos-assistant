@@ -12,6 +12,9 @@ import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
@@ -38,6 +41,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -54,6 +58,7 @@ class ProtectedReadScopeIntegrationTest {
     @AfterEach
     void clearTraceCapture() {
         LocalTurnTraceCapture.clear();
+        TurnTaskContractCapture.clear();
     }
 
     @Test
@@ -298,6 +303,166 @@ class ProtectedReadScopeIntegrationTest {
         assertTrue(transcript.contains("withheld from model context"), transcript);
         assertFalse(transcript.contains("protected file contents"), transcript);
         assertFalse(result.finalAnswer().contains("Family medical bill: 1837.42 EUR"), result.finalAnswer());
+    }
+
+    @Test
+    void private_mode_named_pdf_target_blocks_sibling_private_document_before_handoff_approval() throws Exception {
+        writePdf(workspace.resolve("private-report.pdf"), "Named PDF fact");
+        writeDocx(workspace.resolve("private-report.docx"), "Sibling DOCX fact");
+
+        AtomicInteger approvals = new AtomicInteger();
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null,
+                approvalGate(approvals, new AtomicReference<>(""), new AtomicReference<>(""), ApprovalResponse.APPROVED),
+                registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I did not inspect the sibling document.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        TurnTaskContractCapture.set(readOnlyContract(
+                "Summarize private-report.pdf.",
+                Set.of("private-report.pdf"),
+                Set.of()));
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize private-report.pdf."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"private-report.docx\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertEquals(0, approvals.get(), "blocked sibling read must not ask private handoff approval");
+        assertTrue(transcript.contains("outside the current requested private document target set"), transcript);
+        assertFalse(transcript.contains("Sibling DOCX fact"), transcript);
+        assertEquals(0, result.readPaths().size(), result.readPaths().toString());
+    }
+
+    @Test
+    void private_mode_multiple_named_document_targets_allow_each_named_target() throws Exception {
+        writePdf(workspace.resolve("private-report.pdf"), "Named PDF fact");
+        writeDocx(workspace.resolve("private-report.docx"), "Named DOCX fact");
+
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I cannot see the raw private document text.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        TurnTaskContractCapture.set(readOnlyContract(
+                "Summarize private-report.pdf and private-report.docx.",
+                Set.of("private-report.pdf", "private-report.docx"),
+                Set.of()));
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize private-report.pdf and private-report.docx."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"private-report.docx\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("outside the current requested private document target set"), transcript);
+        assertTrue(transcript.contains("withheld from model context"), transcript);
+        assertEquals(List.of("private-report.docx"), result.readPaths());
+    }
+
+    @Test
+    void private_mode_named_xlsx_target_blocks_sibling_private_workbook_before_extraction() throws Exception {
+        writeXls(workspace.resolve("private-workbook.xls"), "Sibling workbook fact");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            workbook.createSheet("Private").createRow(0).createCell(0).setCellValue("Named workbook fact");
+            try (OutputStream out = Files.newOutputStream(workspace.resolve("private-workbook.xlsx"))) {
+                workbook.write(out);
+            }
+        }
+
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.APPROVED), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I did not inspect the sibling workbook.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        TurnTaskContractCapture.set(readOnlyContract(
+                "Summarize private-workbook.xlsx.",
+                Set.of("private-workbook.xlsx"),
+                Set.of()));
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize private-workbook.xlsx."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"private-workbook.xls\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertTrue(transcript.contains("outside the current requested private document target set"), transcript);
+        assertFalse(transcript.contains("Sibling workbook fact"), transcript);
+        assertEquals(0, result.readPaths().size(), result.readPaths().toString());
+    }
+
+    @Test
+    void developer_mode_public_document_read_is_not_restricted_by_private_named_target_guard() throws Exception {
+        writePdf(workspace.resolve("public-report.pdf"), "Public report fact");
+
+        Config cfg = new Config(null);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("The report says Public report fact.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        TurnTaskContractCapture.set(readOnlyContract(
+                "Summarize public-report.pdf.",
+                Set.of("different-target.pdf"),
+                Set.of()));
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize public-report.pdf."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"public-report.pdf\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("outside the current requested private document target set"), transcript);
+        assertTrue(transcript.contains("Public report fact"), transcript);
+        assertEquals(List.of("public-report.pdf"), result.readPaths());
     }
 
     @Test
@@ -620,6 +785,19 @@ class ProtectedReadScopeIntegrationTest {
                 .anyMatch(eventType::equals);
     }
 
+    private static TaskContract readOnlyContract(String request, Set<String> expectedTargets, Set<String> sourceTargets) {
+        return new TaskContract(
+                TaskType.READ_ONLY_QA,
+                false,
+                false,
+                false,
+                expectedTargets,
+                sourceTargets,
+                Set.of(),
+                request,
+                "test-contract");
+    }
+
     private static void writePdf(Path path, String text) throws Exception {
         try (PDDocument document = new PDDocument()) {
             PDPage page = new PDPage();
@@ -641,6 +819,15 @@ class ProtectedReadScopeIntegrationTest {
             sheet.createRow(0).createCell(0).setCellValue(text);
             try (OutputStream out = Files.newOutputStream(path)) {
                 workbook.write(out);
+            }
+        }
+    }
+
+    private static void writeDocx(Path path, String text) throws Exception {
+        try (XWPFDocument doc = new XWPFDocument()) {
+            doc.createParagraph().createRun().setText(text);
+            try (OutputStream out = Files.newOutputStream(path)) {
+                doc.write(out);
             }
         }
     }

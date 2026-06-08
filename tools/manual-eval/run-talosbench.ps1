@@ -265,6 +265,42 @@ function Test-ApprovalInputDrift {
     return @($failures)
 }
 
+function Test-TalosBenchBackendContaminatedTranscript {
+    param([string]$Transcript)
+    if ([string]::IsNullOrWhiteSpace($Transcript)) { return $false }
+    $backendSignal = $Transcript -match "(?i)BACKEND_RESPONSE_ERROR|Engine error \(HTTP 0\)|HTTP 0"
+    if (-not $backendSignal) { return $false }
+    $zeroToolCalls = $Transcript -match "(?im)^\s*Tool calls:\s*0\s*$"
+    $noUsedTools = $Transcript -notmatch "(?i)\[Used\s+[1-9][0-9]*\s+tool"
+    return $zeroToolCalls -and $noUsedTools
+}
+
+function Get-TalosBenchBackendContaminationStatus {
+    param(
+        [string]$Transcript,
+        [string]$CurrentStatus
+    )
+    if ($CurrentStatus -ne "FAIL") {
+        return [pscustomobject]@{
+            Status = $CurrentStatus
+            Contaminated = $false
+            Note = ""
+        }
+    }
+    if (Test-TalosBenchBackendContaminatedTranscript -Transcript $Transcript) {
+        return [pscustomobject]@{
+            Status = "BACKEND_CONTAMINATED"
+            Contaminated = $true
+            Note = "Backend HTTP 0/BACKEND_RESPONSE_ERROR occurred before any tool evidence; release evidence is contaminated, not an ordinary product failure."
+        }
+    }
+    return [pscustomobject]@{
+        Status = $CurrentStatus
+        Contaminated = $false
+        Note = ""
+    }
+}
+
 function Get-LastRegexValue {
     param([string]$Text, [string]$Pattern, [switch]$CaseSensitive)
     $options = if ($CaseSensitive) {
@@ -824,6 +860,40 @@ User Request
         -Expected "RUN" `
         -Actual $explicitPipedApprovalGate.Status
 
+    $backendContaminatedTranscript = @"
+talos [auto] > [Engine error: Engine error (HTTP 0):
+connection closed before response]
+
+Last Turn
+  Status:    FAILED
+  Outcome:   BACKEND_RESPONSE_ERROR
+  Tool calls: 0
+
+Local Trace
+  Outcome: FAILED (BACKEND_RESPONSE_ERROR)
+"@
+    $backendContaminationStatus = Get-TalosBenchBackendContaminationStatus `
+        -Transcript $backendContaminatedTranscript `
+        -CurrentStatus "FAIL"
+    Assert-TalosBenchEqual -Name "backend HTTP 0 no-tool failure is contaminated evidence" `
+        -Expected "BACKEND_CONTAMINATED" `
+        -Actual $backendContaminationStatus.Status
+    $productFailureTranscript = @"
+talos [auto] > [tool_result: talos.read_file]
+[error] File not found: missing.md
+[/tool_result]
+
+Last Turn
+  Status:    FAILED
+  Tool calls: 1
+"@
+    $productFailureStatus = Get-TalosBenchBackendContaminationStatus `
+        -Transcript $productFailureTranscript `
+        -CurrentStatus "FAIL"
+    Assert-TalosBenchEqual -Name "tool-backed product failure is not backend contamination" `
+        -Expected "FAIL" `
+        -Actual $productFailureStatus.Status
+
     $multiTurnFixture = @"
 talos [auto] > First response mentions talos.write_file as a future option.
 
@@ -1261,6 +1331,13 @@ function Invoke-TalosCase {
         $notes += $Case.notes
     }
 
+    $backendContamination = Get-TalosBenchBackendContaminationStatus -Transcript $text -CurrentStatus $status
+    if ($backendContamination.Contaminated) {
+        $status = $backendContamination.Status
+        $blocker = "no"
+        $notes += $backendContamination.Note
+    }
+
     return [pscustomobject]@{
         Id = $Case.id
         Category = $Case.category
@@ -1270,6 +1347,55 @@ function Invoke-TalosCase {
         Transcript = $relativeTranscript
         Artifacts = $(if ($StrictEvidence) { Resolve-Path -LiteralPath $caseArtifactRoot -Relative } else { "" })
         Notes = ($notes -join " ")
+    }
+}
+
+function Invoke-TalosCaseWithBackendRerun {
+    param($Case, [string]$RunRoot)
+
+    $first = Invoke-TalosCase -Case $Case -RunRoot $RunRoot
+    if ($first.Status -ne "BACKEND_CONTAMINATED" -or -not $StrictEvidence) {
+        return $first
+    }
+
+    $originalArtifactRoot = Join-Path $RunRoot $Case.id
+    $originalMovedRoot = Join-Path $RunRoot ($Case.id + "-backend-contaminated-original")
+    if (Test-Path -LiteralPath $originalMovedRoot) {
+        Remove-Item -LiteralPath $originalMovedRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $originalArtifactRoot) {
+        Move-Item -LiteralPath $originalArtifactRoot -Destination $originalMovedRoot
+    }
+
+    $rerun = Invoke-TalosCase -Case $Case -RunRoot $RunRoot
+    $originalRel = if (Test-Path -LiteralPath $originalMovedRoot) {
+        Resolve-Path -LiteralPath $originalMovedRoot -Relative
+    } else {
+        ""
+    }
+
+    if ($rerun.Status -eq "PASS") {
+        return [pscustomobject]@{
+            Id = $Case.id
+            Category = $Case.category
+            Lane = (Get-TalosBenchLane -Case $Case)
+            Status = "CONTAMINATED_THEN_RERUN_PASS"
+            Blocker = "no"
+            Transcript = "original: $originalRel; rerun: $($rerun.Transcript)"
+            Artifacts = "original: $originalRel; rerun: $($rerun.Artifacts)"
+            Notes = "Original run was backend-contaminated before tool evidence; bounded strict-evidence rerun passed. $($rerun.Notes)"
+        }
+    }
+
+    return [pscustomobject]@{
+        Id = $Case.id
+        Category = $Case.category
+        Lane = (Get-TalosBenchLane -Case $Case)
+        Status = $rerun.Status
+        Blocker = $rerun.Blocker
+        Transcript = "original: $originalRel; rerun: $($rerun.Transcript)"
+        Artifacts = "original: $originalRel; rerun: $($rerun.Artifacts)"
+        Notes = "Original run was backend-contaminated before tool evidence; bounded rerun status: $($rerun.Status). $($rerun.Notes)"
     }
 }
 
@@ -1390,7 +1516,7 @@ New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
 $results = @()
 foreach ($case in $selected) {
     Write-Host "Running TalosBench case: $($case.id)"
-    $results += Invoke-TalosCase -Case $case -RunRoot $runRoot
+    $results += Invoke-TalosCaseWithBackendRerun -Case $case -RunRoot $runRoot
 }
 
 $summary = Join-Path $runRoot "summary.md"
@@ -1425,5 +1551,8 @@ if ($results | Where-Object { $_.Status -eq "SYNC_REQUIRED" }) {
     exit 1
 }
 if ($results | Where-Object { $_.Status -eq "FAIL" }) {
+    exit 1
+}
+if ($results | Where-Object { $_.Status -eq "BACKEND_CONTAMINATED" }) {
     exit 1
 }
