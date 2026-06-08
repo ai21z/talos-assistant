@@ -544,15 +544,16 @@ integration and true PTY/JLine provenance that this packet did not newly rerun.
 
 ## 2026-06-08 WS3 current-candidate PTY packet preparation
 
-Prepared a current-candidate manual true-PTY/JLine packet from the installed
-`0.10.0` Talos launcher and the audited Qwen managed llama.cpp config.
+Prepared a current-head manual true-PTY/JLine packet from the installed
+`0.10.0` Talos launcher and the audited Qwen managed llama.cpp config after
+the `T312 add live workspace-op release gates` checkpoint.
 
 Evidence:
 
 - Packet root:
-  `local/manual-testing/t312-ws3-pty-manual-20260608-214542/artifacts`
+  `local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts`
 - Fixture workspace:
-  `local/manual-workspaces/t312-ws3-pty-manual-20260608-214542/workspace`
+  `local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace`
 - Status:
   `PTY-MANUAL-AUDIT-STATUS.json` records `MANUAL_REQUIRED`,
   `automatedPtyCoverage=false`, and the installed launcher path
@@ -565,9 +566,13 @@ Evidence:
   `validateSynchronizedApprovalPtyManualAudit` reports `Status: FAIL` because
   `PTY-MANUAL-AUDIT-RESULT.json` is absent. This is the expected state until a
   maintainer completes the real terminal run and fills the result JSON.
+  Current-head validation command:
+  `.\gradlew.bat validateSynchronizedApprovalPtyManualAudit "-PptyManualArtifactsRoot=local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts" "-PptyManualWorkspace=local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace" --no-daemon`.
 - Artifact hygiene:
   `checkRuntimeArtifactCanaries` passed over the prepared artifact root and
   fixture workspace using the generated fixture allowlist.
+  Current-head scan command:
+  `.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts,local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace" "-PartifactScanAllowlist=C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\t312-ws3-pty-manual-current-head-20260608-230224\workspace\.env" --no-daemon`.
 
 This packet does not close T306. It proves the current-candidate manual packet
 is ready and fail-closed, not that true PTY/JLine coverage has been observed.

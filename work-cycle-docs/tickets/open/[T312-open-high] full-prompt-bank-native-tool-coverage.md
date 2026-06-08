@@ -399,12 +399,12 @@ PTY/JLine evidence gate.
 
 ## 2026-06-08 WS3 PTY packet preparation cross-reference
 
-Prepared the current-candidate manual true-PTY/JLine packet:
+Prepared the current-head manual true-PTY/JLine packet:
 
 - Packet root:
-  `local/manual-testing/t312-ws3-pty-manual-20260608-214542/artifacts`
+  `local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts`
 - Fixture workspace:
-  `local/manual-workspaces/t312-ws3-pty-manual-20260608-214542/workspace`
+  `local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace`
 - Config:
   `local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958/configs/qwen-config.yaml`
 - Installed Talos:
@@ -412,7 +412,20 @@ Prepared the current-candidate manual true-PTY/JLine packet:
 
 The packet status is correctly `MANUAL_REQUIRED`. Validation fails closed until
 a maintainer supplies `PTY-MANUAL-AUDIT-RESULT.json` from a real interactive
-terminal run. The prepared packet and fixture workspace passed
+terminal run:
+
+```powershell
+.\gradlew.bat validateSynchronizedApprovalPtyManualAudit "-PptyManualArtifactsRoot=local/manual-testing/t312-ws3-pty-manual-current-head-20260608-230224/artifacts" "-PptyManualWorkspace=local/manual-workspaces/t312-ws3-pty-manual-current-head-20260608-230224/workspace" --no-daemon
+```
+
+Result:
+
+```text
+Status: FAIL
+- PTY-MANUAL-AUDIT-RESULT.json is required; prepared packets are not completed PTY/JLine evidence.
+```
+
+The prepared current-head packet and fixture workspace passed
 `checkRuntimeArtifactCanaries` with the generated allowlist.
 
 This does not close the PTY half of T312.
