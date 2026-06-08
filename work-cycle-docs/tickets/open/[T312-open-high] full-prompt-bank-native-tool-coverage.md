@@ -180,8 +180,9 @@ First slice completed in the working tree:
 Remaining implementation:
 
 - Workspace-operation prompt-bank probes now exist in the Java synchronized
-  scripted audit main. The remaining question is whether to add live-model
-  versions before the broader synchronized full prompt-bank run.
+  scripted and live audit main. The remaining question is no longer harness
+  implementation; it is whether the next broader synchronized full prompt-bank
+  run produces current two-model evidence for every lane.
 - Keep the full prompt-bank evidence separate from true PTY/JLine coverage and
   synchronized approval evidence. The historical full GPT-OSS/Qwen TalosBench
   runs are redirected-stdin installed-product evidence, not an interactive
@@ -306,3 +307,112 @@ Keep T312 open. Native-tool documentation/coverage guards exist and the latest
 lane-labeled packet is strong, but every current native tool has not yet been
 proven in a current-commit synchronized/live prompt-bank lane, and true
 PTY/JLine coverage remains outside this packet.
+
+## 2026-06-08 WS1/WS2 implementation update
+
+Implemented the next harness slice from the `0.10.0` release-gate plan:
+
+- Added live-model synchronized approval scenarios for:
+  - `talos.mkdir`
+  - `talos.copy_path`
+  - `talos.move_path`
+  - `talos.rename_path`
+  - `talos.delete_path`
+  - `talos.apply_workspace_batch`
+- Added selectable scripted/live scenario names so operators can run these
+  workspace-operation probes one at a time.
+- Added a harness postcondition that the intended native tool must appear in
+  trace evidence, so a scenario cannot pass merely because another tool happened
+  to create the expected final file state.
+- Added a deterministic COD-A-001 regression scenario for the Qwen malformed
+  static-web selector rewrite shape. The scenario writes a failure bundle and
+  asserts that runtime verification reports `FAILED`, not false success.
+
+Focused evidence:
+
+- RED phase: `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon`
+  failed while the new scenario filter registry was absent.
+- GREEN phase: the same focused test command passed after adding the harness
+  scenarios and regression coverage.
+
+This update does not close T312. The remaining closure evidence is a current
+installed-product, lane-labeled Qwen/GPT-OSS packet that actually runs the new
+live workspace-operation scenarios, plus the separate true PTY/JLine lane where
+claimed.
+
+## 2026-06-08 WS1 focused live workspace-op evidence
+
+Ran the six newly exposed live workspace-operation scenario filters against
+managed llama.cpp GPT-OSS and Qwen configs from the latest `0.10.0` release
+packet.
+
+Evidence root:
+`local/manual-testing/t312-ws1-live-workspace-ops-20260608-213656`
+
+Result:
+
+- GPT-OSS passed all six live filters:
+  - `workspace-mkdir-approved`
+  - `workspace-copy-path-approved`
+  - `workspace-move-path-approved`
+  - `workspace-rename-path-approved`
+  - `workspace-delete-path-approved`
+  - `workspace-batch-apply-approved`
+- Qwen passed five of six live filters:
+  - `workspace-mkdir-approved`
+  - `workspace-copy-path-approved`
+  - `workspace-move-path-approved`
+  - `workspace-rename-path-approved`
+  - `workspace-delete-path-approved`
+- Qwen failed `workspace-batch-apply-approved` twice:
+  - Initial run: model used `talos.apply_workspace_batch` with invalid
+    `operations_json` missing required path `to`; runtime rejected it before
+    approval and left `source.md` unchanged.
+  - Bounded rerun: model still did not reach an approval prompt for a valid
+    workspace operation; runtime reported the action obligation failure and left
+    `source.md` unchanged.
+
+The Qwen failure is a live lane failure with fail-closed runtime behavior, not a
+false success or unapproved mutation. Keep T312 open until the release packet
+either gets passing bounded rerun evidence for this scenario or records it as a
+model-weakness finding under the final beta decision rules.
+
+Follow-up schema clarification:
+
+- Source inspection showed `BatchWorkspaceApplyTool` documented supported op
+  names but did not document the required per-operation path keys (`from`,
+  `to`, `new_name`, `path`) in the model-facing tool schema.
+- Added focused regression coverage for the descriptor text and updated the
+  `operations_json` description to name the required keys by operation.
+- Focused Qwen rerun after the schema clarification passed
+  `workspace-batch-apply-approved`:
+  `local/manual-testing/t312-ws1-live-workspace-ops-post-schema-20260608-215206`.
+- The rerun records one approval, `checkpointStatus=CREATED`,
+  `traceStatus=COMPLETE`, `verificationStatus=READBACK_ONLY`, and
+  `source-copy.md` containing the expected copied content.
+
+The focused WS1 native-tool evidence is now substantially stronger: GPT-OSS has
+passing live evidence for all six workspace-op filters, and Qwen has passing
+live evidence for all six after the descriptor fix. T312 still remains open for
+the broader current-candidate lane-labeled full prompt-bank packet and the true
+PTY/JLine evidence gate.
+
+## 2026-06-08 WS3 PTY packet preparation cross-reference
+
+Prepared the current-candidate manual true-PTY/JLine packet:
+
+- Packet root:
+  `local/manual-testing/t312-ws3-pty-manual-20260608-214542/artifacts`
+- Fixture workspace:
+  `local/manual-workspaces/t312-ws3-pty-manual-20260608-214542/workspace`
+- Config:
+  `local/manual-testing/current-0.10.0-release-packet-post-t734-20260608-191958/configs/qwen-config.yaml`
+- Installed Talos:
+  `build\install\talos\bin\talos.bat`
+
+The packet status is correctly `MANUAL_REQUIRED`. Validation fails closed until
+a maintainer supplies `PTY-MANUAL-AUDIT-RESULT.json` from a real interactive
+terminal run. The prepared packet and fixture workspace passed
+`checkRuntimeArtifactCanaries` with the generated allowlist.
+
+This does not close the PTY half of T312.

@@ -188,3 +188,31 @@ Keep T280 open. This is strong candidate evidence, but the current packet still
 does not provide current-commit true PTY/JLine evidence, and the redirected
 TalosBench lane still labels approval-sensitive/native-operation cases as
 manual-required rather than fully covered.
+
+## 2026-06-08 WS5 provider-body quality review
+
+Added a focused provider-body/prompt-debug quality review for the post-T734
+capability/private-mode packet:
+
+```text
+work-cycle-docs/reports/current-0.10.0-ws5-provider-body-quality-review.md
+```
+
+Result:
+
+- All privacy-sensitive provider-required rows had prompt-debug/provider-body
+  evidence where required by the capability script.
+- Private PDF/DOCX/XLSX and private retrieve-disabled rows recorded
+  `WITHHELD_PRIVATE_MODE`, no unexpected private document targets, and no raw
+  private/protected fixture value hits in model-facing provider-body,
+  prompt-debug, or output artifacts.
+- Public PDF/DOCX/XLSX rows had provider-body evidence containing the expected
+  public extracted fixture text.
+- `/show` private document rows were local-display-only (`provider_bodies=0`)
+  and redacted the private value.
+- Fresh release-clean artifact scan over the two post-T734 model-facing packet
+  roots passed without an allowlist.
+
+Keep T280 open. This removes much of the prior "heuristic only" uncertainty for
+the post-T734 capability packet, but it still does not provide true PTY/JLine
+coverage or a final clean beta decision packet for the current dirty branch.

@@ -35,7 +35,7 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
         return new ToolDescriptor(NAME, description(),
                 """
                 {"type":"object","properties":{
-                  "operations_json":{"type":"string","description":"JSON array of operations. Supported op values: mkdir, move_path, copy_path, rename_path, delete_path. Use overwrite/recursive booleans when needed."}
+                  "operations_json":{"type":"string","description":"JSON array of operations, or object with operations array. Required keys by op: mkdir uses path; copy_path and move_path use from and to; rename_path uses path and new_name; delete_path uses path. Optional overwrite/recursive booleans are supported when applicable."}
                 },"required":["operations_json"]}""",
                 ToolRiskLevel.WRITE,
                 ToolOperationMetadata.workspaceMutation(

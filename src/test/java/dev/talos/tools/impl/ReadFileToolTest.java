@@ -168,7 +168,7 @@ class ReadFileToolTest {
     }
 
     @Test
-    void malformedPdfReportsExtractionFailureWithoutFabrication() throws IOException {
+    void malformedPdfReportsCorruptFailureWithoutFabrication() throws IOException {
         Files.writeString(workspace.resolve("sample.pdf"), "%PDF-1.7 fake test payload");
 
         ToolCall call = new ToolCall("talos.read_file", Map.of("path", "sample.pdf"));
@@ -177,7 +177,8 @@ class ReadFileToolTest {
         assertFalse(r.success());
         assertEquals(ToolError.UNSUPPORTED_FORMAT, r.error().code());
         assertTrue(r.errorMessage().contains("Cannot extract text from sample.pdf"), r.errorMessage());
-        assertTrue(r.errorMessage().contains("PDF extraction failed"), r.errorMessage());
+        assertTrue(r.errorMessage().contains("status: CORRUPT"), r.errorMessage());
+        assertTrue(r.errorMessage().contains("PDF appears corrupt"), r.errorMessage());
         assertFalse(r.errorMessage().contains("fake test payload"), r.errorMessage());
     }
 

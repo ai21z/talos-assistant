@@ -541,3 +541,33 @@ Results:
 Keep T306 open. The synchronized runner is functioning and current-candidate
 evidence is strong, but this ticket still covers broader prompt-bank
 integration and true PTY/JLine provenance that this packet did not newly rerun.
+
+## 2026-06-08 WS3 current-candidate PTY packet preparation
+
+Prepared a current-candidate manual true-PTY/JLine packet from the installed
+`0.10.0` Talos launcher and the audited Qwen managed llama.cpp config.
+
+Evidence:
+
+- Packet root:
+  `local/manual-testing/t312-ws3-pty-manual-20260608-214542/artifacts`
+- Fixture workspace:
+  `local/manual-workspaces/t312-ws3-pty-manual-20260608-214542/workspace`
+- Status:
+  `PTY-MANUAL-AUDIT-STATUS.json` records `MANUAL_REQUIRED`,
+  `automatedPtyCoverage=false`, and the installed launcher path
+  `build\install\talos\bin\talos.bat`.
+- Runbook:
+  `PTY-MANUAL-AUDIT-RUNBOOK.md` instructs a real interactive terminal run and
+  explicitly rejects Gradle redirected stdin, ProcessBuilder, IDE consoles, and
+  pipes.
+- Fail-closed validation:
+  `validateSynchronizedApprovalPtyManualAudit` reports `Status: FAIL` because
+  `PTY-MANUAL-AUDIT-RESULT.json` is absent. This is the expected state until a
+  maintainer completes the real terminal run and fills the result JSON.
+- Artifact hygiene:
+  `checkRuntimeArtifactCanaries` passed over the prepared artifact root and
+  fixture workspace using the generated fixture allowlist.
+
+This packet does not close T306. It proves the current-candidate manual packet
+is ready and fail-closed, not that true PTY/JLine coverage has been observed.

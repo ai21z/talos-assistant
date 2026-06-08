@@ -154,11 +154,33 @@ This ticket remains open until the `0.10.0` audit packet proves that approval
 tokens cannot drift into subsequent user turns for any approval-sensitive case
 used in release evidence.
 
+## 2026-06-08 WS4 deterministic fail-closed regression
+
+Added focused synchronized harness coverage for the missing-approval-response
+shape that originally motivated this ticket:
+
+- A scripted model calls `talos.write_file` for `notes.md`.
+- The synchronized approval script intentionally supplies no approval step.
+- The harness raises `Unexpected approval prompt`.
+- The target file remains unchanged.
+
+Focused evidence:
+
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon`
+  passed with the new regression.
+
+This is a runtime/harness fail-closed regression, not a claim that redirected
+stdin can become release-grade approval evidence. T313 remains open until the
+current `0.10.0` release packet demonstrates approval-sensitive cases through
+synchronized approval handling or manual true PTY/JLine capture, with lane
+labels that prevent piped approval drift overclaims.
+
 ## Open questions
 
 - Should approval-sensitive TalosBench cases be split into a separate synchronized runner instead of overloading the current PowerShell runner?
 - Should the synchronized Java runner import the TalosBench JSON directly so there is only one prompt bank?
-- Is a Windows ConPTY dependency acceptable for release-audit automation, or should manual PTY evidence remain the standard?
+- Is a Windows ConPTY dependency acceptable for post-beta release-audit automation,
+  or should manual PTY evidence remain the standard for the beta lane?
 
 ## Related files
 

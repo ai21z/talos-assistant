@@ -102,6 +102,24 @@ class DocumentExtractionAdaptersTest {
     }
 
     @Test
+    void corrupt_pdf_reports_corrupt_not_generic_failed(@TempDir Path workspace) throws Exception {
+        Path pdf = workspace.resolve("corrupt.pdf");
+        Files.writeString(pdf, "%PDF-1.4\nnot a valid pdf body");
+        Config cfg = extractionEnabled("pdf");
+
+        DocumentExtractionResult result = new DocumentExtractionService(cfg)
+                .extract(DocumentExtractionRequest.read(pdf, workspace));
+
+        assertEquals(DocumentExtractionStatus.CORRUPT, result.status(), result.warnings().toString());
+        assertTrue(result.safeText().isBlank(), result.safeText());
+        assertTrue(result.warnings().stream()
+                .anyMatch(w -> w.code().equals("document-corrupt")
+                        && w.message().contains("corrupt")),
+                result.warnings().toString());
+        assertFalse(result.modelHandoffAllowed(), "corrupt PDFs must not be handed to the model as evidence");
+    }
+
+    @Test
     void docx_text_extraction_reads_known_paragraphs_and_tables(@TempDir Path workspace) throws Exception {
         Path docx = workspace.resolve("known.docx");
         try (XWPFDocument doc = new XWPFDocument()) {
@@ -124,6 +142,24 @@ class DocumentExtractionAdaptersTest {
         assertTrue(result.safeText().contains("ColumnB"), result.safeText());
         assertTrue(result.provenance().adapterName().contains("poi-docx"));
         assertRuntimeVersion(XWPFDocument.class, result.provenance().adapterVersion());
+    }
+
+    @Test
+    void corrupt_docx_reports_corrupt_not_generic_failed(@TempDir Path workspace) throws Exception {
+        Path docx = workspace.resolve("corrupt.docx");
+        Files.writeString(docx, "not a real docx archive");
+        Config cfg = extractionEnabled("word");
+
+        DocumentExtractionResult result = new DocumentExtractionService(cfg)
+                .extract(DocumentExtractionRequest.read(docx, workspace));
+
+        assertEquals(DocumentExtractionStatus.CORRUPT, result.status(), result.warnings().toString());
+        assertTrue(result.safeText().isBlank(), result.safeText());
+        assertTrue(result.warnings().stream()
+                .anyMatch(w -> w.code().equals("document-corrupt")
+                        && w.message().contains("corrupt")),
+                result.warnings().toString());
+        assertFalse(result.modelHandoffAllowed(), "corrupt DOCX files must not be handed to the model as evidence");
     }
 
     @Test
@@ -292,6 +328,78 @@ class DocumentExtractionAdaptersTest {
         assertTrue(result.safeText().contains("B2: 1200"), result.safeText());
         assertTrue(result.provenance().adapterName().contains("poi-xls"));
         assertRuntimeVersion(HSSFWorkbook.class, result.provenance().adapterVersion());
+    }
+
+    @Test
+    void xls_text_extraction_skips_hidden_sheets_and_reports_limitation(@TempDir Path workspace) throws Exception {
+        Path xls = workspace.resolve("hidden-sheet.xls");
+        try (HSSFWorkbook workbook = new HSSFWorkbook()) {
+            var visible = workbook.createSheet("VisibleBudget");
+            visible.createRow(0).createCell(0).setCellValue("Visible public xls amount");
+            var hidden = workbook.createSheet("HiddenPrivate");
+            hidden.createRow(0).createCell(0).setCellValue("HIDDEN_XLS_PRIVATE_SHOULD_NOT_APPEAR");
+            workbook.setSheetHidden(1, true);
+            try (OutputStream out = Files.newOutputStream(xls)) {
+                workbook.write(out);
+            }
+        }
+        Config cfg = extractionEnabled("excel");
+
+        DocumentExtractionResult result = new DocumentExtractionService(cfg)
+                .extract(DocumentExtractionRequest.read(xls, workspace));
+
+        assertEquals(DocumentExtractionStatus.SUCCESS, result.status());
+        assertTrue(result.safeText().contains("Visible public xls amount"), result.safeText());
+        assertFalse(result.safeText().contains("HIDDEN_XLS_PRIVATE_SHOULD_NOT_APPEAR"), result.safeText());
+        assertTrue(result.warnings().stream()
+                .anyMatch(w -> w.code().equals("excel-hidden-sheets")
+                        && w.message().contains("hidden sheet")),
+                result.warnings().toString());
+    }
+
+    @Test
+    void xls_formula_cells_report_formula_and_cached_value_policy(@TempDir Path workspace) throws Exception {
+        Path xls = workspace.resolve("formula.xls");
+        try (HSSFWorkbook workbook = new HSSFWorkbook()) {
+            var sheet = workbook.createSheet("Budget");
+            sheet.createRow(0).createCell(0).setCellValue(4);
+            sheet.createRow(1).createCell(0).setCellValue(6);
+            var formula = sheet.createRow(2).createCell(0);
+            formula.setCellFormula("SUM(A1:A2)");
+            workbook.getCreationHelper().createFormulaEvaluator().evaluateFormulaCell(formula);
+            try (OutputStream out = Files.newOutputStream(xls)) {
+                workbook.write(out);
+            }
+        }
+        Config cfg = extractionEnabled("excel");
+
+        DocumentExtractionResult result = new DocumentExtractionService(cfg)
+                .extract(DocumentExtractionRequest.read(xls, workspace));
+
+        assertEquals(DocumentExtractionStatus.SUCCESS, result.status());
+        assertTrue(result.safeText().contains("A3: [formula=SUM(A1:A2); cached=10]"), result.safeText());
+        assertTrue(result.warnings().stream()
+                        .anyMatch(w -> w.code().equals("xls-formula-policy")
+                                && w.message().contains("not recalculated")),
+                result.warnings().toString());
+    }
+
+    @Test
+    void corrupt_xls_reports_corrupt_not_generic_failed(@TempDir Path workspace) throws Exception {
+        Path xls = workspace.resolve("corrupt.xls");
+        Files.writeString(xls, "not a real xls workbook");
+        Config cfg = extractionEnabled("excel");
+
+        DocumentExtractionResult result = new DocumentExtractionService(cfg)
+                .extract(DocumentExtractionRequest.read(xls, workspace));
+
+        assertEquals(DocumentExtractionStatus.CORRUPT, result.status(), result.warnings().toString());
+        assertTrue(result.safeText().isBlank(), result.safeText());
+        assertTrue(result.warnings().stream()
+                .anyMatch(w -> w.code().equals("document-corrupt")
+                        && w.message().contains("corrupt")),
+                result.warnings().toString());
+        assertFalse(result.modelHandoffAllowed(), "corrupt XLS files must not be handed to the model as evidence");
     }
 
 
