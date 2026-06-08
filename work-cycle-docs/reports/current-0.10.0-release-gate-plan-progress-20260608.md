@@ -7,15 +7,14 @@ Plan executed from:
 
 Current branch: `codex/t312-live-workspace-ops`
 
-Current HEAD: `23bdbb403b52a8f4e088675f3c50c1f771b18794`
+Behavior checkpoint commit:
+`05d23d3ca9e9a7d09be65a573293d037ca38e5ef`
+(`T312 add live workspace-op release gates`).
 
 Version: `talosVersion=0.10.0`
 
-Working-tree status after checkpoint commit: clean.
-
-Checkpoint commit:
-`23bdbb403b52a8f4e088675f3c50c1f771b18794`
-(`T312 add live workspace-op release gates`).
+Report note: this file may be followed by a metadata-only correction commit;
+use `git rev-parse HEAD` for the final branch head.
 
 ## Summary
 
