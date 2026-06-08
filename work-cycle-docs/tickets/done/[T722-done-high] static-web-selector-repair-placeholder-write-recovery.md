@@ -1,9 +1,10 @@
 # T722 - Static-Web Selector Repair Placeholder Write Recovery
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-08
 Source audit: `local/manual-testing/candidate-0.10.0-full-two-model-20260608-000026`
+Completed: 2026-06-08
 
 ## Problem
 
@@ -62,4 +63,20 @@ harness:
 - The rejection path produces a concrete retry/failure instruction containing
   `script.js`, excluding `scripts.js`.
 - No file changes occur for placeholder arguments.
+
+## Implementation Evidence
+
+- `StaticWebRepairPathGuard` now treats obvious placeholder paths such as `?`,
+  `<path>`, `[filename]`, `path`, `file`, and `todo` as invalid static-web
+  expected-target scope writes before approval.
+- The existing expected-target scope repair lane then recovers the selector case
+  through the runtime-owned exact replacement path when the request provides a
+  concrete replacement (`.missing-button` -> `.cta-button`).
+- Regressions:
+  - `StaticWebRepairPathGuardTest.rejectsPlaceholderWritePathBeforeApprovalForStaticWebTargetSet`
+  - `ToolCallLoopTest.staticWebPlaceholderWritePathRepairsToExactExpectedSelectorTarget`
+- Verification:
+  - `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.runtime.toolcall.StaticWebRepairPathGuardTest" --tests "dev.talos.runtime.ToolCallLoopTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.*" --no-daemon`
+  - `.\gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon`
 

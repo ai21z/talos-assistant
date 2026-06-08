@@ -3414,6 +3414,72 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void staticWebPlaceholderWritePathRepairsToExactExpectedSelectorTarget() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-placeholder-target-repair-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """);
+            Files.writeString(ws.resolve("scripts.js"),
+                    "document.querySelector('.similar-but-forbidden');\n");
+
+            String request = "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. "
+                    + "Do not edit scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String placeholderWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"?","content":"?"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("no retry should be needed")))
+                    .build();
+
+            ToolCallLoop.LoopResult result;
+            try {
+                TurnUserRequestCapture.set(request);
+                TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+                result = loop.run(placeholderWrite, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals("""
+                    document.querySelector('.cta-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """, Files.readString(ws.resolve("script.js")));
+            assertEquals("document.querySelector('.similar-but-forbidden');\n",
+                    Files.readString(ws.resolve("scripts.js")),
+                    "placeholder repair must not mutate the forbidden sibling file");
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> "talos.write_file".equals(outcome.toolName())
+                                    && "?".equals(outcome.pathHint())
+                                    && !outcome.success()
+                                    && outcome.errorMessage().contains("Target outside expected targets before approval")),
+                    "write_file(?) must be rejected before approval with a target-scope diagnostic");
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> "talos.edit_file".equals(outcome.toolName())
+                                    && "script.js".equals(outcome.pathHint())
+                                    && outcome.success()),
+                    "placeholder target block should be repaired by the runtime-owned exact edit on script.js");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void sameIterationExpectedTargetProgressWrongFileRepromptsToRemainingStaticWebTarget() throws Exception {
         Path ws = Files.createTempDirectory("talos-static-web-same-iteration-progress-repair-");
         try {
