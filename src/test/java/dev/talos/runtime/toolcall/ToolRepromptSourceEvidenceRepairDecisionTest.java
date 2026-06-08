@@ -75,6 +75,36 @@ class ToolRepromptSourceEvidenceRepairDecisionTest {
         assertTrue(prompt.contains("Board brief marker: ORBITAL-DECK-71."), prompt);
     }
 
+    @Test
+    void sourceEvidenceWriteBeforeReadRepromptsForMissingSourceReadFirst() {
+        ChatMessage.NativeToolCall readCall = new ChatMessage.NativeToolCall(
+                "read-1",
+                "talos.read_file",
+                Map.of("path", "problem.md", "max_lines", 200));
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("", List.of(readCall))),
+                16_384);
+        String request = "Create dijkstra.py and test_dijkstra.py according to problem.md, then run pytest if available.";
+        LoopState state = state(request, recorded.client());
+        state.toolOutcomes.add(failedSourceEvidenceReadBeforeWrite("dijkstra.py"));
+        state.toolOutcomes.add(failedSourceEvidenceReadBeforeWrite("test_dijkstra.py"));
+
+        Optional<Boolean> decision = ToolRepromptSourceEvidenceRepairDecision.tryHandle(state, request);
+
+        assertEquals(Optional.of(true), decision);
+        assertFalse(state.hasPendingActionObligation(), "source-read repair must not raise a mutation obligation");
+        assertEquals(List.of(readCall), state.currentNativeCalls);
+        assertEquals(1, recorded.requests().size());
+        String prompt = recorded.requests().getFirst().messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(prompt.contains("[SourceEvidenceReadBeforeWriteRepair]"), prompt);
+        assertTrue(prompt.contains("Missing source target(s): problem.md"), prompt);
+        assertTrue(prompt.contains("Call talos.read_file for the missing source target(s) first"), prompt);
+        assertFalse(prompt.contains("[Expected target progress]"), prompt);
+    }
+
     private LoopState state(String request, List<LlmClient.StreamResult> responses) {
         return state(request, ScriptedNativeLlmClient.recordingWithContextWindow(responses, 16_384).client());
     }
@@ -140,6 +170,20 @@ class ToolRepromptSourceEvidenceRepairDecisionTest {
                 "",
                 "Source-derived write blocked before approval: " + path
                         + " does not include required exact evidence phrase(s).");
+    }
+
+    private static ToolCallLoop.ToolOutcome failedSourceEvidenceReadBeforeWrite(String path) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                path,
+                false,
+                true,
+                false,
+                "",
+                "Source-derived artifact write blocked before approval: the current task requires reading "
+                        + "source target(s) problem.md before writing `" + path + "`. Call talos.read_file "
+                        + "for the source target(s) first, then retry the write. No approval was requested "
+                        + "and no file was changed.");
     }
 
     private static List<ToolSpec> baseTools() {

@@ -5861,6 +5861,76 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void mutationRetryContinuesRemainingExpectedTargetAfterPartialRetryMutation(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
+            var specs = registry.descriptors().stream()
+                    .map(descriptor -> new ToolSpec(
+                            descriptor.name(),
+                            descriptor.description(),
+                            descriptor.parametersSchema()))
+                    .toList();
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_read_problem",
+                                    "talos.read_file",
+                                    java.util.Map.of("path", "problem.md", "max_lines", 200)))),
+                            new LlmClient.StreamResult("I have enough information to implement this.", List.of()),
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_dijkstra",
+                                    "talos.write_file",
+                                    java.util.Map.of(
+                                            "path", "dijkstra.py",
+                                            "content", "def shortest_path():\n    return 5\n")))),
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_test",
+                                    "talos.write_file",
+                                    java.util.Map.of(
+                                            "path", "test_dijkstra.py",
+                                            "content", "from dijkstra import shortest_path\n\n"
+                                                    + "def test_shortest_path():\n"
+                                                    + "    assert shortest_path() == 5\n"))))),
+                    16_384);
+            recorded.client().setToolSpecs(specs);
+            var ctx = Context.builder(new Config())
+                    .llm(recorded.client())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .nativeToolSpecs(specs)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            Files.writeString(workspace.resolve("problem.md"), "Implement Dijkstra and provide a pytest file.\n");
+            messages.add(ChatMessage.user("Create dijkstra.py and test_dijkstra.py according to problem.md."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(recorded.requests().size() >= 4,
+                    "initial call, post-read response, missing-mutation retry, and remaining-target continuation should all reach model");
+            String continuationPrompt = recorded.requests().get(3).messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(Files.isRegularFile(workspace.resolve("dijkstra.py")));
+            assertTrue(Files.isRegularFile(workspace.resolve("test_dijkstra.py")),
+                    "remaining expected target must be continued after partial missing-mutation retry\n"
+                            + "answer:\n" + out.text() + "\ncontinuation prompt:\n" + continuationPrompt);
+            assertFalse(out.text().contains("test_dijkstra.py: expected target was not successfully mutated"),
+                    out.text());
+            assertTrue(continuationPrompt.contains("test_dijkstra.py"), continuationPrompt);
+            assertTrue(continuationPrompt.contains("Remaining expected target"), continuationPrompt);
+            assertFalse(continuationPrompt.contains("dijkstra.py, test_dijkstra.py"),
+                    "continuation should focus on the remaining unsatisfied target only: " + continuationPrompt);
+        }
+
+        @Test
         void mutationRetryForFreshExplicitRequestDoesNotReissueOlderMutationRequest() {
             var processor = new dev.talos.runtime.TurnProcessor(null);
             var ctx = Context.builder(new Config())

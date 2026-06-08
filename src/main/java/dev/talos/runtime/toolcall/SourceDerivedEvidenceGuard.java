@@ -104,7 +104,7 @@ final class SourceDerivedEvidenceGuard {
         return out;
     }
 
-    private static List<String> missingSourceEvidenceTargets(LoopState state, TaskContract contract) {
+    static List<String> missingSourceEvidenceTargets(LoopState state, TaskContract contract) {
         if (state == null || contract == null || contract.sourceEvidenceTargets().isEmpty()) {
             return List.of();
         }

@@ -895,6 +895,37 @@ class SynchronizedApprovalAuditRunnerTest {
     }
 
     @Test
+    void synchronized_summary_scores_appendLineObligationRepairAsRuntimeRepairPass() {
+        SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
+                SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
+                        "append line repaired",
+                        """
+                                {
+                                  "traceStatus" : "PARTIAL",
+                                  "verificationStatus" : "PASSED",
+                                  "verificationSummary" : "Append line verification passed.",
+                                  "approvalCount" : 1,
+                                  "toolEventTypes" : [
+                                    "TOOL_CALL_PARSED",
+                                    "TOOL_EXECUTED",
+                                    "ACTION_OBLIGATION_EVALUATED",
+                                    "PENDING_ACTION_OBLIGATION_RAISED",
+                                    "APPROVAL_REQUIRED",
+                                    "APPROVAL_GRANTED",
+                                    "TOOL_EXECUTED",
+                                    "EXPECTATION_VERIFIED",
+                                    "VERIFICATION_COMPLETED"
+                                  ]
+                                }
+                                """);
+
+        assertEquals(
+                SynchronizedApprovalAuditMain.ScenarioScore.PASS_WITH_RUNTIME_REPAIR,
+                evaluation.score());
+        assertTrue(evaluation.reason().contains("runtime repair"), evaluation.reason());
+    }
+
+    @Test
     void synchronized_summary_keeps_partial_failed_verifier_as_review_required() {
         SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
                 SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
@@ -921,6 +952,24 @@ class SynchronizedApprovalAuditRunnerTest {
                                 {
                                   "traceStatus" : "PARTIAL",
                                   "verificationStatus" : "PASSED",
+                                  "toolEventTypes" : [ "TOOL_CALL_PARSED", "TOOL_EXECUTED", "VERIFICATION_COMPLETED" ]
+                                }
+                                """);
+
+        assertEquals(
+                SynchronizedApprovalAuditMain.ScenarioScore.FAIL_REVIEW_REQUIRED,
+                evaluation.score());
+    }
+
+    @Test
+    void synchronized_summary_keeps_generic_partial_readback_only_as_review_required() {
+        SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
+                SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
+                        "generic-readback-only",
+                        """
+                                {
+                                  "traceStatus" : "PARTIAL",
+                                  "verificationStatus" : "READBACK_ONLY",
                                   "toolEventTypes" : [ "TOOL_CALL_PARSED", "TOOL_EXECUTED", "VERIFICATION_COMPLETED" ]
                                 }
                                 """);
@@ -964,8 +1013,11 @@ class SynchronizedApprovalAuditRunnerTest {
                         "t325-python-command-boundary"));
 
         assertEquals(1, run.bundles().size());
-        assertTrue(Files.readString(run.summary()).contains("Scenarios: 1"));
-        assertTrue(Files.readString(run.summary()).contains("t325-python-command-boundary"));
+        String summary = Files.readString(run.summary());
+        assertTrue(summary.contains("Scenarios: 1"));
+        assertTrue(summary.contains("t325-python-command-boundary"));
+        assertTrue(summary.contains("PASS_WITH_READBACK_ONLY_LIMITATION"), summary);
+        assertTrue(summary.contains("readback-only"), summary);
         assertTrue(Files.isRegularFile(workspaces
                 .resolve("t325-python-command-boundary")
                 .resolve("dijkstra.py")));

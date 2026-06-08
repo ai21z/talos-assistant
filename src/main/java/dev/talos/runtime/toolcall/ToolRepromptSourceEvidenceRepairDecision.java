@@ -8,6 +8,18 @@ final class ToolRepromptSourceEvidenceRepairDecision {
     }
 
     static Optional<Boolean> tryHandle(LoopState state, String userTask) {
+        Optional<SourceEvidenceReadBeforeWriteRepairPlanner.Plan> readRepair =
+                SourceEvidenceReadBeforeWriteRepairPlanner.nextPlan(
+                        state,
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
+                        userTask);
+        if (readRepair.isPresent()) {
+            SourceEvidenceReadBeforeWriteRepairPlanner.Plan repair = readRepair.get();
+            state.sourceEvidenceReadRepairPromptedKeys.add(repair.key());
+            return Optional.of(ToolRepromptChatExecutor.execute(state, repair.messages(), repair.tools(), repair.controls(),
+                    "source-evidence read-before-write repair"));
+        }
+
         Optional<SourceEvidenceExactRepairPlanner.Plan> sourceEvidenceRepair =
                 SourceEvidenceExactRepairPlanner.nextPlan(
                         state,
