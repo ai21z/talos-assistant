@@ -27,22 +27,40 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
     @Override public String name() { return NAME; }
 
     @Override public String description() {
-        return "Apply a batch of workspace operations from an operations_json string.";
+        return "Apply a batch of workspace operations from a native operations array "
+                + "(preferred) or a legacy operations_json string.";
     }
 
     @Override
     public ToolDescriptor descriptor() {
+        // T744: the native `operations` array is the advertised (and grammar-
+        // constrained) shape; the double-encoded `operations_json` string is
+        // kept as an accepted legacy form for older transcripts and scripted
+        // harness fixtures. WorkspaceBatchPlanParser accepts both keys, and
+        // the T744 argument converters deliver array arguments losslessly as
+        // JSON strings.
         return new ToolDescriptor(NAME, description(),
                 """
                 {"type":"object","properties":{
-                  "operations_json":{"type":"string","description":"JSON array of operations, or object with operations array. Required keys by op: mkdir uses path; copy_path and move_path use from and to; rename_path uses path and new_name; delete_path uses path. Optional overwrite/recursive booleans are supported when applicable."}
-                },"required":["operations_json"]}""",
+                  "operations":{"type":"array","minItems":1,"description":"Workspace operations to apply in order. Required keys by op: mkdir uses path; copy_path and move_path use from and to; rename_path uses path and new_name; delete_path uses path. Optional overwrite/recursive booleans are supported when applicable.","items":{"type":"object","properties":{
+                    "op":{"type":"string","enum":["mkdir","copy_path","move_path","rename_path","delete_path"]},
+                    "path":{"type":"string"},
+                    "from":{"type":"string"},
+                    "to":{"type":"string"},
+                    "new_name":{"type":"string"},
+                    "overwrite":{"type":"boolean"},
+                    "recursive":{"type":"boolean"}
+                  },"required":["op"]}},
+                  "operations_json":{"type":"string","description":"Legacy form: the same operations array encoded as a JSON string."}
+                },"required":["operations"]}""",
                 ToolRiskLevel.WRITE,
                 ToolOperationMetadata.workspaceMutation(
                         NAME,
                         CapabilityKind.ORGANIZE,
                         ToolRiskLevel.WRITE,
-                        Map.of("operations_json", ToolOperationMetadata.PathRole.TARGET_PATH),
+                        Map.of(
+                                "operations", ToolOperationMetadata.PathRole.TARGET_PATH,
+                                "operations_json", ToolOperationMetadata.PathRole.TARGET_PATH),
                         true,
                         true,
                         "WORKSPACE_BATCH_APPLIED",

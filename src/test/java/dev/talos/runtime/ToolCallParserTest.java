@@ -36,6 +36,23 @@ class ToolCallParserTest {
     }
 
     @Test
+    void containerArgumentsArePreservedAsJson() {
+        // T744: asText("") returns "" for container nodes, which silently
+        // destroyed array-valued params like the batch tool's operations.
+        String response = """
+                <tool_call>
+                {"name": "talos.apply_workspace_batch", "parameters": {"operations": [{"op": "mkdir", "path": "docs/reports"}], "dry_run": false}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("[{\"op\":\"mkdir\",\"path\":\"docs/reports\"}]",
+                calls.get(0).param("operations"));
+        assertEquals("false", calls.get(0).param("dry_run"));
+    }
+
+    @Test
     void parseMultipleToolCalls() {
         String response = """
                 Let me search and then read.
