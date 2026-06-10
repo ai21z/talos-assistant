@@ -101,7 +101,8 @@ public final class CurrentTurnCapabilityFrame {
                     Do not emulate move, copy, rename, or mkdir by manually writing or editing file contents.
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
-                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.""");
+                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.
+                    operations_json example: [{"op":"copy_path","from":"a.md","to":"b.md"},{"op":"mkdir","path":"docs/reports"}]""");
             case CONDITIONAL_REVIEW_FIX -> frame.append("""
                     This is a conditional review-and-fix turn.
                     Inspect the relevant files first using read-only tools.
