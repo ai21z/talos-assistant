@@ -1,12 +1,15 @@
-name: Beta Dev CI
+name: Talos CI
 
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: [v0.9.0-beta-dev]
+    branches: [main, v0.9.0-beta-dev]
   push:
     branches:
+      - main
       - v0.9.0-beta-dev
+      - 'codex/**'
+      - 'feature/**'
 
 permissions:
   contents: read
