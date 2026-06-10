@@ -470,3 +470,15 @@ probe under isolated-home installed-product evidence.
 `proposal-only-does-not-mutate` is not in the live scenario filter list today
 (`SynchronizedApprovalAuditMain.liveScenarioFilters()`), so either add it to
 the focused live filters or add a dedicated retrieve probe scenario.
+
+## 2026-06-10 evidence-repair addendum
+
+A third Qwen full-bank live attempt failed closed again at
+`workspace-batch-apply-approved`
+(`local/manual-testing/current-0.10.1-qwen-syncbank-r3-20260610-210541/artifacts`):
+the model issued no `talos.apply_workspace_batch` call, so no approval prompt
+appeared. Two of three full-bank failures now concentrate on this scenario
+(run 1: malformed tool-call payload; run 3: no tool call), while the focused
+rerun passes. Classified model-owned full-bank instability; the focused-rerun
+bundle remains the only batch-tool PASS evidence for Qwen in this packet.
+Keep T312 open.

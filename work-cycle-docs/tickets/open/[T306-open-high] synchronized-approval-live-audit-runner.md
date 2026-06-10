@@ -606,3 +606,21 @@ Fresh synchronized live evidence:
 Keep T306 open. The runner remains strong and fail-closed, but fresh true
 PTY/JLine human evidence is still missing and the full Qwen live bank is not
 stable enough for a clean release close.
+
+## 2026-06-10 evidence-repair addendum
+
+A third Qwen full-bank live attempt failed closed again at
+`workspace-batch-apply-approved`
+(`local/manual-testing/current-0.10.1-qwen-syncbank-r3-20260610-210541/artifacts`);
+the runner's fail-closed behavior worked correctly a third time.
+
+Runner improvement candidate discovered: when a full bank aborts, the runner's
+own post-bank `ArtifactCanaryScanner` pass is bypassed (the exception
+propagates before the scan call), so failed-bank artifact roots are written
+but not scanned. The r3 root was scanned manually with
+`checkRuntimeArtifactCanaries` (PASS). Consider moving the scan into a
+finally-style path so aborted banks are always scanned.
+
+An owner checklist for the pending human PTY run now exists at
+`local/manual-testing/current-0.10.1-release-packet-20260610-090049/pty-qwen/OWNER-PTY-CHECKLIST.md`.
+Keep T306 open pending that human run, validation, and canary rescan.

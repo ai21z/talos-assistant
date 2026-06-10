@@ -248,3 +248,19 @@ Results:
 Keep T280 open. The current-candidate packet is real and strong, but the fresh
 PTY/JLine human lane is still incomplete and the Qwen full synchronized lane is
 not stable enough to support a beta-ready close.
+
+## 2026-06-10 evidence-repair addendum
+
+A third Qwen full-bank live attempt
+(`local/manual-testing/current-0.10.1-qwen-syncbank-r3-20260610-210541/artifacts`)
+failed closed again at `workspace-batch-apply-approved` after 30 completed
+scenarios (the model issued no workspace-batch tool call; manual canary scan
+over the r3 root passed). Final classification: full-bank live-model
+instability with fail-closed runtime behavior — model-owned, since GPT-OSS
+passes the same 31-scenario bank and the runtime failed closed correctly in
+all three attempts.
+
+Keep T280 open. Remaining blockers: the human PTY lane
+(`pty-qwen/OWNER-PTY-CHECKLIST.md` is ready), and a beta decision on whether
+the model-owned Qwen full-bank instability blocks beta or is recorded as a
+known model limitation with focused-rerun coverage.

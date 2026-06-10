@@ -336,3 +336,17 @@ Result:
 Keep T284 open. This is valid release evidence, but it is still an execution
 packet with unresolved PTY/manual and Qwen full-lane stability gaps, not a
 beta-ready close.
+
+## 2026-06-10 evidence-repair addendum
+
+Additional execution evidence:
+
+- third Qwen full-bank live attempt, failed closed at
+  `workspace-batch-apply-approved` after 30 completed scenarios:
+  `local/manual-testing/current-0.10.1-qwen-syncbank-r3-20260610-210541/artifacts`
+  (manual canary scan over the r3 root passed);
+- final classification recorded in the packet report: full-bank live-model
+  instability with fail-closed runtime behavior, model-owned.
+
+The packet report and provenance corrections were committed in `953bf4eb`.
+Keep T284 open pending the human PTY lane and the final beta decision.
