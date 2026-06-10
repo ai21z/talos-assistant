@@ -87,3 +87,14 @@ read-only.
 - Wave-1 tickets (T739-T753) all pass the strict rules.
 - Aging script output sane on the current queue.
 - CHANGELOG `## [Unreleased]` gains a T748 entry.
+
+## 2026-06-11 completion evidence
+
+- `TicketHygieneTest` landed with three rules: bracketed status-token vs
+  directory (repo-wide), ticket-ID uniqueness across open/+done/ (repo-wide),
+  strict filename vocabulary + body `Status:` line for IDs >= 739
+  (grandfather threshold; the 80+ legacy filename variants untouched).
+  Green against the full 716-file corpus.
+- `scripts/ticket-aging.ps1` landed; first run surfaced five high-priority
+  tickets 21 days stale (T274, T276, T281, T283, T286) — exactly the queue
+  signal the cycle lacked.

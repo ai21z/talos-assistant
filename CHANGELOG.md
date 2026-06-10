@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Changed
+- [T748] Added `TicketHygieneTest` (directory/status-token consistency and
+  ID uniqueness repo-wide; strict template rules ratcheted for tickets
+  T739+) and `scripts/ticket-aging.ps1` for open-queue age visibility.
 - [T747] Added `scripts/cut-candidate.ps1`: hermetic scripted candidate cut
   (clean-tree guard, bump, commit, build-from-committed-tree, launcher-vs-HEAD
   cross-check, mandatory post-bump check, summary regeneration with version
