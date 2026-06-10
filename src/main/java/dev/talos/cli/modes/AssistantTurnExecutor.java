@@ -1167,10 +1167,14 @@ public final class AssistantTurnExecutor {
         boolean supportsRequired = ctx != null
                 && ctx.llm() != null
                 && ctx.llm().supportsRequiredToolChoice();
+        boolean supportsNamed = ctx != null
+                && ctx.llm() != null
+                && ctx.llm().supportsNamedToolChoice();
         return ProviderRequestControlPolicy.forTurn(
                 plan,
                 requestToolSpecs == null ? List.of() : requestToolSpecs,
-                supportsRequired);
+                supportsRequired,
+                supportsNamed);
     }
 
     private static LlmClient.StreamResult chatFullExactWriteContextFallback(

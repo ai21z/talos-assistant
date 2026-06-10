@@ -14,6 +14,9 @@ import java.util.Set;
 /** Maps runtime-owned turn obligations to provider-neutral chat controls. */
 public final class ProviderRequestControlPolicy {
     private static final Set<String> MUTATING_TOOLS = Set.of("talos.write_file", "talos.edit_file");
+    private static final Set<String> WORKSPACE_TOOLS = Set.of(
+            "talos.apply_workspace_batch", "talos.mkdir", "talos.copy_path",
+            "talos.move_path", "talos.rename_path", "talos.delete_path");
     private static final Set<String> INSPECTION_TOOLS = Set.of(
             "talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
     private static final Set<String> COMMAND_TOOLS = Set.of("talos.run_command");
@@ -25,6 +28,15 @@ public final class ProviderRequestControlPolicy {
             List<ToolSpec> visibleTools,
             boolean requiredToolChoiceSupported
     ) {
+        return forTurn(plan, visibleTools, requiredToolChoiceSupported, false);
+    }
+
+    public static ChatRequestControls forTurn(
+            CurrentTurnPlan plan,
+            List<ToolSpec> visibleTools,
+            boolean requiredToolChoiceSupported,
+            boolean namedToolChoiceSupported
+    ) {
         if (!requiredToolChoiceSupported || plan == null || visibleTools == null || visibleTools.isEmpty()) {
             return ChatRequestControls.defaults();
         }
@@ -32,10 +44,12 @@ public final class ProviderRequestControlPolicy {
         ActionObligation action = plan.actionObligation();
         EvidenceObligation evidence = EvidenceObligationPolicy.parse(plan.evidenceObligation());
         boolean mutatingToolsVisible = hasAnyTool(visibleTools, MUTATING_TOOLS);
+        boolean workspaceToolsVisible = hasAnyTool(visibleTools, WORKSPACE_TOOLS);
         boolean inspectionToolsVisible = hasAnyTool(visibleTools, INSPECTION_TOOLS);
         boolean commandToolsVisible = hasAnyTool(visibleTools, COMMAND_TOOLS);
 
         boolean require = false;
+        String namedTool = "";
         List<String> tags = new ArrayList<>();
 
         if (explicitCommandRequest(plan) && commandToolsVisible) {
@@ -43,6 +57,21 @@ public final class ProviderRequestControlPolicy {
             tags.add("action-obligation:" + action.name());
             tags.add("evidence-obligation:" + evidence.name());
             tags.add("required-tool:talos.run_command");
+        } else if (action == ActionObligation.WORKSPACE_OPERATION_REQUIRED && workspaceToolsVisible) {
+            // Workspace operations were the one mutation family left at AUTO,
+            // letting qwen2.5-coder emit malformed payloads or skip the call
+            // entirely in three full-bank release runs (T739). REQUIRED engages
+            // the provider grammar from token zero; NAMED pins the exact tool
+            // when the surface exposes only one.
+            require = true;
+            tags.add("action-obligation:" + action.name());
+            if (namedToolChoiceSupported) {
+                List<String> visibleWorkspace = visibleToolNames(visibleTools, WORKSPACE_TOOLS);
+                if (visibleWorkspace.size() == 1) {
+                    namedTool = visibleWorkspace.get(0);
+                    tags.add("required-tool:" + namedTool);
+                }
+            }
         } else if (action == ActionObligation.CONDITIONAL_REVIEW_FIX
                 && (inspectionToolsVisible || mutatingToolsVisible)) {
             require = true;
@@ -64,8 +93,8 @@ public final class ProviderRequestControlPolicy {
 
         if (!require) return ChatRequestControls.defaults();
         return new ChatRequestControls(
-                ToolChoiceMode.REQUIRED,
-                "",
+                namedTool.isBlank() ? ToolChoiceMode.REQUIRED : ToolChoiceMode.NAMED,
+                namedTool,
                 ResponseFormatMode.TEXT,
                 "",
                 tags);
@@ -93,5 +122,14 @@ public final class ProviderRequestControlPolicy {
             if (names.contains(name)) return true;
         }
         return false;
+    }
+
+    private static List<String> visibleToolNames(List<ToolSpec> tools, Set<String> names) {
+        List<String> out = new ArrayList<>();
+        for (ToolSpec tool : tools) {
+            String name = tool == null ? "" : Objects.toString(tool.name(), "");
+            if (names.contains(name) && !out.contains(name)) out.add(name);
+        }
+        return out;
     }
 }

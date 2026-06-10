@@ -98,6 +98,99 @@ class ProviderRequestControlPolicyTest {
     }
 
     @Test
+    void workspaceObligationRequiresToolChoiceWhenWorkspaceToolsVisible() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Use talos.apply_workspace_batch to create directory docs/reports and copy source.md "
+                        + "to docs/reports/source-copy.md in one batch.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.apply_workspace_batch", "talos.mkdir"),
+                List.of("talos.apply_workspace_batch", "talos.mkdir"),
+                List.of());
+        assertEquals(ActionObligation.WORKSPACE_OPERATION_REQUIRED, plan.actionObligation());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.apply_workspace_batch"), tool("talos.mkdir")),
+                true,
+                true);
+
+        assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
+        assertEquals("", controls.namedTool());
+        assertEquals(List.of("action-obligation:WORKSPACE_OPERATION_REQUIRED"), controls.debugTags());
+    }
+
+    @Test
+    void workspaceObligationUsesNamedChoiceWhenSingleWorkspaceToolVisible() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Use talos.apply_workspace_batch to create directory docs/reports and copy source.md "
+                        + "to docs/reports/source-copy.md in one batch.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.apply_workspace_batch"),
+                List.of("talos.apply_workspace_batch"),
+                List.of());
+        assertEquals(ActionObligation.WORKSPACE_OPERATION_REQUIRED, plan.actionObligation());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.apply_workspace_batch")),
+                true,
+                true);
+
+        assertEquals(ToolChoiceMode.NAMED, controls.toolChoice());
+        assertEquals("talos.apply_workspace_batch", controls.namedTool());
+        assertEquals(List.of(
+                "action-obligation:WORKSPACE_OPERATION_REQUIRED",
+                "required-tool:talos.apply_workspace_batch"), controls.debugTags());
+    }
+
+    @Test
+    void workspaceObligationFallsBackToRequiredWithoutNamedSupport() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Use talos.apply_workspace_batch to create directory docs/reports and copy source.md "
+                        + "to docs/reports/source-copy.md in one batch.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.apply_workspace_batch"),
+                List.of("talos.apply_workspace_batch"),
+                List.of());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.apply_workspace_batch")),
+                true,
+                false);
+
+        assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
+        assertEquals("", controls.namedTool());
+    }
+
+    @Test
+    void workspaceObligationDoesNotForceToolsOnUnsupportedBackend() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Use talos.apply_workspace_batch to create directory docs/reports and copy source.md "
+                        + "to docs/reports/source-copy.md in one batch.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.apply_workspace_batch"),
+                List.of("talos.apply_workspace_batch"),
+                List.of());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.apply_workspace_batch")),
+                false,
+                true);
+
+        assertEquals(ToolChoiceMode.AUTO, controls.toolChoice());
+    }
+
+    @Test
     void directAnswerDoesNotForceTools() {
         var contract = TaskContractResolver.fromUserRequest("Hello, what can you do?");
         CurrentTurnPlan plan = CurrentTurnPlan.create(

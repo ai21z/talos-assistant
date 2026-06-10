@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- [T739] Wired `WORKSPACE_OPERATION_REQUIRED` turns to provider tool-choice
+  enforcement (`required`, or named single-tool pinning when the surface
+  exposes exactly one workspace tool), closing the constraint-coverage gap
+  behind the Qwen full-bank workspace-batch failures; added
+  `LlmClient.supportsNamedToolChoice()`.
+
 ## [0.10.1] - 2026-06-10
 
 ### Changed
