@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-06-10
+
+### Changed
+- [T735-done-high] Added a runtime-owned private-document denial notice so the
+  user-visible final answer deterministically says private document content was
+  withheld from model context instead of relying on model paraphrase.
+- [T736-done-high] Made the PTY manual-audit packet self-contained by running
+  Talos under a packet-local isolated home, generating a launcher script, and
+  requiring transcript evidence of both packet isolation and the ordinary `.env`
+  approval prompt.
+- [T737-done-high] Repaired approved private-document containment answers so an
+  approved handoff can answer narrow yes/no containment questions without
+  printing the protected value and without leaking redacted history wording into
+  the visible answer.
+- [T738-done-medium] Updated PTY validator trace acceptance so current
+  approval-count `/last trace` evidence can satisfy the private-document
+  approval-trace requirement without relaxing the denial-wording gate.
+- Reset candidate provenance for the next release packet: the PTY/manual,
+  synchronized-approval, and capability lanes will be rerun from a single clean
+  committed candidate instead of mixing evidence across dirty-tree builds.
+
 ## [0.10.0] - 2026-06-07
 
 ### Added
