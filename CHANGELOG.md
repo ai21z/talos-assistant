@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- [T744] Native tool-call arguments now survive the wire losslessly: container
+  values (arrays/objects) are preserved as JSON in both argument converters
+  (previously silently destroyed or rendered as Java toString), and
+  `talos.apply_workspace_batch` advertises a native `operations` array as its
+  grammar-constrained shape while still accepting the legacy double-encoded
+  `operations_json` string.
 - [T743] Escalating mutation repair ladder: malformed tool-protocol debris on
   mutation/workspace-obligation turns now gets one bounded MissingMutationRetry
   pass with escalated constraints (temperature pinned to zero) before the

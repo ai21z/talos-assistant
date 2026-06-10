@@ -12,6 +12,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ToolCallSupportTest {
 
     @Test
+    void convertNativeToolCallsSerializesContainerArgumentsAsJson() {
+        // T744: native arguments arrive as Maps/Lists from the transport;
+        // String.valueOf rendered them as Java toString, not JSON.
+        var operation = new java.util.LinkedHashMap<String, Object>();
+        operation.put("op", "mkdir");
+        operation.put("path", "docs");
+        var nativeCall = new dev.talos.spi.types.ChatMessage.NativeToolCall(
+                "id-1",
+                "talos.apply_workspace_batch",
+                Map.of("operations", java.util.List.of(operation)));
+
+        var calls = ToolCallSupport.convertNativeToolCalls(java.util.List.of(nativeCall));
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "[{\"op\":\"mkdir\",\"path\":\"docs\"}]",
+                calls.get(0).param("operations"));
+    }
+
+    @Test
+    void convertNativeToolCallsKeepsScalarArgumentsAsLegacyText() {
+        var nativeCall = new dev.talos.spi.types.ChatMessage.NativeToolCall(
+                "id-2",
+                "talos.read_file",
+                Map.of("path", "README.md", "max_lines", 50));
+
+        var calls = ToolCallSupport.convertNativeToolCalls(java.util.List.of(nativeCall));
+
+        org.junit.jupiter.api.Assertions.assertEquals("README.md", calls.get(0).param("path"));
+        org.junit.jupiter.api.Assertions.assertEquals("50", calls.get(0).param("max_lines"));
+    }
+
+    @Test
     void editFileWithMissingNewStringCountsAsEmptyArgumentFailure() {
         ToolCall call = new ToolCall("talos.edit_file", Map.of(
                 "path", "script.js",

@@ -421,12 +421,23 @@ public final class ToolCallParser {
                 var fields = paramsNode.fields();
                 while (fields.hasNext()) {
                     var entry = fields.next();
-                    params.put(entry.getKey(), entry.getValue().asText(""));
+                    params.put(entry.getKey(), jsonParamValue(entry.getValue()));
                 }
                 return params;
             }
         }
         return params;
+    }
+
+    /**
+     * Scalars keep their text form; container values (arrays/objects) keep
+     * their JSON form so string-typed tool params can carry structured
+     * content losslessly. Jackson's {@code asText("")} returns the empty
+     * string for containers, which silently destroyed array arguments (T744).
+     */
+    private static String jsonParamValue(JsonNode value) {
+        if (value == null || value.isNull()) return "";
+        return value.isContainerNode() ? value.toString() : value.asText("");
     }
 }
 

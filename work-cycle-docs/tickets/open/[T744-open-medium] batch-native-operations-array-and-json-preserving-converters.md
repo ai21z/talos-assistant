@@ -102,3 +102,23 @@ fixture remains on legacy form for back-compat proof
 - The converter change touches every native tool call; the generic round-trip
   tests and full unit lane are the guard. Land BEFORE the T746 banks so the
   bank exercises the shipping surface.
+
+## 2026-06-10 completion evidence
+
+- Implemented: `ToolCallParser.extractParams` preserves container nodes as
+  JSON (`jsonParamValue`; `asText("")` previously returned "" for arrays);
+  `ToolCallSupport.convertNativeToolCalls` serializes Map/List arguments via
+  Jackson (`String.valueOf` previously produced non-JSON `toString`);
+  `BatchWorkspaceApplyTool` descriptor now advertises a native `operations`
+  array (required, item schema with op enum) plus the legacy `operations_json`
+  string; `WorkspaceBatchPlanParser` already accepted the `operations` param
+  key, so execution needed no change.
+- Note: schema `required:["operations"]` constrains live grammar-enforced
+  model emissions only — tool execution validates via the parser, so legacy
+  scripted fixtures and old transcripts using `operations_json` keep working
+  (proven by the unchanged scripted bank tests).
+- Tests green: ToolCallParserTest +1 (container preservation),
+  ToolCallSupportTest +2 (container JSON, scalar legacy),
+  BatchWorkspaceApplyToolTest +2 (native array execution identical to legacy;
+  schema advertisement). Full `test` + `e2eTest` lanes BUILD SUCCESSFUL
+  (2m10s) — no converter fallout across the 4799-test suite.

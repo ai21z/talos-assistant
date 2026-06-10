@@ -86,6 +86,39 @@ class BatchWorkspaceApplyToolTest {
     }
 
     @Test
+    void appliesNativeOperationsArrayParamIdenticallyToLegacyString(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("source.txt"), "source");
+        var tool = new BatchWorkspaceApplyTool();
+
+        // T744: the converters deliver a native array argument as a JSON
+        // string under the `operations` key; execution must match the legacy
+        // operations_json path exactly.
+        ToolResult result = tool.execute(
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations", """
+                        [
+                          {"op":"mkdir","path":"docs/reports"},
+                          {"op":"copy_path","from":"source.txt","to":"docs/reports/source.txt"}
+                        ]
+                        """)),
+                context(workspace));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertTrue(Files.isDirectory(workspace.resolve("docs/reports")));
+        assertEquals("source", Files.readString(workspace.resolve("docs/reports/source.txt")));
+        assertTrue(result.output().contains("Applied batch workspace operation"), result.output());
+    }
+
+    @Test
+    void descriptorAdvertisesNativeOperationsArrayWithLegacyStringForm() {
+        String schema = new BatchWorkspaceApplyTool().descriptor().parametersSchema();
+
+        assertTrue(schema.contains("\"operations\":{\"type\":\"array\""), schema);
+        assertTrue(schema.contains("\"required\":[\"operations\"]"), schema);
+        assertTrue(schema.contains("\"operations_json\":{\"type\":\"string\""), schema);
+        assertTrue(schema.contains("\"required\":[\"op\"]"), schema);
+    }
+
+    @Test
     void deletePathBatchPlanIsDestructiveForApprovalAndCheckpointing() {
         var call = new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
                 [{"op":"delete_path","path":"docs/old-plan.md"}]

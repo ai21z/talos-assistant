@@ -61,12 +61,33 @@ public final class ToolCallSupport {
             Map<String, String> params = new LinkedHashMap<>();
             if (ntc.arguments() != null) {
                 for (var entry : ntc.arguments().entrySet()) {
-                    params.put(entry.getKey(), String.valueOf(entry.getValue()));
+                    params.put(entry.getKey(), jsonArgumentValue(entry.getValue()));
                 }
             }
             calls.add(new ToolCall(ntc.name(), params));
         }
         return calls;
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper NATIVE_ARGUMENT_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * Native tool-call arguments are deserialized to Maps/Lists by the
+     * transport; {@code String.valueOf} rendered them as Java {@code toString}
+     * ({@code [{op=mkdir, path=docs}]}) - not JSON - silently corrupting
+     * container-valued params. Containers are re-serialized as JSON; scalars
+     * keep the legacy text form (T744).
+     */
+    private static String jsonArgumentValue(Object value) {
+        if (value instanceof java.util.Map || value instanceof java.util.List) {
+            try {
+                return NATIVE_ARGUMENT_MAPPER.writeValueAsString(value);
+            } catch (Exception e) {
+                return String.valueOf(value);
+            }
+        }
+        return String.valueOf(value);
     }
 
     public static String formatToolResult(ToolCall call, ToolResult result) {
