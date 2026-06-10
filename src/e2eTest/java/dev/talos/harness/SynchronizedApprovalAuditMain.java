@@ -57,6 +57,7 @@ public final class SynchronizedApprovalAuditMain {
         List<String> filters = new ArrayList<>();
         filters.add("static-web-selector-script-only-verified");
         filters.add("t325-python-command-boundary");
+        filters.add("proposal-only-does-not-mutate");
         filters.addAll(WORKSPACE_OPERATION_SCENARIOS);
         filters.add("static-web-selector-script-only-malformed-fails");
         return List.copyOf(filters);
@@ -66,6 +67,9 @@ public final class SynchronizedApprovalAuditMain {
         List<String> filters = new ArrayList<>();
         filters.add("static-web-selector-script-only-verified");
         filters.add("t325-python-command-boundary");
+        // T745: focused retrieve probe - the only scenario exercising
+        // talos.retrieve; previously runnable only inside full banks.
+        filters.add("proposal-only-does-not-mutate");
         filters.addAll(WORKSPACE_OPERATION_SCENARIOS);
         return List.copyOf(filters);
     }
@@ -295,6 +299,8 @@ public final class SynchronizedApprovalAuditMain {
                     runStaticWebSelectorScriptOnlyVerified(artifactsRoot, workspacesRoot);
             case "t325-python-command-boundary" ->
                     runPythonCommandBoundaryExpectedFilesCreated(artifactsRoot, workspacesRoot);
+            case "proposal-only-does-not-mutate" ->
+                    runProposalOnlyDoesNotMutate(artifactsRoot, workspacesRoot);
             case "workspace-mkdir-approved" ->
                     runWorkspaceMkdirApproved(artifactsRoot, workspacesRoot);
             case "workspace-copy-path-approved" ->
@@ -324,6 +330,8 @@ public final class SynchronizedApprovalAuditMain {
                     runStaticWebSelectorScriptOnlyVerified(artifactsRoot, workspacesRoot, client);
             case "t325-python-command-boundary" ->
                     runPythonCommandBoundaryExpectedFilesCreated(artifactsRoot, workspacesRoot, client);
+            case "proposal-only-does-not-mutate" ->
+                    runProposalOnlyDoesNotMutate(artifactsRoot, workspacesRoot, client);
             case "workspace-mkdir-approved" ->
                     runWorkspaceMkdirApproved(artifactsRoot, workspacesRoot, client);
             case "workspace-copy-path-approved" ->
