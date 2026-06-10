@@ -157,6 +157,34 @@ scenario 31 `workspace-batch-apply-approved`):
   each time — this is not approval bypass, not false success, and not a
   privacy leak.
 
+2026-06-11 wave-1 stabilization addendum (branch
+`codex/wave1-stability-and-cycle`, commits `6d5d5533`..`01f95a0f`):
+
+The corrected classification is now proven by fix-plus-green-rerun. The
+evaluation-identified runtime gaps were closed (T739 workspace-obligation
+provider tool choice incl. NAMED single-tool pinning; T740 sampling governance
+with near-greedy obligation turns and `llm.sampling.seed`; T741 named repair
+re-prompts; T742 batch frame exemplar; T743 escalating repair ladder; T744
+native batch operations array + JSON-preserving argument converters), then
+both full banks were rerun with `seed=424242`:
+
+- Qwen full 31-scenario live bank **PASSED for the first time** (4th
+  attempt): `local/manual-testing/wave1-stabilization-qwen-20260611-005233/artifacts`
+  — artifact scan PASS; `workspace-batch-apply-approved` plain PASS; `t325`
+  PASS_WITH_READBACK_ONLY_LIMITATION; 5/31 scenarios required the bounded
+  T743 rescue (`SATISFIED_AFTER_RETRY`), honestly noted as load-bearing.
+- GPT-OSS full bank PASSED with zero rescues (no regression):
+  `local/manual-testing/wave1-stabilization-gptoss-20260611-005426/artifacts`.
+- Bank-position/KV hypothesis **falsified**: with a fixed seed the batch
+  scenario's provider body is byte-identical (SHA256 `215A0778E5AAB2FE…`)
+  across two focused runs (`wave1-t745-ab-a/b`) and the full bank, with
+  identical outcomes — the original variance was ungoverned sampling.
+- Clean focused `talos.retrieve` evidence now exists (T745):
+  `local/manual-testing/wave1-t745-retrieve-s7-20260611-004808/artifacts/proposal-only-does-not-mutate`
+  (PASS, scan PASS, `TOOL_EXECUTED talos.retrieve success=true`).
+- Evidence grade: stabilization (mid-wave tree). The release-grade rerun
+  follows from the committed `0.10.2` candidate at wave close.
+
 Original two-run classification (superseded by the final classification
 above):
 

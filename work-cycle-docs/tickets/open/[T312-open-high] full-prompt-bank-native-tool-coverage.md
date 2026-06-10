@@ -487,3 +487,15 @@ closed on that evidence), so the PTY half of this ticket is no longer
 outstanding. Keep T312 open for the two remaining items: clean
 `talos.retrieve` invocation evidence and a clean Qwen full synchronized bank
 (or its formal acceptance as a known model limitation in the beta decision).
+
+## 2026-06-11 wave-1 stabilization update
+
+Both remaining items now have stabilization-grade evidence:
+
+- Clean focused `talos.retrieve` invocation (PASS bundle, artifact scan PASS):
+  `local/manual-testing/wave1-t745-retrieve-s7-20260611-004808/artifacts/proposal-only-does-not-mutate`.
+- Clean Qwen full 31-scenario bank (first complete pass) plus zero-rescue
+  GPT-OSS bank; roots in the packet report addendum.
+
+T312 closes when the release-grade `0.10.2` packet reproduces this from a
+committed candidate (wave close).

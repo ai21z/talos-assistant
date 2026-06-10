@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T746] Wave-1 stabilization evidence: first-ever complete Qwen 31-scenario
+  synchronized live bank (artifact scan PASS) plus a zero-rescue GPT-OSS
+  bank, proving the T739-T744 constraint stack on both audited models; the
+  bank-position hypothesis was falsified via byte-identical seeded provider
+  bodies.
 - [T745] `proposal-only-does-not-mutate` is now runnable as a focused
   scripted/live synchronized-approval scenario (the only scenario exercising
   `talos.retrieve`), enabling clean focused retrieve evidence.
