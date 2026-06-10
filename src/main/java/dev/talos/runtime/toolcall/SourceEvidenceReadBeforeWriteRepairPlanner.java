@@ -6,6 +6,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
@@ -133,12 +134,17 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
                 || !hasReadTool(tools)) {
             return ChatRequestControls.defaults();
         }
+        // The gate names the required tool explicitly; pinning it via NAMED
+        // removes the wrong-tool substitution observed in the t325 bank
+        // failure (model answered "call talos.read_file" with grep, 4x).
+        boolean named = state.ctx.llm().supportsNamedToolChoice();
         return new ChatRequestControls(
-                ToolChoiceMode.REQUIRED,
-                "",
+                named ? ToolChoiceMode.NAMED : ToolChoiceMode.REQUIRED,
+                named ? "talos.read_file" : "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("source-evidence-read-before-write-repair"));
+                List.of("source-evidence-read-before-write-repair"),
+                SamplingControls.NEAR_GREEDY);
     }
 
     private static boolean hasReadTool(List<ToolSpec> tools) {

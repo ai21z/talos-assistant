@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Changed
+- [T741] Source-evidence repair re-prompts now pin the known required tool via
+  named tool choice (read-before-write repair pins `talos.read_file`,
+  post-read write repair pins `talos.write_file`) and run near-greedy,
+  eliminating the wrong-tool substitution observed in the t325 bank failure.
 - [T740] Added provider sampling governance: new `SamplingControls`
   (temperature/top_p/top_k/seed) on `ChatRequestControls`, near-greedy
   defaults on tool-obligation turns, optional `llm.sampling.*` config

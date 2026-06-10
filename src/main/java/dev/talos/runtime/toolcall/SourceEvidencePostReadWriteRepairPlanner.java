@@ -5,6 +5,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
@@ -165,12 +166,16 @@ final class SourceEvidencePostReadWriteRepairPlanner {
                 || !hasWriteTool(tools)) {
             return ChatRequestControls.defaults();
         }
+        // The repair frame narrows the surface to talos.write_file and names it
+        // explicitly; NAMED pins the call for 14B-class models (T741).
+        boolean named = state.ctx.llm().supportsNamedToolChoice();
         return new ChatRequestControls(
-                ToolChoiceMode.REQUIRED,
-                "",
+                named ? ToolChoiceMode.NAMED : ToolChoiceMode.REQUIRED,
+                named ? "talos.write_file" : "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("pending-action-obligation", "source-evidence-post-read-write-repair"));
+                List.of("pending-action-obligation", "source-evidence-post-read-write-repair"),
+                SamplingControls.NEAR_GREEDY);
     }
 
     private static boolean hasWriteTool(List<ToolSpec> tools) {

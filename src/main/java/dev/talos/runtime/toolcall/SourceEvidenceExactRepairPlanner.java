@@ -6,6 +6,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
@@ -179,12 +180,15 @@ final class SourceEvidenceExactRepairPlanner {
                 || !hasMutatingTool(tools)) {
             return ChatRequestControls.defaults();
         }
+        // Required tool is ambiguous here (write_file or edit_file), so the
+        // constraint stays REQUIRED; sampling still runs near-greedy (T741).
         return new ChatRequestControls(
                 ToolChoiceMode.REQUIRED,
                 "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("pending-action-obligation", "source-evidence-exact-compact-repair"));
+                List.of("pending-action-obligation", "source-evidence-exact-compact-repair"),
+                SamplingControls.NEAR_GREEDY);
     }
 
     private static String safeRepairReason(String reason) {
