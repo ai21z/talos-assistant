@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T751] Codified work-cycle doctrine: AGENTS.md candidate loop now orders
+  changelog-before-bump (matching `bump-patch.ps1`), records the dirty-tree
+  evidence-downgrade rule and the tooling-only SHA rule, and points at the
+  scripted cut; the operator prompt branch reference is packet-anchored; the
+  ticket template now requires per-ticket Unreleased CHANGELOG entries.
 - [T746] Wave-1 stabilization evidence: first-ever complete Qwen 31-scenario
   synchronized live bank (artifact scan PASS) plus a zero-rescue GPT-OSS
   bank, proving the T739-T744 constraint stack on both audited models; the

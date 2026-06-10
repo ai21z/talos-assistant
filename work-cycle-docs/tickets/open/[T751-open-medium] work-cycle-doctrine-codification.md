@@ -88,3 +88,15 @@ Refactor scope: bounded doc edits; no prompt-bank or fixture changes
 - The four edits landed; AGENTS.md no longer contradicts bump-patch.ps1.
 - T747's script steps map 1:1 to the corrected AGENTS.md sequence.
 - CHANGELOG `## [Unreleased]` gains a T751 entry.
+
+## 2026-06-11 completion evidence
+
+- AGENTS.md Versioned Candidate Loop reordered (Unreleased notes → bump →
+  commit → build-from-committed-tree), dirty-tree downgrade rule and
+  tooling-only SHA rule codified, scripted cut (`scripts/cut-candidate.ps1`)
+  referenced as the preferred sequence with the manual fallback kept.
+- `full-e2e-audit-operator-prompt.md` branch reference packet-anchored.
+- Ticket template Work-Test Cycle Notes now require a per-ticket
+  `## [Unreleased]` entry for behavior-changing tickets, citing
+  bump-patch.ps1's empty-section hard-fail.
+- Docs validation tests green (`dev.talos.docs.*`, `dev.talos.audit.*`).
