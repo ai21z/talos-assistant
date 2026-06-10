@@ -16,7 +16,7 @@ class SynchronizedCliPtyManualAuditValidatorTest {
         Path artifacts = tempDir.resolve("manual-testing");
         Path workspace = tempDir.resolve("manual-workspace");
         SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
-                Path.of("C:/talos/bin/talos.bat"),
+                fakeTalosCommand(tempDir),
                 null,
                 artifacts,
                 workspace));
@@ -35,7 +35,7 @@ class SynchronizedCliPtyManualAuditValidatorTest {
         Path artifacts = tempDir.resolve("manual-testing");
         Path workspace = tempDir.resolve("manual-workspace");
         SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
-                Path.of("C:/talos/bin/talos.bat"),
+                fakeTalosCommand(tempDir),
                 null,
                 artifacts,
                 workspace));
@@ -61,7 +61,7 @@ class SynchronizedCliPtyManualAuditValidatorTest {
         Path artifacts = tempDir.resolve("manual-testing");
         Path workspace = tempDir.resolve("manual-workspace");
         SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
-                Path.of("C:/talos/bin/talos.bat"),
+                fakeTalosCommand(tempDir),
                 null,
                 artifacts,
                 workspace));
@@ -94,7 +94,7 @@ class SynchronizedCliPtyManualAuditValidatorTest {
         Path artifacts = tempDir.resolve("manual-testing");
         Path workspace = tempDir.resolve("manual-workspace");
         SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
-                Path.of("C:/talos/bin/talos.bat"),
+                fakeTalosCommand(tempDir),
                 null,
                 artifacts,
                 workspace));
@@ -121,7 +121,7 @@ class SynchronizedCliPtyManualAuditValidatorTest {
         Path artifacts = tempDir.resolve("manual-testing");
         Path workspace = tempDir.resolve("manual-workspace");
         SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
-                Path.of("C:/talos/bin/talos.bat"),
+                fakeTalosCommand(tempDir),
                 null,
                 artifacts,
                 workspace));
@@ -142,6 +142,113 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                 result.findings().toString());
     }
 
+    @Test
+    void rejects_completed_transcript_without_ordinary_protected_read_approval_prompt(@TempDir Path tempDir)
+            throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                fakeTalosCommand(tempDir),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript().replace(
+                "Allow? [y=yes, a=yes for session, N=no] n",
+                "Protected content was not read because approval was denied."));
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertFalse(result.passed());
+        assertTrue(result.findings().stream()
+                .anyMatch(f -> f.contains("ordinary protected-read approval prompt")),
+                result.findings().toString());
+    }
+
+    @Test
+    void rejects_completed_transcript_without_packet_isolation_proof(@TempDir Path tempDir) throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                fakeTalosCommand(tempDir),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript()
+                .replace("Launcher script: RUN-PTY-MANUAL-AUDIT.ps1\n", "")
+                .replace("Packet isolated home: C:/tmp/isolated-home\n", ""));
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertFalse(result.passed());
+        assertTrue(result.findings().stream()
+                .anyMatch(f -> f.contains("packet isolation evidence")),
+                result.findings().toString());
+    }
+
+    @Test
+    void accepts_completed_transcript_with_current_private_document_approval_trace_shape(@TempDir Path tempDir)
+            throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                fakeTalosCommand(tempDir),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript()
+                .replace("trace: private document model handoff approved for this turn",
+                        "Approvals: required=1 granted=1 denied=0\n"
+                                + "Assistant Preview\n"
+                                + "  [private document answer redacted from history]\n"
+                                + "Outcome: COMPLETE (READ_ONLY_ANSWERED)"));
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertTrue(result.passed(), result.findings().toString());
+    }
+
+    @Test
+    void rejects_completed_transcript_with_private_document_approval_yes_but_no_trace_evidence(@TempDir Path tempDir)
+            throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                fakeTalosCommand(tempDir),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript()
+                .replace("trace: private document model handoff approved for this turn",
+                        "Outcome: COMPLETE (READ_ONLY_ANSWERED)"));
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertFalse(result.passed());
+        assertTrue(result.findings().stream()
+                        .anyMatch(f -> f.contains("private-document per-turn approval trace evidence")),
+                result.findings().toString());
+    }
+
     private static String completedTranscript() {
         return """
                 # Synchronized CLI PTY/JLine Manual Transcript
@@ -150,6 +257,8 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                 Model: gpt-oss:20b
                 Backend: managed llama.cpp
                 Talos command: C:/talos/bin/talos.bat
+                Launcher script: RUN-PTY-MANUAL-AUDIT.ps1
+                Packet isolated home: C:/tmp/isolated-home
                 Workspace: C:/tmp/workspace
                 Terminal application: Windows Terminal
                 Evidence owner: manual operator
@@ -228,5 +337,11 @@ class SynchronizedCliPtyManualAuditValidatorTest {
         return path.toAbsolutePath().normalize().toString()
                 .replace("\\", "\\\\")
                 .replace("\"", "\\\"");
+    }
+
+    private static Path fakeTalosCommand(Path tempDir) throws Exception {
+        Path talosCommand = tempDir.resolve("talos.bat");
+        Files.writeString(talosCommand, "@echo off\r\necho Talos test launcher\r\n");
+        return talosCommand;
     }
 }

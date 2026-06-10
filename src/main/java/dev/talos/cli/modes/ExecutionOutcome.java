@@ -284,7 +284,11 @@ record ExecutionOutcome(
                     EVIDENCE_CONTAINMENT_MARKERS);
         } else {
             ProtectedReadAnswerGuard.PostconditionResult protectedReadPostcondition =
-                    ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(current, loopResult, workspace);
+                    ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                            current,
+                            loopResult,
+                            workspace,
+                            messages);
             current = protectedReadPostcondition.answer();
             approvedProtectedReadPostcondition = protectedReadPostcondition.repaired();
             current = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
