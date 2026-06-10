@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Changed
+- [T745] `proposal-only-does-not-mutate` is now runnable as a focused
+  scripted/live synchronized-approval scenario (the only scenario exercising
+  `talos.retrieve`), enabling clean focused retrieve evidence.
 - [T744] Native tool-call arguments now survive the wire losslessly: container
   values (arrays/objects) are preserved as JSON in both argument converters
   (previously silently destroyed or rendered as Java toString), and

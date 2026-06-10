@@ -88,3 +88,37 @@ Refactor scope: harness filter list + switch cases + harness test
   artifact scan PASS — citable by T312 without caveat.
 - A/B verdict written with byte-comparison evidence.
 - CHANGELOG `## [Unreleased]` gains a T745 entry.
+
+## 2026-06-11 completion evidence
+
+- Wiring: `proposal-only-does-not-mutate` added to scripted + live focused
+  filters and both scenario switches; harness regression test green.
+- Clean retrieve evidence (T312 gap closed): focused live run with
+  `llm.sampling.seed=7` —
+  `local/manual-testing/wave1-t745-retrieve-s7-20260611-004808/artifacts/proposal-only-does-not-mutate`
+  — scenario scored PASS (COMPLETE), artifact scan PASS, trace shows the full
+  pipeline `TOOL_CALL_PARSED talos.retrieve` → `PERMISSION_DECISION ALLOW` →
+  `TOOL_EXECUTED success=true`. Honest note: a first probe with seed 424242
+  (`wave1-t745-retrieve-20260611-004623`) also PASSED but the model chose
+  `talos.grep` — retrieve-vs-grep is genuine model choice on this read-only
+  surface; both runs are recorded; the claim made is invocation-pipeline
+  correctness, not invocation rate.
+- Seeded A/B determinism (bank-position falsification, part 1):
+  two focused `workspace-batch-apply-approved` runs with `seed=424242`
+  (`wave1-t745-ab-a`, `wave1-t745-ab-b`) — provider bodies **byte-identical**
+  (SHA256 `215A0778E5AAB2FE…` both) and outcomes identical (both PASS).
+  Per-request determinism with a fixed seed is proven; combined with the r1
+  byte-identical-input/divergent-output finding under a random seed, the
+  bank-position/KV-contamination hypothesis is CLOSED — the variance was
+  sampling. Part 2 (same scenario at the end of a full seeded bank) lands
+  with the T746 bank run (compare the bank's batch provider-body hash).
+- Wave-1 stack observed live on the 3×-failed scenario: provider body now
+  carries `tool_choice {type:function, name:talos.apply_workspace_batch}`
+  (T739 NAMED), `top_p 0.8 / top_k 20 / seed 424242` (T740), and the run
+  PASSED via the T743 ladder: trace `UNSATISFIED` (first attempt, temp 0.2,
+  no tool call) → escalated retry (temp 0.0) → `SATISFIED_AFTER_RETRY` →
+  approval granted → applied.
+- **Follow-up question for T746**: the first attempt carried NAMED tool
+  choice yet produced no parsed tool call — investigate at bank scale
+  (grammar/template interaction vs transport argument recovery) using the
+  bank's per-scenario retry-rate data.
