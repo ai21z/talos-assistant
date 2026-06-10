@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
@@ -203,6 +204,26 @@ class ProviderRequestControlPolicyTest {
         var controls = ProviderRequestControlPolicy.forTurn(plan, List.of(), true);
 
         assertEquals(ToolChoiceMode.AUTO, controls.toolChoice());
+    }
+
+    @Test
+    void obligationTurnsCarryNearGreedySamplingAndDirectAnswersDoNot() {
+        var mutating = TaskContractResolver.fromUserRequest("Create scripts.js with a click handler.");
+        CurrentTurnPlan mutatingPlan = CurrentTurnPlan.create(
+                mutating,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+        var obligationControls = ProviderRequestControlPolicy.forTurn(
+                mutatingPlan, List.of(tool("talos.write_file")), true);
+        assertEquals(SamplingControls.NEAR_GREEDY, obligationControls.sampling());
+
+        var smallTalk = TaskContractResolver.fromUserRequest("Hello, what can you do?");
+        CurrentTurnPlan directPlan = CurrentTurnPlan.create(
+                smallTalk, ExecutionPhase.INSPECT, List.of(), List.of(), List.of());
+        var directControls = ProviderRequestControlPolicy.forTurn(directPlan, List.of(), true);
+        assertEquals(SamplingControls.none(), directControls.sampling());
     }
 
     @Test

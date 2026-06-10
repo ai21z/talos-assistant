@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T740] Added provider sampling governance: new `SamplingControls`
+  (temperature/top_p/top_k/seed) on `ChatRequestControls`, near-greedy
+  defaults on tool-obligation turns, optional `llm.sampling.*` config
+  overrides (incl. fixed seed for reproducible audit banks), emitted on the
+  llama.cpp wire and rendered in prompt-debug.
 - [T739] Wired `WORKSPACE_OPERATION_REQUIRED` turns to provider tool-choice
   enforcement (`required`, or named single-tool pinning when the surface
   exposes exactly one workspace tool), closing the constraint-coverage gap

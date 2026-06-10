@@ -12,6 +12,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -131,6 +132,9 @@ public final class LlmClient implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicInteger scriptedCursor =
             new java.util.concurrent.atomic.AtomicInteger(0);
 
+    /** Config-level sampling overrides from llm.sampling (T740); unset fields leave server defaults. */
+    private final SamplingControls configSampling;
+
     public LlmClient(Config cfg) {
         this(cfg, null);
     }
@@ -144,6 +148,7 @@ public final class LlmClient implements AutoCloseable {
         Map<String, Object> llmBlock = CfgUtil.map(this.cfg.data.get("llm"));
         String transport = String.valueOf(llmBlock.getOrDefault("transport", "placeholder"));
         this.mode = "engine".equalsIgnoreCase(transport) ? TransportMode.ENGINE : TransportMode.PLACEHOLDER;
+        this.configSampling = parseConfigSampling(CfgUtil.map(llmBlock.get("sampling")));
 
         // ---- defaults compatible with existing tests ----
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(this.cfg);
@@ -500,7 +505,7 @@ public final class LlmClient implements AutoCloseable {
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
             ChatRequest req = new ChatRequest(
                     backend, model, sys, usr, sn, timeout, List.of(), toolSpecs,
-                    promptDebugControlsForPlainCall(sys));
+                    withConfigSampling(promptDebugControlsForPlainCall(sys)));
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, onChunk != null));
             return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
         });
@@ -851,7 +856,7 @@ public final class LlmClient implements AutoCloseable {
                         m.toolCallId()))
                 .toList();
         List<ToolSpec> tools = effectiveToolSpecs(requestToolSpecs);
-        ChatRequestControls requestControls = controls == null ? ChatRequestControls.defaults() : controls;
+        ChatRequestControls requestControls = withConfigSampling(controls);
         List<ChatMessage> requestMessages = fitMessagesToContextBudget(sanitized, tools, requestControls);
         if (requestMessages.size() < sanitized.size()) {
             requestControls = withDebugTag(requestControls, "context-budget-trimmed");
@@ -958,7 +963,49 @@ public final class LlmClient implements AutoCloseable {
                 safe.namedTool(),
                 safe.responseFormat(),
                 safe.jsonSchema(),
-                tags);
+                tags,
+                safe.sampling());
+    }
+
+    /** Layers llm.sampling config values under turn-level sampling decisions (set fields win). */
+    private ChatRequestControls withConfigSampling(ChatRequestControls controls) {
+        ChatRequestControls safe = controls == null ? ChatRequestControls.defaults() : controls;
+        if (configSampling == null || !configSampling.anySet()) return safe;
+        SamplingControls merged = safe.sampling().mergedWithFallback(configSampling);
+        if (merged.equals(safe.sampling())) return safe;
+        return safe.withSampling(merged);
+    }
+
+    private static SamplingControls parseConfigSampling(Map<String, Object> sampling) {
+        if (sampling == null || sampling.isEmpty()) return SamplingControls.none();
+        return new SamplingControls(
+                asDoubleOrNull(sampling.get("temperature")),
+                asDoubleOrNull(sampling.get("top_p")),
+                asIntOrNull(sampling.get("top_k")),
+                asLongOrNull(sampling.get("seed")));
+    }
+
+    private static Double asDoubleOrNull(Object v) {
+        if (v instanceof Number n) return n.doubleValue();
+        if (v == null) return null;
+        try { return Double.parseDouble(String.valueOf(v)); } catch (Exception e) { return null; }
+    }
+
+    private static Integer asIntOrNull(Object v) {
+        if (v instanceof Number n) return n.intValue();
+        if (v == null) return null;
+        try { return Integer.parseInt(String.valueOf(v)); } catch (Exception e) { return null; }
+    }
+
+    private static Long asLongOrNull(Object v) {
+        if (v instanceof Number n) return n.longValue();
+        if (v == null) return null;
+        try { return Long.parseLong(String.valueOf(v)); } catch (Exception e) { return null; }
+    }
+
+    /** Test seam: the parsed llm.sampling config overrides. */
+    SamplingControls configSampling() {
+        return configSampling;
     }
 
     private List<ChatMessage> fitMessagesToContextBudget(List<ChatMessage> messages,

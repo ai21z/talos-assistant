@@ -15,7 +15,8 @@ public record ChatRequestControls(
         String namedTool,
         ResponseFormatMode responseFormat,
         String jsonSchema,
-        List<String> debugTags
+        List<String> debugTags,
+        SamplingControls sampling
 ) {
     private static final ChatRequestControls DEFAULTS = new ChatRequestControls(
             ToolChoiceMode.AUTO,
@@ -30,10 +31,27 @@ public record ChatRequestControls(
         responseFormat = responseFormat == null ? ResponseFormatMode.TEXT : responseFormat;
         jsonSchema = Objects.requireNonNullElse(jsonSchema, "");
         debugTags = normalizeDebugTags(debugTags);
+        sampling = sampling == null ? SamplingControls.none() : sampling;
 
         if (toolChoice == ToolChoiceMode.NAMED && namedTool.isBlank()) {
             throw new IllegalArgumentException("namedTool is required when toolChoice is NAMED");
         }
+    }
+
+    /** Convenience constructor preserving the pre-T740 five-argument shape (sampling unset). */
+    public ChatRequestControls(
+            ToolChoiceMode toolChoice,
+            String namedTool,
+            ResponseFormatMode responseFormat,
+            String jsonSchema,
+            List<String> debugTags
+    ) {
+        this(toolChoice, namedTool, responseFormat, jsonSchema, debugTags, null);
+    }
+
+    public ChatRequestControls withSampling(SamplingControls newSampling) {
+        return new ChatRequestControls(
+                toolChoice, namedTool, responseFormat, jsonSchema, debugTags, newSampling);
     }
 
     public static ChatRequestControls defaults() {
