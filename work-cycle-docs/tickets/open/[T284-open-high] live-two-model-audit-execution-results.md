@@ -1,6 +1,6 @@
 # T284 - Live Two-Model Audit Execution Results
 
-Status: still-open - full two-model prompt-bank execution results are still missing for the current stabilized head
+Status: still-open - current 0.10.1 execution packet exists, but it is not yet a clean beta pass
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -300,3 +300,39 @@ their prompt-debug/provider-body evidence. It confirms:
 Keep T284 open. The WS5 review strengthens the result packet, but final closure
 still requires the remaining current-candidate PTY/full-native-tool release
 evidence to be reconciled in one final packet.
+
+## 2026-06-10 current 0.10.1 execution packet
+
+Current execution packet:
+
+- `work-cycle-docs/reports/current-0.10.1-release-packet-20260610-090049-results.md`
+
+Authoritative lane roots:
+
+- safe redirected GPT-OSS:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/gptoss/talosbench/20260610-090530`
+- safe redirected Qwen:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/qwen/talosbench/20260610-090842`
+- synchronized approval GPT-OSS:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/gptoss/sync-approval`
+- synchronized approval Qwen failures:
+  `.../artifacts/qwen/sync-approval` and `.../artifacts/qwen/sync-approval-r2`
+- focused Qwen blocker reruns:
+  `.../artifacts/qwen/t325-python-command-boundary` and
+  `.../artifacts/qwen/workspace-batch-apply-approved`
+- capability/private-mode:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049-capability`
+
+Result:
+
+- current `0.10.1` packet exists and is lane-labeled;
+- GPT-OSS is green across the safe lane, full synchronized lane, and capability
+  lane;
+- Qwen is green on the safe lane, focused `t325`, focused workspace-op live
+  filters, and the capability lane, but not yet on the full synchronized live
+  bank;
+- the PTY lane is still `MANUAL_REQUIRED`.
+
+Keep T284 open. This is valid release evidence, but it is still an execution
+packet with unresolved PTY/manual and Qwen full-lane stability gaps, not a
+beta-ready close.

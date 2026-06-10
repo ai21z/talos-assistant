@@ -1,6 +1,6 @@
 # T280 - Two-Model Live Audit Before Beta
 
-Status: still-open - full two-model live prompt-bank audit remains unrun for the current stabilized head
+Status: still-open - current 0.10.1 two-model packet exists, but PTY completion and Qwen full-lane stability still block beta close
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -216,3 +216,35 @@ Result:
 Keep T280 open. This removes much of the prior "heuristic only" uncertainty for
 the post-T734 capability packet, but it still does not provide true PTY/JLine
 coverage or a final clean beta decision packet for the current dirty branch.
+
+## 2026-06-10 current 0.10.1 packet update
+
+Current candidate evidence now exists for commit
+`016467943b4bd0819708a070a229b18d766f182a`, `talosVersion=0.10.1`.
+
+Evidence roots:
+
+- main packet:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049`
+- capability packet:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049-capability`
+- summary report:
+  `work-cycle-docs/reports/current-0.10.1-release-packet-20260610-090049-results.md`
+
+Results:
+
+- safe redirected TalosBench lanes passed the non-approval cases for GPT-OSS
+  and Qwen with `Piped approval inputs allowed: False`; approval-sensitive cases
+  remained `MANUAL_REQUIRED`;
+- GPT-OSS full synchronized approval live lane passed with 31 scenarios and
+  artifact scan PASS;
+- Qwen full synchronized approval live lane failed closed twice on different
+  scenarios (`workspace-batch-apply-approved`, then
+  `t325-python-command-boundary`), while focused reruns of those scenarios
+  passed individually;
+- capability/private-mode bank passed 44 turns across both models;
+- release-clean canary scan over the model-facing packet roots passed.
+
+Keep T280 open. The current-candidate packet is real and strong, but the fresh
+PTY/JLine human lane is still incomplete and the Qwen full synchronized lane is
+not stable enough to support a beta-ready close.

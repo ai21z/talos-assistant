@@ -1,6 +1,6 @@
 # [T312-open-high] Full Prompt-Bank Native Tool Coverage
 
-Status: implemented-awaiting-evidence - native-tool prompt-bank coverage added; current stabilized head still needs full prompt-bank/candidate evidence
+Status: implemented-awaiting-evidence - current 0.10.1 packet has explicit 13-tool evidence roots, but the full Qwen lane is still unstable
 Severity: high
 Release gate: private-document beta / full E2E release evidence
 Branch: v0.9.0-beta-dev
@@ -429,3 +429,44 @@ The prepared current-head packet and fixture workspace passed
 `checkRuntimeArtifactCanaries` with the generated allowlist.
 
 This does not close the PTY half of T312.
+
+## 2026-06-10 current 0.10.1 native-tool reconciliation
+
+Current packet:
+
+- `work-cycle-docs/reports/current-0.10.1-release-packet-20260610-090049-results.md`
+
+Current 13-tool evidence roots:
+
+- `talos.list_dir` -> `.../artifacts/qwen/talosbench/20260610-090842/simple-folder-listing`
+- `talos.read_file` -> `.../artifacts/gptoss/sync-approval/protected-read-denied`
+- `talos.grep` -> `...-capability/artifacts-gptoss/03-env-secret-search`
+- `talos.retrieve` -> `.../artifacts/qwen/sync-approval/proposal-only-does-not-mutate`
+  (invocation evidenced inside the failed first Qwen full bank; the capability
+  root `artifacts-gptoss/12-retrieve-public` answered with `talos.read_file`,
+  not retrieve - no clean-bank retrieve evidence exists yet)
+- `talos.write_file` -> `.../artifacts/qwen/t325-python-command-boundary/t325-python-command-boundary`
+- `talos.edit_file` -> `.../artifacts/gptoss/sync-approval/static-web-selector-script-only-verified`
+- `talos.mkdir` -> `.../artifacts/qwen/workspace-mkdir-approved`
+- `talos.copy_path` -> `.../artifacts/qwen/workspace-copy-path-approved`
+- `talos.move_path` -> `.../artifacts/qwen/workspace-move-path-approved`
+- `talos.rename_path` -> `.../artifacts/qwen/workspace-rename-path-approved`
+- `talos.delete_path` -> `.../artifacts/qwen/workspace-delete-path-approved`
+- `talos.apply_workspace_batch` -> `.../artifacts/qwen/workspace-batch-apply-approved`
+- `talos.run_command` -> `.../artifacts/qwen/talosbench/20260610-090842/full-audit-run-command-profile-boundary`
+
+Fresh live workspace-op evidence:
+
+- GPT-OSS 6/6 PASS under focused live filters;
+- Qwen 6/6 PASS under focused live filters.
+
+Keep T312 open. The current packet has explicit evidence roots for all 13
+tools, but the `talos.retrieve` root is invocation-only evidence inside a
+failed full bank (not clean 13/13 coverage), the Qwen full synchronized live
+bank remains unstable, and the PTY manual lane is still incomplete.
+
+Bounded follow-up for the next packet: run one focused read-only retrieve
+probe under isolated-home installed-product evidence.
+`proposal-only-does-not-mutate` is not in the live scenario filter list today
+(`SynchronizedApprovalAuditMain.liveScenarioFilters()`), so either add it to
+the focused live filters or add a dedicated retrieve probe scenario.

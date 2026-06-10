@@ -1,6 +1,6 @@
 # T306 - Synchronized Approval Live Audit Runner
 
-Status: implemented-awaiting-evidence - synchronized approval runner works; broader full prompt-bank integration remains open
+Status: implemented-awaiting-evidence - current 0.10.1 runner evidence is strong, but fresh human PTY evidence is still missing
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -576,3 +576,33 @@ Evidence:
 
 This packet does not close T306. It proves the current-candidate manual packet
 is ready and fail-closed, not that true PTY/JLine coverage has been observed.
+
+## 2026-06-10 current 0.10.1 runner evidence
+
+Fresh current-candidate PTY/manual packet:
+
+- artifacts:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/pty-qwen/artifacts`
+- workspace:
+  `local/manual-workspaces/current-0.10.1-release-packet-20260610-090049/pty-qwen/workspace`
+
+Results:
+
+- `prepareSynchronizedApprovalPtyManualAudit` passed;
+- `validateSynchronizedApprovalPtyManualAudit` failed closed exactly as
+  intended because `PTY-MANUAL-AUDIT-RESULT.json` is still absent;
+- prepared-packet canary scan passed with the generated `.env` allowlist.
+
+Fresh synchronized live evidence:
+
+- GPT-OSS full live bank passed with 31 scenarios and artifact scan PASS:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/gptoss/sync-approval`
+- Qwen full live bank failed closed twice on different scenarios:
+  `workspace-batch-apply-approved` and `t325-python-command-boundary`;
+- focused Qwen reruns for those two scenarios both passed:
+  `.../artifacts/qwen/workspace-batch-apply-approved` and
+  `.../artifacts/qwen/t325-python-command-boundary`.
+
+Keep T306 open. The runner remains strong and fail-closed, but fresh true
+PTY/JLine human evidence is still missing and the full Qwen live bank is not
+stable enough for a clean release close.
