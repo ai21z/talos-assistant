@@ -59,6 +59,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -598,6 +599,40 @@ public final class AssistantTurnExecutor {
     ) {
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
                 || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
+            // T743: on mutation/workspace-obligation turns, malformed protocol
+            // debris gets one bounded MissingMutationRetry pass (escalated
+            // constraints) before the no-action notice. The r1 bank failure
+            // showed the model that ATTEMPTED a tool call got zero retries.
+            // If the retry does not produce a successful mutation, the
+            // original fail-fast shaping (no-action notice) is preserved.
+            CurrentTurnPlan debrisPlan = safePlanFromMessages(plan, messages, ctx);
+            boolean retryableObligation = debrisPlan != null
+                    && debrisPlan.taskContract() != null
+                    && debrisPlan.taskContract().mutationAllowed()
+                    && ResponseObligationVerifier.unsatisfiedNoToolResponse(
+                            debrisPlan.actionObligation(), answer);
+            if (retryableObligation) {
+                ToolCallLoop.LoopResult debrisLoop = emptyNoToolLoopResult(answer, messages);
+                MissingMutationRetry.Result debrisRetry = mutationRequestRetryIfNeeded(
+                        answer, messages, plan, debrisLoop, workspace, ctx);
+                boolean retryMutated = debrisRetry.mutationsInRetry() > 0
+                        || (debrisRetry.retryLoopResult() != null
+                                && debrisRetry.retryLoopResult().mutatingToolSuccesses() > 0);
+                if (retryMutated) {
+                    ToolCallLoop.LoopResult verificationLoop = debrisRetry.retryLoopResult() == null
+                            ? debrisLoop
+                            : debrisRetry.retryLoopResult();
+                    int extraMutationSuccesses = debrisRetry.retryLoopResult() == null
+                            ? debrisRetry.mutationsInRetry()
+                            : 0;
+                    moveToVerifyAfterSuccessfulMutation(ctx, verificationLoop, extraMutationSuccesses);
+                    return new ToolLoopAnswerResolution(
+                            shapeAnswerAfterToolLoop(
+                                    debrisRetry.answer(), messages, plan, verificationLoop, workspace,
+                                    extraMutationSuccesses, debrisRetry.actionObligationFailed(), opts),
+                            debrisRetry.extraSummary());
+                }
+            }
             return new ToolLoopAnswerResolution(
                     shapeAnswerWithoutTools(answer, messages, plan, ctx, false, opts),
                     null);
@@ -3057,7 +3092,25 @@ public final class AssistantTurnExecutor {
                 workspace,
                 ctx,
                 (retryMessages, retryPlan, retryToolSpecs) ->
-                        chatFull(ctx, retryMessages, retryPlan, retryToolSpecs));
+                        chatFullEscalatedRetry(ctx, retryMessages, retryPlan, retryToolSpecs));
+    }
+
+    /**
+     * T743: retries escalate instead of re-rolling - the obligation constraint
+     * envelope (tool choice) stays, and temperature is pinned to zero so an
+     * identical re-ask cannot diverge by sampling alone.
+     */
+    private static LlmClient.StreamResult chatFullEscalatedRetry(
+            Context ctx,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            List<ToolSpec> requestToolSpecs
+    ) {
+        ChatRequestControls controls = chatControlsForTurn(
+                ctx, plan, requestToolSpecsForControls(ctx, requestToolSpecs));
+        SamplingControls escalated = new SamplingControls(0.0, null, null, null)
+                .mergedWithFallback(controls.sampling());
+        return ctx.llm().chatFull(messages, requestToolSpecs, controls.withSampling(escalated));
     }
 
     static ChatMessage compactStaticVerificationRepairInstructionForRetry(ChatMessage message) {

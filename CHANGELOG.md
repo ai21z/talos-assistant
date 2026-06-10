@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- [T743] Escalating mutation repair ladder: malformed tool-protocol debris on
+  mutation/workspace-obligation turns now gets one bounded MissingMutationRetry
+  pass with escalated constraints (temperature pinned to zero) before the
+  no-action notice; genuinely invalid mutating parameters get one corrected
+  retry with the tool error echoed. Pre-approval policy rejections (sandbox
+  escape, source-evidence blocks) keep fail-fast behavior.
 - [T742] The workspace-operation capability frame now includes a literal
   `operations_json` example so 14B-class models see the exact wire format for
   batch operations instead of prose-only key descriptions.
