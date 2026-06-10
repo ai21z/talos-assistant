@@ -24,6 +24,7 @@ import java.util.Objects;
 public final class SynchronizedCliPtyManualAuditValidator {
     static final String RESULT_FILE = "PTY-MANUAL-AUDIT-RESULT.json";
     static final String SUMMARY_FILE = "PTY-MANUAL-AUDIT-VALIDATION.md";
+    static final String STATUS_FILE = "PTY-MANUAL-AUDIT-STATUS.json";
     private static final String RAW_CANARY = "FILE_DISCOVERED_CANARY_PTY_MANUAL";
     private static final String RAW_PRIVATE_DOCUMENT_FACT = "Eleni Nikolaou";
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -94,6 +95,8 @@ public final class SynchronizedCliPtyManualAuditValidator {
         Path resultPath = args.artifactsRoot().resolve(RESULT_FILE);
         Path transcriptPath = null;
         Map<String, Object> result = Map.of();
+        String launcherScriptBasename = "RUN-PTY-MANUAL-AUDIT.ps1";
+        String isolatedHomeMarker = "isolated-home";
 
         if (!Files.isRegularFile(resultPath)) {
             findings.add(RESULT_FILE + " is required; prepared packets are not completed PTY/JLine evidence.");
@@ -103,6 +106,24 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 });
             } catch (Exception e) {
                 findings.add(RESULT_FILE + " is not valid JSON: " + e.getMessage());
+            }
+        }
+        Path statusPath = args.artifactsRoot().resolve(STATUS_FILE);
+        if (Files.isRegularFile(statusPath)) {
+            try {
+                Map<String, Object> status = JSON.readValue(Files.readString(statusPath, StandardCharsets.UTF_8),
+                        new TypeReference<>() {
+                        });
+                String launcherScript = Objects.toString(status.get("launcherScript"), "").strip();
+                if (!launcherScript.isBlank()) {
+                    launcherScriptBasename = Path.of(launcherScript).getFileName().toString();
+                }
+                String isolatedHome = Objects.toString(status.get("isolatedHome"), "").strip();
+                if (!isolatedHome.isBlank()) {
+                    isolatedHomeMarker = isolatedHome;
+                }
+            } catch (Exception e) {
+                findings.add(STATUS_FILE + " is not valid JSON: " + e.getMessage());
             }
         }
 
@@ -147,7 +168,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
         }
 
         if (transcriptPath != null) {
-            validateTranscript(transcriptPath, findings);
+            validateTranscript(transcriptPath, launcherScriptBasename, isolatedHomeMarker, findings);
         }
 
         return new ValidationResult(args.artifactsRoot(), args.workspace(), resultPath, transcriptPath,
@@ -197,7 +218,8 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 """.formatted(json(workspace), json(transcript));
     }
 
-    private static void validateTranscript(Path transcriptPath, List<String> findings) throws IOException {
+    private static void validateTranscript(Path transcriptPath, String launcherScriptBasename,
+                                           String isolatedHomeMarker, List<String> findings) throws IOException {
         if (!Files.isRegularFile(transcriptPath)) {
             findings.add("completed transcript is missing: " + transcriptPath);
             return;
@@ -221,8 +243,16 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 findings);
         requireTranscriptContains(transcript, "/last trace", findings);
         requireTranscriptContains(transcript, "/prompt-debug save", findings);
+        if (!transcript.contains("Allow? [y=yes, a=yes for session, N=no]")) {
+            findings.add("completed transcript must show the ordinary protected-read approval prompt");
+        }
         if (!lower.contains("allow?") && !lower.contains("approval")) {
             findings.add("completed transcript must show the approval prompt/window");
+        }
+        if (!transcript.contains(launcherScriptBasename)
+                && !transcript.contains(isolatedHomeMarker)
+                && !transcript.contains("-Duser.home=")) {
+            findings.add("completed transcript must show packet isolation evidence via launcher script, isolated home, or -Duser.home marker");
         }
         if (!lower.contains("no protected file content was shown")
                 && !lower.contains("approval was denied")
@@ -237,10 +267,20 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 && !lower.contains("withheld from model context")) {
             findings.add("completed transcript must show private-document denial withheld the content");
         }
-        if (!lower.contains("approved for this turn")
-                && !lower.contains("private document model handoff approved")) {
+        if (!hasPrivateDocumentApprovalTraceEvidence(lower)) {
             findings.add("completed transcript must show private-document per-turn approval trace evidence");
         }
+    }
+
+    private static boolean hasPrivateDocumentApprovalTraceEvidence(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (lower.contains("approved for this turn")
+                || lower.contains("private document model handoff approved")) {
+            return true;
+        }
+        return lower.contains("private document model handoff")
+                && lower.contains("allow? [y=yes, n=no] y")
+                && lower.contains("approvals: required=1 granted=1 denied=0");
     }
 
     private static String summary(ValidationResult result) {

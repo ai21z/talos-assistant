@@ -23,6 +23,10 @@ import java.util.regex.Pattern;
 public final class ProtectedReadAnswerGuard {
     private static final Pattern ENV_ASSIGNMENT = Pattern.compile(
             "(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,}\\s*=\\s*[^\\s`'\"<>]+)");
+    private static final Pattern WHETHER_CONTAINS_PROMPT = Pattern.compile(
+            "(?i)\\bwhether\\s+(?:it|the document|the file)\\s+contains\\s+([^?.!]+)");
+    private static final Pattern DOES_CONTAIN_PROMPT = Pattern.compile(
+            "(?i)\\bdoes\\s+(?:it|the document|the file)\\s+contain\\s+([^?.!]+)");
 
     private ProtectedReadAnswerGuard() {
     }
@@ -86,6 +90,15 @@ public final class ProtectedReadAnswerGuard {
             ToolCallLoop.LoopResult loopResult,
             Path workspace
     ) {
+        return enforceApprovedProtectedReadPostcondition(answer, loopResult, workspace, List.of());
+    }
+
+    public static PostconditionResult enforceApprovedProtectedReadPostcondition(
+            String answer,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            List<ChatMessage> messages
+    ) {
         List<ToolCallLoop.ToolOutcome> protectedReads = successfulCurrentProtectedReadOutcomes(
                 loopResult,
                 workspace);
@@ -99,9 +112,15 @@ public final class ProtectedReadAnswerGuard {
         boolean repaired = false;
         if (isGenericProtectedReadRefusal(current)
                 && !answerContainsCurrentProtectedReadEvidence(current, protectedReads)) {
-            current = approvedProtectedReadEvidenceAnswer(protectedReads);
+            String repairedContainmentAnswer =
+                    approvedPrivateDocumentContainmentAnswer(messages, loopResult);
+            current = repairedContainmentAnswer.isBlank()
+                    ? approvedProtectedReadEvidenceAnswer(protectedReads)
+                    : repairedContainmentAnswer;
             status = "REPAIRED";
-            reason = "generic model refusal replaced with current approved read evidence";
+            reason = repairedContainmentAnswer.isBlank()
+                    ? "generic model refusal replaced with current approved read evidence"
+                    : "blocked/refusal answer replaced with approved private-document containment answer";
             repaired = true;
         }
         LocalTurnTraceCapture.recordProtectedReadPostcondition(
@@ -129,7 +148,8 @@ public final class ProtectedReadAnswerGuard {
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!outcome.success() || outcome.denied()) continue;
             if (ProtectedPathPolicy.classify(workspace, outcome.pathHint()).protectedPath()
-                    || looksProtectedPathHint(outcome.pathHint())) {
+                    || looksProtectedPathHint(outcome.pathHint())
+                    || isApprovedDocumentExtractionRead(loopResult, outcome)) {
                 out.add(outcome);
             }
         }
@@ -153,6 +173,9 @@ public final class ProtectedReadAnswerGuard {
                 || lower.contains("cannot assist with that")
                 || lower.contains("can't access local files")
                 || lower.contains("cannot access local files")
+                || lower.contains("approval blocked")
+                || lower.contains("redacted from history")
+                || lower.contains("protected content was redacted")
                 || (lower.contains("i'm sorry") && (lower.contains("can't") || lower.contains("cannot")));
     }
 
@@ -193,8 +216,47 @@ public final class ProtectedReadAnswerGuard {
         return out.toString();
     }
 
+    private static String approvedPrivateDocumentContainmentAnswer(
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        if (loopResult == null || loopResult.readFileBodies() == null || loopResult.readFileBodies().isEmpty()) {
+            return "";
+        }
+        String prompt = latestNaturalLanguageUserPrompt(messages);
+        String phrase = containmentPhrase(prompt);
+        if (phrase.isBlank()) return "";
+        for (String body : loopResult.readFileBodies().values()) {
+            if (documentBodyContainsRequestedPhrase(body, phrase)) {
+                return safeContainmentAnswer(phrase);
+            }
+        }
+        return "";
+    }
+
     private static String canonicalDisplayPath(String pathHint) {
         return pathHint == null ? "" : pathHint.strip().replace('\\', '/');
+    }
+
+    private static boolean isApprovedDocumentExtractionRead(
+            ToolCallLoop.LoopResult loopResult,
+            ToolCallLoop.ToolOutcome outcome
+    ) {
+        if (loopResult == null || outcome == null || outcome.pathHint() == null || outcome.pathHint().isBlank()) {
+            return false;
+        }
+        String path = canonicalDisplayPath(outcome.pathHint()).toLowerCase(Locale.ROOT);
+        if (!(path.endsWith(".pdf")
+                || path.endsWith(".docx")
+                || path.endsWith(".xls")
+                || path.endsWith(".xlsx"))) {
+            return false;
+        }
+        String readBody = currentReadBody(loopResult, outcome.pathHint());
+        if (readBody.isBlank()) return false;
+        String lower = readBody.toLowerCase(Locale.ROOT);
+        return lower.contains("extracted document text from")
+                || lower.contains("extractor:");
     }
 
     private static boolean isDeniedProtectedReadOutcome(ToolCallLoop.ToolOutcome outcome) {
@@ -261,6 +323,94 @@ public final class ProtectedReadAnswerGuard {
         String normalizedAnswer = normalizeSensitiveSnippet(answer).toLowerCase(Locale.ROOT);
         String normalizedSnippet = normalizeSensitiveSnippet(snippet).toLowerCase(Locale.ROOT);
         return normalizedSnippet.length() >= 8 && normalizedAnswer.contains(normalizedSnippet);
+    }
+
+    private static String latestNaturalLanguageUserPrompt(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return "";
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"user".equals(message.role())) continue;
+            String content = message.content() == null ? "" : message.content().strip();
+            if (content.isBlank()) continue;
+            if (content.startsWith("[tool_result:")) continue;
+            return content;
+        }
+        return "";
+    }
+
+    private static String containmentPhrase(String prompt) {
+        if (prompt == null || prompt.isBlank()) return "";
+        Matcher whetherMatcher = WHETHER_CONTAINS_PROMPT.matcher(prompt);
+        if (whetherMatcher.find()) {
+            return cleanContainmentPhrase(whetherMatcher.group(1));
+        }
+        Matcher doesMatcher = DOES_CONTAIN_PROMPT.matcher(prompt);
+        if (doesMatcher.find()) {
+            return cleanContainmentPhrase(doesMatcher.group(1));
+        }
+        return "";
+    }
+
+    private static String cleanContainmentPhrase(String phrase) {
+        if (phrase == null || phrase.isBlank()) return "";
+        String cleaned = phrase.strip();
+        cleaned = cleaned.replaceAll("(?i)\\bdo not print.*$", "").strip();
+        while (!cleaned.isEmpty() && ".,;:!?".indexOf(cleaned.charAt(cleaned.length() - 1)) >= 0) {
+            cleaned = cleaned.substring(0, cleaned.length() - 1).strip();
+        }
+        return cleaned;
+    }
+
+    private static boolean documentBodyContainsRequestedPhrase(String body, String phrase) {
+        if (body == null || body.isBlank() || phrase == null || phrase.isBlank()) return false;
+        String normalizedBody = normalizeSensitiveSnippet(body).toLowerCase(Locale.ROOT);
+        List<String> requiredTokens = significantTokens(phrase);
+        if (requiredTokens.isEmpty()) return false;
+        for (String token : requiredTokens) {
+            if (!normalizedBody.contains(token)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<String> significantTokens(String phrase) {
+        String[] pieces = normalizeSensitiveSnippet(phrase).toLowerCase(Locale.ROOT).split("[^a-z0-9]+");
+        List<String> tokens = new ArrayList<>();
+        for (String piece : pieces) {
+            if (piece.isBlank()) continue;
+            if (piece.length() <= 1) continue;
+            if (isContainmentStopWord(piece)) continue;
+            tokens.add(piece);
+        }
+        return tokens;
+    }
+
+    private static boolean isContainmentStopWord(String token) {
+        return switch (token) {
+            case "a", "an", "the", "it", "this", "that", "document", "file", "value", "raw", "contains", "contain" -> true;
+            default -> false;
+        };
+    }
+
+    private static String safeContainmentAnswer(String phrase) {
+        String normalizedPhrase = cleanContainmentPhrase(phrase);
+        if (normalizedPhrase.isBlank()) {
+            return "Yes. The document contains the requested protected value, but the raw value is not printed.";
+        }
+        String suffix = normalizedPhrase.toLowerCase(Locale.ROOT).contains("name")
+                ? "the name is not printed."
+                : "the raw value is not printed.";
+        return "Yes. The document contains " + normalizedPhrase + ", but " + suffix;
+    }
+
+    private static String currentReadBody(ToolCallLoop.LoopResult loopResult, String pathHint) {
+        if (loopResult == null || loopResult.readFileBodies() == null || loopResult.readFileBodies().isEmpty()) {
+            return "";
+        }
+        return loopResult.readFileBodies().getOrDefault(
+                canonicalDisplayPath(pathHint).toLowerCase(Locale.ROOT),
+                loopResult.readFileBodies().getOrDefault(canonicalDisplayPath(pathHint), ""));
     }
 
     private static String normalizeSensitiveSnippet(String value) {

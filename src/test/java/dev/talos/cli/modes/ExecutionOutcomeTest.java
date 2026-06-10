@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -3740,6 +3741,119 @@ class ExecutionOutcomeTest {
                     .anyMatch(line -> line.contains("does not assign visible text")), trace.verification().limitations().toString());
         } finally {
             LocalTurnTraceCapture.clear();
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void approvedPrivateDocumentContainmentPromptRepairsBlockedHistoryAnswer() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-private-doc-approved-");
+        try {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Read medical-notes.docx and tell me whether it contains a patient name. Do not print the name."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "[Approval blocked: protected content was redacted from history]",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of("medical-notes.docx"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    dev.talos.runtime.failure.FailureDecision.continueLoop(),
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file",
+                            "medical-notes.docx",
+                            true,
+                            false,
+                            false,
+                            "Extracted document text from medical-notes.docx (status: SUCCESS)",
+                            "",
+                            dev.talos.tools.VerificationStatus.UNKNOWN)),
+                    Map.of("medical-notes.docx", """
+                            Extracted document text from medical-notes.docx (status: SUCCESS)
+                            Warning: DOCX extraction is text-oriented; layout, comments, tracked changes, and embedded objects may be partial or omitted.
+                            Extractor: poi-docx 5.5.1
+
+                            Patient name: [redacted-private-document-canary]
+                            """));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertEquals("Yes. The document contains a patient name, but the name is not printed.",
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Eleni Nikolaou"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[redacted-private-document-canary]"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Approval blocked"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void deniedPrivateDocumentContainmentPromptKeepsWithheldNotice() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-private-doc-denied-");
+        try {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Read medical-notes.docx and tell me whether it contains a patient name. Do not print the name."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Private document content was read locally but withheld from model context by privacy policy.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of("medical-notes.docx"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    dev.talos.runtime.failure.FailureDecision.continueLoop(),
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file",
+                            "medical-notes.docx",
+                            true,
+                            false,
+                            false,
+                            "Private document content was read locally but withheld from model context by privacy policy.",
+                            "",
+                            dev.talos.tools.VerificationStatus.UNKNOWN)),
+                    Map.of("medical-notes.docx",
+                            "Private document content was read locally but withheld from model context by privacy policy."));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertTrue(outcome.finalAnswer().contains("withheld from model context"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Yes. The document contains"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Eleni Nikolaou"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[redacted-private-document-canary]"), outcome.finalAnswer());
+        } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
                     try { Files.deleteIfExists(path); } catch (Exception ignored) { }
