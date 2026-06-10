@@ -6287,10 +6287,19 @@ class AssistantTurnExecutorTest {
             var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
                     "invalid mutation summary", messages, loopResult, WS, ctx);
 
-            assertEquals("invalid mutation summary", result.answer());
+            // T743: invalid mutating arguments now get exactly one bounded
+            // corrected retry with the tool error echoed into the re-prompt.
+            // The scripted retry response issues no tool call, so the retry
+            // fails closed with a deterministic obligation-failure answer.
             assertEquals(0, result.mutationsInRetry());
-            assertNull(result.extraSummary(),
-                    "invalid mutating arguments already explain zero mutations, so retry must not fire");
+            assertTrue(result.actionObligationFailed(),
+                    "failed corrected retry must surface obligation failure");
+            assertTrue(messages.stream().anyMatch(m -> m.content() != null
+                            && m.content().contains("rejected with invalid parameters")
+                            && m.content().contains("`old_string` must be present and non-empty")),
+                    "retry prompt must echo the tool error");
+            assertTrue(result.answer().contains("[Action obligation failed"),
+                    "failed retry must end with the deterministic no-action answer: " + result.answer());
         }
 
         @Test

@@ -96,3 +96,26 @@ Refactor scope: the two named classes + tests
 
 - ATE is a 3,305-line hub (Wave 5 unwinds it) — keep the routing change
   minimal and covered by tests; no opportunistic refactoring here.
+
+## 2026-06-10 completion evidence
+
+- Implemented: (a) malformed-debris answers on mutation/workspace-obligation
+  turns route through one bounded MissingMutationRetry pass in
+  `AssistantTurnExecutor.resolveNoToolAnswer`; if the retry does not produce a
+  successful mutation, the original no-action notice is preserved (existing
+  malformed-protocol test stays green); (b) the retry chat binding escalates
+  via `chatFullEscalatedRetry` (obligation tool-choice envelope + temperature
+  pinned to 0 over NEAR_GREEDY); (c) genuinely invalid mutating parameters get
+  one corrected retry with the tool error echoed into the re-prompt.
+- Scope refinement found during testing: pre-approval policy rejections
+  (sandbox escape "Path not allowed before approval", source-evidence
+  "blocked before approval", forbidden targets) reuse INVALID_PARAMS and are
+  EXCLUDED from the generic corrected retry — the deterministic e2e scenario
+  pack (scenario 28 path-escape) and the source-evidence executor test caught
+  the over-broad first version; discriminator: pre-approval rejections
+  consistently carry "before approval" in their messages.
+- Tests green: new `AssistantTurnExecutorDebrisRetryTest` (corrected second
+  response rescues the turn end-to-end), `MissingMutationRetryTest` +2
+  (invalid-params echo retry; denied-mutation suppression), updated
+  `mutationRetryDoesNotFireAfterInvalidMutatingArgs` to the new contract.
+- Full `test` + `e2eTest` lanes BUILD SUCCESSFUL (2m17s, 4797 unit + 168 e2e).

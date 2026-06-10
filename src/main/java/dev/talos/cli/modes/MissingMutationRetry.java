@@ -95,7 +95,17 @@ final class MissingMutationRetry {
         if (ctx.toolCallLoop() == null || chat == null) return new Result(answer, 0, null);
         if (hasDeniedMutation(loopResult)) return new Result(answer, 0, null);
         if (loopResult.failureDecision().shouldStop()) return new Result(answer, 0, null);
-        if (hasInvalidMutatingFailure(loopResult)) return new Result(answer, 0, null);
+        // T743: a mutating call that failed with genuinely invalid parameters
+        // now gets one bounded corrected retry with the tool error echoed.
+        // Previously the model that ATTEMPTED a call got zero retries while a
+        // do-nothing response got one - inverted incentives observed in the
+        // 0.10.1 banks. Policy/evidence blocks that reuse INVALID_PARAMS
+        // (e.g. source-derived write blocked before approval) keep the
+        // original suppression - their dedicated repair planners own them.
+        String invalidParamsError = firstInvalidMutatingFailureMessage(loopResult);
+        if (invalidParamsError == null && hasInvalidMutatingFailure(loopResult)) {
+            return new Result(answer, 0, null);
+        }
 
         String userRequest = safePlan.originalUserRequest();
         TaskContract retryContract = safePlan.taskContract();
@@ -122,7 +132,9 @@ final class MissingMutationRetry {
         LocalTurnTraceCapture.recordActionObligation(
                 obligation.name(),
                 "UNSATISFIED",
-                "model response had no " + requiredToolCallLabel(obligation, retryToolNames));
+                invalidParamsError != null
+                        ? "mutating tool call failed with invalid parameters; bounded corrected retry"
+                        : "model response had no " + requiredToolCallLabel(obligation, retryToolNames));
         String retrySummary = ResponseObligationVerifier.retryFailureSummary(obligation, answer);
         List<ToolSpec> retryToolSpecs = toolSpecs(ctx, retryToolNames);
         String retryInstruction = mutationRetryInstruction(
@@ -130,6 +142,12 @@ final class MissingMutationRetry {
                 userRequest,
                 priorMutationRequest,
                 retryToolNames);
+        if (invalidParamsError != null) {
+            retryInstruction = retryInstruction
+                    + "\nPrevious mutating tool call was rejected with invalid parameters: "
+                    + invalidParamsError
+                    + "\nRe-issue one corrected tool call with valid parameters.";
+        }
         String retryFrame = compactMutationRetryFrame(safePlan, retryToolSpecs, retryToolNames);
         messages.add(ChatMessage.assistant(retrySummary));
         messages.add(ChatMessage.system(retryFrame));
@@ -1029,6 +1047,24 @@ final class MissingMutationRetry {
                         && !outcome.success()
                         && !outcome.denied()
                         && ToolError.INVALID_PARAMS.equals(outcome.errorCode()));
+    }
+
+    private static String firstInvalidMutatingFailureMessage(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return null;
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || outcome.success() || !outcome.mutating() || outcome.denied()) continue;
+            if (!ToolError.INVALID_PARAMS.equals(outcome.errorCode())) continue;
+            String message = outcome.errorMessage() == null ? "" : outcome.errorMessage();
+            // Pre-approval policy/validation rejections (sandbox escapes,
+            // source-evidence blocks, forbidden targets) reuse INVALID_PARAMS
+            // and consistently carry "before approval" in their messages; they
+            // must not be re-prompted toward - dedicated planners or fail-fast
+            // truth-check rendering own them. The generic corrected retry
+            // targets genuinely malformed parameters only (T743).
+            if (message.contains("before approval")) continue;
+            return message.isBlank() ? "invalid tool parameters" : message.strip();
+        }
+        return null;
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
