@@ -107,3 +107,27 @@ ChatRequestControls construction sites (convenience ctor)
 - A fixed `llm.sampling.seed` in a harness config produces identical
   provider bodies across reruns of the same scenario (used by T745 A/B).
 - CHANGELOG `## [Unreleased]` gains a T740 entry.
+
+## 2026-06-10 completion evidence
+
+- Implemented: `spi/types/SamplingControls.java` (none()/NEAR_GREEDY/anySet/
+  mergedWithFallback); `ChatRequestControls` gains a sixth `sampling`
+  component with compact-ctor normalization, a 5-arg convenience ctor (zero
+  churn at the 13 construction sites), and `withSampling`;
+  `ProviderRequestControlPolicy` attaches NEAR_GREEDY whenever it returns
+  REQUIRED/NAMED; `LlmClient` parses `llm.sampling.{temperature,top_p,top_k,
+  seed}` into `configSampling` and layers it under turn controls at both
+  request paths (`withConfigSampling`); `withDebugTag` now preserves sampling
+  (it previously reconstructed field-by-field and would have dropped it);
+  `CompatChatClient.buildBody` emits the four fields when set;
+  `PromptDebugInspector` renders a `- Sampling:` line when any field is set.
+- Ollama note: the legacy Ollama transport does not flow ChatRequestControls
+  sampling (it reports no required-tool-choice support and the policy never
+  decorates its turns); acceptable for the legacy backend.
+- Tests green (focused): ChatRequestControlsTest (+4),
+  ProviderRequestControlPolicyTest (+1 sampling test),
+  CompatChatClientTest (+2 wire tests), LlmClientSamplingConfigTest (new, 3).
+- Full unit lane green after the record change:
+  `./gradlew.bat test --no-daemon` BUILD SUCCESSFUL (1m51s).
+- Live provider-body confirmation deferred to T746 banks; fixed-seed A/B in
+  T745.

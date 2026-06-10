@@ -11,6 +11,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
@@ -161,6 +162,14 @@ public final class CompatChatClient {
         Object responseFormat = serializeResponseFormat(req);
         if (responseFormat != null) {
             body.put("response_format", responseFormat);
+        }
+
+        SamplingControls sampling = req.controls == null ? null : req.controls.sampling();
+        if (sampling != null) {
+            if (sampling.temperature() != null) body.put("temperature", sampling.temperature());
+            if (sampling.topP() != null) body.put("top_p", sampling.topP());
+            if (sampling.topK() != null) body.put("top_k", sampling.topK());
+            if (sampling.seed() != null) body.put("seed", sampling.seed());
         }
 
         return body;

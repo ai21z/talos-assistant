@@ -19,6 +19,51 @@ class ChatRequestControlsTest {
         assertEquals(ResponseFormatMode.TEXT, controls.responseFormat());
         assertEquals("", controls.jsonSchema());
         assertTrue(controls.debugTags().isEmpty());
+        assertEquals(SamplingControls.none(), controls.sampling());
+    }
+
+    @Test
+    void fiveArgConstructorLeavesSamplingUnset() {
+        ChatRequestControls controls = new ChatRequestControls(
+                ToolChoiceMode.REQUIRED,
+                "",
+                ResponseFormatMode.TEXT,
+                "",
+                List.of("tag"));
+
+        assertEquals(SamplingControls.none(), controls.sampling());
+    }
+
+    @Test
+    void withSamplingPreservesAllOtherFields() {
+        ChatRequestControls base = new ChatRequestControls(
+                ToolChoiceMode.NAMED,
+                "talos.read_file",
+                ResponseFormatMode.TEXT,
+                "",
+                List.of("repair"));
+
+        ChatRequestControls sampled = base.withSampling(SamplingControls.NEAR_GREEDY);
+
+        assertEquals(ToolChoiceMode.NAMED, sampled.toolChoice());
+        assertEquals("talos.read_file", sampled.namedTool());
+        assertEquals(List.of("repair"), sampled.debugTags());
+        assertEquals(SamplingControls.NEAR_GREEDY, sampled.sampling());
+    }
+
+    @Test
+    void samplingMergeFillsOnlyUnsetFields() {
+        SamplingControls turn = new SamplingControls(0.0, null, null, null);
+        SamplingControls config = new SamplingControls(0.7, 0.9, 40, 1234L);
+
+        SamplingControls merged = turn.mergedWithFallback(config);
+
+        assertEquals(0.0, merged.temperature());
+        assertEquals(0.9, merged.topP());
+        assertEquals(40, merged.topK());
+        assertEquals(1234L, merged.seed());
+        assertEquals(SamplingControls.none(), SamplingControls.none().mergedWithFallback(SamplingControls.none()));
+        assertTrue(SamplingControls.NEAR_GREEDY.anySet());
     }
 
     @Test

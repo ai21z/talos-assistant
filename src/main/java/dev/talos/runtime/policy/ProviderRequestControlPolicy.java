@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
@@ -92,12 +93,16 @@ public final class ProviderRequestControlPolicy {
         }
 
         if (!require) return ChatRequestControls.defaults();
+        // Tool-obligation turns run near-greedy: server-default sampling with a
+        // random seed produced divergent outputs for byte-identical requests in
+        // the 0.10.1 release banks (T740).
         return new ChatRequestControls(
                 namedTool.isBlank() ? ToolChoiceMode.REQUIRED : ToolChoiceMode.NAMED,
                 namedTool,
                 ResponseFormatMode.TEXT,
                 "",
-                tags);
+                tags,
+                SamplingControls.NEAR_GREEDY);
     }
 
     private static boolean requiresInspectionTool(ActionObligation action) {

@@ -48,6 +48,13 @@ public final class PromptDebugInspector {
         }
         out.append('\n');
         out.append("- Response format: ").append(snapshot.controls().responseFormat()).append('\n');
+        if (snapshot.controls().sampling().anySet()) {
+            var sampling = snapshot.controls().sampling();
+            out.append("- Sampling: temperature=").append(sampling.temperature())
+                    .append(" top_p=").append(sampling.topP())
+                    .append(" top_k=").append(sampling.topK())
+                    .append(" seed=").append(sampling.seed()).append('\n');
+        }
         out.append("- Debug tags: ").append(debugTags(snapshot.controls().debugTags())).append('\n');
         appendDiagnostics(out, snapshot.diagnostics());
         out.append("- Captured: ").append(snapshot.capturedAt()).append('\n');

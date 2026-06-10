@@ -9,6 +9,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
@@ -120,6 +121,73 @@ class CompatChatClientTest {
             assertEquals("json_schema", body.path("response_format").path("type").asText());
             assertEquals("object", body.path("response_format").path("schema").path("type").asText());
             assertTrue(body.path("response_format").path("schema").path("properties").has("path"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void chatSerializesSamplingControlsWhenSet() throws Exception {
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
+                {"choices":[{"message":{"role":"assistant","content":"ok"}}]}
+                """, "application/json");
+        try {
+            CompatChatClient client = client(server);
+            ChatRequest request = new ChatRequest(
+                    "llama_cpp",
+                    "agent.gguf",
+                    "",
+                    "",
+                    List.of(),
+                    Duration.ofSeconds(5),
+                    List.of(ChatMessage.user("batch op")),
+                    List.of(new ToolSpec("talos.apply_workspace_batch", "Batch", "{}")),
+                    new ChatRequestControls(
+                            ToolChoiceMode.REQUIRED,
+                            "",
+                            ResponseFormatMode.TEXT,
+                            "",
+                            List.of()).withSampling(new SamplingControls(0.2, 0.8, 20, 42L)));
+
+            client.chat(request);
+
+            JsonNode body = MAPPER.readTree(bodyRef.get());
+            assertEquals(0.2, body.path("temperature").asDouble());
+            assertEquals(0.8, body.path("top_p").asDouble());
+            assertEquals(20, body.path("top_k").asInt());
+            assertEquals(42L, body.path("seed").asLong());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void chatOmitsSamplingFieldsWhenUnset() throws Exception {
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
+                {"choices":[{"message":{"role":"assistant","content":"ok"}}]}
+                """, "application/json");
+        try {
+            CompatChatClient client = client(server);
+            ChatRequest request = new ChatRequest(
+                    "llama_cpp",
+                    "agent.gguf",
+                    "",
+                    "",
+                    List.of(),
+                    Duration.ofSeconds(5),
+                    List.of(ChatMessage.user("hello")),
+                    List.of(),
+                    ChatRequestControls.defaults());
+
+            client.chat(request);
+
+            JsonNode body = MAPPER.readTree(bodyRef.get());
+            assertFalse(body.has("temperature"));
+            assertFalse(body.has("top_p"));
+            assertFalse(body.has("top_k"));
+            assertFalse(body.has("seed"));
         } finally {
             server.stop(0);
         }
