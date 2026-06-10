@@ -107,3 +107,18 @@ Refactor scope: ProviderRequestControlPolicy + its test only
   live provider-body capture in T746.
 - CHANGELOG `## [Unreleased]` gains a T739 entry.
 - No behavior change for non-workspace obligations.
+
+## 2026-06-10 completion evidence
+
+- Implemented: `WORKSPACE_TOOLS` set + `WORKSPACE_OPERATION_REQUIRED` branch
+  with NAMED single-tool pinning in `ProviderRequestControlPolicy` (new 4-arg
+  `forTurn` overload; 3-arg delegates with named unsupported, so all prior
+  callers/tests are unchanged); `LlmClient.supportsNamedToolChoice()`
+  mirroring the required-choice accessor;
+  `AssistantTurnExecutor.chatControlsForTurn` passes both capability flags.
+- `./gradlew.bat test --tests "dev.talos.runtime.policy.ProviderRequestControlPolicyTest" --no-daemon`
+  PASS — 10 tests (6 existing regression + 4 new), including precondition
+  asserts proving the batch prompt classifies as
+  `WORKSPACE_OPERATION_REQUIRED`.
+- Live provider-body confirmation (tool_choice present on a workspace turn)
+  is deferred to the T746 stabilization banks.

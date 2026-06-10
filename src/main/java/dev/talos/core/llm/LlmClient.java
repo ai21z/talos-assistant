@@ -303,6 +303,16 @@ public final class LlmClient implements AutoCloseable {
         }
     }
 
+    public boolean supportsNamedToolChoice() {
+        if (mode != TransportMode.ENGINE || engineResolver == null) return false;
+        if ("ollama".equalsIgnoreCase(backend)) return false;
+        try {
+            return engineResolver.capabilities().namedToolChoice();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /**
      * P2 — install an external cancel supplier (e.g., a Ctrl-C handler that
      * flips an {@link java.util.concurrent.atomic.AtomicBoolean}). Polled on
