@@ -85,3 +85,16 @@ Refactor scope: new schema doc + new test + one exemplar JSON
   green.
 - 0.10.2 wave-close packet ships a valid GATES.json.
 - CHANGELOG `## [Unreleased]` gains a T749 entry.
+
+## 2026-06-11 completion evidence
+
+- Schema v1 documented (`work-cycle-docs/release-gate-ledger.md`) with the
+  tooling-only SHA rule and append-only SUPERSEDED semantics.
+- Exemplar retrofitted for the 0.10.1 packet
+  (`current-0.10.1-release-packet-20260610-090049-GATES.json`): nine gates
+  covering all five live lanes + deterministic summaries + static analysis,
+  with honest FAIL_REVIEW_REQUIRED (qwen sync, wave-1 fix noted) and NOT_RUN
+  (qodana stale) rows.
+- `GatesLedgerTest` green (schema/lane/status vocabularies, 40-hex SHA,
+  non-empty gates, per-file violation messages).
+- Remaining: the 0.10.2 packet authors its ledger at wave close.
