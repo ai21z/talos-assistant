@@ -44,6 +44,7 @@ class SourceEvidenceExactRepairPlannerTest {
                 "revenue.csv");
         assertEquals(List.of("talos.write_file"), toolNames(repair.tools()));
         assertEquals(ToolChoiceMode.REQUIRED, repair.controls().toolChoice());
+        assertEquals(dev.talos.spi.types.SamplingControls.NEAR_GREEDY, repair.controls().sampling());
         assertEquals(List.of("pending-action-obligation", "source-evidence-exact-compact-repair"),
                 repair.controls().debugTags());
 

@@ -82,3 +82,18 @@ Refactor scope: the named planners + tests
 - t325-style repair re-prompt provider body contains the named function shape
   (asserted live in T746).
 - CHANGELOG `## [Unreleased]` gains a T741 entry.
+
+## 2026-06-10 completion evidence
+
+- Implemented: `SourceEvidenceReadBeforeWriteRepairPlanner` pins NAMED
+  `talos.read_file`; `SourceEvidencePostReadWriteRepairPlanner` pins NAMED
+  `talos.write_file` (its frame narrows the surface to write_file and names
+  it explicitly); `SourceEvidenceExactRepairPlanner` keeps REQUIRED (required
+  tool ambiguous: write_file or edit_file) — all three now carry
+  `SamplingControls.NEAR_GREEDY`; REQUIRED fallback preserved when the
+  backend lacks named support.
+- Tests green: new `SourceEvidenceReadBeforeWriteRepairPlannerTest` (NAMED +
+  named tool + NEAR_GREEDY + tag), extended
+  `SourceEvidenceExactRepairPlannerTest` (REQUIRED + NEAR_GREEDY), full
+  `dev.talos.runtime.toolcall.*` package green.
+- Live confirmation deferred to T746 banks.
