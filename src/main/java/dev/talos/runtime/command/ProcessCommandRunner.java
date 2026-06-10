@@ -24,7 +24,11 @@ public final class ProcessCommandRunner implements CommandRunner {
         if (plan == null) {
             return CommandResult.internalFailure(null, 0, "Command plan is required.");
         }
-        var executor = Executors.newFixedThreadPool(2);
+        // T752: try-with-resources (Java 21 AutoCloseable ExecutorService)
+        // with the deliberate shutdownNow() in finally preserved - close()
+        // then only awaits the already-interrupted capture tasks briefly,
+        // keeping the aggressive timeout-kill semantics intact.
+        try (var executor = Executors.newFixedThreadPool(2)) {
         Process process = null;
         try {
             List<String> command = new ArrayList<>();
@@ -82,6 +86,7 @@ public final class ProcessCommandRunner implements CommandRunner {
                             + SafeLogFormatter.throwableMessage(e));
         } finally {
             executor.shutdownNow();
+        }
         }
     }
 

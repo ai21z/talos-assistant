@@ -59,11 +59,16 @@ public record ContextItem(
                 ? ToolContentMetadata.ContentPrivacyClass.NORMAL
                 : metadata.privacyClass();
         String output = result == null ? "" : result.output();
+        // T752: explicit null-flow - the old correlated ternary
+        // (!blank(metadata == null ? "" : metadata.sourcePath()) ? metadata.sourcePath() : path)
+        // was null-safe only via the blank("") correlation, which both static
+        // analysis and human readers mis-read as an NPE.
+        String metadataSourcePath = metadata == null ? "" : metadata.sourcePath();
         return fromText(
                 sourceForTool(toolName, metadata),
                 boundaryForTool(toolName, metadata),
                 privacy,
-                !blank(metadata == null ? "" : metadata.sourcePath()) ? metadata.sourcePath() : path,
+                blank(metadataSourcePath) ? path : metadataSourcePath,
                 output,
                 0);
     }

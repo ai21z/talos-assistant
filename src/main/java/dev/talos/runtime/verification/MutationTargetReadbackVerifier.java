@@ -27,15 +27,23 @@ final class MutationTargetReadbackVerifier {
 
         if (successfulMutations != null) {
             for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
-                WorkspaceOperationPlan workspaceOperationPlan = outcome == null ? null : outcome.workspaceOperationPlan();
+                // T752: explicit null guard - a null outcome previously reached
+                // line-42 only via the blank-pathHint correlation, which static
+                // analysis flagged as an NPE candidate in the readback
+                // verifier. Behavior preserved: a null entry still records the
+                // generic no-target-path problem.
+                if (outcome == null) {
+                    problems.add("tool succeeded but did not expose a target path.");
+                    continue;
+                }
+                WorkspaceOperationPlan workspaceOperationPlan = outcome.workspaceOperationPlan();
                 if (workspaceOperationPlan != null && !workspaceOperationPlan.pathEffects().isEmpty()) {
                     workspaceOperationPlans.add(workspaceOperationPlan);
                     continue;
                 }
-                String pathHint = normalizePath(outcome == null ? "" : outcome.pathHint());
+                String pathHint = normalizePath(outcome.pathHint());
                 if (pathHint.isBlank()) {
-                    String toolName = outcome == null ? "tool" : outcome.toolName();
-                    problems.add(toolName + " succeeded but did not expose a target path.");
+                    problems.add(outcome.toolName() + " succeeded but did not expose a target path.");
                     continue;
                 }
                 mutationTargets.add(pathHint);

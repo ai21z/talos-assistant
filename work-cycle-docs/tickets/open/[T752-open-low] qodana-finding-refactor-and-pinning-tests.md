@@ -78,3 +78,18 @@ Refactor scope: the three classes + their tests; no API changes
 - Focused tests green; full `test` lane green.
 - T753's fresh scan no longer reports the three findings.
 - CHANGELOG `## [Unreleased]` gains a T752 entry.
+
+## 2026-06-11 completion evidence
+
+- Line currency verified for all three findings before touching anything.
+- `ContextItem.fromToolResult`: the correlated ternary replaced with an
+  explicit `metadataSourcePath` local (behavior identical; pinned by new
+  `ContextItemSourcePathFallbackTest` — null result and blank-source-path
+  fallbacks).
+- `MutationTargetReadbackVerifier`: explicit null-outcome guard preserving
+  the exact legacy problem line ("tool succeeded but did not expose a target
+  path."); pinned by `nullOutcomeEntryRecordsGenericNoTargetProblem`.
+- `ProcessCommandRunner`: try-with-resources around the executor with the
+  deliberate `shutdownNow()` finally preserved (timeout-kill semantics
+  unchanged); existing `ProcessCommandRunnerTest` green.
+- Full unit lane BUILD SUCCESSFUL (2m08s).
