@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T747] Added `scripts/cut-candidate.ps1`: hermetic scripted candidate cut
+  (clean-tree guard, bump, commit, build-from-committed-tree, launcher-vs-HEAD
+  cross-check, mandatory post-bump check, summary regeneration with version
+  verification, and a tooling-sourced `candidate-manifest.json`), removing the
+  provenance-defect class found on the 0.10.1 cut.
 - [T751] Codified work-cycle doctrine: AGENTS.md candidate loop now orders
   changelog-before-bump (matching `bump-patch.ps1`), records the dirty-tree
   evidence-downgrade rule and the tooling-only SHA rule, and points at the

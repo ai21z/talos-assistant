@@ -92,3 +92,18 @@ Flags: `-DryRun` (print plan, execute nothing mutating), `-SelfTest`
 - Wave-close 0.10.2 cut produces a manifest whose `sha` equals
   `git rev-parse HEAD` and all four summaries report 0.10.2.
 - CHANGELOG `## [Unreleased]` gains a T747 entry.
+
+## 2026-06-11 completion evidence
+
+- `scripts/cut-candidate.ps1` landed: preconditions (clean tree, on-branch),
+  bump via bump-patch.ps1, cut commit, installDist from the committed tree,
+  launcher-version-vs-gradle.properties cross-check, mandatory post-bump
+  `gradlew check`, `talosQualitySummaries` with per-summary version
+  verification, manifest with 40-hex SHA validation (SHA from
+  `git rev-parse`, never typed).
+- `-SelfTest` PASS (version parsing incl. failure case, launcher-line
+  accept/reject, manifest assembly + short-SHA rejection).
+- Dirty-tree refusal proven live: the first `-DryRun` ran while the script
+  itself was untracked and the precondition correctly aborted with the
+  offending path listed.
+- Real execution gate: the wave-close 0.10.2 cut (dogfood).
