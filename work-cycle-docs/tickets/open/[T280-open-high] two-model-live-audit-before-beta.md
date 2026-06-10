@@ -260,7 +260,11 @@ instability with fail-closed runtime behavior — model-owned, since GPT-OSS
 passes the same 31-scenario bank and the runtime failed closed correctly in
 all three attempts.
 
-Keep T280 open. Remaining blockers: the human PTY lane
-(`pty-qwen/OWNER-PTY-CHECKLIST.md` is ready), and a beta decision on whether
-the model-owned Qwen full-bank instability blocks beta or is recorded as a
-known model limitation with focused-rerun coverage.
+2026-06-10 21:55: the human PTY lane is now complete and validated
+(`pty-qwen/artifacts/PTY-MANUAL-AUDIT-VALIDATION.md` Status: PASS; canary scan
+PASS; both independently rerun). T306 is closed on that evidence.
+
+Keep T280 open. The single remaining blocker is the owner beta decision on
+whether the model-owned Qwen full-bank instability blocks beta or is recorded
+as a known model limitation with focused-rerun coverage and a green GPT-OSS
+full bank.

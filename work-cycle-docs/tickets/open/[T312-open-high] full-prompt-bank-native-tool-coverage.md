@@ -481,4 +481,9 @@ appeared. Two of three full-bank failures now concentrate on this scenario
 (run 1: malformed tool-call payload; run 3: no tool call), while the focused
 rerun passes. Classified model-owned full-bank instability; the focused-rerun
 bundle remains the only batch-tool PASS evidence for Qwen in this packet.
-Keep T312 open.
+
+2026-06-10 21:55: the PTY manual lane is now complete and validated (T306
+closed on that evidence), so the PTY half of this ticket is no longer
+outstanding. Keep T312 open for the two remaining items: clean
+`talos.retrieve` invocation evidence and a clean Qwen full synchronized bank
+(or its formal acceptance as a known model limitation in the beta decision).

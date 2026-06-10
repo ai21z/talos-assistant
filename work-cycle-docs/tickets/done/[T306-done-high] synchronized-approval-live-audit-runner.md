@@ -1,6 +1,6 @@
 # T306 - Synchronized Approval Live Audit Runner
 
-Status: implemented-awaiting-evidence - current 0.10.1 runner evidence is strong, but fresh human PTY evidence is still missing
+Status: done - 0.10.1 PTY/manual lane human-completed and validated; runner reproducible and fail-closed across scripted, live, and manual lanes
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -624,3 +624,38 @@ finally-style path so aborted banks are always scanned.
 An owner checklist for the pending human PTY run now exists at
 `local/manual-testing/current-0.10.1-release-packet-20260610-090049/pty-qwen/OWNER-PTY-CHECKLIST.md`.
 Keep T306 open pending that human run, validation, and canary rescan.
+
+## 2026-06-10 closure
+
+The TRUE_PTY_MANUAL lane for the current `0.10.1` packet is complete:
+
+- packet regenerated fresh at 21:28 via
+  `prepareSynchronizedApprovalPtyManualAudit` (idempotent rewrite, same roots);
+- owner-completed real-terminal run (PowerShell 7.6.2) at 21:43 via the
+  generated launcher under the packet isolated home (`-Duser.home` marker in
+  the transcript);
+- `PTY-MANUAL-AUDIT-RESULT.json` status PASSED, filled from observed evidence
+  with owner identity recorded;
+- `validateSynchronizedApprovalPtyManualAudit` PASS (`true PTY/JLine coverage:
+  manual-validated`, findings: none) and the PTY canary scan PASS — both
+  independently rerun afterward with exit 0;
+- the transcript evidences: denied protected read (`BLOCKED_BY_APPROVAL`,
+  approvals required=1 granted=0 denied=1, no raw value anywhere),
+  private-mode `private document model handoff` denial withheld extraction
+  (`LOCAL_DISPLAY_ONLY` with the deterministic denial notice), per-turn
+  approved handoff answering the containment question without printing the
+  name (approvals required=1 granted=1 denied=0), `/last trace` and
+  `/prompt-debug save` captured into the packet isolated home.
+
+Acceptance criteria are satisfied: approval-sensitive prompts run from
+reproducible commands, artifact bundles contain the required evidence files,
+targeted artifact scans pass, and a human-operated transcript package now
+exists and passes for the current candidate.
+
+Close T306. Recorded post-beta follow-ups (not blockers for this closure):
+
+- the ConPTY/JNA-vs-manual PTY harness design decision;
+- runner improvement: canary-scan aborted full-bank artifact roots
+  automatically (currently bypassed when the bank throws; r3 was scanned
+  manually);
+- Qwen full-bank stability remains tracked under T280/T284/T312.
