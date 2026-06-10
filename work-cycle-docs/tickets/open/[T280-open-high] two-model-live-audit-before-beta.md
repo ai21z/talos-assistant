@@ -268,3 +268,15 @@ Keep T280 open. The single remaining blocker is the owner beta decision on
 whether the model-owned Qwen full-bank instability blocks beta or is recorded
 as a known model limitation with focused-rerun coverage and a green GPT-OSS
 full bank.
+
+## 2026-06-11 wave-1 stabilization update
+
+The instability was re-rooted as a runtime constraint-coverage gap and fixed
+(T739-T744). Both full banks are now green as stabilization evidence:
+Qwen 31/31 (first complete bank, 4th attempt) at
+`local/manual-testing/wave1-stabilization-qwen-20260611-005233/artifacts` and
+GPT-OSS 31/31 zero-rescue at
+`local/manual-testing/wave1-stabilization-gptoss-20260611-005426/artifacts`.
+Bank-position hypothesis falsified by byte-identical seeded provider bodies.
+Remaining for close: the release-grade two-model packet from the committed
+`0.10.2` candidate (wave close).

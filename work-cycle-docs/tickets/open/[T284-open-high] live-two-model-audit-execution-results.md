@@ -353,3 +353,11 @@ The packet report and provenance corrections were committed in `953bf4eb`.
 2026-06-10 21:55: the human PTY lane is complete and validated (validation
 PASS, canary scan PASS, independently rerun). Keep T284 open pending only the
 final owner beta decision on the model-owned Qwen full-bank instability.
+
+## 2026-06-11 wave-1 stabilization update
+
+Stabilization-grade green banks now exist for both models after the T739-T744
+runtime fixes (Qwen 31/31 first-ever complete bank, GPT-OSS 31/31 zero
+rescues; roots recorded in T280 and the packet report addendum). Keep T284
+open for the release-grade results packet from the committed `0.10.2`
+candidate.

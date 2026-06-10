@@ -82,3 +82,23 @@ Refactor scope: docs only (report + T280/T284/T312 updates)
 - Reclassification recorded in the packet report and the three gate tickets
   with evidence paths; docs commit made.
 - CHANGELOG `## [Unreleased]` gains a T746 entry (evidence note).
+
+## 2026-06-11 completion evidence
+
+- Qwen full bank: **31/31 PASS-family, artifact scan PASS** — the first
+  complete Qwen bank in four attempts:
+  `local/manual-testing/wave1-stabilization-qwen-20260611-005233/artifacts`
+  (`workspace-batch-apply-approved` plain PASS; `t325`
+  PASS_WITH_READBACK_ONLY_LIMITATION; 5/31 scenarios rescued by the bounded
+  T743 ladder — `SATISFIED_AFTER_RETRY` — honestly recorded).
+- GPT-OSS full bank: 31/31, artifact scan PASS, **zero rescues** (no
+  regression from the wave-1 stack):
+  `local/manual-testing/wave1-stabilization-gptoss-20260611-005426/artifacts`.
+- Runner self-scans passed for both banks (no aborts, so the known
+  post-abort scan gap was not exercised).
+- Reclassification + evidence recorded in the packet report addendum and
+  T280/T284/T312.
+- Open observation carried to wave close: first attempts under NAMED tool
+  choice still occasionally produce no parsed call (5/31 Qwen rescues) —
+  grammar/template interaction worth a focused look when the 0.10.2 packet
+  data lands.
