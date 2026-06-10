@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Changed
+- [T749] Added the release gate ledger: schema v1
+  (`work-cycle-docs/release-gate-ledger.md`), a retrofitted GATES.json for
+  the 0.10.1 packet, and `GatesLedgerTest` validating every ledger — release
+  verdicts become machine-checkable artifacts with tooling-sourced SHAs.
 - [T748] Added `TicketHygieneTest` (directory/status-token consistency and
   ID uniqueness repo-wide; strict template rules ratcheted for tickets
   T739+) and `scripts/ticket-aging.ps1` for open-queue age visibility.
