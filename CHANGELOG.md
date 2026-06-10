@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T752] Behavior-preserving clarity refactors for the stale-scan Qodana
+  findings: explicit null-flow in `ContextItem.fromToolResult` and
+  `MutationTargetReadbackVerifier`, and try-with-resources around the command
+  runner's executor (shutdownNow timeout semantics preserved), each pinned by
+  tests.
 - [T750] Hardened the coverage gate: INSTRUCTION floor 0.65→0.82, new BRANCH
   floor 0.62, and per-package floors for `runtime.policy`, `safety`, and
   `core.secret` ratcheted to measured actuals; CI workflow triggers repointed

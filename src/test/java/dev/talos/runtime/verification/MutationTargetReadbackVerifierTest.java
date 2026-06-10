@@ -48,6 +48,21 @@ class MutationTargetReadbackVerifierTest {
     }
 
     @Test
+    void nullOutcomeEntryRecordsGenericNoTargetProblem() {
+        // T752 pinning: a null list entry must keep recording the generic
+        // problem line (not throw, not be silently skipped).
+        java.util.List<ToolCallLoop.ToolOutcome> mutations = new java.util.ArrayList<>();
+        mutations.add(null);
+
+        MutationTargetReadbackVerifier.Result result =
+                MutationTargetReadbackVerifier.verify(workspace, mutations);
+
+        assertTrue(result.problems().contains("tool succeeded but did not expose a target path."),
+                result.problems().toString());
+        assertTrue(result.mutationTargets().isEmpty(), result.mutationTargets().toString());
+    }
+
+    @Test
     void missingPathHintRecordsToolProblemWithoutMutationTarget() {
         MutationTargetReadbackVerifier.Result result = MutationTargetReadbackVerifier.verify(
                 workspace,
