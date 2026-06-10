@@ -939,12 +939,61 @@ val candidateJacocoTestReport by tasks.registering(JacocoReport::class) {
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.jacocoTestReport)
     violationRules {
+        // T750: floors ratcheted to measured actuals minus ~2 points
+        // (2026-06-11 test lane: INSTRUCTION 84.83%, BRANCH 64.78%). The old
+        // single 0.65 INSTRUCTION rule could absorb a 20-point regression
+        // silently and left BRANCH - the decision-heavy counter for a
+        // fail-closed product - entirely ungated. Tighten as coverage grows;
+        // never loosen without a ticket.
         rule {
             limit {
-                // Baseline guard: current candidate coverage is ~71%, so 65%
-                // catches real regressions without pretending coverage is the
-                // primary quality signal.
-                minimum = "0.65".toBigDecimal()
+                counter = "INSTRUCTION"
+                minimum = "0.82".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                minimum = "0.62".toBigDecimal()
+            }
+        }
+        // Per-package floors for the packages where an untested branch
+        // violates doctrine directly (measured 2026-06-11:
+        // runtime.policy 89.58/69.58, safety 82.48/64.09, core.secret
+        // 39.63/41.18 - the secret floor pins today's low coverage in place
+        // until targeted tests raise it).
+        rule {
+            element = "PACKAGE"
+            includes = listOf("dev.talos.runtime.policy")
+            limit {
+                counter = "INSTRUCTION"
+                minimum = "0.87".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                minimum = "0.67".toBigDecimal()
+            }
+        }
+        rule {
+            element = "PACKAGE"
+            includes = listOf("dev.talos.safety")
+            limit {
+                counter = "INSTRUCTION"
+                minimum = "0.80".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                minimum = "0.62".toBigDecimal()
+            }
+        }
+        rule {
+            element = "PACKAGE"
+            includes = listOf("dev.talos.core.secret")
+            limit {
+                counter = "INSTRUCTION"
+                minimum = "0.37".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                minimum = "0.39".toBigDecimal()
             }
         }
     }

@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T750] Hardened the coverage gate: INSTRUCTION floor 0.65→0.82, new BRANCH
+  floor 0.62, and per-package floors for `runtime.policy`, `safety`, and
+  `core.secret` ratcheted to measured actuals; CI workflow triggers repointed
+  from the defunct-only `v0.9.0-beta-dev` filter to main + beta-dev +
+  codex/feature branches.
 - [T749] Added the release gate ledger: schema v1
   (`work-cycle-docs/release-gate-ledger.md`), a retrofitted GATES.json for
   the 0.10.1 packet, and `GatesLedgerTest` validating every ledger — release
