@@ -17,7 +17,10 @@ The remaining blockers are:
 
 - fresh true PTY/JLine human completion is still pending;
 - the Qwen full synchronized approval bank is unstable as a complete 31-scenario
-  lane even though the focused blocker scenarios pass individually;
+  lane even though the focused blocker scenarios pass individually; after a
+  third fail-closed full-bank attempt on 2026-06-10 this is classified as
+  full-bank live-model instability with fail-closed runtime behavior
+  (model-owned; see the synchronized approval lane section);
 - ticket/docs reconciliation is current, but the final beta decision must remain
   open until the PTY lane is completed and the synchronized live lane is judged
   from that full evidence set.
@@ -54,7 +57,7 @@ The remaining blockers are:
 | Lane | GPT-OSS | Qwen | Verdict |
 | --- | --- | --- | --- |
 | `SAFE_REDIRECTED_STDIN` | PASS safe cases; approval-sensitive cases `MANUAL_REQUIRED` | PASS safe cases; approval-sensitive cases `MANUAL_REQUIRED` | PASS for the redirected safe lane |
-| `SYNC_APPROVAL` | PASS, 31 scenarios, artifact scan PASS | two full-bank runs failed closed on different scenarios (`workspace-batch-apply-approved`, then `t325-python-command-boundary`) | FAIL_REVIEW_REQUIRED |
+| `SYNC_APPROVAL` | PASS, 31 scenarios, artifact scan PASS | three full-bank runs failed closed (`workspace-batch-apply-approved`, `t325-python-command-boundary`, `workspace-batch-apply-approved` again) | FAIL_REVIEW_REQUIRED (classified model-owned full-bank instability) |
 | `SYNC_APPROVAL_WORKSPACE_OPS` | 6/6 PASS | 6/6 PASS | PASS |
 | `TRUE_PTY_MANUAL` | n/a | packet prepared, validation fails closed until result JSON exists; canary scan PASS on prepared packet | MANUAL_REQUIRED |
 | `CAPABILITY_PRIVATE_MODE` | included in two-model 44-turn bank | included in two-model 44-turn bank | PASS by process/tool-artifact heuristics |
@@ -122,7 +125,36 @@ Focused Qwen reruns:
 - `workspace-batch-apply-approved` PASS:
   `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/qwen/workspace-batch-apply-approved`
 
-Classification:
+2026-06-10 third full-bank attempt (evidence-repair pass, post-commit
+`953bf4eb`):
+
+- Root:
+  `local/manual-testing/current-0.10.1-qwen-syncbank-r3-20260610-210541/artifacts`
+- Failure: `workspace-batch-apply-approved` again — the model issued no
+  workspace-batch tool call at all ("Action obligation failed: no workspace
+  operation was performed in this turn."), so no approval prompt appeared and
+  the harness failed closed after 30 completed scenarios with
+  `Expected 1 approval prompt(s), observed 0.`
+- A manual `checkRuntimeArtifactCanaries` scan over the r3 artifacts root
+  passed (the runner's own post-bank scan is bypassed when the bank aborts —
+  noted as a small runner improvement candidate under T306).
+
+Final classification after three full-bank attempts (failures at scenario 31
+`workspace-batch-apply-approved`, scenario 25 `t325-python-command-boundary`,
+scenario 31 `workspace-batch-apply-approved`):
+
+- full-bank live-model instability with fail-closed runtime behavior;
+- model-owned: GPT-OSS passes the same 31-scenario bank; two of three Qwen
+  failures concentrate on `workspace-batch-apply-approved`, where Qwen fails
+  to emit a valid `talos.apply_workspace_batch` call late in the bank while
+  passing the same scenario in a focused rerun (run 1: malformed tool-call
+  payload; run 3: no tool call);
+- the runtime denied nothing incorrectly, mutated nothing, and failed closed
+  each time — this is not approval bypass, not false success, and not a
+  privacy leak.
+
+Original two-run classification (superseded by the final classification
+above):
 
 - Full-bank Qwen failure classification: `mixed`
 - Ownership split:
