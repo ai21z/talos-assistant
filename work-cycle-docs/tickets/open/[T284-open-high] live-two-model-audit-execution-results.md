@@ -349,4 +349,7 @@ Additional execution evidence:
   instability with fail-closed runtime behavior, model-owned.
 
 The packet report and provenance corrections were committed in `953bf4eb`.
-Keep T284 open pending the human PTY lane and the final beta decision.
+
+2026-06-10 21:55: the human PTY lane is complete and validated (validation
+PASS, canary scan PASS, independently rerun). Keep T284 open pending only the
+final owner beta decision on the model-owned Qwen full-bank instability.
