@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Changed
+- [T742] The workspace-operation capability frame now includes a literal
+  `operations_json` example so 14B-class models see the exact wire format for
+  batch operations instead of prose-only key descriptions.
 - [T741] Source-evidence repair re-prompts now pin the known required tool via
   named tool choice (read-before-write repair pins `talos.read_file`,
   post-read write repair pins `talos.write_file`) and run near-greedy,

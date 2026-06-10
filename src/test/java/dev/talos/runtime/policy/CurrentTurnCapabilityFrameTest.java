@@ -349,8 +349,27 @@ class CurrentTurnCapabilityFrameTest {
         assertTrue(frame.contains("Use the visible workspace operation tool"), frame);
         assertTrue(frame.contains("talos.move_path"), frame);
         assertTrue(frame.contains("Do not emulate move, copy, rename, or mkdir"), frame);
+        assertTrue(frame.contains(
+                "operations_json example: [{\"op\":\"copy_path\",\"from\":\"a.md\",\"to\":\"b.md\"},"
+                        + "{\"op\":\"mkdir\",\"path\":\"docs/reports\"}]"), frame);
         assertFalse(frame.contains("Available mutating tools: talos.write_file, talos.edit_file"), frame);
         assertFalse(frame.contains("You must write or edit these exact target paths"), frame);
+    }
+
+    @Test
+    void workspaceOperationExampleAbsentForNonWorkspaceObligations() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create scripts.js with a click handler.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertFalse(frame.contains("operations_json example:"), frame);
     }
 
     @Test

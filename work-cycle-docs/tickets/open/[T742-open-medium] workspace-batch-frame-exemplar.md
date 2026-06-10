@@ -76,3 +76,13 @@ frame snapshot assertions that break
   included).
 - Live prompt-debug for a batch turn shows the exemplar line (T746).
 - CHANGELOG `## [Unreleased]` gains a T742 entry.
+
+## 2026-06-10 completion evidence
+
+- Implemented: one literal example line appended to the
+  WORKSPACE_OPERATION_REQUIRED frame in `CurrentTurnCapabilityFrame`
+  (prohibition lines untouched).
+- Tests green: `CurrentTurnCapabilityFrameTest` — example asserted present for
+  workspace turns and absent for mutating-tool turns; no snapshot fallout —
+  full `test` + `e2eTest` lanes BUILD SUCCESSFUL (2m09s).
+- Live prompt-debug confirmation deferred to T746 banks.
