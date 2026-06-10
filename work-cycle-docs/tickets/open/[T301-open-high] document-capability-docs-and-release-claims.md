@@ -1,6 +1,6 @@
 # T301 - Document Capability Docs and Release Claims
 
-Status: still-open - capability docs exist but release-claim drift prevention remains open
+Status: still-open - current 0.10.1 claim reconciliation is in place, but the final beta-ready decision remains open
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -225,5 +225,32 @@ npm --prefix site test
 
 Keep T301 open until the final beta packet is produced from a committed SHA and
 all public release artifacts/claims are reconciled against that packet.
+
+## 2026-06-10 current packet reconciliation
+
+Current packet:
+
+- `work-cycle-docs/reports/current-0.10.1-release-packet-20260610-090049-results.md`
+
+Reconciled in this pass:
+
+- `CHANGELOG.md` now declares `0.10.1`;
+- `site/index.html` startup terminal screen-reader text now says
+  `TALOS v0.10.1`;
+- `npm --prefix site test` passed;
+- `.\gradlew.bat test --tests "dev.talos.docs.ReadmePrivacyCopyTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon` passed.
+
+Current claim state remains narrow:
+
+- PDF/DOCX/XLS/XLSX are text-extraction claims with limitations;
+- image/OCR and PowerPoint remain outside beta claims;
+- private paperwork remains outside approved beta positioning;
+- the synchronized approval lane is strong for GPT-OSS and focused Qwen slices,
+  but the Qwen full bank is still unstable and the PTY/manual lane is not yet
+  complete.
+
+Keep T301 open. Public-facing wording is now aligned with the current packet,
+but the final beta-ready decision remains blocked by the incomplete PTY/manual
+lane and Qwen full synchronized-lane instability.
 
 

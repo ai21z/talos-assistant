@@ -1,6 +1,6 @@
 # T299 - Document Extraction Fixtures, BDD, and Live Audit
 
-Status: still-open - generated fixture/live evidence exists; larger maintained document corpus remains open
+Status: still-open - narrow beta-core extraction claim is supported; larger maintained document corpus remains open
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -268,5 +268,30 @@ Keep T299 open. This closes a small adversarial-classification and `.xls`
 limitation-parity gap for generated fixtures, but it does not create the larger
 maintained real-world fixture corpus, checked-in protected fixture set, or final
 two-model live release packet required by the ticket.
+
+## 2026-06-10 beta-scope narrowing decision
+
+Current `0.10.1` evidence strengthens the narrow beta-core extraction claim:
+
+- `local/manual-testing/current-0.10.1-release-packet-20260610-090049-capability`
+  passed 44 turns across GPT-OSS and Qwen;
+- public PDF/DOCX/XLSX prompts used the expected named targets and recorded
+  `SENT_TO_MODEL`;
+- private-mode PDF/DOCX/XLSX prompts used the expected named targets and
+  recorded `WITHHELD_PRIVATE_MODE`;
+- raw-root canary scan with the script allowlist passed;
+- release-clean canary scan over model-facing artifacts and redacted snapshots
+  passed.
+
+Ticket decision:
+
+- the narrow beta claim for small text-bearing PDF/DOCX/XLS/XLSX extraction is
+  now supported by current-candidate evidence;
+- the larger maintained/adversarial fixture corpus, broader BDD-style document
+  quality coverage, and post-beta corpus work remain open and are explicitly
+  deferred beyond beta.
+
+Keep T299 open with that narrowed scope. Do not treat this ticket as a hard
+blocker for the narrow `0.10.1` beta extraction claim.
 
 

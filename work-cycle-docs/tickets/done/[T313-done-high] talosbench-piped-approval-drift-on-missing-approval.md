@@ -1,6 +1,6 @@
 # T313 - TalosBench Piped Approval Drift On Missing Approval Prompt
 
-Status: implemented-awaiting-evidence - default piped approval execution fails closed; synchronized full prompt-bank path remains open
+Status: done - current 0.10.1 packet proves redirected approval inputs are excluded from release evidence
 Severity: high
 Release gate: yes for full live-audit evidence
 Branch: v0.9.0-beta-dev
@@ -174,6 +174,37 @@ stdin can become release-grade approval evidence. T313 remains open until the
 current `0.10.0` release packet demonstrates approval-sensitive cases through
 synchronized approval handling or manual true PTY/JLine capture, with lane
 labels that prevent piped approval drift overclaims.
+
+## 2026-06-10 current 0.10.1 redirected-lane evidence
+
+Fresh safe-lane packet roots:
+
+- GPT-OSS:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/gptoss/talosbench/20260610-090530`
+- Qwen:
+  `local/manual-testing/current-0.10.1-release-packet-20260610-090049/artifacts/qwen/talosbench/20260610-090842`
+
+Results:
+
+- both summaries record `Piped approval inputs allowed: False`;
+- approval-sensitive TalosBench cases remained `MANUAL_REQUIRED`;
+- `full-audit-run-command-profile-boundary` passed in the safe redirected lane;
+- approval evidence for release review came from the synchronized approval
+  lane, not piped approval input; the PTY packet is prepared and fail-closed
+  but still pending a human real-terminal run.
+
+Close T313. The acceptance criteria are now satisfied:
+
+- approval-sensitive TalosBench cases no longer pre-feed approval input by
+  default;
+- missing approval prompts fail closed and preserve first-turn evidence;
+- the current `0.10.1` packet uses lane-labeled evidence and records
+  `Piped approval inputs allowed: False` in both redirected summaries;
+- approval-sensitive release evidence came from the synchronized approval
+  lane, not from redirected approval input; the PTY/manual lane for this
+  packet is prepared and fail-closed but not yet completed
+  (`PTY-MANUAL-AUDIT-RESULT.json` pending a human real-terminal run), so no
+  completed PTY/manual evidence is claimed by this closure.
 
 ## Open questions
 
