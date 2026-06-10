@@ -394,15 +394,28 @@ Use this when the current state is ready to be evaluated as a real patch candida
 Rules:
 
 1. Finish the intended change set.
-2. Bump the patch version.
-3. Update `CHANGELOG.md`.
-4. Build the candidate artifact.
+2. Ensure material notes exist under `## [Unreleased]` in `CHANGELOG.md`
+   (accumulated per ticket; `bump-patch.ps1` hard-fails on an empty section).
+3. Bump the patch version (the bump promotes the Unreleased notes into the
+   dated candidate entry).
+4. Commit the cut, then build the candidate artifact from the committed tree.
 5. Run the mandatory post-bump verification gate.
 6. Run deterministic E2E, coverage, and quality summary tasks.
 7. Run Qodana/static-analysis evidence when appropriate.
 8. Review all evidence as one named candidate packet.
 
-Recommended Windows sequence:
+A dirty working tree downgrades live evidence to local stabilization grade.
+Release packets require a clean committed candidate: lane evidence is anchored
+to the candidate commit SHA, and the SHA recorded in reports must come from
+`git rev-parse`, never typed by hand.
+
+Recommended Windows sequence (scripted, preferred):
+
+```powershell
+.\scripts\cut-candidate.ps1
+```
+
+Manual fallback sequence:
 
 ```powershell
 .\scripts\bump-patch.ps1

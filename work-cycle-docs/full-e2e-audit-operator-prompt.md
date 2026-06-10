@@ -9,9 +9,10 @@ You are auditing Talos as an installed local workspace assistant, not as a unit
 test target and not as a demo.
 
 Repository:
-- Branch: v0.9.0-beta-dev.
+- Branch: the current audit branch recorded in the candidate packet
+  (record the exact branch and `git rev-parse HEAD` SHA in the report).
 - Do not merge to main.
-- Audit the built Talos artifact from this branch.
+- Audit the built Talos artifact from the committed candidate on that branch.
 
 Models:
 - Qwen: qwen2.5-coder:14b through managed llama.cpp.

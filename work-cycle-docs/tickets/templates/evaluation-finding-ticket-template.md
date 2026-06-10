@@ -201,7 +201,10 @@ Add broader commands if runtime code changes:
 
 - Use the inner dev loop unless the ticket explicitly declares a candidate.
 - Do not bump version unless this is candidate closeout.
-- Do not update `CHANGELOG.md` unless this is candidate closeout.
+- Behavior-changing tickets add a one-line entry under `## [Unreleased]` in
+  `CHANGELOG.md` when they land (`bump-patch.ps1` hard-fails at cut time if
+  the Unreleased section is empty); do not create dated version entries
+  outside candidate closeout.
 - Convert live failure evidence into deterministic regression before closeout
   whenever practical.
 
