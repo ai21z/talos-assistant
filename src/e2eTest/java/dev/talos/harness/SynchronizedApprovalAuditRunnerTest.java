@@ -3,6 +3,7 @@ package dev.talos.harness;
 import dev.talos.core.Config;
 import dev.talos.runtime.ApprovalResponse;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -917,7 +918,66 @@ class SynchronizedApprovalAuditRunnerTest {
             assertTrue(Files.readString(run.summary()).contains("Scenarios: 1"), scenario);
             assertTrue(Files.readString(run.summary()).contains(scenario), scenario);
             assertWorkspaceOperationPostCondition(workspaces.resolve(scenario), scenario);
+
+            // T764: the approved-and-executed turn must also render un-BLOCKED,
+            // not just leave correct file state (T763's regression shape passed
+            // file-state checks while rendering BLOCKED_BY_POLICY).
+            String traceText = Files.readString(run.bundles().getFirst().traceText());
+            String outcomeLine = traceText.lines()
+                    .filter(line -> line.startsWith("OUTCOME_RENDERED"))
+                    .findFirst()
+                    .orElse("");
+            assertFalse(outcomeLine.isBlank(), scenario + ": trace has no OUTCOME_RENDERED line");
+            assertFalse(outcomeLine.contains("BLOCKED"), scenario + ": " + outcomeLine);
         }
+    }
+
+    @Test
+    void workspace_outcome_claim_fails_blocked_by_policy_rendered_outcome() {
+        SynchronizedApprovalAuditRunner.Result blocked =
+                resultWithRenderedOutcome("BLOCKED", "BLOCKED_BY_POLICY");
+
+        IOException error = assertThrows(IOException.class, () ->
+                SynchronizedApprovalAuditMain.requireOutcomeNotBlocked(blocked,
+                        "copy scenario rendered a BLOCKED outcome after the approved operation"));
+
+        assertTrue(error.getMessage().contains(
+                        "OUTCOME_RENDERED {status=BLOCKED, classification=BLOCKED_BY_POLICY}"),
+                error.getMessage());
+    }
+
+    @Test
+    void workspace_outcome_claim_fails_blocked_by_approval_rendered_outcome() {
+        SynchronizedApprovalAuditRunner.Result blocked =
+                resultWithRenderedOutcome("BLOCKED", "BLOCKED_BY_APPROVAL");
+
+        IOException error = assertThrows(IOException.class, () ->
+                SynchronizedApprovalAuditMain.requireOutcomeNotBlocked(blocked,
+                        "move scenario rendered a BLOCKED outcome after the approved operation"));
+
+        assertTrue(error.getMessage().contains("classification=BLOCKED_BY_APPROVAL"), error.getMessage());
+    }
+
+    @Test
+    void workspace_outcome_claim_accepts_complete_and_partial_rendered_outcomes() throws Exception {
+        SynchronizedApprovalAuditMain.requireOutcomeNotBlocked(
+                resultWithRenderedOutcome("COMPLETE", "COMPLETED_VERIFIED"), "claim");
+        SynchronizedApprovalAuditMain.requireOutcomeNotBlocked(
+                resultWithRenderedOutcome("COMPLETE", "COMPLETED_UNVERIFIED"), "claim");
+        // PARTIAL stays acceptable: live lanes may pass through legitimate
+        // runtime repair, which the summary scorer owns.
+        SynchronizedApprovalAuditMain.requireOutcomeNotBlocked(
+                resultWithRenderedOutcome("PARTIAL", "PARTIAL"), "claim");
+    }
+
+    private static SynchronizedApprovalAuditRunner.Result resultWithRenderedOutcome(
+            String status,
+            String classification) {
+        LocalTurnTrace trace = LocalTurnTrace
+                .builder("trc-outcome-claim", "sid-outcome-claim", 1, "2026-06-11T00:00:00Z")
+                .outcome(status, "NONE", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", classification)
+                .build();
+        return new SynchronizedApprovalAuditRunner.Result("answer", List.of(), "", trace, "");
     }
 
     @Test

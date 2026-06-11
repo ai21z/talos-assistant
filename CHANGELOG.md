@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Changed
+- [T764] The synchronized-approval workspace-operation scenarios
+  (mkdir/copy/move/rename/delete/batch-apply, scripted and live) now claim
+  the rendered outcome in addition to tool usage and file state: an
+  approved-and-executed turn that fail-closes as BLOCKED (e.g.
+  `OUTCOME_RENDERED {status=BLOCKED, classification=BLOCKED_BY_POLICY}`) now
+  fails the harness instead of passing silently — the claim gap that masked
+  T763's phantom expected-target block across the 0.10.2/0.10.3 packet
+  lanes. PARTIAL outcomes still pass, so legitimate runtime-repair lanes are
+  not overclaimed.
+
+### Fixed
+- [T763] Task-contract target extraction no longer treats bare English
+  function words ("by", "to", "with", "into", "using", ...) as path-like
+  expected mutation targets; names with a file extension or path separator
+  still extract. This removes the phantom remaining target "by" that the
+  workspace-operation retry frame's "mkdir by writing/editing file content"
+  wording injected into expected-target progress accounting, which
+  fail-closed every approved copy/move/rename/delete retry turn as BLOCKED
+  after the operation had already been approved, executed, and checkpointed
+  (seen in the 0.10.2/0.10.3 packet sync-approval lanes).
+
 ## [0.10.3] - 2026-06-11
 
 ### Changed
