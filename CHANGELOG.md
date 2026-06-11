@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- [T761] The advertised default tool surface is now derived from
+  `ToolSurfacePlanner.plan()` over a canonical descriptor catalog instead of
+  a hand-maintained duplicate branch tree; read-only turns with expected
+  targets now advertise only `talos.read_file` (matching what the runtime
+  always enforced — the model can no longer be advertised tools the runtime
+  denies). Parity tests pin the catalog against the bootstrap registry.
 - [T760] The protected-read answer postcondition now distinguishes blank
   model answers from refusals (truthful trace reasons) and scopes refusal-
   marker detection to the first 240 characters of the answer — long grounded

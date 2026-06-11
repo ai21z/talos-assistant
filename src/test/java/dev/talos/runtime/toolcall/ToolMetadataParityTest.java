@@ -109,6 +109,28 @@ class ToolMetadataParityTest {
     }
 
     @Test
+    void canonicalDescriptorCatalogMatchesTheBootstrapRegistry() {
+        // T761: defaultVisibleToolNames derives from plan() over
+        // CanonicalToolDescriptors — this pin keeps that catalog from rotting
+        // when tools are added or their metadata changes.
+        var canonical = CanonicalToolDescriptors.registry().descriptors();
+        var bootstrap = bootstrapEquivalentRegistry().descriptors();
+
+        assertEquals(
+                bootstrap.stream().map(d -> d.name()).sorted().toList(),
+                canonical.stream().map(d -> d.name()).sorted().toList(),
+                "canonical catalog must register exactly the bootstrap tool set");
+        for (var expected : bootstrap) {
+            var actual = canonical.stream()
+                    .filter(d -> d.name().equals(expected.name()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(expected.riskLevel(), actual.riskLevel(), expected.name());
+            assertEquals(expected.operationMetadata(), actual.operationMetadata(), expected.name());
+        }
+    }
+
+    @Test
     void aliasPolicyClassificationMatchesMetadataForEveryTool() {
         ToolRegistry registry = bootstrapEquivalentRegistry();
         for (var descriptor : registry.descriptors()) {

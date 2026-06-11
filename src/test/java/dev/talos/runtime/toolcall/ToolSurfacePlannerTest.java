@@ -615,6 +615,36 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void expectedTargetReadDefaultsMatchTheRuntimeEnforcedSurface() {
+        // T761 drift fix: read-only turns with expected targets advertised
+        // four read tools while plan() (the runtime-enforced surface) allowed
+        // only talos.read_file — the model could be advertised tools the
+        // runtime denies. Defaults now derive from plan(), so they agree.
+        for (String request : List.of(
+                "Read config.json and tell me the name.",
+                "Read .env and tell me what it says.")) {
+            assertEquals(
+                    List.of("talos.read_file"),
+                    ToolSurfacePlanner.defaultVisibleToolNames(
+                            TaskContractResolver.fromUserRequest(request),
+                            ExecutionPhase.INSPECT),
+                    request);
+        }
+    }
+
+    @Test
+    void nullContractDefaultsStayEmptyWhilePlanKeepsReadOnlyEnforcementSurface() {
+        // Intentional asymmetry (documented on defaultVisibleToolNames):
+        // callers without a contract advertise nothing, while plan(null, ...)
+        // returns the read-only surface for runtime enforcement.
+        assertEquals(List.of(),
+                ToolSurfacePlanner.defaultVisibleToolNames(null, ExecutionPhase.INSPECT));
+        assertEquals(
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve"),
+                ToolSurfacePlanner.plan(null, ExecutionPhase.INSPECT, registry()).nativeToolNames());
+    }
+
+    @Test
     void defaultNamesMatchCurrentPromptFallbackSurfaces() {
         assertEquals(
                 List.of(),

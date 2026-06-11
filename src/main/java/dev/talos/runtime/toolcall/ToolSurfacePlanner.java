@@ -123,61 +123,24 @@ public final class ToolSurfacePlanner {
         return select(registry, ToolSurfacePlanner::isReadOnlyOperation, "read-only metadata surface");
     }
 
+    /**
+     * Default visible tool names for callers without a live registry
+     * (capability-frame fallbacks, prompt inspector, traces).
+     *
+     * <p>T761: derived from {@link #plan} over the canonical descriptor
+     * catalog — the production-enforced surface IS the advertised surface,
+     * by construction. A ~46-line hand-maintained copy of the plan branches
+     * previously lived here and had drifted (the expected-target-read branch
+     * had no counterpart, so read-only turns with expected targets advertised
+     * four read tools while the runtime allowed only talos.read_file).
+     *
+     * <p>Intentional asymmetry kept from the old code: a null contract
+     * yields an EMPTY default frame, while {@code plan(null, ...)} returns
+     * the read-only surface for runtime enforcement.
+     */
     public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
-        if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
-        if (contract.type() == TaskType.CHECKPOINT_RESTORE) return List.of();
-        if (sessionUncertaintyRequest(contract)) return List.of();
-        if (unsupportedCommandRequest(contract)) return List.of();
-        if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
-        if (!contract.mutationAllowed()
-                && verifyOnlyDirectoryAwarePathCheck(contract)) {
-            return List.of("talos.list_dir", "talos.read_file");
-        }
-        if (!contract.mutationAllowed()
-                && readOnlyPathExistenceCheck(contract)) {
-            return List.of("talos.list_dir", "talos.read_file");
-        }
-        if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
-            var workspaceOperation = WorkspaceOperationIntent.detect(contract);
-            if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
-                return workspaceOperation.get().toolNames();
-            }
-            if (sourceDerivedFileCreateTargets(contract)) {
-                return List.of("talos.grep", "talos.list_dir",
-                        "talos.read_file", "talos.retrieve", "talos.write_file");
-            }
-            if (staticWebFullFileApplyTargets(contract)) {
-                return List.of("talos.grep", "talos.list_dir",
-                        "talos.read_file", "talos.retrieve", "talos.write_file");
-            }
-            if (fileEditTargets(contract)) {
-                return List.of("talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.read_file", "talos.retrieve", "talos.write_file");
-            }
-            if (exactStaticWebFileTargets(contract)) {
-                return List.of("talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.read_file", "talos.retrieve", "talos.write_file");
-            }
-            return List.of(
-                    "talos.apply_workspace_batch",
-                    "talos.copy_path",
-                    "talos.edit_file",
-                    "talos.grep",
-                    "talos.list_dir",
-                    "talos.mkdir",
-                    "talos.move_path",
-                    "talos.read_file",
-                    "talos.rename_path",
-                    "talos.retrieve",
-                    "talos.write_file");
-        }
-        if (explicitCommandVerificationSurface(contract, phase)) {
-            return List.of("talos.run_command");
-        }
-        if (verificationCommandSurface(contract, phase)) {
-            return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command");
-        }
-        return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
+        if (contract == null) return List.of();
+        return plan(contract, phase, CanonicalToolDescriptors.registry()).nativeToolNames();
     }
 
     public static List<String> names(List<ToolSpec> specs) {
