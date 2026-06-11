@@ -14,9 +14,12 @@ public record TerminalCapabilities(
         boolean dumbTerminal
 ) {
     public static TerminalCapabilities detectDefault() {
+        // isatty, not System.console(): on JDK 22+ a console exists even for
+        // redirected output, which would enable color/unicode on piped
+        // transcripts that must stay byte-identical plain (T770).
         return detect(
                 System.getenv(),
-                System.console() != null,
+                InteractiveTty.stdoutIsTty(),
                 System.getProperty("os.name", ""),
                 Charset.defaultCharset(),
                 null);
