@@ -8,8 +8,10 @@ import java.util.Locale;
 public final class ProtectedWorkspacePaths {
     private ProtectedWorkspacePaths() {}
 
-    /** Index freshness version for protected workspace path classification. */
-    public static final String POLICY_VERSION = "protected-content-policy-v2";
+    /** Index freshness version for protected workspace path classification.
+     *  v3 (T759): equals-or-suffix word-run matching replaced substring
+     *  matching — stale RAG indexes must rebuild their privacy partition. */
+    public static final String POLICY_VERSION = "protected-content-policy-v3";
 
     public record Decision(
             String rawPath,

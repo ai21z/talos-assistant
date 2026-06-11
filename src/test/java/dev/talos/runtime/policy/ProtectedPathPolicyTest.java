@@ -50,6 +50,18 @@ class ProtectedPathPolicyTest {
     }
 
     @Test
+    void doesNotOverTriggerDerivationalSuffixSourceFiles() {
+        // T759: equals-or-suffix word-run matching — the stem must end the
+        // run. "tokenizer"/"secretary"/"passwordless" no longer classify;
+        // "api_token"/"mysecrets" still do (suffix keeps them fail-closed).
+        assertFalse(ProtectedPathPolicy.classify(workspace, "src/tokenizer.java").protectedPath());
+        assertFalse(ProtectedPathPolicy.classify(workspace, "docs/secretary-notes.md").protectedPath());
+        assertFalse(ProtectedPathPolicy.classify(workspace, "docs/passwordless-ssh.md").protectedPath());
+        assertProtected("config/api_token.txt", "SECRET");
+        assertProtected("notes/mysecrets.txt", "SECRET");
+    }
+
+    @Test
     void rejectsEscapingPathsBeforeRulesCanAllowThem() {
         ResourceDecision decision = ProtectedPathPolicy.classify(workspace, "../outside/.env");
 

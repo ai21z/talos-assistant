@@ -69,20 +69,45 @@ class ProtectedPathTokensTest {
     }
 
     // ── derivational-suffix names: the T759 deltas ──────────────────────
-    // CURRENT behavior (substring matching): all protected — these are the
-    // false positives. The consolidation commit flips them to "".
+    // Substring matching classified ALL of these as SECRET (the evaluation's
+    // false positives). The equals-or-suffix word-run rule frees them: the
+    // stem is a prefix of the run, not its suffix.
 
     @Test
-    void derivationalSuffixNamesCharacterization() {
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokenizer.java"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("src/tokenizer.py"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokenize.rs"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("untokenized_data.csv"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokenization-notes.md"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secretary-notes.md"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secretariat.txt"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("passwordless-ssh.md"));
-        assertEquals("SECRET", ProtectedPathTokens.protectedKind("credentialing.md"));
+    void derivationalSuffixNamesAreNoLongerProtected() {
+        assertEquals("", ProtectedPathTokens.protectedKind("tokenizer.java"));
+        assertEquals("", ProtectedPathTokens.protectedKind("src/tokenizer.py"));
+        assertEquals("", ProtectedPathTokens.protectedKind("tokenize.rs"));
+        assertEquals("", ProtectedPathTokens.protectedKind("untokenized_data.csv"));
+        assertEquals("", ProtectedPathTokens.protectedKind("tokenization-notes.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("secretary-notes.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("secretariat.txt"));
+        assertEquals("", ProtectedPathTokens.protectedKind("passwordless-ssh.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("credentialing.md"));
+    }
+
+    // ── fail-closed readback sensitivity (replaces 4 planner copies) ────
+
+    @Test
+    void readbackSensitivityFailsClosedOnBlankAndCoversPlannerVocabulary() {
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(null));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("  "));
+        // The four former planner copies' vocabulary, all covered:
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".env"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".env.local"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".git/config"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".ssh/known_hosts"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".gnupg/trustdb.gpg"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("backup/id_rsa"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("credentials/aws.txt"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("club-secret.md"));
+        // Fail-closed expansion vs the old copies (intended): the full
+        // canonical vocabulary now applies to readback sensitivity too.
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("passwords.txt"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("server.pem"));
+        // Ordinary repair targets stay inlineable.
+        assertFalse(ProtectedPathTokens.isSensitiveReadbackPath("index.html"));
+        assertFalse(ProtectedPathTokens.isSensitiveReadbackPath("src/tokenizer.py"));
     }
 
     @Test
@@ -92,6 +117,18 @@ class ProtectedPathTokensTest {
         // decision, out of scope (documented in the ticket).
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("token.java"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("jsontoken.java"));
+    }
+
+    // ── sink-redaction consumer (SafeLogFormatter) follows the classifier ─
+
+    @Test
+    void logRedactionFollowsTheCanonicalClassifier() {
+        // api_token.txt: still redacted; tokenizer.java: no longer redacted
+        // to <protected-path> (T759 delta visible at the log sink).
+        assertEquals("reading <protected-path> now",
+                SafeLogFormatter.value("reading api_token.txt now"));
+        assertEquals("reading tokenizer.java now",
+                SafeLogFormatter.value("reading tokenizer.java now"));
     }
 
     // ── looksProtectedPathToken normalization ──────────────────────────

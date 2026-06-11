@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T759] Protected-path classification consolidated into a single canonical
+  classifier (`ProtectedPathTokens`) with equals-or-suffix word-run matching;
+  five divergent local copies (four repair planners + the protected-read
+  answer guard) now delegate to it. Fixes `tokenizer.java`-class false
+  positives while keeping `mysecrets.txt`/`api_token.txt`-class names
+  protected; protected-content policy version bumped to v3 so RAG indexes
+  rebuild their privacy partition.
 - [T758] Tool failure classification is now driven by typed
   `ToolFailureReason` codes carried from producers through `ToolError` and
   `ToolOutcome`; all six message-sniffing classifier sites are migrated and
