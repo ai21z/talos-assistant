@@ -28,7 +28,12 @@ public final class TerminalOutput {
 
     /** Autoflush PrintStream whose bytes reach the terminal through its writer. */
     public static PrintStream printStreamFor(Terminal terminal) {
-        Charset charset = terminal.encoding();
+        // outputEncoding(), not encoding(): since JLine 3.30 the writer
+        // encodes output with the stdout-specific charset (which can differ
+        // from encoding() — observed UTF-8 vs windows-1252 in T781). Both
+        // sides of this adapter must use the writer's actual charset or
+        // non-ASCII chrome mangles to '?'.
+        Charset charset = terminal.outputEncoding();
         return new PrintStream(new WriterOutputStream(terminal.writer(), charset), true, charset);
     }
 

@@ -631,8 +631,11 @@ dependencies {
     // Local static-web behavior verification: in-process, workspace-local page execution only.
     implementation("org.htmlunit:htmlunit:${project.property("htmlUnitVersion")}")
 
-    // REPL
-    implementation("org.jline:jline:3.26.3")
+    // REPL. 3.30.x (not 4.x: the JNA provider and parts of the 3.x API are
+    // removed there). 3.30.12+ fixes the status-bar duplication on terminal
+    // resize that affects the T779 status row. Any future bump is a
+    // PTY-revalidation event: terminal provider internals shift bytes.
+    implementation("org.jline:jline:3.30.13")
 
     // Unified diff for the approval window (T756): pure Java, zero transitive
     // runtime dependencies, Apache-2.0.

@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Changed
+- [T781] JLine upgraded 3.26.3 → 3.30.13 as an isolated change (not 4.x:
+  the JNA provider and parts of the 3.x API are removed there). 3.30.12+
+  fixes the status-bar duplication on terminal resize affecting the T779
+  status row. The inert `.jna(true)` builder flag (no JNA on the
+  classpath — resolution always fell through to the bundled JNI
+  provider) is replaced by an explicit `.provider("jni")` pin for
+  deterministic provider selection on JDK 21. Found and absorbed one
+  3.30 behavior change: a terminal's writer now encodes output with the
+  stdout-specific `outputEncoding()` which can differ from `encoding()`;
+  `TerminalOutput` now uses the writer's actual charset so non-ASCII
+  chrome cannot mangle. Full check green; redirected transcript
+  byte-identical to the pre-wave smoke. This bump gates on the wave-close
+  fresh true-PTY cycle.
 - [T780] The status row now carries live session context next to the
   spinner: routing decision, active model id, and 1-based turn number
   (`⠹ Answering…  12s · route unified · qwen2.5-coder:14b · turn 3`),
