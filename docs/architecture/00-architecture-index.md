@@ -62,6 +62,7 @@ avoid split-brain architecture ownership.
 | `28-codebase-cleanup-ticket-backlog.md` | Cleanup ticket ledger and follow-up backlog. |
 | `29-v1-scenario-pack.md` | Scenario pack design. |
 | `30-cli-ui-output-architecture-audit.md` | CLI UI output architecture audit. |
+| `31-inline-tui-strategy-and-fullscreen-rejection.md` | ADR: inline JLine rendering accepted, full-screen TUI rejected (Wave 3); locks in the byte-frozen chrome, degradation, and single-writer rules. |
 
 ## Current Cleanup Decision
 
