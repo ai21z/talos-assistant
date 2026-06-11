@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Changed
+- [T769] Interactive-terminal detection now uses the OS-level `isatty`
+  probe everywhere (new `cli.ui.InteractiveTty`, lifted from RunCmd's
+  terminal selection) instead of `System.console() != null`, which on
+  JDK 22+ reports a console even for piped/redirected output and would
+  have flooded redirected transcripts with spinner carriage returns. The
+  fallback for hosts where the JLine natives cannot load honors JDK 22's
+  `Console.isTerminal()` via reflection (the build targets JDK 21).
+  `RenderEngine` additionally takes its interactivity from the
+  bootstrap's terminal selection (`lineReader` presence) rather than
+  re-detecting, so scripted and test paths stay plain by construction.
 - [T767] The history-chrome line prefixes that
   `MemoryUpdateListener.stripUiChromeForHistory` removes before assistant
   text reaches conversation history (`[Used N tool(s)...]`,
