@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T756] The approval window now shows a colored unified diff for write and
+  edit mutations (java-diff-utils; capped at 60 lines; redacted; fail-closed
+  skips for protected/oversized/binary targets; plain ASCII under
+  NO_COLOR/ASCII terminals). The legacy approval detail stays byte-identical
+  with the diff appended after it; a `APPROVAL_DIFF_PREVIEW` trace event
+  records hash and line counts; risk inference ignores diff bodies so quoted
+  "remove"/"delete" code cannot escalate the risk label.
 - [T755] Markdown-commentary sanitization of write/edit content now runs
   once, pre-approval, in the runtime's call normalization — the approval
   preview, trace hashes, checkpoint, and written file all see identical

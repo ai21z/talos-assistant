@@ -342,6 +342,7 @@ class JsonScenarioPackTest {
                     .assertNoFailedCalls()
                     .assertApprovalCounts(1, 1, 0, 0)
                     .assertAnyApprovalDetailContains("(40 bytes, 2 lines)")
+                    .assertAnyApprovalDetailContains("diff (+")
                     .assertFileContains("style.css", "background: #222")
                     .assertFileNotContains("style.css", "## Summary")
                     .assertFileNotContains("style.css", "```");

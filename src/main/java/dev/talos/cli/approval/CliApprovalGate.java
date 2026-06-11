@@ -165,7 +165,7 @@ public final class CliApprovalGate implements ApprovalGate {
     }
 
     private static String inferRisk(String description, String detail) {
-        String text = ((description == null ? "" : description) + "\n" + (detail == null ? "" : detail))
+        String text = ((description == null ? "" : description) + "\n" + riskScanScope(detail))
                 .toLowerCase(java.util.Locale.ROOT);
         if (text.contains("protected read")
                 || text.contains("sensitive read")
@@ -179,5 +179,18 @@ public final class CliApprovalGate implements ApprovalGate {
             return "write";
         }
         return "sensitive";
+    }
+
+    /**
+     * Risk inference must not scan the unified-diff block (T756): diff body
+     * lines quote arbitrary file content, and words like "remove" or
+     * "delete" inside the user's own code would flip the label to
+     * "destructive". The block is the final detail section, opened by the
+     * "diff (+" marker line that TurnProcessor appends.
+     */
+    private static String riskScanScope(String detail) {
+        if (detail == null) return "";
+        int diffStart = detail.indexOf("\n    diff (+");
+        return diffStart >= 0 ? detail.substring(0, diffStart) : detail;
     }
 }

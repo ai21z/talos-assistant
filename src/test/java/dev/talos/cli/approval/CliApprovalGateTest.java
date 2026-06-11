@@ -174,6 +174,28 @@ class CliApprovalGateTest {
             assertTrue(gate.approve(null, null));
         }
 
+        @Test
+        void diffBlockContentDoesNotEscalateRiskLabel() {
+            // T756: the diff body quotes arbitrary file content; "remove" or
+            // "delete" inside the user's own code must not flip the label.
+            var out = new ByteArrayOutputStream();
+            var gate = new CliApprovalGate(
+                    new ByteArrayInputStream("\n".getBytes(StandardCharsets.UTF_8)),
+                    new PrintStream(out, true, StandardCharsets.UTF_8));
+
+            gate.approveFull(
+                    "write operation: talos.write_file",
+                    "target: app.js (40 bytes, 2 lines)\n"
+                            + "    diff (+1 -1):\n"
+                            + "    @@ -1 +1 @@\n"
+                            + "    -button.removeEventListener('click', deleteItem);\n"
+                            + "    +button.addEventListener('click', addItem);");
+
+            String text = out.toString(StandardCharsets.UTF_8);
+            assertTrue(text.contains("Risk    write"), text);
+            assertFalse(text.contains("Risk    destructive"), text);
+        }
+
         private static CliApprovalGate gateWith(String userInput) {
             return new CliApprovalGate(
                     new ByteArrayInputStream(userInput.getBytes(StandardCharsets.UTF_8)),

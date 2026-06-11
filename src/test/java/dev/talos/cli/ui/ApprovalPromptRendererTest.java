@@ -46,6 +46,58 @@ class ApprovalPromptRendererTest {
                 "ASCII approval prompt must be terminal-safe: " + rendered);
     }
 
+    // ---- T756: diff-block colorization ----
+
+    private static final TerminalCapabilities COLOR =
+            new TerminalCapabilities(ColorPolicy.ALWAYS, true, true, true, false);
+    private static final String DIFF_DETAIL =
+            "target: app.css (12 bytes, 2 lines)\n"
+                    + "    preview:\n"
+                    + "      - item one\n"
+                    + "    diff (+1 -1):\n"
+                    + "    @@ -1 +1 @@\n"
+                    + "    -a { x: 1; }\n"
+                    + "    +a { x: 2; }";
+
+    @Test
+    void diffBlockLinesAreColorizedWhenColorEnabled() {
+        ApprovalPromptRenderer renderer = new ApprovalPromptRenderer(CliTheme.forCapabilities(COLOR), 80);
+        CliTheme theme = CliTheme.forCapabilities(COLOR);
+
+        String rendered = renderer.render("write file", DIFF_DETAIL, "write");
+
+        assertTrue(rendered.contains(theme.error("    -a { x: 1; }")), rendered);
+        assertTrue(rendered.contains(theme.success("    +a { x: 2; }")), rendered);
+        assertTrue(rendered.contains(theme.metadata("    @@ -1 +1 @@")), rendered);
+        // A "- item" line BEFORE the diff marker must never be colorized.
+        assertFalse(rendered.contains(theme.error("      - item one")), rendered);
+    }
+
+    @Test
+    void diffBlockOutputIsByteIdenticalPlainWhenColorDisabled() {
+        ApprovalPromptRenderer colorNever =
+                new ApprovalPromptRenderer(CliTheme.forCapabilities(UNICODE), 80);
+
+        String rendered = colorNever.render("write file", DIFF_DETAIL, "write");
+
+        assertFalse(rendered.contains("\033["), "no ANSI escapes with ColorPolicy.NEVER: " + rendered);
+        assertTrue(rendered.contains("│ " + "    -a { x: 1; }"), rendered);
+        assertTrue(rendered.contains("│ " + "    +a { x: 2; }"), rendered);
+    }
+
+    @Test
+    void diffLinesAtBuilderCapSurviveWrappingIntact() {
+        // MAX_LINE_LENGTH (70) + 4-space indent = 74 = the wrap threshold at
+        // width 80; capped diff lines must pass through wrap() verbatim.
+        ApprovalPromptRenderer renderer = new ApprovalPromptRenderer(CliTheme.forCapabilities(UNICODE), 80);
+        String longDiffLine = "+" + "x".repeat(69);
+        String detail = "target: f.txt\n    diff (+1 -0):\n    " + longDiffLine;
+
+        String rendered = renderer.render("write file", detail, "write");
+
+        assertTrue(rendered.contains("    " + longDiffLine), rendered);
+    }
+
     @Test
     void longUnbrokenDetailIsWrappedInsideTrustWindow() {
         ApprovalPromptRenderer renderer = new ApprovalPromptRenderer(CliTheme.forCapabilities(ASCII), 60);

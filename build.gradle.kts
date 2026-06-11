@@ -634,6 +634,10 @@ dependencies {
     // REPL
     implementation("org.jline:jline:3.26.3")
 
+    // Unified diff for the approval window (T756): pure Java, zero transitive
+    // runtime dependencies, Apache-2.0.
+    implementation("io.github.java-diff-utils:java-diff-utils:${project.property("javaDiffUtilsVersion")}")
+
     // JUnit 5 (explicit engine to avoid Gradle 9 deprecation)
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
