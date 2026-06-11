@@ -22,41 +22,41 @@
     {
       "name": "safe-redirected-gptoss",
       "lane": "SAFE_REDIRECTED_STDIN",
-      "status": "MANUAL_REQUIRED",
-      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/talosbench",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/talosbench/20260612-011407",
       "model": "llama_cpp/gpt-oss-20b",
-      "notes": "rerun required: wave 3 reworked the interactive rendering stack end to end; redirected transcripts must stay byte-identical plain (no ANSI, no markdown, no status row) and the forbidden approval-prompt substrings (byte-frozen via ApprovalPromptText since T765/T766) must hold on a live bank; scheduled in this close session from pwsh"
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; piped approval inputs disallowed; StrictEvidence; matches the 0.10.2/0.10.3 baseline. Wave-3 degradation claim verified live: all 19 transcripts scanned, zero ANSI escape bytes - redirected output stayed byte-plain through the rendering rework; run from pwsh"
     },
     {
       "name": "safe-redirected-qwen",
       "lane": "SAFE_REDIRECTED_STDIN",
-      "status": "MANUAL_REQUIRED",
-      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/talosbench",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/talosbench/20260612-011101",
       "model": "llama_cpp/qwen2.5-coder-14b",
-      "notes": "rerun required (same rationale as the gptoss lane); 0.10.3 baseline: 19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; scheduled in this close session from pwsh (never Windows PowerShell 5.1 - its stderr handling aborts the runner)"
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; piped approval inputs disallowed; StrictEvidence; matches the 0.10.2/0.10.3 baseline. All 19 transcripts scanned, zero ANSI escape bytes; run from pwsh (never Windows PowerShell 5.1 - its stderr handling aborts the runner)"
     },
     {
       "name": "sync-approval-gptoss",
       "lane": "SYNC_APPROVAL",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/sync-approval",
       "model": "llama_cpp/gpt-oss-20b",
-      "notes": "rerun required after the JLine 3.26.3->3.30.13 bump and the chrome-constants migration (T765-T768): scripted approval paths must keep their exact bytes live; seed 424242; 0.10.3 baseline 31/31 with 2 PASS_WITH_RUNTIME_REPAIR"
+      "notes": "31/31 PASS-family from the committed candidate, runner artifact scan PASS; 2 PASS_WITH_RUNTIME_REPAIR (mutation-append-line-verified, static-web-selector-script-only-verified - the same two as 0.10.3, both verified-final); t325 PASS_WITH_READBACK_ONLY_LIMITATION; zero rescues; seed 424242"
     },
     {
       "name": "sync-approval-qwen",
       "lane": "SYNC_APPROVAL",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/sync-approval",
       "model": "llama_cpp/qwen2.5-coder-14b",
-      "notes": "rerun required (same rationale); watch item: T763+T764 ride in this candidate - the 4 workspace-op scenarios that scored PASS with BLOCKED traces at 0.10.2/0.10.3 (phantom 'by' expected target) should now genuinely pass, and T764's outcome claim turns any remaining silent BLOCKED into a visible failure; seed 424242"
+      "notes": "31/31 PASS-family from the committed candidate, runner artifact scan PASS; ZERO ladder rescues and ZERO runtime repairs. Headline delta vs 0.10.2/0.10.3: all six workspace-op scenarios now trace COMPLETE - the PASS-with-BLOCKED-traces quirk (phantom 'by' expected target) is gone, confirming T763 live with T764's outcome claim active; the only BLOCKED traces are the deliberately-blocking scenarios; t325 PASS_WITH_READBACK_ONLY_LIMITATION; seed 424242"
     },
     {
       "name": "capability-private-mode-both-models",
       "lane": "CAPABILITY_PRIVATE_MODE",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957-capability",
-      "notes": "rerun required: streamed-answer shaping (T776 wrap, T777 markdown) sits on the answer path end to end even though it is interactive-only by activation predicate; verify zero secret/canary leaks, zero overclaims, and unchanged protected-read approvals on both models; OCR via the controlled stub"
+      "notes": "48 runs (24/model incl. private-folder bank); 0 secret leaks, 0 canary leaks, 0 overclaims across all 48 rows; PASS by process/tool-artifact heuristics; private-mode handoffs WITHHELD_PRIVATE_MODE as expected; the pptx row matches the 0.10.3 baseline exactly (pre-existing unsupported-format handling, prompt-debug False, no overclaim); targeted canary scan over the capability roots PASS with the documented fixture allowlist; OCR via controlled stub"
     },
     {
       "name": "true-pty-manual-qwen",
@@ -69,9 +69,9 @@
     {
       "name": "release-clean-canary-scan",
       "lane": "DETERMINISTIC",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts",
-      "notes": "runs over the live-lane artifact roots once the banks complete; the build-tree canary scan already passed in the post-bump check"
+      "notes": "checkRuntimeArtifactCanaries PASS over the packet artifacts root (no allowlist) and the capability testing+workspace roots (documented fixture allowlist); the build-tree canary scan passed in the post-bump check; the pty-targeted scan (fixture .env allowlist) runs in the owner PTY cycle (OWNER-RUNBOOK Step 9) and is covered by the TRUE_PTY_MANUAL gate"
     }
   ]
 }

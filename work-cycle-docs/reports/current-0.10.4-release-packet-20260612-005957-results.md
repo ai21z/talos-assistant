@@ -90,21 +90,19 @@ Carried trust-surface fixes:
 
 ## Gate status (see GATES.json for the authoritative ledger)
 
-Ledger recorded at packet creation: `DETERMINISTIC` and `STATIC_ANALYSIS`
-are green; the live lanes (`SAFE_REDIRECTED_STDIN`, `SYNC_APPROVAL`,
-`CAPABILITY_PRIVATE_MODE`) are being executed by this close session and
-their verdicts will be recorded in a follow-up commit; `TRUE_PTY_MANUAL`
-is owner-run and mandatory this wave (every ticket touches rendering).
+**Every scripted lane is green for both audited models** (live lanes
+executed by the close session on 2026-06-12, immediately after the packet
+ledger was recorded). `TRUE_PTY_MANUAL` remains open: it is owner-run and
+mandatory this wave (every ticket touches rendering).
 
-| Lane | Status at packet creation |
-|---|---|
-| Deterministic summaries | PASS — all four summaries 0.10.4; post-bump check green; launcher reverified 0.10.4 after catching a stale post-cut rebuild |
-| Qodana static analysis | PASS — fresh native scan at the cut revision (operator-attested; linter 253.31821 emits no provenance metadata — see self-distrust notes); 0 critical, 113 findings (108 warning / 5 note) |
-| `SAFE_REDIRECTED_STDIN` (both models) | scheduled this session — byte-identical-plain redirected output is the wave's headline degradation claim |
-| `SYNC_APPROVAL` (both models, seed 424242) | scheduled this session — watch the T763/T764 workspace-op delta vs 0.10.3 |
-| `CAPABILITY_PRIVATE_MODE` (48 runs) | scheduled this session |
-| `TRUE_PTY_MANUAL` | owner-run, REQUIRED — wave-3 visual surface (markdown, fences, status row + resize, dynamic widths, JLine 3.30.13) |
-| Canary scans | after the lanes |
+| Lane | GPT-OSS | Qwen | Verdict |
+|---|---|---|---|
+| `SAFE_REDIRECTED_STDIN` | 19 PASS / 22 MANUAL_REQUIRED, 0 FAIL | 19 PASS / 22 MANUAL_REQUIRED, 0 FAIL | PASS (matches 0.10.2/0.10.3 baseline); **all 38 transcripts carry zero ANSI bytes** — the wave's byte-plain redirected claim verified live |
+| `SYNC_APPROVAL` (full 31-scenario live bank, seed 424242) | 31/31, artifact scan PASS, 2 PASS_WITH_RUNTIME_REPAIR (same two as 0.10.3) | 31/31, artifact scan PASS, **0 rescues, all six workspace-op scenarios trace COMPLETE** (T763 fix confirmed live, T764 claim active; 0.10.2/0.10.3 had PASS-with-BLOCKED-traces) | PASS |
+| `CAPABILITY_PRIVATE_MODE` | 24 prompts | 24 prompts | PASS — 48/48 runs, 0 secret/canary leaks, 0 overclaims; pptx row identical to 0.10.3 baseline; OCR via controlled stub |
+| `TRUE_PTY_MANUAL` | — | owner-run pending — wave-3 visual surface (markdown, fences, status row + resize, dynamic widths, JLine 3.30.13); see the packet OWNER-RUNBOOK Step 6 | MANUAL_REQUIRED |
+| Canary scans | packet artifacts root (no allowlist) | capability roots (fixture allowlist) | PASS; pty-targeted scan runs in the owner cycle |
+| Deterministic summaries + Qodana | all summaries 0.10.4; fresh native scan, 0 critical, 113 findings (88 → 113 vs 0.10.3 — wave-3 growth + linter bump) | (bundle) | PASS |
 
 ## Self-distrust notes
 
