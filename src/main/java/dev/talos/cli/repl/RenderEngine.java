@@ -42,6 +42,7 @@ public final class RenderEngine {
     private final boolean showTimingAfterAnswer;
     private final boolean markdownEnabled;
     private final boolean interactive;
+    private final dev.talos.cli.ui.StatusRowPresenter statusRow;
 
     // Spinner state
     private final AtomicBoolean spinnerActive = new AtomicBoolean(false);
@@ -80,15 +81,30 @@ public final class RenderEngine {
      */
     public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive,
                         IntSupplier terminalWidth) {
-        this(cfg, redactor, out, interactive, CliTheme.current(), terminalWidth);
+        this(cfg, redactor, out, interactive, CliTheme.current(), terminalWidth, null);
+    }
+
+    /**
+     * @param terminal the live JLine terminal, used for the Status bottom
+     *                 row (T779); {@code null} keeps the legacy {@code \r}
+     *                 spinner for capable detection-free paths.
+     */
+    public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive,
+                        IntSupplier terminalWidth, org.jline.terminal.Terminal terminal) {
+        this(cfg, redactor, out, interactive, CliTheme.current(), terminalWidth, terminal);
     }
 
     RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme) {
-        this(cfg, redactor, out, interactive, theme, null);
+        this(cfg, redactor, out, interactive, theme, null, null);
     }
 
     RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme,
                  IntSupplier terminalWidth) {
+        this(cfg, redactor, out, interactive, theme, terminalWidth, null);
+    }
+
+    RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme,
+                 IntSupplier terminalWidth, org.jline.terminal.Terminal terminal) {
         this.cfg = (cfg == null ? new Config() : cfg);
         this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
@@ -96,6 +112,9 @@ public final class RenderEngine {
         this.theme = theme == null ? CliTheme.current() : theme;
         this.progressRenderer = new ProgressLineRenderer(this.theme);
         this.terminalWidth = terminalWidth;
+        this.statusRow = terminal != null
+                ? new dev.talos.cli.ui.StatusRowPresenter(terminal, this.theme)
+                : null;
 
         // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
@@ -160,6 +179,13 @@ public final class RenderEngine {
     public void startSpinner() {
         if (!showStatusDuringAnswer) return;
         if (!interactive) return;
+        // Capable terminals get the JLine Status bottom row (T779): drawn in
+        // a managed scroll region, so no raw \r frames ever interleave with
+        // answer output. Unsupported terminals keep the legacy thread.
+        if (statusRow != null && statusRow.supported()) {
+            statusRow.start(statusLabel);
+            return;
+        }
         if (!spinnerActive.compareAndSet(false, true)) return;
 
         spinnerStartTime = Instant.now();
@@ -194,9 +220,12 @@ public final class RenderEngine {
     }
 
     /**
-     * Stops the spinner.
+     * Stops the spinner (status row or legacy thread).
      */
     public void stopSpinner() {
+        if (statusRow != null) {
+            statusRow.stop();
+        }
         if (!spinnerActive.compareAndSet(true, false)) return;
         synchronized (spinnerMonitor) {
             spinnerMonitor.notifyAll();
@@ -204,6 +233,18 @@ public final class RenderEngine {
         if (spinnerThread != null) {
             try { spinnerThread.join(200); }
             catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+    }
+
+    /**
+     * Tears rendering down at session end (T779): stops any spinner and
+     * closes the JLine status region so the terminal scroll area is
+     * restored before the process exits.
+     */
+    public void shutdown() {
+        stopSpinner();
+        if (statusRow != null) {
+            statusRow.close();
         }
     }
 
