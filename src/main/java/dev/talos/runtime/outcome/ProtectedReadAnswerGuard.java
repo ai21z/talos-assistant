@@ -110,7 +110,12 @@ public final class ProtectedReadAnswerGuard {
         String reason = "approved protected read answer used current read evidence";
         String current = answer == null ? "" : answer;
         boolean repaired = false;
-        if (isGenericProtectedReadRefusal(current)
+        // T760: blank answers and refusals are distinct conditions. Both are
+        // repaired with the approved read evidence (shipping an empty final
+        // answer after the user granted a protected-read approval is worse),
+        // but the trace reason must be truthful about which one happened.
+        boolean blankAnswer = current.isBlank();
+        if ((blankAnswer || isProtectedReadRefusal(current))
                 && !answerContainsCurrentProtectedReadEvidence(current, protectedReads)) {
             String repairedContainmentAnswer =
                     approvedPrivateDocumentContainmentAnswer(messages, loopResult);
@@ -118,9 +123,13 @@ public final class ProtectedReadAnswerGuard {
                     ? approvedProtectedReadEvidenceAnswer(protectedReads)
                     : repairedContainmentAnswer;
             status = "REPAIRED";
-            reason = repairedContainmentAnswer.isBlank()
-                    ? "generic model refusal replaced with current approved read evidence"
-                    : "blocked/refusal answer replaced with approved private-document containment answer";
+            if (!repairedContainmentAnswer.isBlank()) {
+                reason = "blocked/refusal answer replaced with approved private-document containment answer";
+            } else if (blankAnswer) {
+                reason = "blank model answer replaced with current approved read evidence";
+            } else {
+                reason = "generic model refusal replaced with current approved read evidence";
+            }
             repaired = true;
         }
         LocalTurnTraceCapture.recordProtectedReadPostcondition(
@@ -156,9 +165,26 @@ public final class ProtectedReadAnswerGuard {
         return List.copyOf(out);
     }
 
-    private static boolean isGenericProtectedReadRefusal(String answer) {
-        if (answer == null || answer.isBlank()) return true;
-        String lower = answer.toLowerCase(Locale.ROOT);
+    /**
+     * Refusal markers are matched within the ANSWER HEAD only (T760).
+     * Refusals are characteristically answer-initial, and runtime-injected
+     * markers ("approval blocked", "protected content was redacted") always
+     * sit at offset 0 of runtime-replaced answers, so head scoping cannot
+     * miss them. Whole-answer matching destroyed long grounded answers whose
+     * tail carried a legitimate caveat ("the raw value cannot be shared").
+     * A refusal buried past the head passes through — an answer-quality
+     * trade only; disclosure control lives in the suppression/handoff/
+     * redaction layers, not here.
+     */
+    private static final int REFUSAL_HEAD_CHARS = 240;
+
+    private static boolean isProtectedReadRefusal(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        String head = answer.strip();
+        if (head.length() > REFUSAL_HEAD_CHARS) {
+            head = head.substring(0, REFUSAL_HEAD_CHARS);
+        }
+        String lower = head.toLowerCase(Locale.ROOT);
         return lower.contains("can't provide")
                 || lower.contains("cannot provide")
                 || lower.contains("can't share")

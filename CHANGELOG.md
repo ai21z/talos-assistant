@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T760] The protected-read answer postcondition now distinguishes blank
+  model answers from refusals (truthful trace reasons) and scopes refusal-
+  marker detection to the first 240 characters of the answer — long grounded
+  answers with tail caveats like "the raw value cannot be shared" are no
+  longer destroyed and replaced.
 - [T759] Protected-path classification consolidated into a single canonical
   classifier (`ProtectedPathTokens`) with equals-or-suffix word-run matching;
   five divergent local copies (four repair planners + the protected-read
