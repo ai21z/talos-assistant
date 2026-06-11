@@ -20,23 +20,13 @@ public final class ToolCallSupport {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallSupport.class);
     public static final int KEEP_RECENT_TOOL_RESULTS = 2;
 
-    private static final Set<String> READ_ONLY_TOOLS = Set.of(
-            "read_file", "file_read", "readfile",
-            "list_dir", "list_directory", "dir_list", "ls", "listdir", "listdirectory",
-            "grep", "search", "grepsearch",
-            "retrieve"
-    );
-    private static final Set<String> MUTATING_TOOLS = Set.of(
-            "write_file", "file_write", "writefile",
-            "create_file", "file_create", "createfile",
-            "edit_file", "file_edit", "editfile",
-            "apply_workspace_batch", "workspace_batch", "batch_apply", "apply_batch",
-            "mkdir", "make_dir", "make_directory", "create_dir", "create_directory",
-            "move_path", "move", "mv",
-            "copy_path", "copy", "cp",
-            "rename_path", "rename",
-            "delete_path", "delete", "remove_path", "remove", "rm"
-    );
+    // T757: the duplicate READ_ONLY_TOOLS/MUTATING_TOOLS name sets are gone.
+    // Static name classification delegates to ToolAliasPolicy (the alias
+    // policy's single canonical-name source); trust gates in TurnProcessor
+    // read ToolOperationMetadata from the resolved tool, and name-only gate
+    // callers use ToolMutationGate (fail-closed for unknown names).
+    // PATH_REQUIRED_TOOLS stays: it is a path-repair concern, not gating
+    // (future derivation from ToolOperationMetadata.pathRoles is possible).
     private static final Set<String> PATH_REQUIRED_TOOLS = Set.of(
             "write_file", "file_write", "writefile",
             "create_file", "file_create", "createfile",
@@ -283,13 +273,11 @@ public final class ToolCallSupport {
     }
 
     public static boolean isReadOnlyTool(String toolName) {
-        String canonical = ToolAliasPolicy.localCanonicalName(toolName);
-        return READ_ONLY_TOOLS.contains(canonical);
+        return ToolAliasPolicy.isReadOnly(toolName);
     }
 
     public static boolean isMutatingTool(String toolName) {
-        String canonical = ToolAliasPolicy.localCanonicalName(toolName);
-        return MUTATING_TOOLS.contains(canonical);
+        return ToolAliasPolicy.isMutating(toolName);
     }
 
     private static boolean isEditFileTool(String toolName) {
