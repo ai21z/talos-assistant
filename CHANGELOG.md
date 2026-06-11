@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- [T782] Added the inline-TUI architecture decision record
+  (`docs/architecture/31-inline-tui-strategy-and-fullscreen-rejection.md`):
+  full-screen TUI (Lanterna/Jexer/alternate-screen) is rejected with
+  evidence — the alternate screen would destroy the plain-scrollback
+  transcripts the PTY evidence chain string-matches — and the Wave 3
+  standing rules (byte-frozen chrome contracts, byte-identical
+  degradation, visible markdown markers, Talos-authored nanorc, single
+  authoritative writer, additive status row, JLine bumps as isolated
+  PTY-revalidation events) are locked in with explicit revisit criteria.
 - [T781] JLine upgraded 3.26.3 → 3.30.13 as an isolated change (not 4.x:
   the JNA provider and parts of the 3.x API are removed there). 3.30.12+
   fixes the status-bar duplication on terminal resize affecting the T779
