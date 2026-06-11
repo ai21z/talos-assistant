@@ -1,6 +1,6 @@
 # T741 - Named Tool Choice On Source-Evidence Repair Re-Prompts
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: supports T280/T284 bank stability (t325-class failures)
 Branch: codex/wave1-stability-and-cycle

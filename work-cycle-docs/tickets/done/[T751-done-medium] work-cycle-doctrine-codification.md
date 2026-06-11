@@ -1,6 +1,6 @@
 # T751 - Work-Cycle Doctrine Codification
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: no (doctrine-integrity; prerequisite for T747's encoded sequence)
 Branch: codex/wave1-stability-and-cycle

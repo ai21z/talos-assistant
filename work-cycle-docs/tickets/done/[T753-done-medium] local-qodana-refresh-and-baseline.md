@@ -1,6 +1,6 @@
 # T753 - Local Qodana Refresh And Baseline
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: yes - 0.10.2 packet should not cite a stale-provenance scan
 Branch: codex/wave1-stability-and-cycle

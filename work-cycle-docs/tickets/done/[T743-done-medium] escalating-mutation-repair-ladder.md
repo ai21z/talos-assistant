@@ -1,6 +1,6 @@
 # T743 - Escalating Mutation Repair Ladder
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: supports T280/T284 bank stability (rescues residual emission failures)
 Branch: codex/wave1-stability-and-cycle

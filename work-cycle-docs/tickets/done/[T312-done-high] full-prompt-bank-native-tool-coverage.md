@@ -1,6 +1,6 @@
 # [T312-open-high] Full Prompt-Bank Native Tool Coverage
 
-Status: implemented-awaiting-evidence - current 0.10.1 packet has explicit 13-tool evidence roots, but the full Qwen lane is still unstable
+Status: done - 13/13 native tools evidenced in the 0.10.2 release-grade packet incl. clean focused talos.retrieve
 Severity: high
 Release gate: private-document beta / full E2E release evidence
 Branch: v0.9.0-beta-dev
@@ -499,3 +499,16 @@ Both remaining items now have stabilization-grade evidence:
 
 T312 closes when the release-grade `0.10.2` packet reproduces this from a
 committed candidate (wave close).
+
+## 2026-06-11 closure
+
+All 13 registered native tools are evidenced in the 0.10.2 release-grade
+packet from a clean committed candidate: the full synchronized banks cover
+read/write/edit/workspace-operation/batch/command-boundary scenarios for both
+models (31/31 each), the focused retrieve probe provides clean
+`TOOL_EXECUTED talos.retrieve success=true` evidence (seed-reproducible),
+and the safe lanes cover the redirected prompt bank. The deterministic
+coverage guard (FullAuditCoverageDocumentationTest) and lane-labeled
+reporting remain in force. Report: `work-cycle-docs/reports/current-0.10.2-release-packet-20260611-081900-results.md`.
+
+Close T312.

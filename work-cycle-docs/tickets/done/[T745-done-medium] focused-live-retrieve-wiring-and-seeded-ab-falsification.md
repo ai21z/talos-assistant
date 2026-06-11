@@ -1,6 +1,6 @@
 # T745 - Focused Live Retrieve Wiring And Seeded A/B Falsification
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: yes - supplies the clean `talos.retrieve` evidence T312 requires
 Branch: codex/wave1-stability-and-cycle

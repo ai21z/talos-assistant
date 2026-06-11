@@ -1,6 +1,6 @@
 # T739 - Workspace-Obligation Provider Tool Choice
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: high
 Release gate: yes - directly unblocks the Qwen full synchronized bank (T280/T284/T312)
 Branch: codex/wave1-stability-and-cycle
