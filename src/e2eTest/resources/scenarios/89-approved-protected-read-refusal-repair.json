@@ -1,0 +1,15 @@
+{
+  "name": "approved protected read refusal is repaired with evidence",
+  "fixture": "protected-path",
+  "v1Pack": true,
+  "claims": [
+    "approved-protected-read-refusal-repaired-with-evidence"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Read .env and tell me what it says.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
+    "I'm sorry, but I can't share the contents of that file."
+  ]
+}

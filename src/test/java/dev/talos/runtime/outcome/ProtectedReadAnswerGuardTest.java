@@ -166,6 +166,99 @@ class ProtectedReadAnswerGuardTest {
         assertTrue(result.answer().contains("- .env: no additional detail"));
     }
 
+    // ---- T760: blank ≠ refusal; refusal markers scoped to the answer head ----
+
+    @Test
+    void blankAnswerIsRepairedWithTruthfulBlankReason() throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SAFE_AUDIT_SETTING=fake\n");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                readOutcome("talos.read_file", ".env", "1 | contains approved private configuration"));
+
+        LocalTurnTraceCapture.begin(
+                "trc-t760-blank", "sid", 1, "2026-06-11T00:00:00Z",
+                "workspace-hash", "auto", "test", "model", "Read .env.");
+        try {
+            ProtectedReadAnswerGuard.PostconditionResult result =
+                    ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                            "",
+                            loopResult,
+                            workspace);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(result.repaired(), "blank answer after a granted approval must still be repaired");
+            assertTrue(result.answer().contains("- .env: contains approved private configuration"));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "PROTECTED_READ_POSTCONDITION_CHECKED".equals(event.type())
+                                    && "REPAIRED".equals(event.data().get("status"))
+                                    && "blank model answer replaced with current approved read evidence"
+                                            .equals(event.data().get("reason"))),
+                    "the trace reason must say BLANK, not refusal — calling a blank answer a "
+                            + "'generic model refusal' was the T760 truthfulness violation");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void tailCaveatBeyondAnswerHeadDoesNotTriggerRefusalRepair() throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SAFE_AUDIT_SETTING=fake\n");
+        // A long grounded answer whose TAIL carries a legitimate caveat. The
+        // caveat phrase ("cannot share") sits well past the 240-char head, and
+        // the answer does not literally contain the evidence-summary
+        // substring — under whole-answer matching this answer was destroyed.
+        String answer = ("The configuration file defines one audit setting used by the local test "
+                + "harness. Its value is a fake placeholder that exists so canary scans have "
+                + "something safe to detect. The file has a single line and no other entries. ")
+                .repeat(2)
+                + "As a general policy note, I cannot share raw secret values beyond this summary.";
+
+        ProtectedReadAnswerGuard.PostconditionResult result =
+                ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                        answer,
+                        loopResult(readOutcome(
+                                "talos.read_file", ".env",
+                                "1 | contains approved private configuration")),
+                        workspace);
+
+        assertFalse(result.repaired(),
+                "a tail caveat must not classify a long grounded answer as a refusal");
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void headPositionedRefusalIsStillRepaired() throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SAFE_AUDIT_SETTING=fake\n");
+
+        ProtectedReadAnswerGuard.PostconditionResult result =
+                ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                        "I'm sorry, but I can't share the contents of that file with you.",
+                        loopResult(readOutcome(
+                                "talos.read_file", ".env",
+                                "1 | contains approved private configuration")),
+                        workspace);
+
+        assertTrue(result.repaired());
+    }
+
+    @Test
+    void tokenizerSourceReadDoesNotEngageProtectedReadPostcondition() {
+        // T759/T760 characterization: tokenizer.java is no longer classified
+        // protected, so the postcondition guard does not own this answer at
+        // all — even a refusal-shaped answer passes through untouched.
+        String answer = "I can't provide that.";
+
+        ProtectedReadAnswerGuard.PostconditionResult result =
+                ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
+                        answer,
+                        loopResult(readOutcome(
+                                "talos.read_file", "src/tokenizer.java",
+                                "public final class Tokenizer { }")),
+                        workspace);
+
+        assertFalse(result.repaired());
+        assertEquals(answer, result.answer());
+    }
+
     private static ToolCallLoop.ToolOutcome readOutcome(String toolName, String pathHint, String summary) {
         return new ToolCallLoop.ToolOutcome(
                 toolName,

@@ -1233,6 +1233,31 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/89-approved-protected-read-refusal-repair.json] 89: approved protected read refusal is repaired with evidence")
+    void approvedProtectedReadRefusalIsRepairedWithEvidence() {
+        var loaded = JsonScenarioLoader.load("scenarios/89-approved-protected-read-refusal-repair.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            // T760 end-to-end pin for the answer-head refusal path: after a
+            // GRANTED protected-read approval, a head-positioned refusal is
+            // replaced with the approved read evidence and traced truthfully.
+            // (The blank-answer branch is a guard-level path pinned in
+            // ProtectedReadAnswerGuardTest: at the executor level, blank loop
+            // answers are owned by the loop-summary fallback first.)
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerNotContains("I can't share")
+                    .assertLocalTraceRecorded();
+            assertTrue(result.localTrace().events().stream().anyMatch(event ->
+                            "PROTECTED_READ_POSTCONDITION_CHECKED".equals(event.type())
+                                    && "REPAIRED".equals(event.data().get("status"))),
+                    "trace must record the postcondition repair");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/70-denied-protected-read-blocked-outcome.json] 70: denied protected read produces blocked outcome")
     void deniedProtectedReadProducesBlockedOutcome() {
         var loaded = JsonScenarioLoader.load("scenarios/70-denied-protected-read-blocked-outcome.json");
