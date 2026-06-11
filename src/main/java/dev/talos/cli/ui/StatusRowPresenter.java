@@ -43,6 +43,10 @@ public final class StatusRowPresenter implements AutoCloseable {
     private Thread ticker;
     private volatile Instant startedAt;
     private volatile String label = "";
+    // Live context (T780) — renderer-owned, never model text.
+    private volatile String route = "";
+    private volatile java.util.function.Supplier<String> model = () -> "";
+    private volatile java.util.function.IntSupplier turn = () -> 0;
 
     public StatusRowPresenter(Terminal terminal, CliTheme theme) {
         this.terminal = terminal;
@@ -65,6 +69,17 @@ public final class StatusRowPresenter implements AutoCloseable {
 
     public boolean supported() {
         return supports(terminal);
+    }
+
+    /** Current routing decision shown on the row (already-trusted text). */
+    public void route(String routeLabel) {
+        this.route = routeLabel == null ? "" : routeLabel;
+    }
+
+    /** Live model/turn sources, polled per tick (T780). */
+    public void context(java.util.function.Supplier<String> model, java.util.function.IntSupplier turn) {
+        this.model = model == null ? () -> "" : model;
+        this.turn = turn == null ? () -> 0 : turn;
     }
 
     /** Starts the ticking row; no-op when unsupported or already running. */
@@ -125,13 +140,56 @@ public final class StatusRowPresenter implements AutoCloseable {
         }
     }
 
-    private AttributedString buildRow() {
+    AttributedString buildRow() {
         String glyph = frames[frame.getAndIncrement() % frames.length];
-        long secs = startedAt.until(Instant.now(), ChronoUnit.SECONDS);
+        long secs = startedAt == null ? 0 : startedAt.until(Instant.now(), ChronoUnit.SECONDS);
         String elapsed = secs < 60
                 ? secs + "s"
                 : String.format(Locale.ROOT, "%d:%02d", secs / 60, secs % 60);
-        return AttributedString.fromAnsi(
-                "  " + theme.active(glyph) + " " + theme.metadata(label) + "  " + theme.muted(elapsed));
+        String separator = theme.capabilities().unicodeSafe() ? " · " : " | ";
+        StringBuilder ansi = new StringBuilder()
+                .append("  ").append(theme.active(glyph))
+                .append(" ").append(theme.metadata(label))
+                .append("  ").append(theme.muted(elapsed));
+        if (!route.isBlank()) {
+            ansi.append(theme.muted(separator)).append(theme.metadata("route " + route));
+        }
+        String modelLabel = safeGet(model);
+        if (!modelLabel.isBlank()) {
+            ansi.append(theme.muted(separator)).append(theme.metadata(modelLabel));
+        }
+        int turnNumber = safeTurn(turn);
+        if (turnNumber > 0) {
+            ansi.append(theme.muted(separator)).append(theme.metadata("turn " + turnNumber));
+        }
+        AttributedString row = AttributedString.fromAnsi(ansi.toString());
+        int maxColumns = Math.max(8, terminalColumns() - 1);
+        return row.columnLength() > maxColumns ? row.columnSubSequence(0, maxColumns) : row;
+    }
+
+    private int terminalColumns() {
+        try {
+            int width = terminal.getWidth();
+            return width > 0 ? width : 80;
+        } catch (RuntimeException unavailable) {
+            return 80;
+        }
+    }
+
+    private static String safeGet(java.util.function.Supplier<String> supplier) {
+        try {
+            String value = supplier.get();
+            return value == null ? "" : value;
+        } catch (RuntimeException unavailable) {
+            return "";
+        }
+    }
+
+    private static int safeTurn(java.util.function.IntSupplier supplier) {
+        try {
+            return supplier.getAsInt();
+        } catch (RuntimeException unavailable) {
+            return 0;
+        }
     }
 }

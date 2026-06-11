@@ -209,6 +209,10 @@ public final class TalosBootstrap {
                 lineReader != null,
                 terminalWidth,
                 lineReader != null ? lineReader.getTerminal() : null);
+        // Live status-row context (T780): model id and 1-based turn number,
+        // polled per tick. Renderer-owned values only.
+        final ConversationManager statusConversation = conversationManager;
+        render.setStatusContext(llm::getModel, () -> statusConversation.turnCount() + 1);
 
         // ── Approval gate ─────────────────────────────────────────────────
         // When a JLine LineReader is available, approval reads through the same

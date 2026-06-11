@@ -148,8 +148,21 @@ public final class RenderEngine {
     public void printRouteHint(String routeLabel) {
         if (!interactive) return;
         if (routeLabel == null || routeLabel.isBlank()) return;
+        // The printed line is the evidence record and stays unchanged; the
+        // status row additionally mirrors the route live (T780).
+        if (statusRow != null) {
+            statusRow.route(terminalText(routeLabel));
+        }
         out.println(progressRenderer.route(terminalText(routeLabel), ""));
         out.flush();
+    }
+
+    /** Live model/turn sources for the status row (T780); no-op without one. */
+    public void setStatusContext(java.util.function.Supplier<String> model,
+                                 java.util.function.IntSupplier turn) {
+        if (statusRow != null) {
+            statusRow.context(model, turn);
+        }
     }
 
     /**
