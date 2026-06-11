@@ -198,3 +198,4 @@ ui:
   show_timing_after_answer: true
   show_breakdown: false
   status_label: "Answering…"
+  markdown: true         # Styled streaming markdown in capable interactive terminals; redirected/NO_COLOR/ASCII/dumb output always stays plain

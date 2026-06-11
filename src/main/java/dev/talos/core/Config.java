@@ -359,6 +359,7 @@ public class Config implements EngineConfig {
         putIfAbsent(ui, "show_timing_after_answer", true, "ui.show_timing_after_answer");
         putIfAbsent(ui, "show_breakdown", false, "ui.show_breakdown");
         putIfAbsent(ui, "status_label", "Answering…", "ui.status_label");
+        putIfAbsent(ui, "markdown", true, "ui.markdown");
 
         // ----- tools -----
         Map<String,Object> tools = map(data.get("tools"));

@@ -28,7 +28,7 @@ package dev.talos.cli.ui;
  * block oracle: trailing whitespace of the whole answer cannot be stripped
  * retroactively while streaming.
  */
-public final class StreamingAnswerShaper {
+public final class StreamingAnswerShaper implements StreamShaper {
 
     private final int maxWidth;
 
@@ -50,6 +50,7 @@ public final class StreamingAnswerShaper {
     }
 
     /** Shape a sanitized chunk; returns text ready for the pane stream (may be empty). */
+    @Override
     public String accept(String chunk) {
         if (chunk == null || chunk.isEmpty()) return "";
         StringBuilder out = new StringBuilder(chunk.length() + 8);
@@ -74,6 +75,7 @@ public final class StreamingAnswerShaper {
     }
 
     /** Drain buffered state at stream close; no trailing newline is added. */
+    @Override
     public String flush() {
         StringBuilder out = new StringBuilder();
         if (pendingCarriageReturn) {
