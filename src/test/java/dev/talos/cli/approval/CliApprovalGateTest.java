@@ -253,6 +253,37 @@ class CliApprovalGateTest {
         }
 
         @Test
+        void sessionPromptBytesAreTheEvidenceChainContract() {
+            // T765 characterization: this exact string is matched by the PTY
+            // manual-audit validator, the talosbench forbidden-substring bank,
+            // and the scripted harness. It is byte-frozen — any change must go
+            // through ApprovalPromptText and the e2e contract test.
+            var capturedPrompt = new String[1];
+            var gate = new CliApprovalGate(prompt -> {
+                capturedPrompt[0] = prompt;
+                return "n";
+            }, new PrintStream(new ByteArrayOutputStream()), null);
+
+            gate.approveFull("write file", null);
+
+            assertEquals("  Allow? [y=yes, a=yes for session, N=no] ", capturedPrompt[0]);
+        }
+
+        @Test
+        void oncePromptBytesAreTheEvidenceChainContract() {
+            // T765 characterization: byte-frozen once-only form (see above).
+            var capturedPrompt = new String[1];
+            var gate = new CliApprovalGate(prompt -> {
+                capturedPrompt[0] = prompt;
+                return "n";
+            }, new PrintStream(new ByteArrayOutputStream()), null);
+
+            gate.approveOnce("private document model handoff", null);
+
+            assertEquals("  Allow? [y=yes, N=no] ", capturedPrompt[0]);
+        }
+
+        @Test
         void approveOncePromptPassedToFunctionHasNoSessionChoice() {
             var capturedPrompt = new String[1];
             Function<String, String> reader = prompt -> {

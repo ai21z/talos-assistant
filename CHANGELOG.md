@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Changed
+- [T765] The approval-prompt chrome strings (`Allow? [y=yes, a=yes for
+  session, N=no]`, `Allow? [y=yes, N=no]`, the `Allow? [y=yes` prefix, and
+  the `approval required` window title) are now owned by a single
+  byte-frozen constants class (`cli.ui.ApprovalPromptText`) instead of
+  being retyped at each call site; `CliApprovalGate` and
+  `ApprovalPromptRenderer` render from the constants, and characterization
+  tests pin the exact bytes against typed literals. These strings are
+  load-bearing evidence-chain contracts (PTY manual-audit validator,
+  talosbench forbidden-substring banks, scripted harness artifacts), so
+  Wave 3 rendering work cannot drift them silently. No output bytes
+  changed.
 - [T764] The synchronized-approval workspace-operation scenarios
   (mkdir/copy/move/rename/delete/batch-apply, scripted and live) now claim
   the rendered outcome in addition to tool usage and file state: an
