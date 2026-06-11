@@ -35,6 +35,16 @@ class TaskContractResolverTest {
                     + "The complete file must contain exactly two lines: first line T61-B exact README; "
                     + "second line Line two; no other characters.";
 
+    // Exact shape of MissingMutationRetry's WORKSPACE_OPERATION_REQUIRED retry frame, which is
+    // re-parsed as the latest user request by expected-target progress accounting (T763).
+    private static final String WORKSPACE_OPERATION_RETRY_FRAME =
+            "Retry required: the previous model response did not issue the required workspace operation tool call. "
+                    + "The user's request was:\n\n"
+                    + "«Use talos.copy_path to copy source.md to source-copy.md. "
+                    + "Perform only that workspace operation.»\n\n"
+                    + "Call talos.copy_path. Do not emulate move, copy, rename, or mkdir by writing/editing "
+                    + "file content. If impossible, name the operation target and reason in one sentence.";
+
     @Test
     void explicitEditRequestBecomesFileEditContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
@@ -91,6 +101,74 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("delete-me.tmp"), contract.expectedTargets());
+    }
+
+    @Test
+    void workspaceCopyScenarioPromptPinsExactPathTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.copy_path to copy source.md to source-copy.md. Perform only that workspace operation.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("source.md", "source-copy.md"), contract.expectedTargets());
+    }
+
+    @Test
+    void workspaceMoveScenarioPromptPinsExactPathTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.move_path to move move-me.md to moved.md. Perform only that workspace operation.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("move-me.md", "moved.md"), contract.expectedTargets());
+    }
+
+    @Test
+    void workspaceRenameScenarioPromptPinsExactPathTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.rename_path to rename rename-me.md to renamed.md. Perform only that workspace operation.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("rename-me.md", "renamed.md"), contract.expectedTargets());
+    }
+
+    @Test
+    void workspaceOperationRetryFrameExtractsOnlyPathTargets() {
+        assertEquals(Set.of("source.md", "source-copy.md"),
+                TaskContractResolver.extractExpectedTargets(WORKSPACE_OPERATION_RETRY_FRAME));
+    }
+
+    @Test
+    void bareStopWordsAfterDirectoryVerbsAreNeverExpectedTargets() {
+        assertEquals(Set.of(), TaskContractResolver.extractExpectedTargets(
+                "Do not emulate move, copy, rename, or mkdir by writing/editing file content."));
+        for (String stopWord : List.of("by", "to", "with", "into", "using")) {
+            assertEquals(Set.of(), TaskContractResolver.extractExpectedTargets("mkdir " + stopWord), stopWord);
+        }
+    }
+
+    @Test
+    void stopWordLookalikesWithSeparatorOrExtensionStillExtract() {
+        assertEquals(Set.of("by/2026"),
+                TaskContractResolver.extractExpectedTargets("mkdir by/2026"));
+        assertEquals(Set.of("with.d"),
+                TaskContractResolver.extractExpectedTargets("mkdir with.d"));
+    }
+
+    @Test
+    void naturalBatchCopyDestinationStopWordIsNotAnExpectedTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "batch this: create batch-one, then copy styles.css to by.");
+
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("batch-one"), contract.expectedTargets());
     }
 
     @Test

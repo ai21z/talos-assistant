@@ -4,6 +4,7 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -1730,6 +1731,7 @@ public final class SynchronizedApprovalAuditMain {
         if (!Files.isDirectory(workspace.resolve("docs").resolve("reports"))) {
             throw new IOException("mkdir scenario did not create docs/reports directory");
         }
+        requireOutcomeNotBlocked(result, "mkdir scenario rendered a BLOCKED outcome after the approved operation");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
@@ -1753,6 +1755,8 @@ public final class SynchronizedApprovalAuditMain {
             if (!Files.isDirectory(workspace.resolve("docs").resolve("reports"))) {
                 throw new IOException("live mkdir scenario did not create docs/reports directory");
             }
+            requireOutcomeNotBlocked(result,
+                    "live mkdir scenario rendered a BLOCKED outcome after the approved operation");
         } catch (IOException e) {
             writeFailureMarker(bundle, e);
             throw e;
@@ -1779,6 +1783,7 @@ public final class SynchronizedApprovalAuditMain {
                 "copy scenario removed source.md");
         requireFileContent(workspace.resolve("source-copy.md"), "copy source\n",
                 "copy scenario did not create source-copy.md");
+        requireOutcomeNotBlocked(result, "copy scenario rendered a BLOCKED outcome after the approved operation");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
@@ -1804,6 +1809,8 @@ public final class SynchronizedApprovalAuditMain {
                     "live copy scenario removed source.md");
             requireFileContent(workspace.resolve("source-copy.md"), "copy source\n",
                     "live copy scenario did not create source-copy.md");
+            requireOutcomeNotBlocked(result,
+                    "live copy scenario rendered a BLOCKED outcome after the approved operation");
         } catch (IOException e) {
             writeFailureMarker(bundle, e);
             throw e;
@@ -1831,6 +1838,7 @@ public final class SynchronizedApprovalAuditMain {
         }
         requireFileContent(workspace.resolve("moved.md"), "move source\n",
                 "move scenario did not create moved.md");
+        requireOutcomeNotBlocked(result, "move scenario rendered a BLOCKED outcome after the approved operation");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
@@ -1857,6 +1865,8 @@ public final class SynchronizedApprovalAuditMain {
             }
             requireFileContent(workspace.resolve("moved.md"), "move source\n",
                     "live move scenario did not create moved.md");
+            requireOutcomeNotBlocked(result,
+                    "live move scenario rendered a BLOCKED outcome after the approved operation");
         } catch (IOException e) {
             writeFailureMarker(bundle, e);
             throw e;
@@ -1885,6 +1895,7 @@ public final class SynchronizedApprovalAuditMain {
         }
         requireFileContent(workspace.resolve("renamed.md"), "rename source\n",
                 "rename scenario did not create renamed.md");
+        requireOutcomeNotBlocked(result, "rename scenario rendered a BLOCKED outcome after the approved operation");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
@@ -1911,6 +1922,8 @@ public final class SynchronizedApprovalAuditMain {
             }
             requireFileContent(workspace.resolve("renamed.md"), "rename source\n",
                     "live rename scenario did not create renamed.md");
+            requireOutcomeNotBlocked(result,
+                    "live rename scenario rendered a BLOCKED outcome after the approved operation");
         } catch (IOException e) {
             writeFailureMarker(bundle, e);
             throw e;
@@ -1936,6 +1949,7 @@ public final class SynchronizedApprovalAuditMain {
         if (Files.exists(workspace.resolve("delete-me.tmp"))) {
             throw new IOException("delete scenario left delete-me.tmp in place");
         }
+        requireOutcomeNotBlocked(result, "delete scenario rendered a BLOCKED outcome after the approved operation");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
@@ -1960,6 +1974,8 @@ public final class SynchronizedApprovalAuditMain {
             if (Files.exists(workspace.resolve("delete-me.tmp"))) {
                 throw new IOException("live delete scenario left delete-me.tmp in place");
             }
+            requireOutcomeNotBlocked(result,
+                    "live delete scenario rendered a BLOCKED outcome after the approved operation");
         } catch (IOException e) {
             writeFailureMarker(bundle, e);
             throw e;
@@ -1989,6 +2005,7 @@ public final class SynchronizedApprovalAuditMain {
                 "batch scenario removed source.md");
         requireFileContent(workspace.resolve("source-copy.md"), "batch source\n",
                 "batch scenario did not create source-copy.md");
+        requireOutcomeNotBlocked(result, "batch scenario rendered a BLOCKED outcome after the approved operation");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
@@ -2016,6 +2033,8 @@ public final class SynchronizedApprovalAuditMain {
                     "live batch scenario removed source.md");
             requireFileContent(workspace.resolve("source-copy.md"), "batch source\n",
                     "live batch scenario did not create source-copy.md");
+            requireOutcomeNotBlocked(result,
+                    "live batch scenario rendered a BLOCKED outcome after the approved operation");
         } catch (IOException e) {
             writeFailureMarker(bundle, e);
             throw e;
@@ -2106,6 +2125,25 @@ public final class SynchronizedApprovalAuditMain {
         String traceText = result == null ? "" : result.traceText();
         if (!traceText.contains("TOOL_EXECUTED " + toolName + " ")) {
             throw new IOException(message);
+        }
+    }
+
+    /**
+     * Approved-and-executed workspace operations must not fail-closed in the
+     * rendered outcome (T764; the gap that masked T763's phantom
+     * expected-target block). PARTIAL stays acceptable so legitimate
+     * runtime-repair lanes are not overclaimed.
+     */
+    static void requireOutcomeNotBlocked(
+            SynchronizedApprovalAuditRunner.Result result,
+            String message
+    ) throws IOException {
+        LocalTurnTrace trace = result == null ? null : result.trace();
+        LocalTurnTrace.OutcomeSummary outcome = trace == null ? null : trace.outcome();
+        String status = outcome == null ? "" : outcome.status();
+        if ("BLOCKED".equals(status)) {
+            throw new IOException(message + ": OUTCOME_RENDERED {status=" + status
+                    + ", classification=" + outcome.classification() + "}");
         }
     }
 

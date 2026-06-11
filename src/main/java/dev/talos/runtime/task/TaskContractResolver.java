@@ -298,6 +298,13 @@ public final class TaskContractResolver {
                     + "hmm+|huh"
                     + ")[\\s.!?]*$");
 
+    // Bare English function words that verb-pattern captures can swallow as path tokens
+    // (e.g. "mkdir by writing/editing file content" in the workspace-operation retry frame).
+    // Membership is whole-token, so names with a file extension or path separator never match.
+    private static final Set<String> BARE_PATH_STOP_WORDS = Set.of(
+            "a", "an", "the", "and", "or", "to", "into", "onto",
+            "by", "with", "using", "via", "from", "of", "in", "on", "at", "for", "as");
+
     private static final Set<String> DEICTIC_FOLLOW_UPS = Set.of(
             "this here",
             "this folder",
@@ -651,7 +658,7 @@ public final class TaskContractResolver {
         Matcher destinationMatcher = BATCH_DESTINATION_OPERATION.matcher(userRequest);
         while (destinationMatcher.find()) {
             String destination = normalizeTarget(destinationMatcher.group(2));
-            if (!destination.isBlank()) out.add(destination);
+            if (!destination.isBlank() && !isBarePathStopWord(destination)) out.add(destination);
         }
         return Set.copyOf(out);
     }
@@ -799,10 +806,13 @@ public final class TaskContractResolver {
 
     private static boolean looksLikeDirectoryTarget(String value) {
         if (value == null || value.isBlank()) return false;
-        String lower = value.toLowerCase(Locale.ROOT);
-        if (Set.of("a", "an", "the", "and", "to", "into").contains(lower)) return false;
-        if (lower.contains(" ")) return false;
+        if (isBarePathStopWord(value)) return false;
+        if (value.contains(" ")) return false;
         return value.matches("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
+    }
+
+    private static boolean isBarePathStopWord(String value) {
+        return value != null && BARE_PATH_STOP_WORDS.contains(value.toLowerCase(Locale.ROOT));
     }
 
     public static Set<String> extractForbiddenTargets(String userRequest) {
