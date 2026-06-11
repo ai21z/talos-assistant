@@ -1,0 +1,108 @@
+package dev.talos.safety;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * T759 characterization matrix for the canonical protected-path classifier.
+ *
+ * <p>This commit pins CURRENT (substring-matching) behavior, including the
+ * known false positives the 2026-06-10 evaluation flagged (tokenizer.java
+ * et al.). The consolidation commit flips the marked expectations to the
+ * equals-or-suffix word-run rule — the test diff IS the behavioral-delta
+ * documentation.
+ */
+class ProtectedPathTokensTest {
+
+    // ── exact-rule families: identical before and after T759 ───────────
+
+    @Test
+    void exactSegmentAndExtensionRulesAreProtected() {
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".env"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".env.local"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("config/prod.env"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secrets/api.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokens/jwt.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("credentials/db.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("protected/private-notes.md"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".ssh/config"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".aws/config"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".azure/profile"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("keys/server.pem"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("certs/tls.key"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("store.p12"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("bundle.pfx"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".config/gcloud/properties"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".git/config"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".gnupg/pubring.kbx"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".github/workflows/ci.yml"));
+    }
+
+    @Test
+    void secretBearingNamesAreProtected() {
+        // Names whose word runs END with a vocabulary stem stay protected
+        // before and after T759 (the equals-or-suffix rule keeps them).
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("api_token.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("auth-tokens.json"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secret_config.yaml"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("mysecrets.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("supersecret.conf"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("accesstoken.java"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("user-credentials.db"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("passwords.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("password123.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("private_key.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("my-private-key.bak"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("docs/my_tokens.txt"));
+    }
+
+    @Test
+    void ordinaryNamesAreNotProtected() {
+        assertEquals("", ProtectedPathTokens.protectedKind("environment.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("readme.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("src/app.java"));
+        assertEquals("", ProtectedPathTokens.protectedKind("styles.css"));
+        assertEquals("", ProtectedPathTokens.protectedKind("monkey.txt"));
+        assertEquals("", ProtectedPathTokens.protectedKind("keyboard-shortcuts.md"));
+    }
+
+    // ── derivational-suffix names: the T759 deltas ──────────────────────
+    // CURRENT behavior (substring matching): all protected — these are the
+    // false positives. The consolidation commit flips them to "".
+
+    @Test
+    void derivationalSuffixNamesCharacterization() {
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokenizer.java"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("src/tokenizer.py"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokenize.rs"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("untokenized_data.csv"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("tokenization-notes.md"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secretary-notes.md"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secretariat.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("passwordless-ssh.md"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("credentialing.md"));
+    }
+
+    @Test
+    void knownRemainingLimitationLexerTokenSourceFiles() {
+        // "Token.java" has the literal word run — it stays protected before
+        // and after T759. A source-extension exemption is a separate policy
+        // decision, out of scope (documented in the ticket).
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("token.java"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("jsontoken.java"));
+    }
+
+    // ── looksProtectedPathToken normalization ──────────────────────────
+
+    @Test
+    void looksProtectedPathTokenNormalizesQuotesSlashesAndCase() {
+        assertTrue(ProtectedPathTokens.looksProtectedPathToken("\".ENV\""));
+        assertTrue(ProtectedPathTokens.looksProtectedPathToken(".\\secrets\\api.txt"));
+        assertTrue(ProtectedPathTokens.looksProtectedPathToken("./id_rsa"));
+        assertFalse(ProtectedPathTokens.looksProtectedPathToken("README.md"));
+        assertFalse(ProtectedPathTokens.looksProtectedPathToken("  "));
+        assertFalse(ProtectedPathTokens.looksProtectedPathToken(null));
+    }
+}
