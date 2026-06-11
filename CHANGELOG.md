@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-06-11
+
 ### Changed
 - [T762] Read-only proposal grounding now derives ungrounded-file detection
   from observed tool evidence (result text plus the paths tools actually
