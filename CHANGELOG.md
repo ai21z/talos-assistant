@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-06-11
+
 ### Changed
 - [T782] Added the inline-TUI architecture decision record
   (`docs/architecture/31-inline-tui-strategy-and-fullscreen-rejection.md`):
