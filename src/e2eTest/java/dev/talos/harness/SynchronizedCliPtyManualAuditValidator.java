@@ -244,6 +244,12 @@ public final class SynchronizedCliPtyManualAuditValidator {
     private static void validateTranscriptContent(String transcript, String launcherScriptBasename,
                                                   String isolatedHomeMarker, List<String> findings) {
         String lower = transcript.toLowerCase(Locale.ROOT);
+        // Wrap-tolerant prose view (T775): the answer pane and approval
+        // window wrap prose at the live terminal width (T772/T773/T776),
+        // so a required phrase may arrive split across rail-prefixed lines.
+        // Prose checks match the raw transcript OR the rejoined view;
+        // chrome checks (prompt strings, markers, commands) stay raw-only.
+        String prose = lower + "\n" + wrapTolerantView(transcript).toLowerCase(Locale.ROOT);
         if (transcript.contains(RAW_CANARY)) {
             findings.add("raw protected fixture canary appeared in completed transcript");
         }
@@ -272,33 +278,71 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 && !transcript.contains("-Duser.home=")) {
             findings.add("completed transcript must show packet isolation evidence via launcher script, isolated home, or -Duser.home marker");
         }
-        if (!lower.contains("no protected file content was shown")
-                && !lower.contains("approval was denied")
-                && !lower.contains("approval was not granted")
-                && !lower.contains("protected content was not read")) {
+        if (!prose.contains("no protected file content was shown")
+                && !prose.contains("approval was denied")
+                && !prose.contains("approval was not granted")
+                && !prose.contains("protected content was not read")) {
             findings.add("completed transcript must show protected-read denial without raw content");
         }
-        if (!lower.contains("private document model handoff")) {
+        if (!prose.contains("private document model handoff")) {
             findings.add("completed transcript must show private document model handoff approval prompt/window");
         }
-        if (!lower.contains("private document content was withheld")
-                && !lower.contains("withheld from model context")) {
+        if (!prose.contains("private document content was withheld")
+                && !prose.contains("withheld from model context")) {
             findings.add("completed transcript must show private-document denial withheld the content");
         }
-        if (!hasPrivateDocumentApprovalTraceEvidence(lower)) {
+        if (!hasPrivateDocumentApprovalTraceEvidence(lower, prose)) {
             findings.add("completed transcript must show private-document per-turn approval trace evidence");
         }
     }
 
-    private static boolean hasPrivateDocumentApprovalTraceEvidence(String lower) {
+    private static boolean hasPrivateDocumentApprovalTraceEvidence(String lower, String prose) {
         if (lower == null || lower.isBlank()) return false;
-        if (lower.contains("approved for this turn")
-                || lower.contains("private document model handoff approved")) {
+        if (prose.contains("approved for this turn")
+                || prose.contains("private document model handoff approved")) {
             return true;
         }
-        return lower.contains("private document model handoff")
+        // The prompt line and the approvals counter are chrome/trace lines,
+        // never pane-wrapped — they stay raw-only deliberately.
+        return prose.contains("private document model handoff")
                 && lower.contains(ApprovalPromptText.ONCE_PROMPT.toLowerCase(Locale.ROOT) + " y")
                 && lower.contains("approvals: required=1 granted=1 denied=0");
+    }
+
+    /**
+     * Rejoins soft-wrapped pane content (T775): strips the answer-pane /
+     * approval-window rail prefix and joins consecutive railed lines with
+     * single spaces, so a prose phrase split by width-reactive wrapping
+     * still matches. A bare rail (blank pane line) is a paragraph break and
+     * deliberately does NOT join across — only soft wraps are tolerated.
+     */
+    static String wrapTolerantView(String transcript) {
+        StringBuilder out = new StringBuilder();
+        StringBuilder paneRun = new StringBuilder();
+        for (String line : Objects.toString(transcript, "").split("\\R", -1)) {
+            String unrailed = unrail(line);
+            if (unrailed != null && !unrailed.isBlank()) {
+                if (!paneRun.isEmpty()) paneRun.append(' ');
+                paneRun.append(unrailed.strip());
+                continue;
+            }
+            if (!paneRun.isEmpty()) {
+                out.append(paneRun).append('\n');
+                paneRun.setLength(0);
+            }
+            out.append(line).append('\n');
+        }
+        if (!paneRun.isEmpty()) {
+            out.append(paneRun).append('\n');
+        }
+        return out.toString();
+    }
+
+    private static String unrail(String line) {
+        if (line == null) return null;
+        if (line.startsWith("  │ ") || line.startsWith("  | ")) return line.substring(4);
+        if (line.equals("  │") || line.equals("  |")) return "";
+        return null;
     }
 
     private static String summary(ValidationResult result) {
