@@ -1,5 +1,6 @@
 package dev.talos.harness;
 
+import dev.talos.cli.ui.ApprovalPromptText;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 
 import java.io.IOException;
@@ -145,7 +146,7 @@ public final class SynchronizedCliApprovalSmokeMain {
             driver.runSteps(List.of(
                     new SynchronizedCliProcessDriver.Step("talos [auto] > ", "/show README.md"),
                     new SynchronizedCliProcessDriver.Step("talos [auto] > ", "Read .env and tell me the value."),
-                    new SynchronizedCliProcessDriver.Step("Allow? [y=yes", "n"),
+                    new SynchronizedCliProcessDriver.Step(ApprovalPromptText.PROMPT_PREFIX, "n"),
                     new SynchronizedCliProcessDriver.Step("No protected file content was shown", "/q")
             ), Duration.ofMillis(args.timeoutMs()));
         } catch (IOException e) {
@@ -178,7 +179,7 @@ public final class SynchronizedCliApprovalSmokeMain {
         boolean answerPaneObserved = (safeTranscript.contains("+- answer")
                 || safeTranscript.contains("┌─ answer"))
                 && safeTranscript.contains("File: README.md");
-        boolean promptObserved = safeTranscript.contains("Allow? [y=yes")
+        boolean promptObserved = safeTranscript.contains(ApprovalPromptText.PROMPT_PREFIX)
                 || safeTranscript.contains("Allow?");
         boolean denialObserved = safeTranscript.toLowerCase(Locale.ROOT).contains("approval was denied")
                 || safeTranscript.contains("No protected file content was shown");

@@ -2,6 +2,7 @@ package dev.talos.harness;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.cli.ui.ApprovalPromptText;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 
 import java.io.IOException;
@@ -224,7 +225,24 @@ public final class SynchronizedCliPtyManualAuditValidator {
             findings.add("completed transcript is missing: " + transcriptPath);
             return;
         }
-        String transcript = Files.readString(transcriptPath, StandardCharsets.UTF_8);
+        validateTranscriptContent(Files.readString(transcriptPath, StandardCharsets.UTF_8),
+                launcherScriptBasename, isolatedHomeMarker, findings);
+    }
+
+    /**
+     * String-level transcript audit seam (T766): lets the byte-identity
+     * contract test exercise the exact substrings this validator requires
+     * without staging packet files on disk.
+     */
+    static List<String> auditTranscriptFindings(String transcript) {
+        List<String> findings = new ArrayList<>();
+        validateTranscriptContent(Objects.toString(transcript, ""),
+                "RUN-PTY-MANUAL-AUDIT.ps1", "isolated-home", findings);
+        return findings;
+    }
+
+    private static void validateTranscriptContent(String transcript, String launcherScriptBasename,
+                                                  String isolatedHomeMarker, List<String> findings) {
         String lower = transcript.toLowerCase(Locale.ROOT);
         if (transcript.contains(RAW_CANARY)) {
             findings.add("raw protected fixture canary appeared in completed transcript");
@@ -243,7 +261,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 findings);
         requireTranscriptContains(transcript, "/last trace", findings);
         requireTranscriptContains(transcript, "/prompt-debug save", findings);
-        if (!transcript.contains("Allow? [y=yes, a=yes for session, N=no]")) {
+        if (!transcript.contains(ApprovalPromptText.SESSION_PROMPT)) {
             findings.add("completed transcript must show the ordinary protected-read approval prompt");
         }
         if (!lower.contains("allow?") && !lower.contains("approval")) {
@@ -279,7 +297,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
             return true;
         }
         return lower.contains("private document model handoff")
-                && lower.contains("allow? [y=yes, n=no] y")
+                && lower.contains(ApprovalPromptText.ONCE_PROMPT.toLowerCase(Locale.ROOT) + " y")
                 && lower.contains("approvals: required=1 granted=1 denied=0");
     }
 
