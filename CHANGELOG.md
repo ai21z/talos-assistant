@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T773] The approval window and the `/status` dashboard resolve their
+  width from the live terminal (clamped 60–120) instead of a hardcoded
+  80. The approval prompt strings themselves are width-independent and
+  stay byte-frozen via `ApprovalPromptText`/the T766 contract test;
+  terminal-less paths (scripted approval, `talos status` outside the
+  REPL, redirected output) keep the fixed 80 and do not consult
+  `COLUMNS`, so their bytes are unchanged by construction.
 - [T772] The answer pane resolves its width from the live terminal
   (clamped 60–120) instead of a hardcoded 96; the width is captured at
   stream open, so one streamed answer stays internally consistent and a

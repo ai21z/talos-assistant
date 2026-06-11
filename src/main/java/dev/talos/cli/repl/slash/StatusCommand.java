@@ -15,14 +15,22 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.IntSupplier;
 
 public final class StatusCommand implements Command {
     private final ModeController modes;
     private final Path workspace;
+    private final IntSupplier terminalWidth;
 
     public StatusCommand(ModeController modes, Path workspace) {
+        this(modes, workspace, null);
+    }
+
+    /** With a live terminal width source the dashboard follows the terminal (T773). */
+    public StatusCommand(ModeController modes, Path workspace, IntSupplier terminalWidth) {
         this.modes = modes;
         this.workspace = workspace;
+        this.terminalWidth = terminalWidth;
     }
 
     @Override public CommandSpec spec() {
@@ -56,7 +64,7 @@ public final class StatusCommand implements Command {
                     activeModel,
                     ctx.session() == null ? "off" : ctx.session().getDebugLevel().label(),
                     "/status --verbose for diagnostics");
-            return new Result.TrustedInfo(CliStatusDashboard.render(snapshot));
+            return new Result.TrustedInfo(CliStatusDashboard.render(snapshot, terminalWidth));
         }
 
         Path absWorkspace = workspace.toAbsolutePath().normalize();

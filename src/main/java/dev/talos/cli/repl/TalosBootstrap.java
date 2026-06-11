@@ -199,11 +199,14 @@ public final class TalosBootstrap {
         // re-detected here: a JLine LineReader exists only when RunCmd's
         // isatty checks passed, and scripted/test paths (lineReader == null
         // or a non-System.out sink) must stay plain (T769). The same
-        // selection feeds the live width source for the answer pane (T772).
+        // selection feeds the live width source for the answer pane (T772),
+        // the approval window, and the /status dashboard (T773).
         final LineReader lineReaderRef = lineReader;
+        final java.util.function.IntSupplier terminalWidth =
+                lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null;
         RenderEngine render = new RenderEngine(cfg, redactor, out,
                 lineReader != null && out == System.out,
-                lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null);
+                terminalWidth);
 
         // ── Approval gate ─────────────────────────────────────────────────
         // When a JLine LineReader is available, approval reads through the same
@@ -222,7 +225,7 @@ public final class TalosBootstrap {
             };
         }
         if (effectiveApprovalReader != null) {
-            approvalGate = new CliApprovalGate(effectiveApprovalReader, out, spinnerStopper);
+            approvalGate = new CliApprovalGate(effectiveApprovalReader, out, spinnerStopper, terminalWidth);
         } else {
             // Fallback: Scanner-based (tests, non-interactive pipelines)
             approvalGate = new CliApprovalGate();
@@ -357,7 +360,7 @@ public final class TalosBootstrap {
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack,
-                sessionStore, checkpointService, runtimeSession.startedAt());
+                sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth);
 
         // ── Assemble router ──────────────────────────────────────────────
         String sessionNotice = restoreSummary.hasSavedSession()
@@ -396,7 +399,8 @@ public final class TalosBootstrap {
                                           Path workspace, AtomicBoolean quit,
                                           FileUndoStack undoStack, SessionStore sessionStore,
                                           CheckpointService checkpointService,
-                                          java.time.Instant activeSessionStartedAt) {
+                                          java.time.Instant activeSessionStartedAt,
+                                          java.util.function.IntSupplier terminalWidth) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -417,7 +421,7 @@ public final class TalosBootstrap {
         registry.register(new ModelsCommand());
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
-        registry.register(new StatusCommand(modes, workspace));
+        registry.register(new StatusCommand(modes, workspace, terminalWidth));
         registry.register(new ExplainLastTurnCommand(workspace, sessionStore, activeSessionStartedAt));
         registry.register(new PromptCommand(modes, workspace));
         registry.register(new PromptDebugCommand());

@@ -57,6 +57,19 @@ public final class CliStatusDashboard {
         return render(snapshot, TerminalCapabilities.detectDefault(), StartupBannerRenderer.DEFAULT_WIDTH);
     }
 
+    /**
+     * Renders at the live terminal width (T773). COLUMNS only refines a
+     * terminal that cannot report its width; terminal-less callers keep the
+     * fixed default so redirected output stays byte-identical.
+     */
+    public static String render(Snapshot snapshot, java.util.function.IntSupplier terminalWidth) {
+        return render(snapshot, TerminalCapabilities.detectDefault(),
+                TerminalWidths.resolve(
+                        terminalWidth,
+                        terminalWidth != null ? System.getenv() : java.util.Map.of(),
+                        StartupBannerRenderer.DEFAULT_WIDTH));
+    }
+
     public static String render(Snapshot snapshot, TerminalCapabilities capabilities, int width) {
         return StartupBannerRenderer.render(
                 snapshot,

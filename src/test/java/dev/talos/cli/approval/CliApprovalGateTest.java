@@ -253,6 +253,40 @@ class CliApprovalGateTest {
         }
 
         @Test
+        void approvalWindowWithoutTerminalRendersAtHistoricalWidth80() {
+            // T773 characterization: no-terminal paths keep the fixed
+            // pre-T773 window width byte-for-byte.
+            var bout = new ByteArrayOutputStream();
+            var gate = new CliApprovalGate(prompt -> "n",
+                    new PrintStream(bout, true, StandardCharsets.UTF_8), null);
+
+            gate.approveFull("write file", "target: src/main/Main.java");
+
+            String output = bout.toString(StandardCharsets.UTF_8);
+            String oracle = new dev.talos.cli.ui.ApprovalPromptRenderer(
+                    dev.talos.cli.ui.CliTheme.current(), 80)
+                    .render("write file", "target: src/main/Main.java", "write");
+            assertTrue(output.contains(oracle),
+                    "no-terminal approval window must render the exact width-80 bytes\n" + output);
+        }
+
+        @Test
+        void approvalWindowFollowsTheLiveTerminalWidth() {
+            var bout = new ByteArrayOutputStream();
+            var gate = new CliApprovalGate(prompt -> "n",
+                    new PrintStream(bout, true, StandardCharsets.UTF_8), null, () -> 70);
+
+            gate.approveFull("write file", "target: src/main/Main.java");
+
+            String output = bout.toString(StandardCharsets.UTF_8);
+            String oracle = new dev.talos.cli.ui.ApprovalPromptRenderer(
+                    dev.talos.cli.ui.CliTheme.current(), 70)
+                    .render("write file", "target: src/main/Main.java", "write");
+            assertTrue(output.contains(oracle),
+                    "live width 70 must drive the approval window\n" + output);
+        }
+
+        @Test
         void sessionPromptBytesAreTheEvidenceChainContract() {
             // T765 characterization: this exact string is matched by the PTY
             // manual-audit validator, the talosbench forbidden-substring bank,
