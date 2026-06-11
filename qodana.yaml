@@ -17,6 +17,18 @@ exclude:
       - .qodana
       - local
       - .gradle
+  # T753 triaged noise families (2026-06-11 fresh scan, 169 findings):
+  # MutationIntent's regex banks intentionally use non-capturing groups for
+  # readability/uniformity; the style nag drowned real signal (51 findings,
+  # 44 in one file).
+  - name: RegExpUnnecessaryNonCapturingGroup
+    paths:
+      - src/main/java/dev/talos/runtime/MutationIntent.java
+  # The shared LlmClient lifecycle is intentional (one client per session,
+  # closed by the owner; harness runs close via try-with-resources). The
+  # remaining hits are this accepted pattern (37 findings). Real lifecycle
+  # defects were fixed under T752 (ProcessCommandRunner executor).
+  - name: AutoCloseableResource
 
 # Optional quality gate for local Qodana runs. Qodana remains highly
 # recommended, not part of the hard Gradle `check` gate. If a developer runs

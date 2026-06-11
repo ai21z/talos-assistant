@@ -83,3 +83,31 @@ Refactor scope: qodana.yaml only (+ regenerated reports)
 - T752's three findings absent; triage table recorded.
 - 0.10.2 candidate packet (wave close) cites the fresh scan.
 - CHANGELOG `## [Unreleased]` gains a T753 entry.
+
+## 2026-06-11 completion evidence
+
+- Docker mode (`qodanaLocal`) failed twice with the documented Windows
+  Gradle-import failure class (`Could not create service of type FileHasher:
+  java.io.IOException: Input/output error` in `.qodana/log/gradle-import.log`;
+  the IDE coroutine crashes were secondary noise). The runbook's native
+  fallback applies (work-test-cycle-setup.md:166, step-by-step:256). The
+  owner ran `.\gradlew.bat qodanaNativeFreshLocal --no-daemon` successfully
+  on HEAD `b6f2641f`.
+- `writeQodanaSummary` regenerated: `summaryStatus:
+  qodana-results-match-current-candidate`, provenance branch
+  `codex/wave1-stability-and-cycle` rev `b6f2641f`,
+  `revisionStatus: matches-current-revision` — staleness eliminated.
+- Triage table (169 findings, 0 critical, 165 HIGH-warning / 4 MODERATE):
+
+  | Rule | Count | Bucket | Action |
+  |---|---|---|---|
+  | ConstantValue | 55 | dead-branch signal | feed Wave-6 mutation-testing work; no suppression |
+  | RegExpUnnecessaryNonCapturingGroup | 51 | noise (44 in MutationIntent) | baselined in qodana.yaml, scoped to MutationIntent |
+  | AutoCloseableResource | 37 | accepted shared-LlmClient lifecycle | baselined in qodana.yaml (real lifecycle defect fixed in T752) |
+  | DataFlowIssue | 6 | style (meaningless min/max, already-assigned, too-complex) | recorded; no NPE candidates remain (T752 sites clean) |
+  | tail (CollectionAddAll 6, UnusedAssignment 3, others 1-2) | 14 | minor style | recorded for opportunistic cleanup |
+
+- The three T752 sites (ContextItem, MutationTargetReadbackVerifier,
+  ProcessCommandRunner) no longer appear in the fresh SARIF.
+- Suppression validation note: the qodana.yaml baselines take effect on the
+  next scan; rationale comments cite this ticket.
