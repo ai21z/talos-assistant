@@ -461,6 +461,119 @@ class TurnProcessorTest {
         assertEquals("T155 exact literal\nLine two", Files.readString(workspace.resolve("README.md")));
     }
 
+    // ---- T757: metadata-driven mutation/checkpoint gating ----
+
+    private static TalosTool stubTool(String name, ToolRiskLevel risk, ToolOperationMetadata metadata) {
+        return new TalosTool() {
+            @Override public String name() { return name; }
+            @Override public String description() { return "stub"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor(name, "stub", null, risk, metadata);
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok("stub-executed");
+            }
+        };
+    }
+
+    private static ToolOperationMetadata mutatingStubMetadata(String name) {
+        return ToolOperationMetadata.workspaceMutation(
+                name,
+                dev.talos.core.capability.CapabilityKind.EDIT,
+                ToolRiskLevel.WRITE,
+                Map.of("path", ToolOperationMetadata.PathRole.TARGET_FILE),
+                false,
+                true,
+                "STUB_DONE",
+                "");
+    }
+
+    @Test
+    void mutatingMetadataToolIsIntentBlockedEvenWhenAbsentFromLegacyNameLists(
+            @TempDir Path workspace) {
+        // Pre-T757 this stub failed OPEN: isMutatingTool("talos.shredder")
+        // was false, so a read-only contract did not block it.
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stubTool("talos.shredder", ToolRiskLevel.WRITE,
+                mutatingStubMetadata("talos.shredder")));
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = new TurnProcessor(ModeController.defaultController(),
+                approvalGate(approvals, new ArrayList<>(), true), registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "What does the README say?";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.shredder", Map.of("path", "README.md")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.DENIED, result.error().code());
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void mutatingMetadataToolGetsCheckpointEvenWhenAbsentFromLegacyNameLists(
+            @TempDir Path workspace) throws Exception {
+        // Pre-T757 this stub skipped checkpoint capture entirely.
+        Files.writeString(workspace.resolve("notes.txt"), "keep me\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stubTool("talos.shredder", ToolRiskLevel.WRITE,
+                mutatingStubMetadata("talos.shredder")));
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = new TurnProcessor(ModeController.defaultController(),
+                approvalGate(approvals, new ArrayList<>(), true), registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t757", "session-t757", 1, "2026-06-11T00:00:00Z",
+                "workspace-hash", "auto", "test", "model", "test");
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.shredder", Map.of("path", "notes.txt")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(1, approvals.get());
+            assertTrue(trace.events().stream()
+                            .anyMatch(e -> e.type().startsWith("CHECKPOINT_")),
+                    "checkpoint must be captured before a metadata-mutating tool executes; events: "
+                            + trace.events().stream().map(e -> e.type()).toList());
+            assertTrue(result.success(), result.errorMessage());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void inspectMetadataToolExecutesWithoutApprovalOrCheckpoint(@TempDir Path workspace) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stubTool("talos.peek", ToolRiskLevel.READ_ONLY,
+                ToolOperationMetadata.inspect("talos.peek", Map.of(), "STUB_PEEKED")));
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = new TurnProcessor(ModeController.defaultController(),
+                approvalGate(approvals, new ArrayList<>(), true), registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t757r", "session-t757r", 1, "2026-06-11T00:00:00Z",
+                "workspace-hash", "auto", "test", "model", "test");
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.peek", Map.of("path", "README.md")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertTrue(trace.events().stream().noneMatch(e -> e.type().startsWith("CHECKPOINT_")),
+                    "read-only metadata must not trigger checkpoints");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     // ---- T756: unified diff in the approval window ----
 
     @Test

@@ -322,6 +322,13 @@ public final class TurnProcessor {
 
         boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
         ToolRiskLevel risk = effectiveRisk(tool.descriptor().riskLevel(), call);
+        // Mutation/checkpoint gating reads the resolved tool's registration
+        // metadata (T757), not name lists: a registered mutating tool missing
+        // from a hand-maintained list previously failed OPEN past the intent
+        // gate, pre-approval validators, and checkpoint capture. The
+        // descriptor canonicalizes null metadata, so opMeta is never null.
+        ToolOperationMetadata opMeta = tool.descriptor().operationMetadata();
+        boolean mutatingTool = opMeta.mutatesWorkspace();
         String userRequest = TurnUserRequestCapture.get();
         TaskContract taskContract = TurnTaskContractCapture.get();
         if (taskContract == null) {
@@ -404,7 +411,7 @@ public final class TurnProcessor {
                             + ". Use talos.list_dir only and answer with file and directory names."));
         }
 
-        if (ToolCallSupport.isMutatingTool(call.toolName())
+        if (mutatingTool
                 && userRequest != null
                 && !taskContract.mutationAllowed()) {
             TurnAuditCapture.recordToolCall(
@@ -503,7 +510,8 @@ public final class TurnProcessor {
         }
 
         if (risk.requiresApproval()) {
-            ToolResult preApprovalValidation = validateBeforeApproval(call, session, ctx, taskContract);
+            ToolResult preApprovalValidation =
+                    validateBeforeApproval(call, session, ctx, taskContract, mutatingTool);
             if (preApprovalValidation != null) {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
@@ -681,7 +689,7 @@ public final class TurnProcessor {
             }
         }
 
-        if (ToolCallSupport.isMutatingTool(call.toolName())) {
+        if (opMeta.requiresCheckpoint()) {
             CheckpointCaptureResult checkpoint = captureCheckpointBeforeMutation(session, call);
             LocalTurnTraceCapture.recordCheckpoint(
                     checkpoint.status(),
@@ -812,14 +820,17 @@ public final class TurnProcessor {
             ToolCall call,
             Session session,
             RuntimeTurnContext ctx,
-            TaskContract taskContract
+            TaskContract taskContract,
+            boolean mutatingTool
     ) {
-        ToolResult sandboxPathValidation = validateSandboxPathBeforeApproval(call, session, ctx);
+        ToolResult sandboxPathValidation =
+                validateSandboxPathBeforeApproval(call, session, ctx, mutatingTool);
         if (sandboxPathValidation != null) {
             return sandboxPathValidation;
         }
 
-        ToolResult forbiddenTargetValidation = validateForbiddenTargetBeforeApproval(call, taskContract);
+        ToolResult forbiddenTargetValidation =
+                validateForbiddenTargetBeforeApproval(call, taskContract, mutatingTool);
         if (forbiddenTargetValidation != null) {
             return forbiddenTargetValidation;
         }
@@ -830,7 +841,8 @@ public final class TurnProcessor {
             return workspaceOrganizationValidation;
         }
 
-        ToolResult expectedTargetValidation = validateExpectedTargetBeforeApproval(call, taskContract);
+        ToolResult expectedTargetValidation =
+                validateExpectedTargetBeforeApproval(call, taskContract, mutatingTool);
         if (expectedTargetValidation != null) {
             return expectedTargetValidation;
         }
@@ -1011,12 +1023,16 @@ public final class TurnProcessor {
                         + ". No approval was requested and no file was changed."));
     }
 
-    private static ToolResult validateExpectedTargetBeforeApproval(ToolCall call, TaskContract taskContract) {
+    private static ToolResult validateExpectedTargetBeforeApproval(
+            ToolCall call,
+            TaskContract taskContract,
+            boolean mutatingTool
+    ) {
         if (call == null
                 || taskContract == null
                 || !taskContract.mutationAllowed()
                 || taskContract.expectedTargets().isEmpty()
-                || !ToolCallSupport.isMutatingTool(call.toolName())) {
+                || !mutatingTool) {
             return null;
         }
         String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename", "target");
@@ -1059,8 +1075,13 @@ public final class TurnProcessor {
         return Set.copyOf(out);
     }
 
-    private static ToolResult validateSandboxPathBeforeApproval(ToolCall call, Session session, RuntimeTurnContext ctx) {
-        if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) {
+    private static ToolResult validateSandboxPathBeforeApproval(
+            ToolCall call,
+            Session session,
+            RuntimeTurnContext ctx,
+            boolean mutatingTool
+    ) {
+        if (call == null || !mutatingTool) {
             return null;
         }
         if (session == null || session.workspace() == null || ctx == null || ctx.sandbox() == null) {
@@ -1086,11 +1107,15 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static ToolResult validateForbiddenTargetBeforeApproval(ToolCall call, TaskContract taskContract) {
+    private static ToolResult validateForbiddenTargetBeforeApproval(
+            ToolCall call,
+            TaskContract taskContract,
+            boolean mutatingTool
+    ) {
         if (call == null || taskContract == null || taskContract.forbiddenTargets().isEmpty()) {
             return null;
         }
-        if (!ToolCallSupport.isMutatingTool(call.toolName())) {
+        if (!mutatingTool) {
             return null;
         }
         List<PathParam> params = pathParams(call);

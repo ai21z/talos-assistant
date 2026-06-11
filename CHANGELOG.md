@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T757] Mutation-intent blocking, pre-approval validators, and checkpoint
+  capture now read `ToolOperationMetadata` from the registry-resolved tool
+  instead of hand-maintained name lists (which failed open for tools missing
+  from them); new `ToolMutationGate` treats unresolvable tools as mutating
+  and checkpoint-required; `ToolCallSupport`'s duplicate name sets are
+  deleted (static classification delegates to `ToolAliasPolicy`, pinned
+  against metadata by a parity test).
 - [T756] The approval window now shows a colored unified diff for write and
   edit mutations (java-diff-utils; capped at 60 lines; redacted; fail-closed
   skips for protected/oversized/binary targets; plain ASCII under

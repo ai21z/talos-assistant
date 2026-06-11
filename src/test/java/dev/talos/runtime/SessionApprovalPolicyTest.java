@@ -237,12 +237,16 @@ class SessionApprovalPolicyTest {
                 ModeController.defaultController(), gate, reg, policy);
 
         Session s = new Session(ws, new Config());
-        Context ctx = Context.builder(new Config()).build();
+        // T757: metadata-mutating stubs now get pre-approval sandbox
+        // validation like real tools; the sandbox must match the workspace.
+        Context ctx = Context.builder(new Config())
+                .sandbox(new dev.talos.core.security.Sandbox(ws, null))
+                .build();
 
         ToolCall c1 = new ToolCall("test.w",
                 Map.of("path", ws.resolve("a.txt").toString(), "content", "1"));
         ToolResult r1 = tp.executeTool(s, c1, ctx);
-        assertTrue(r1.success());
+        assertTrue(r1.success(), r1.errorMessage());
         assertEquals(1, gateCalls.get());
         assertTrue(policy.rememberInWorkspaceWritesEnabled());
 
@@ -250,7 +254,7 @@ class SessionApprovalPolicyTest {
         ToolCall c2 = new ToolCall("test.w",
                 Map.of("path", ws.resolve("b.txt").toString(), "content", "2"));
         ToolResult r2 = tp.executeTool(s, c2, ctx);
-        assertTrue(r2.success(), "policy AUTO_APPROVE should bypass the gate");
+        assertTrue(r2.success(), "policy AUTO_APPROVE should bypass the gate: " + r2.errorMessage());
         assertEquals(1, gateCalls.get(), "gate must not be re-prompted");
     }
 
@@ -275,20 +279,28 @@ class SessionApprovalPolicyTest {
                 ModeController.defaultController(), gate, reg, policy);
 
         Session s = new Session(ws, new Config());
-        Context ctx = Context.builder(new Config()).build();
+        // T757: sandbox must match the workspace (see remember test above).
+        Context ctx = Context.builder(new Config())
+                .sandbox(new dev.talos.core.security.Sandbox(ws, null))
+                .build();
 
         // Remember approval for in-workspace writes.
         tp.executeTool(s, new ToolCall("test.w",
                 Map.of("path", ws.resolve("a.txt").toString(), "content", "1")), ctx);
         assertTrue(policy.rememberInWorkspaceWritesEnabled());
 
-        // Out-of-workspace write: the declarative permission layer denies
-        // workspace escapes before approval. Remembered approval must not
-        // convert an escaped path into another prompt.
+        // Out-of-workspace write: since T757 the fail-closed pre-approval
+        // sandbox validator catches metadata-mutating escapes before the
+        // declarative permission layer (which used to own this denial for
+        // tools absent from the legacy name lists). Either way the invariant
+        // holds: remembered approval must not convert an escaped path into
+        // another prompt, and no mutation happens.
         ToolResult escaped = tp.executeTool(s, new ToolCall("test.w",
                 Map.of("path", other.resolve("evil.txt").toString(), "content", "x")), ctx);
         assertFalse(escaped.success());
-        assertEquals(ToolError.DENIED, escaped.error().code());
+        assertEquals(ToolError.INVALID_PARAMS, escaped.error().code());
+        assertTrue(escaped.errorMessage().contains("Path not allowed before approval"),
+                escaped.errorMessage());
         assertEquals(1, gateCalls.get(),
                 "out-of-workspace write must be denied before another approval prompt");
     }
@@ -306,7 +318,10 @@ class SessionApprovalPolicyTest {
                 ModeController.defaultController(), gate, reg);
 
         Session s = new Session(ws, new Config());
-        Context ctx = Context.builder(new Config()).build();
+        // T757: sandbox must match the workspace (see remember test above).
+        Context ctx = Context.builder(new Config())
+                .sandbox(new dev.talos.core.security.Sandbox(ws, null))
+                .build();
 
         for (int i = 0; i < 3; i++) {
             tp.executeTool(s, new ToolCall("test.w",

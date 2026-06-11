@@ -115,10 +115,13 @@ class ApprovalGatedToolTest {
 
         var ctx = Context.builder(new Config()).build();
         var session = new Session(WS, new Config());
-        var call = new ToolCall("talos.test_destroy", Map.of());
+        // T757: metadata-mutating calls are checkpoint-gated; a call with no
+        // identifiable target path fails closed at checkpoint capture, so the
+        // approval-mechanics stub names its target like a real tool would.
+        var call = new ToolCall("talos.test_destroy", Map.of("path", "tmp-destroy-target.txt"));
 
         ToolResult result = processor.executeTool(session, call, ctx);
-        assertTrue(result.success());
+        assertTrue(result.success(), result.errorMessage());
         assertEquals("destroy-ok", result.output());
     }
 
@@ -250,10 +253,12 @@ class ApprovalGatedToolTest {
 
         var ctx = Context.builder(new Config()).build();
         var session = new Session(WS, new Config());
-        var call = new ToolCall("talos.test_write", Map.of());
+        // T757: see destructiveToolApprovedExecutes — checkpoint gating needs
+        // a target path for metadata-mutating calls.
+        var call = new ToolCall("talos.test_write", Map.of("path", "tmp-noop-write.txt"));
 
         ToolResult result = processor.executeTool(session, call, ctx);
-        assertTrue(result.success(), "NoOpApprovalGate should approve everything");
+        assertTrue(result.success(), "NoOpApprovalGate should approve everything: " + result.errorMessage());
     }
 
     @Test
