@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-06-11
+
 ### Changed
 - [T753] Refreshed local Qodana evidence on the current head via the native
   fallback (Docker mode failed with the documented Windows Gradle-import I/O
@@ -384,3 +386,4 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
+
