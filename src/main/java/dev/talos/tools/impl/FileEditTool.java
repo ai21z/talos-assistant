@@ -1,10 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
-import dev.talos.safety.SafeLogFormatter;
 import dev.talos.tools.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -34,7 +31,6 @@ import java.util.Map;
  */
 public final class FileEditTool implements TalosTool {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileEditTool.class);
     private static final String NAME = "talos.edit_file";
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB
 
@@ -93,13 +89,10 @@ public final class FileEditTool implements TalosTool {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: new_string"));
         }
 
-        // Strip trailing markdown commentary that LLMs accidentally include
-        String sanitizedNew = ContentSanitizer.sanitize(newString, pathParam);
-        if (sanitizedNew.length() < newString.length()) {
-            LOG.debug("Stripped {} chars of trailing markdown commentary from edit_file new_string for {}",
-                    newString.length() - sanitizedNew.length(), SafeLogFormatter.value(pathParam));
-            newString = sanitizedNew;
-        }
+        // new_string arrives exactly as approved: markdown-commentary
+        // sanitization happens once, pre-approval, in the runtime's call
+        // normalization (T755). Re-sanitizing here would break the
+        // approved-bytes == written-bytes invariant.
 
         // Reject no-op edits (old_string == new_string)
         if (oldString.equals(newString)) {

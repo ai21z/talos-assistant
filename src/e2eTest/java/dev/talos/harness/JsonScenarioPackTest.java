@@ -327,6 +327,28 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/88-trailing-commentary-stripped-before-approval.json] 88: trailing commentary is stripped before approval so approved bytes are written bytes")
+    void trailingCommentaryStrippedBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/88-trailing-commentary-stripped-before-approval.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            // T755: the raw emission carries trailing markdown commentary.
+            // The approval window must describe the sanitized payload
+            // (40 bytes / 2 lines — the raw payload is 89 bytes / 6 lines),
+            // and the written file must equal those approved bytes exactly.
+            // The trace-level hash equality (TOOL_CONTENT_SANITIZED.afterHash
+            // == APPROVAL_REQUIRED.contentHash) is pinned in TurnProcessorTest.
+            result.assertUsedTool("talos.write_file")
+                    .assertNoFailedCalls()
+                    .assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnyApprovalDetailContains("(40 bytes, 2 lines)")
+                    .assertFileContains("style.css", "background: #222")
+                    .assertFileNotContains("style.css", "## Summary")
+                    .assertFileNotContains("style.css", "```");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/22-build-website-prompt-allows-apply.json] 22: build website prompt is apply-capable")
     void buildWebsitePromptAllowsApply() {
         var loaded = JsonScenarioLoader.load("scenarios/22-build-website-prompt-allows-apply.json");

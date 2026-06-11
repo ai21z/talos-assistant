@@ -159,13 +159,14 @@ class SensitiveLogRedactionTest {
         assertFalse(registry.contains("name, tool.name()"), registry);
         assertFalse(registry.contains("name, decision.canonicalToolName()"), registry);
 
-        assertTrue(editTool.contains("SafeLogFormatter.value(pathParam)"), editTool);
-        assertFalse(editTool.contains("new_string for {}\",\n                    newString.length() - sanitizedNew.length(), pathParam"),
-                editTool);
-
-        assertTrue(writeTool.contains("SafeLogFormatter.value(pathParam)"), writeTool);
-        assertFalse(writeTool.contains("content for {}\",\n                    content.length() - sanitized.length(), pathParam"),
-                writeTool);
+        // T755: in-tool sanitization (and its path-bearing debug logging) is
+        // gone — sanitization happens once, pre-approval, in the runtime's
+        // MarkdownCommentaryCallNormalizer, and is trace-recorded as
+        // hash/byte summaries only. The tools must not log or sanitize.
+        assertFalse(editTool.contains("ContentSanitizer"), editTool);
+        assertFalse(editTool.contains("LOG.debug"), editTool);
+        assertFalse(writeTool.contains("ContentSanitizer"), writeTool);
+        assertFalse(writeTool.contains("LOG.debug"), writeTool);
 
         assertTrue(reranker.contains("Rerank: dropping candidate (score {}, below threshold {})"), reranker);
         assertFalse(reranker.contains("SafeLogFormatter.value(c.path())"), reranker);

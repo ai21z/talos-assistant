@@ -339,6 +339,128 @@ class TurnProcessorTest {
         assertEquals(1, approvals.get());
     }
 
+    // ---- T755: markdown-commentary sanitization before the approval gate ----
+
+    private static final String COMMENTARY_CSS_CONTENT =
+            "body { color: red; }\n```\n## Summary\n- Adjusted the body color\n";
+    private static final String SANITIZED_CSS_CONTENT = "body { color: red; }\n";
+
+    @Test
+    void writeContentSanitizedBeforeApprovalSoApprovedBytesAreWrittenBytes(@TempDir Path workspace)
+            throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t755", "session-t755", 1, "2026-06-11T00:00:00Z",
+                "workspace-hash", "auto", "test", "model", "test");
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.write_file", Map.of(
+                            "path", "styles.css",
+                            "content", COMMENTARY_CSS_CONTENT)), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertEquals(1, approvals.get());
+            // The written bytes are exactly the sanitized bytes the user approved.
+            assertEquals(SANITIZED_CSS_CONTENT, Files.readString(workspace.resolve("styles.css")));
+            // The approval window described the sanitized payload, not the raw one.
+            String detail = approvalDetails.getFirst();
+            assertTrue(detail.contains("(21 bytes, 2 lines)"), detail);
+            assertFalse(detail.contains("Summary"), detail);
+            // Trace: sanitization recorded; approval hashes describe sanitized bytes.
+            var sanitizedEvent = trace.events().stream()
+                    .filter(e -> "TOOL_CONTENT_SANITIZED".equals(e.type()))
+                    .findFirst().orElseThrow();
+            assertEquals("content", sanitizedEvent.data().get("key"));
+            assertTrue((int) sanitizedEvent.data().get("strippedChars") > 0);
+            var approvalEvent = trace.events().stream()
+                    .filter(e -> "APPROVAL_REQUIRED".equals(e.type()))
+                    .findFirst().orElseThrow();
+            assertEquals(sanitizedEvent.data().get("afterHash"), approvalEvent.data().get("contentHash"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void editNewStringSanitizedBeforeApprovalAndAppliedSanitized(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("app.css"), "alpha\nbeta\n");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "app.css",
+                        "old_string", "beta",
+                        "new_string", "gamma\n```\n## Note\n- replaced beta\n")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("alpha\ngamma\n\n", Files.readString(workspace.resolve("app.css")));
+        String detail = approvalDetails.getFirst();
+        assertTrue(detail.contains("with:    gamma\\n"), detail);
+        assertFalse(detail.contains("Note"), detail);
+    }
+
+    @Test
+    void editSanitizedIntoNoOpIsRejectedBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("app.css"), "alpha\nbeta\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        // After sanitization new_string collapses to "alpha\n" == old_string:
+        // the edit is a no-op and must be rejected before any approval prompt.
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "app.css",
+                        "old_string", "alpha\n",
+                        "new_string", "alpha\n```\n## Note\n- explanation\n")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("identical"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("alpha\nbeta\n", Files.readString(workspace.resolve("app.css")));
+    }
+
+    @Test
+    void exactLiteralContractRestoresLiteralPayloadEvenWhenSanitizerWouldStrip(@TempDir Path workspace)
+            throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Edit README.md now using talos.write_file. "
+                + "The complete file must contain exactly two lines: "
+                + "first line T155 exact literal; second line Line two; no other characters.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        // Model emits the right payload plus trailing commentary. Sanitization
+        // strips the commentary; the exact-literal corrector (running after)
+        // remains the ground truth for the final payload.
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "README.md",
+                        "content", "T155 exact literal\nLine two\n```\n## Done\n- wrote the file\n")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("T155 exact literal\nLine two", Files.readString(workspace.resolve("README.md")));
+    }
+
     @Test
     void forbiddenTargetFromTaskContractFailsBeforeApproval(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<h1>original</h1>");

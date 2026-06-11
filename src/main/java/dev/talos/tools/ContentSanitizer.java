@@ -1,6 +1,5 @@
-package dev.talos.tools.impl;
+package dev.talos.tools;
 
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -16,8 +15,15 @@ import java.util.regex.Pattern;
  * commentary and strips it. Conservative: it only acts when the post-fence
  * text is clearly markdown, not more code. {@code .md} files are exempt
  * because triple backticks are valid markdown content.
+ *
+ * <p><b>Sanitize-once contract (T755):</b> the single production caller is
+ * the runtime's pre-approval normalization step
+ * ({@code dev.talos.runtime.MarkdownCommentaryCallNormalizer}), so the bytes
+ * the user approves are exactly the bytes written. {@code sanitize} is NOT
+ * idempotent — stripping shifts the trailing scan window, so a second pass
+ * can strip an earlier legitimate fence. Tools must not re-sanitize.
  */
-final class ContentSanitizer {
+public final class ContentSanitizer {
 
     private ContentSanitizer() {}
 
@@ -64,7 +70,7 @@ final class ContentSanitizer {
      * @param filePath the target file path (used to exempt .md files; may be null)
      * @return sanitized content, or the original content unchanged
      */
-    static String sanitize(String content, String filePath) {
+    public static String sanitize(String content, String filePath) {
         if (content == null || content.isEmpty()) return content;
 
         // Exempt markdown files — triple backticks are valid content

@@ -117,6 +117,25 @@ public final class LocalTurnTraceCapture {
                 normalizedPath));
     }
 
+    public static void recordContentSanitized(
+            String phase,
+            ToolCall call,
+            String key,
+            int strippedChars,
+            String beforeValue,
+            String afterValue
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(ContentSanitizationTraceEventFactory.sanitized(
+                phase,
+                call,
+                key,
+                strippedChars,
+                beforeValue,
+                afterValue));
+    }
+
     public static void recordToolCallBlocked(String phase, ToolCall call, String reason) {
         Bag bag = HOLDER.get();
         if (bag != null) {

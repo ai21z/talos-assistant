@@ -1,4 +1,4 @@
-package dev.talos.tools.impl;
+package dev.talos.tools;
 
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
