@@ -1,0 +1,77 @@
+{
+  "schema": "talos.releaseGates.v1",
+  "packet": "current-0.10.4-release-packet-20260612-005957",
+  "branch": "feature/wave3-tui",
+  "sha": "21a868dbfebcfd3859ed0decde20d48edc606af3",
+  "generated": "2026-06-12T00:59:57+02:00",
+  "gates": [
+    {
+      "name": "deterministic-candidate-summaries",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/candidate-manifest.json",
+      "notes": "scripted cut: all four summaries report 0.10.4; mandatory post-bump check passed (unit + e2e + coverage floors + canary + arch). Packet-creation reverification caught a stale launcher (an aborted post-cut session had rebuilt installDist as 0.10.3 at 22:03Z); rebuilt from the clean cut tree and reverified Talos 0.10.4 before any lane runs"
+    },
+    {
+      "name": "qodana-static-analysis",
+      "lane": "STATIC_ANALYSIS",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/qodana-summary.json",
+      "notes": "fresh native scan at packet creation on the clean working tree at the cut commit (operator-attested; the qodana.yaml-pinned 2026.1 linter, build 253.31821, no longer emits metaInformation.json/result-allProblems.json so the summary honestly reports qodana-provenance-incomplete and the SARIF carries no VCS provenance fields); 0 critical with failureConditions critical=0 enforced by the scan itself (exit 0); 113 findings (108 warning, 5 note) vs 88 at 0.10.3 - wave-3 surface growth plus linter build drift, no new critical families"
+    },
+    {
+      "name": "safe-redirected-gptoss",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/talosbench",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "rerun required: wave 3 reworked the interactive rendering stack end to end; redirected transcripts must stay byte-identical plain (no ANSI, no markdown, no status row) and the forbidden approval-prompt substrings (byte-frozen via ApprovalPromptText since T765/T766) must hold on a live bank; scheduled in this close session from pwsh"
+    },
+    {
+      "name": "safe-redirected-qwen",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/talosbench",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "rerun required (same rationale as the gptoss lane); 0.10.3 baseline: 19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; scheduled in this close session from pwsh (never Windows PowerShell 5.1 - its stderr handling aborts the runner)"
+    },
+    {
+      "name": "sync-approval-gptoss",
+      "lane": "SYNC_APPROVAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/sync-approval",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "rerun required after the JLine 3.26.3->3.30.13 bump and the chrome-constants migration (T765-T768): scripted approval paths must keep their exact bytes live; seed 424242; 0.10.3 baseline 31/31 with 2 PASS_WITH_RUNTIME_REPAIR"
+    },
+    {
+      "name": "sync-approval-qwen",
+      "lane": "SYNC_APPROVAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/sync-approval",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "rerun required (same rationale); watch item: T763+T764 ride in this candidate - the 4 workspace-op scenarios that scored PASS with BLOCKED traces at 0.10.2/0.10.3 (phantom 'by' expected target) should now genuinely pass, and T764's outcome claim turns any remaining silent BLOCKED into a visible failure; seed 424242"
+    },
+    {
+      "name": "capability-private-mode-both-models",
+      "lane": "CAPABILITY_PRIVATE_MODE",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957-capability",
+      "notes": "rerun required: streamed-answer shaping (T776 wrap, T777 markdown) sits on the answer path end to end even though it is interactive-only by activation predicate; verify zero secret/canary leaks, zero overclaims, and unchanged protected-read approvals on both models; OCR via the controlled stub"
+    },
+    {
+      "name": "true-pty-manual-qwen",
+      "lane": "TRUE_PTY_MANUAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/pty-qwen/artifacts",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "REQUIRED, not carryable: every wave-3 ticket touches rendering. Owner must validate on a real terminal: streaming markdown styling (markers visible, colorize-only), nanorc-highlighted code fences, the JLine Status bottom row including resize behavior (3.30.13 fixed the duplication bug), width-reactive banner/answer pane/approval window (clamped 60-120), the wave-2 diff-bearing approval window at a non-default width, single-writer interleaving (no display corruption), and NO_COLOR/redirected degradation spot-checks; validator PASS + targeted canary scan PASS"
+    },
+    {
+      "name": "release-clean-canary-scan",
+      "lane": "DETERMINISTIC",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts",
+      "notes": "runs over the live-lane artifact roots once the banks complete; the build-tree canary scan already passed in the post-bump check"
+    }
+  ]
+}
