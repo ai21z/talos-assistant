@@ -1,6 +1,7 @@
 package dev.talos.cli.approval;
 
 import dev.talos.cli.ui.ApprovalPromptRenderer;
+import dev.talos.cli.ui.ApprovalPromptText;
 import dev.talos.cli.ui.CliTheme;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ApprovalResponse;
@@ -110,7 +111,7 @@ public final class CliApprovalGate implements ApprovalGate {
 
         String response;
         try {
-            response = lineReader.apply("  Allow? [y=yes, a=yes for session, N=no] ");
+            response = lineReader.apply(ApprovalPromptText.SESSION_PROMPT_LINE);
         } catch (Exception e) {
             // JLine EndOfFileException, IOError, etc. → deny
             return ApprovalResponse.DENIED;
@@ -148,7 +149,7 @@ public final class CliApprovalGate implements ApprovalGate {
 
         String response;
         try {
-            response = lineReader.apply("  Allow? [y=yes, N=no] ");
+            response = lineReader.apply(ApprovalPromptText.ONCE_PROMPT_LINE);
         } catch (Exception e) {
             return ApprovalResponse.DENIED;
         }

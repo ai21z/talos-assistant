@@ -29,7 +29,7 @@ public final class ApprovalPromptRenderer {
 
     private String render(String action, String detail, String risk, boolean allowRemember) {
         StringBuilder sb = new StringBuilder();
-        sb.append(border("approval required"));
+        sb.append(border(ApprovalPromptText.WINDOW_TITLE));
         sb.append(row("Action", safe(action, "unknown operation")));
         sb.append(row("Risk", safe(risk, "sensitive")));
         String safeDetail = detail == null ? "" : detail.strip();
