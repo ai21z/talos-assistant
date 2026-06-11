@@ -244,7 +244,12 @@ public class RunCmd implements Runnable, SessionState {
     static Terminal buildTerminal(boolean interactiveConsole) throws IOException {
         TerminalBuilder builder = TerminalBuilder.builder();
         if (interactiveConsole) {
-            return builder.system(true).jna(true).build();
+            // Provider pinned to the bundled JNI natives (T781): the old
+            // .jna(true) flag was inert — no JNA dependency is on the
+            // classpath, so resolution always fell through to JNI anyway —
+            // and pinning keeps provider selection deterministic across
+            // JLine upgrades (FFM would need JDK 22+; this build targets 21).
+            return builder.system(true).provider("jni").build();
         }
         Attributes attributes = new Attributes();
         attributes.setLocalFlag(Attributes.LocalFlag.ECHO, false);

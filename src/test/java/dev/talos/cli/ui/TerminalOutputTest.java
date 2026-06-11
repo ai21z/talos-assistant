@@ -22,6 +22,7 @@ class TerminalOutputTest {
                 .system(false)
                 .dumb(true)
                 .encoding(StandardCharsets.UTF_8)
+                .stdoutEncoding(StandardCharsets.UTF_8)
                 .streams(new ByteArrayInputStream(new byte[0]), sink)
                 .build()) {
             PrintStream out = TerminalOutput.printStreamFor(terminal);
@@ -46,6 +47,7 @@ class TerminalOutputTest {
                 .system(false)
                 .dumb(true)
                 .encoding(StandardCharsets.UTF_8)
+                .stdoutEncoding(StandardCharsets.UTF_8)
                 .streams(new ByteArrayInputStream(new byte[0]), sink)
                 .build()) {
             PrintStream out = TerminalOutput.printStreamFor(terminal);
