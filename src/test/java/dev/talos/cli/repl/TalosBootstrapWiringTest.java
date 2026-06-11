@@ -90,26 +90,20 @@ class TalosBootstrapWiringTest {
     }
 
     /**
-     * JLine-safe stream sink wiring: when a {@link org.jline.reader.LineReader}
-     * is supplied, streaming chunks must be routed through its
-     * {@code Terminal.writer()} so JLine's cursor/column model stays in sync
-     * with what actually reaches the terminal. Writes that bypass JLine
-     * (raw {@code System.out.print}) leave JLine's internal state diverged
-     * from reality; on Windows (jna=true) the next prompt redraw then
-     * overwrites the live input line with scrollback content — the
-     * "hallucinated text bled into next input" symptom observed in
-     * test-output.txt Apr 2026 line 306.
-     *
-     * <p>This test proves the routing contract, not the redraw semantics:
-     * we construct a DumbTerminal wired to a byte-sink, invoke the wired
-     * stream sink directly with a known chunk, and assert the chunk
-     * emerged from the terminal's writer and NOT from the
-     * {@link java.io.PrintStream} passed as {@code out}.
+     * Single-writer contract (T774): the bootstrap writes streamed chunks
+     * through the ONE supplied {@code out} stream — there is no second,
+     * terminal-writer side channel. In production RunCmd supplies a
+     * terminal-backed stream ({@code TerminalOutput.printStreamFor}), so
+     * JLine's cursor/column model sees every character that reaches the
+     * terminal; that routing is covered by
+     * {@code dev.talos.cli.ui.TerminalOutputTest}. The pre-T774 dual-writer
+     * split (raw stdout beside terminal.writer()) caused the Apr 2026
+     * prompt-redraw corruption documented in TalosBootstrap.
      */
     @Test
-    void bootstrapRoutesStreamThroughLineReaderTerminalWhenAvailable() throws Exception {
+    void bootstrapWritesStreamChunksThroughTheSingleSuppliedStream() throws Exception {
         java.io.ByteArrayOutputStream terminalSink = new java.io.ByteArrayOutputStream();
-        java.io.ByteArrayOutputStream stdoutSink   = new java.io.ByteArrayOutputStream();
+        java.io.ByteArrayOutputStream suppliedSink = new java.io.ByteArrayOutputStream();
 
         org.jline.terminal.Terminal term = org.jline.terminal.TerminalBuilder.builder()
                 .dumb(true)
@@ -121,7 +115,7 @@ class TalosBootstrapWiringTest {
 
         ReplRouter router = TalosBootstrap.create(
                 stubSession(), new Config(),
-                new java.io.PrintStream(stdoutSink),
+                new java.io.PrintStream(suppliedSink),
                 WS, reader);
 
         // Drive one chunk directly through the wired stream sink — same
@@ -131,12 +125,12 @@ class TalosBootstrapWiringTest {
         term.flush();
 
         String termOut = terminalSink.toString(java.nio.charset.StandardCharsets.UTF_8);
-        String stdOut  = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
+        String supplied = suppliedSink.toString(java.nio.charset.StandardCharsets.UTF_8);
 
-        assertTrue(termOut.contains("CHUNK-PROBE"),
-                "terminal writer must receive streamed chunks when LineReader is supplied");
-        assertFalse(stdOut.contains("CHUNK-PROBE"),
-                "streamed chunks must not leak to raw stdout when terminal-backed sink is available");
+        assertTrue(supplied.contains("CHUNK-PROBE"),
+                "the single supplied stream must receive streamed chunks");
+        assertFalse(termOut.contains("CHUNK-PROBE"),
+                "no second terminal-writer side channel may exist (single-writer contract)");
     }
 
     /**

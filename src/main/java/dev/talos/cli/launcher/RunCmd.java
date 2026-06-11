@@ -11,6 +11,7 @@ import dev.talos.cli.ui.CliTheme;
 import dev.talos.cli.ui.InteractiveTty;
 import dev.talos.cli.ui.PromptRenderer;
 import dev.talos.cli.ui.TalosBanner;
+import dev.talos.cli.ui.TerminalOutput;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import org.jline.reader.Completer;
@@ -25,6 +26,7 @@ import picocli.CommandLine;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -100,6 +102,11 @@ public class RunCmd implements Runnable, SessionState {
                     bufferedInputBytes(System.in));
             LineReader reader = null;
             ReplInput input;
+            // Single authoritative output stream (T774): in interactive mode
+            // every byte flows through the JLine terminal's writer so its
+            // cursor model never diverges from the screen; scripted mode
+            // keeps raw System.out so redirected bytes are unchanged.
+            PrintStream sink;
             AtomicReference<Completer> completerRef = new AtomicReference<>();
             if (useSystemTerminal) {
                 Terminal term = buildTerminal(true);
@@ -107,12 +114,14 @@ public class RunCmd implements Runnable, SessionState {
                         .completer(delegatingCompleter(completerRef))
                         .build();
                 input = ReplInput.jline(reader);
+                sink = TerminalOutput.printStreamFor(term);
             } else {
                 input = ReplInput.scripted(System.in, System.out);
+                sink = System.out;
             }
 
             // Create router with JLine-integrated approval gate
-            router = TalosBootstrap.create(this, cfg, System.out, ws, reader, input.approvalReader());
+            router = TalosBootstrap.create(this, cfg, sink, ws, reader, input.approvalReader());
             final ReplRouter routerRef = router;
 
             // Now that the router (and its command registry) exist, activate
@@ -126,13 +135,13 @@ public class RunCmd implements Runnable, SessionState {
             java.util.function.IntSupplier terminalWidth =
                     readerRef != null ? () -> readerRef.getTerminal().getWidth() : null;
             if (!noLogo) {
-                TalosBanner.print(ws, cfg, activeMode, getDebugLevel().label(), System.out, terminalWidth);
+                TalosBanner.print(ws, cfg, activeMode, getDebugLevel().label(), sink, terminalWidth);
             } else {
-                TalosBanner.printCompact(ws, cfg, activeMode, System.out, terminalWidth);
+                TalosBanner.printCompact(ws, cfg, activeMode, sink, terminalWidth);
             }
             if (!router.getStartupNotice().isBlank()) {
-                System.out.println(router.getStartupNotice());
-                System.out.println();
+                sink.println(router.getStartupNotice());
+                sink.println();
             }
 
             // Set up prompt refresh callback for mode changes
@@ -158,7 +167,7 @@ public class RunCmd implements Runnable, SessionState {
                 try { line = input.readLine(prompt); }
                 catch (EndOfFileException eof) { break; }
                 catch (UserInterruptException interrupt) {
-                    System.out.println();
+                    sink.println();
                     continue;
                 }
                 if (line == null) break;
@@ -168,7 +177,7 @@ public class RunCmd implements Runnable, SessionState {
 
                 // Rate limit
                 if (!checkRateLimit(lim)) {
-                    System.out.println("Too many requests. Please slow down.\n");
+                    sink.println("Too many requests. Please slow down.\n");
                     continue;
                 }
 
@@ -179,8 +188,8 @@ public class RunCmd implements Runnable, SessionState {
                         continue;
                     }
                     // Unknown -> show minimal help
-                    System.out.println("Unknown command: " + line + "\n");
-                    printMan();
+                    sink.println("Unknown command: " + line + "\n");
+                    printMan(sink);
                     continue;
                 }
 
@@ -191,10 +200,10 @@ public class RunCmd implements Runnable, SessionState {
                 }
 
                 // Fallback (should rarely hit)
-                System.out.println("unhandled prompt (no mode accepted): " + line + "\n");
+                sink.println("unhandled prompt (no mode accepted): " + line + "\n");
             }
 
-            System.out.println("Goodbye!");
+            sink.println("Goodbye!");
         } catch (Exception e) {
             System.err.println("run failed: " + e.getClass().getName() +
                     (e.getMessage() == null ? "" : (": " + sanitizeErrorMessage(e.getMessage()))));
@@ -282,10 +291,10 @@ public class RunCmd implements Runnable, SessionState {
         return InteractiveTty.fileDescriptorIsTerminal(fd);
     }
 
-    private static void printMan() {
-        System.out.println(AnsiColor.grey("  Use ") + AnsiColor.blue("/help")
+    private static void printMan(PrintStream out) {
+        out.println(AnsiColor.grey("  Use ") + AnsiColor.blue("/help")
                 + AnsiColor.grey(" for available commands"));
-        System.out.println();
+        out.println();
     }
 
     private static String maskPath(Path path) { return path.getFileName().toString(); }

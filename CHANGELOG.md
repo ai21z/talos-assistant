@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Changed
+- [T774] Interactive sessions now write through a single authoritative
+  terminal-backed stream (`cli.ui.TerminalOutput.printStreamFor`): the
+  banner, render engine, approval window, spinner, startup notices, and
+  streamed answer chunks all flow through the JLine terminal's writer,
+  replacing the previous split where streamed chunks used
+  `terminal.writer()` while everything else printed to raw `System.out`.
+  JLine's cursor/column model now sees every character that reaches the
+  terminal, closing the documented Apr 2026 display-corruption class
+  where a prompt redraw spliced scrollback into the input line.
+  Scripted/redirected runs keep raw `System.out` — verified
+  byte-identical against a pre-change transcript.
 - [T773] The approval window and the `/status` dashboard resolve their
   width from the live terminal (clamped 60–120) instead of a hardcoded
   80. The approval prompt strings themselves are width-independent and

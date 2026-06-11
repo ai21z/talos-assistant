@@ -197,15 +197,16 @@ public final class TalosBootstrap {
         // ── Rendering (created early so progress sink can reference it) ──
         // Interactivity is decided by the caller's terminal selection, not
         // re-detected here: a JLine LineReader exists only when RunCmd's
-        // isatty checks passed, and scripted/test paths (lineReader == null
-        // or a non-System.out sink) must stay plain (T769). The same
-        // selection feeds the live width source for the answer pane (T772),
-        // the approval window, and the /status dashboard (T773).
+        // isatty checks passed, and scripted/test paths (lineReader == null)
+        // must stay plain (T769). Since T774 the interactive sink is the
+        // terminal-backed stream (not System.out), so reader presence alone
+        // is the signal. The same selection feeds the live width source for
+        // the answer pane (T772), approval window, and /status (T773).
         final LineReader lineReaderRef = lineReader;
         final java.util.function.IntSupplier terminalWidth =
                 lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null;
         RenderEngine render = new RenderEngine(cfg, redactor, out,
-                lineReader != null && out == System.out,
+                lineReader != null,
                 terminalWidth);
 
         // ── Approval gate ─────────────────────────────────────────────────
@@ -286,36 +287,21 @@ public final class TalosBootstrap {
         // Wrapped in ToolCallStreamFilter to suppress text-form tool-call protocol
         // blocks from display, including JSON fallback fences and deprecated XML.
         //
-        // JLine-safe output: when a LineReader is available, route streaming
-        // chunks through its Terminal's writer instead of raw System.out.
-        // JLine tracks the terminal's cursor/column/virtual-line state
-        // internally; writes that bypass it (direct stdout.print) diverge
-        // that model from reality, and on Windows (jna=true) the next
-        // readLine() call's redraw sequence then corrupts the display.
-        //
-        // Observed: test-output.txt Apr 2026 line 306 — after a 300s
-        // wall-clock-aborted repetition loop, the next prompt redraw spliced
-        // leaked token content onto the same visible line as the prompt
-        // ("talos [auto] >  user's prompt is 'The user's prompt is '...").
-        // The tokens were never typed; JLine's cursor model just didn't
-        // know the terminal had moved, so the redraw's CUP/CR/EL sequences
-        // ended up reprinting scrollback as if it were the input buffer.
-        //
-        // Using terminal.writer() keeps JLine authoritative over every
-        // character that reaches the terminal. Falls back to stdout when
-        // no LineReader is supplied (headless tests, programmatic API).
+        // Single-writer design (T774): `out` IS the authoritative stream.
+        // In interactive mode RunCmd passes a terminal-backed PrintStream
+        // (TerminalOutput.printStreamFor), so every character — streamed
+        // chunks, banner, approval window, spinner — flows through JLine's
+        // terminal writer and its cursor/column/virtual-line model never
+        // diverges from the screen. The pre-T774 dual-writer split (raw
+        // System.out beside terminal.writer()) caused the Apr 2026 display
+        // corruption: a prompt redraw spliced leaked scrollback into the
+        // input line ("talos [auto] >  user's prompt is '...") because
+        // JLine never saw the bytes that had moved the cursor.
         final PrintStream stdout = out;
         final RenderEngine renderRef = render;
-        final java.io.PrintWriter termWriter =
-                (lineReader != null) ? lineReader.getTerminal().writer() : null;
         java.util.function.Consumer<String> terminalSink = chunk -> {
-            if (termWriter != null) {
-                termWriter.print(chunk);
-                termWriter.flush();
-            } else {
-                stdout.print(chunk);
-                stdout.flush();
-            }
+            stdout.print(chunk);
+            stdout.flush();
         };
         java.util.function.Consumer<String> streamSink =
                 new ToolCallStreamFilter(renderRef.answerStreamSink(terminalSink));
