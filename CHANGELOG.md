@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- [T772] The answer pane resolves its width from the live terminal
+  (clamped 60–120) instead of a hardcoded 96; the width is captured at
+  stream open, so one streamed answer stays internally consistent and a
+  terminal resize takes effect on the next answer. Paths without a
+  terminal (redirected, scripted, e2e) keep the historical fixed 96 and
+  never consult `COLUMNS`, so their bytes are unchanged by construction.
 - [T771] Width resolution is now owned by a single rule
   (`cli.ui.TerminalWidths`): live JLine `Terminal.getWidth()` clamped to
   60–120, then the `COLUMNS` environment variable (same clamp), then the

@@ -198,9 +198,12 @@ public final class TalosBootstrap {
         // Interactivity is decided by the caller's terminal selection, not
         // re-detected here: a JLine LineReader exists only when RunCmd's
         // isatty checks passed, and scripted/test paths (lineReader == null
-        // or a non-System.out sink) must stay plain (T769).
+        // or a non-System.out sink) must stay plain (T769). The same
+        // selection feeds the live width source for the answer pane (T772).
+        final LineReader lineReaderRef = lineReader;
         RenderEngine render = new RenderEngine(cfg, redactor, out,
-                lineReader != null && out == System.out);
+                lineReader != null && out == System.out,
+                lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null);
 
         // ── Approval gate ─────────────────────────────────────────────────
         // When a JLine LineReader is available, approval reads through the same
