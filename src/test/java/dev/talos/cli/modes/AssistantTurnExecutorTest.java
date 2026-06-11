@@ -2641,6 +2641,40 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void readOnlyProposalFlagsUnobservedNonFixtureFilenames(@TempDir Path workspace)
+                throws Exception {
+            // T762: file detection is evidence-derived, not the audit-fixture
+            // name list — claims about ANY unread file now warn. This pins the
+            // capability the old hardcoded marker set could not provide.
+            Files.writeString(workspace.resolve("README.md"),
+                    "# Focused Audit Fixture\n\nThis workspace checks response grounding.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            "The README should document that main.py loads data.csv at startup.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Grounding warning:"), out.text());
+            assertTrue(out.text().contains("main.py"), out.text());
+        }
+
+        @Test
         void readOnlyReadmeProposalFlagsUnobservedWorkspaceFileMeanings(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("README.md"),

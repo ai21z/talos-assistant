@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T762] Read-only proposal grounding now derives ungrounded-file detection
+  from observed tool evidence (result text plus the paths tools actually
+  touched) instead of a hardcoded audit-fixture filename list — claims about
+  ANY unread file now trigger the grounding warning, not just the seven
+  fixture names. The policy moved from AssistantTurnExecutor into
+  `runtime.outcome.ReadOnlyProposalGroundingGuard` per the policy-ownership
+  doctrine.
 - [T761] The advertised default tool surface is now derived from
   `ToolSurfacePlanner.plan()` over a canonical descriptor catalog instead of
   a hand-maintained duplicate branch tree; read-only turns with expected
