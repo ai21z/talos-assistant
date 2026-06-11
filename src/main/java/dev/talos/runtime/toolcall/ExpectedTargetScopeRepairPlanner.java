@@ -141,6 +141,13 @@ final class ExpectedTargetScopeRepairPlanner {
                 .toList();
     }
 
+    // T758 residual: this consumes FailureDecision.reason() — free text from
+    // the loop's failure summary, not a ToolOutcome — and the surrounding code
+    // additionally EXTRACTS data from it (expected-target list, backticked
+    // failed target). Migrating it needs FailureDecision to carry structured
+    // targets (Wave-5 typed OutcomeSignals), not just a reason code. Until
+    // then this phrase is load-bearing: producers of the expected-target
+    // scope message must not rephrase it.
     private static boolean looksLikeExpectedTargetScopeFailure(String reason) {
         return reason != null
                 && reason.toLowerCase(Locale.ROOT)

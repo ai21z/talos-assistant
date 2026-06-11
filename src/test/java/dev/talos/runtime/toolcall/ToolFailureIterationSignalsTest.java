@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
@@ -56,6 +57,7 @@ class ToolFailureIterationSignalsTest {
         LoopState state = loopState();
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "docs/other.md", "content", "new"));
         ToolResult result = ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
                 "Target outside expected targets before approval: docs/other.md"));
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(write, result, "docs/other.md");
@@ -76,7 +78,8 @@ class ToolFailureIterationSignalsTest {
     void userApprovalDenialOnlyReportsApprovalDeniedForMutatingCalls() {
         LoopState state = loopState();
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new"));
-        ToolResult result = ToolResult.fail(ToolError.denied("User did not approve talos.write_file."));
+        ToolResult result = ToolResult.fail(ToolError.denied(
+                ToolFailureReason.USER_APPROVAL_DENIED, "User did not approve talos.write_file."));
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(write, result, "README.md");
 

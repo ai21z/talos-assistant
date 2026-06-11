@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -74,7 +75,8 @@ class ToolLoopResultSummaryFormatterTest {
                 "",
                 "old_string not found",
                 null,
-                ToolError.INVALID_PARAMS);
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND);
         var laterWrite = new ToolCallLoop.ToolOutcome(
                 "talos.write_file",
                 "src/app.java",

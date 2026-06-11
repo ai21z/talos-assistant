@@ -422,8 +422,8 @@ public final class MutationFailureAnswerRenderer {
     }
 
     private static boolean isUserApprovalDeniedOutcome(ToolCallLoop.ToolOutcome outcome) {
-        if (outcome == null || outcome.errorMessage() == null) return false;
-        return outcome.errorMessage().startsWith("User did not approve ");
+        return outcome != null
+                && outcome.failureReason() == dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED;
     }
 
     private static String readOnlyDeniedCleanAnswer(String answer) {

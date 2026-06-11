@@ -6,6 +6,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -43,7 +44,8 @@ class MutationFailureAnswerRendererTest {
                         "",
                         "User did not approve the talos.edit_file call.",
                         null,
-                        ToolError.DENIED),
+                        ToolError.DENIED)
+                        .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED),
                 new ToolCallLoop.ToolOutcome(
                         "talos.write_file",
                         ".env",
@@ -53,7 +55,8 @@ class MutationFailureAnswerRendererTest {
                         "",
                         "Permission policy denied mutation of protected path `.env`.",
                         null,
-                        ToolError.DENIED)));
+                        ToolError.DENIED)
+                        .withFailureReason(ToolFailureReason.PERMISSION_POLICY_DENIED)));
 
         String out = MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
                 "manual replacement prose",

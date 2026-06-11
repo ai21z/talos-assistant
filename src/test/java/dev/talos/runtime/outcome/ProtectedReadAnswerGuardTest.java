@@ -5,6 +5,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -186,7 +187,8 @@ class ProtectedReadAnswerGuardTest {
                 "",
                 "User did not approve the talos.read_file call.",
                 null,
-                ToolError.DENIED);
+                ToolError.DENIED)
+                .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED);
     }
 
     private static ToolCallLoop.LoopResult loopResult(ToolCallLoop.ToolOutcome... outcomes) {

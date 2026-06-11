@@ -6250,7 +6250,7 @@ class AssistantTurnExecutorTest {
                             "talos.read_file", " .env", false, false, true,
                             "", "User did not approve the talos.read_file call.",
                             null, dev.talos.tools.ToolError.DENIED
-                    )));
+                    ).withFailureReason(dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED)));
 
             String answer = AssistantTurnExecutor.summarizeDeniedProtectedReadOutcomesIfNeeded(
                     "raw secret prose", loopResult);
@@ -6611,6 +6611,7 @@ class AssistantTurnExecutorTest {
                             new dev.talos.runtime.ToolCallLoop.ToolOutcome(
                                     "talos.edit_file", "index.html", false, true, true, "",
                                     "User did not approve the talos.edit_file call.")
+                                    .withFailureReason(dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED)
                     ));
 
             String out = AssistantTurnExecutor.summarizeDeniedMutationOutcomesIfNeeded(

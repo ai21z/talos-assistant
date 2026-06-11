@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
@@ -31,44 +32,60 @@ class ToolExecutionFailureClassifierTest {
     }
 
     @Test
-    void approvalDenialRequiresExactExistingPrefix() {
+    void approvalDenialIsDrivenByTypedReasonNotMessageProse() {
+        // T758 prose-freedom proof: an arbitrary message with the typed
+        // reason classifies; the old magic message without a reason does not.
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new"));
 
         ToolExecutionFailureClassifier.Classification approvalDenial =
                 ToolExecutionFailureClassifier.classify(
                         write,
-                        ToolResult.fail(ToolError.denied("User did not approve talos.write_file.")),
+                        ToolResult.fail(ToolError.denied(
+                                ToolFailureReason.USER_APPROVAL_DENIED,
+                                "The user declined this change; rephrased prose is fine.")),
                         "README.md");
-        ToolExecutionFailureClassifier.Classification ordinaryDenial =
+        ToolExecutionFailureClassifier.Classification legacyProseOnly =
                 ToolExecutionFailureClassifier.classify(
                         write,
-                        ToolResult.fail(ToolError.denied("User rejected talos.write_file.")),
+                        ToolResult.fail(ToolError.denied("User did not approve talos.write_file.")),
                         "README.md");
 
         assertTrue(approvalDenial.userApprovalDenial());
-        assertFalse(ordinaryDenial.userApprovalDenial());
+        assertFalse(legacyProseOnly.userApprovalDenial(),
+                "message sniffing must be gone: prose without a typed reason does not classify");
     }
 
     @Test
-    void pathPolicyAndExpectedTargetBlocksUseExactExistingPrefixes() {
+    void pathPolicyAndExpectedTargetBlocksAreDrivenByTypedReasons() {
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "../README.md", "content", "new"));
 
         ToolExecutionFailureClassifier.Classification pathPolicy =
                 ToolExecutionFailureClassifier.classify(
                         write,
-                        ToolResult.fail(ToolError.invalidParams("Path not allowed before approval: ../README.md")),
+                        ToolResult.fail(ToolError.invalidParams(
+                                ToolFailureReason.PRE_APPROVAL_PATH_NOT_ALLOWED,
+                                "any wording works here")),
                         "../README.md");
         ToolExecutionFailureClassifier.Classification expectedTarget =
                 ToolExecutionFailureClassifier.classify(
                         write,
                         ToolResult.fail(ToolError.invalidParams(
-                                "Target outside expected targets before approval: docs/other.md")),
+                                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                                "any wording works here too")),
                         "docs/other.md");
+        ToolExecutionFailureClassifier.Classification legacyProseOnly =
+                ToolExecutionFailureClassifier.classify(
+                        write,
+                        ToolResult.fail(ToolError.invalidParams(
+                                "Path not allowed before approval: ../README.md")),
+                        "../README.md");
 
         assertTrue(pathPolicy.preApprovalPathPolicyBlock());
         assertFalse(pathPolicy.expectedTargetScopeBlock());
         assertTrue(expectedTarget.preApprovalPathPolicyBlock());
         assertTrue(expectedTarget.expectedTargetScopeBlock());
+        assertFalse(legacyProseOnly.preApprovalPathPolicyBlock(),
+                "message sniffing must be gone: prose without a typed reason does not classify");
     }
 
     @Test
@@ -90,7 +107,7 @@ class ToolExecutionFailureClassifierTest {
     }
 
     @Test
-    void oldStringNotFoundRequiresInvalidParamsAndExistingMessageText() {
+    void oldStringNotFoundRequiresInvalidParamsAndTypedReason() {
         ToolCall edit = new ToolCall("talos.edit_file", Map.of(
                 "path", "README.md",
                 "old_string", "old",
@@ -99,22 +116,25 @@ class ToolExecutionFailureClassifierTest {
         ToolExecutionFailureClassifier.Classification invalidOldString =
                 ToolExecutionFailureClassifier.classify(
                         edit,
-                        ToolResult.fail(ToolError.invalidParams("old_string not found")),
+                        ToolResult.fail(ToolError.invalidParams(
+                                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, "any wording")),
                         "README.md");
         ToolExecutionFailureClassifier.Classification internalOldString =
                 ToolExecutionFailureClassifier.classify(
                         edit,
-                        ToolResult.fail(ToolError.internal("old_string not found")),
+                        ToolResult.fail(ToolError.internal(
+                                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, "any wording")),
                         "README.md");
-        ToolExecutionFailureClassifier.Classification invalidOther =
+        ToolExecutionFailureClassifier.Classification legacyProseOnly =
                 ToolExecutionFailureClassifier.classify(
                         edit,
-                        ToolResult.fail(ToolError.invalidParams("missing old_string")),
+                        ToolResult.fail(ToolError.invalidParams("old_string not found")),
                         "README.md");
 
         assertTrue(invalidOldString.oldStringNotFound());
-        assertFalse(internalOldString.oldStringNotFound());
-        assertFalse(invalidOther.oldStringNotFound());
+        assertFalse(internalOldString.oldStringNotFound(), "INVALID_PARAMS gate still applies");
+        assertFalse(legacyProseOnly.oldStringNotFound(),
+                "message sniffing must be gone: prose without a typed reason does not classify");
     }
 
     @Test

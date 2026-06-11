@@ -14,6 +14,7 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
@@ -159,7 +160,7 @@ public final class ToolCallExecutionStage {
                         + "[error] " + diagnosticError
                         + "\n[/tool_result]";
                 state.toolOutcomes.add(ToolOutcomeFactory.failedEditPreApproval(
-                        effective, pathHint, diagnosticError));
+                        effective, pathHint, diagnosticError, editPreApprovalDecision));
                 appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
                 logEditPreApprovalBlock(editPreApprovalDecision, pathHint);
                 continue;
@@ -239,7 +240,8 @@ public final class ToolCallExecutionStage {
                         effective,
                         pathHint,
                         diagnosticError,
-                        workspaceOperationPlan));
+                        workspaceOperationPlan,
+                        ToolFailureReason.NONE));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked source-derived {} for {} until source target(s) are read: {}",
@@ -287,7 +289,8 @@ public final class ToolCallExecutionStage {
                             effective,
                             pathHint,
                             sourceEvidenceCoverageDiagnostic,
-                            workspaceOperationPlan));
+                            workspaceOperationPlan,
+                            ToolFailureReason.NONE));
                     appendResultMessage(state, parsed.useNativePath(), i,
                             ToolCallSupport.formatToolResult(effective, result));
                     LOG.debug("Blocked source-derived {} for {} before approval: {}",
@@ -318,7 +321,8 @@ public final class ToolCallExecutionStage {
                         effective,
                         pathHint,
                         appendLineDiagnostic,
-                        workspaceOperationPlan));
+                        workspaceOperationPlan,
+                        ToolFailureReason.WRITE_APPEND_LINE_PRESERVATION));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked append-line {} for {} before approval: {}",
@@ -349,7 +353,8 @@ public final class ToolCallExecutionStage {
                         effective,
                         pathHint,
                         staticWebRewriteGroundingDiagnostic,
-                        workspaceOperationPlan));
+                        workspaceOperationPlan,
+                        ToolFailureReason.NONE));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked static-web rewrite {} for {} before approval: {}",
@@ -377,11 +382,14 @@ public final class ToolCallExecutionStage {
                         "tool_loop",
                         effective,
                         staticWebRepairPathDiagnostic);
+                // StaticWebRepairPathGuard's diagnostic is the expected-target
+                // scope family ("Target outside expected targets...").
                 state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
                         effective,
                         pathHint,
                         staticWebRepairPathDiagnostic,
-                        workspaceOperationPlan));
+                        workspaceOperationPlan,
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked static-web repair {} for invalid target {} before approval: {}",
@@ -412,7 +420,8 @@ public final class ToolCallExecutionStage {
                         effective,
                         pathHint,
                         staticWebBlankRequiredAssetDiagnostic,
-                        workspaceOperationPlan));
+                        workspaceOperationPlan,
+                        ToolFailureReason.NONE));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked static-web blank required asset write {} for {} before approval: {}",

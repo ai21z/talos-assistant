@@ -28,7 +28,7 @@ class ToolOutcomeFactoryTest {
                 "new_string", "new"));
 
         ToolCallLoop.ToolOutcome outcome =
-                ToolOutcomeFactory.failedEditPreApproval(edit, "README.md", "old_string not found");
+                ToolOutcomeFactory.failedEditPreApproval(edit, "README.md", "old_string not found", null);
 
         assertEquals("talos.edit_file", outcome.toolName());
         assertEquals("README.md", outcome.pathHint());
@@ -51,7 +51,8 @@ class ToolOutcomeFactoryTest {
         WorkspaceOperationPlan plan = writePlan();
 
         ToolCallLoop.ToolOutcome outcome =
-                ToolOutcomeFactory.failedPreExecutionMutation(write, "README.md", "blocked", plan);
+                ToolOutcomeFactory.failedPreExecutionMutation(
+                        write, "README.md", "blocked", plan, dev.talos.tools.ToolFailureReason.NONE);
 
         assertEquals("talos.write_file", outcome.toolName());
         assertEquals("README.md", outcome.pathHint());

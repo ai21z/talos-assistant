@@ -269,8 +269,8 @@ public final class ProtectedReadAnswerGuard {
     }
 
     private static boolean isUserApprovalDeniedOutcome(ToolCallLoop.ToolOutcome outcome) {
-        if (outcome == null || outcome.errorMessage() == null) return false;
-        return outcome.errorMessage().startsWith("User did not approve ");
+        return outcome != null
+                && outcome.failureReason() == dev.talos.tools.ToolFailureReason.USER_APPROVAL_DENIED;
     }
 
     private static String protectedReadEvidenceSummary(String summary) {

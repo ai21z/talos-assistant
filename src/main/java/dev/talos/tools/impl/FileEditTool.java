@@ -86,7 +86,9 @@ public final class FileEditTool implements TalosTool {
 
         String newString = resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement");
         if (newString == null) {
-            return ToolResult.fail(ToolError.invalidParams("Missing required parameter: new_string"));
+            return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.EDIT_EMPTY_ARGUMENTS,
+                    "Missing required parameter: new_string"));
         }
 
         // new_string arrives exactly as approved: markdown-commentary
@@ -136,6 +138,7 @@ public final class FileEditTool implements TalosTool {
             if (count == 0) {
                 String snippet = buildFileSnippet(content, 20);
                 return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
                         "old_string not found in " + pathParam + ". "
                         + "The exact text was not found in the file. "
                         + "Call talos.read_file to see the current content, then copy the exact text into old_string.\n"
@@ -143,6 +146,7 @@ public final class FileEditTool implements TalosTool {
             }
             if (count > 1) {
                 return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS,
                         "old_string found " + count + " times in " + pathParam +
                         ". Provide more context to make the match unique."));
             }

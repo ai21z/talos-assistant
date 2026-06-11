@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +43,7 @@ class ToolFailureStateAccountingTest {
         state.successfulReadCallBodies.put("talos.read_file:path=index.html;", "1 | <main></main>");
         ToolCall write = new ToolCall("talos.write_file", Map.of("path", "docs\\other.md", "content", "new"));
         ToolResult result = ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
                 "Target outside expected targets before approval: docs/other.md"));
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(write, result, "docs\\other.md");
@@ -67,7 +69,8 @@ class ToolFailureStateAccountingTest {
                 "path", "docs\\notes.md",
                 "old_string", "missing",
                 "new_string", "new"));
-        ToolResult result = ToolResult.fail(ToolError.invalidParams("old_string not found"));
+        ToolResult result = ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, "old_string not found"));
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(edit, result, "docs\\notes.md");
 

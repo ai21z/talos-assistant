@@ -9,6 +9,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -149,7 +150,8 @@ class ToolRepromptTargetReadbackRepairDecisionTest {
                 "",
                 "append-line write_file did not preserve same-turn readback",
                 null,
-                ToolError.INVALID_PARAMS);
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(ToolFailureReason.WRITE_APPEND_LINE_PRESERVATION);
     }
 
     private static ToolCallLoop.ToolOutcome oldStringMissFailure(String path) {
@@ -162,7 +164,8 @@ class ToolRepromptTargetReadbackRepairDecisionTest {
                 "",
                 "old_string not found",
                 null,
-                ToolError.INVALID_PARAMS);
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND);
     }
 
     private static List<ToolSpec> baseTools() {

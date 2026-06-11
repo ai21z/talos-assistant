@@ -11,6 +11,7 @@ import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -154,7 +155,8 @@ class ToolRepromptPathPolicyBlockedDecisionTest {
                 "Target outside expected targets before approval: attempted `" + path
                         + "` while current expected target set: script.js. Similar filenames are not interchangeable.",
                 null,
-                ToolError.INVALID_PARAMS);
+                ToolError.INVALID_PARAMS)
+                .withFailureReason(ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED);
     }
 
     private static List<ToolSpec> baseTools() {
