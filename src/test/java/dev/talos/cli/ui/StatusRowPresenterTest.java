@@ -50,6 +50,49 @@ class StatusRowPresenterTest {
     }
 
     @Test
+    void rowCarriesRouteModelAndTurnContext() throws Exception {
+        try (Terminal terminal = dumbTerminal(new ByteArrayOutputStream())) {
+            var presenter = new StatusRowPresenter(terminal, CliTheme.current());
+            presenter.route("unified");
+            presenter.context(() -> "qwen2.5-coder:14b", () -> 3);
+
+            String row = presenter.buildRow().toString(); // AttributedString#toString is the plain text
+
+            org.junit.jupiter.api.Assertions.assertTrue(row.contains("route unified"), row);
+            org.junit.jupiter.api.Assertions.assertTrue(row.contains("qwen2.5-coder:14b"), row);
+            org.junit.jupiter.api.Assertions.assertTrue(row.contains("turn 3"), row);
+        }
+    }
+
+    @Test
+    void rowTruncatesToTheTerminalWidth() throws Exception {
+        try (Terminal terminal = dumbTerminal(new ByteArrayOutputStream())) {
+            var presenter = new StatusRowPresenter(terminal, CliTheme.current());
+            presenter.route("x".repeat(300));
+            presenter.context(() -> "y".repeat(100), () -> 12);
+
+            int columns = presenter.buildRow().columnLength();
+
+            org.junit.jupiter.api.Assertions.assertTrue(columns < Math.max(80, terminal.getWidth()),
+                    "row must truncate below the terminal width, was " + columns);
+        }
+    }
+
+    @Test
+    void brokenContextSuppliersDegradeSilently() throws Exception {
+        try (Terminal terminal = dumbTerminal(new ByteArrayOutputStream())) {
+            var presenter = new StatusRowPresenter(terminal, CliTheme.current());
+            presenter.context(
+                    () -> { throw new IllegalStateException("model gone"); },
+                    () -> { throw new IllegalStateException("turn gone"); });
+
+            String row = presenter.buildRow().toString();
+
+            org.junit.jupiter.api.Assertions.assertFalse(row.contains("turn"), row);
+        }
+    }
+
+    @Test
     void lifecycleIsIdempotent() throws Exception {
         var sink = new ByteArrayOutputStream();
         try (Terminal terminal = dumbTerminal(sink)) {

@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Changed
+- [T780] The status row now carries live session context next to the
+  spinner: routing decision, active model id, and 1-based turn number
+  (`⠹ Answering…  12s · route unified · qwen2.5-coder:14b · turn 3`),
+  polled per tick and truncated ANSI-aware to the terminal width. All
+  values are renderer-owned; the printed route-hint and turn-stat lines
+  that the evidence chain matches remain printed scrollback lines,
+  byte-unchanged — the row only mirrors them. Broken suppliers degrade
+  silently to a context-free row.
 - [T779] The thinking spinner now renders as a JLine Status bottom row
   on capable terminals (`cli.ui.StatusRowPresenter`): the row lives in a
   managed scroll region below the output, so no raw `\r` frames ever
