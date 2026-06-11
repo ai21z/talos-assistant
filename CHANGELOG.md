@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- [T754] Hardened the bare tool-JSON detection regex (runtime parser and
+  protocol stripper, which run on every model response) against catastrophic
+  backtracking via possessive quantifiers; the pattern now has a single owner
+  in `ToolProtocolText` and adversarial timeout regressions pin linear-time
+  failure.
+
 ## [0.10.2] - 2026-06-11
 
 ### Changed

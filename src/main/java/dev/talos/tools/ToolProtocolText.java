@@ -27,8 +27,25 @@ public final class ToolProtocolText {
             "```(?:json)?[ \\t]*\\R([\\s\\S]*?\"(?:name|function|function_name|tool_name|tool)\"[\\s\\S]*?)\\R?```"
     );
 
+    /**
+     * Bare Talos tool-call JSON at line boundaries. Single owner of this pattern;
+     * the runtime parser references it via {@link #bareToolJsonPattern()}.
+     *
+     * <p>The quantifiers are possessive (T754). The alternation branches start with
+     * disjoint characters (non-brace versus {@code '{'}), so at every position at
+     * most one branch can consume — giving characters back can never produce a
+     * different successful partition, and possessive matching accepts exactly the
+     * same language while eliminating the exponential backtracking a long unclosed
+     * candidate otherwise triggers on every model response. The first branch is
+     * {@code ++} (not {@code *+}) deliberately: a zero-length first-branch iteration
+     * terminates the loop, and under a possessive outer loop there is no backtrack
+     * left to retry that iteration with the brace branch — {@code *+} silently stops
+     * matching one-level nested argument objects. Any future edit to this
+     * alternation must re-verify branch disjointness before keeping the possessive
+     * form (pinned by the adversarial and nested-brace tests).
+     */
     private static final Pattern BARE_JSON_PATTERN = Pattern.compile(
-            "(?:^|\\n)\\s*(\\{\\s*\"(?:name|function|function_name|tool_name|tool)\"\\s*:\\s*\"talos\\.(?:[^{}]*|\\{[^{}]*\\})*\\})",
+            "(?:^|\\n)\\s*(\\{\\s*\"(?:name|function|function_name|tool_name|tool)\"\\s*:\\s*\"talos\\.(?:[^{}]++|\\{[^{}]*+\\})*+\\})",
             Pattern.DOTALL
     );
 
@@ -43,6 +60,14 @@ public final class ToolProtocolText {
     );
 
     private ToolProtocolText() {}
+
+    /**
+     * The bare tool-call JSON pattern shared with the runtime text-fallback
+     * parser, so the two detection surfaces cannot drift apart.
+     */
+    public static Pattern bareToolJsonPattern() {
+        return BARE_JSON_PATTERN;
+    }
 
     /** Strip recognized Talos tool-call protocol text, returning only prose. */
     public static String stripToolCalls(String text) {
