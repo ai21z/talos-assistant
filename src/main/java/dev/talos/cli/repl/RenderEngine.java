@@ -4,6 +4,7 @@ import dev.talos.runtime.Result;
 
 import dev.talos.cli.ui.CliTheme;
 import dev.talos.cli.ui.AnswerPaneRenderer;
+import dev.talos.cli.ui.InteractiveTty;
 import dev.talos.cli.ui.ProgressLineRenderer;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
@@ -85,12 +86,16 @@ public final class RenderEngine {
 
     /**
      * Detect whether stdout is connected to an interactive terminal.
-     * When output is piped or redirected, {@code System.console()} returns null.
+     *
+     * <p>Uses the OS-level isatty probe ({@link InteractiveTty}) rather than
+     * {@code System.console() != null}, which on JDK 22+ returns a console
+     * even for piped/redirected output and would flood non-terminal
+     * consumers with spinner carriage returns (T769).
      */
     private static boolean isInteractiveTerminal(PrintStream target) {
         // If output is not System.out (e.g., test harness), assume non-interactive
         if (target != null && target != System.out) return false;
-        return System.console() != null;
+        return InteractiveTty.stdoutIsTty();
     }
 
     /**

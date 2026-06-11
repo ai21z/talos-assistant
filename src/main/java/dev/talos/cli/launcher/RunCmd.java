@@ -8,6 +8,7 @@ import dev.talos.cli.repl.SlashCommandCompleter;
 import dev.talos.cli.repl.TalosBootstrap;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.InteractiveTty;
 import dev.talos.cli.ui.PromptRenderer;
 import dev.talos.cli.ui.TalosBanner;
 import dev.talos.core.CfgUtil;
@@ -17,12 +18,9 @@ import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
-import org.jline.nativ.CLibrary;
-import org.jline.nativ.Kernel32;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
-import org.jline.utils.OSUtils;
 import picocli.CommandLine;
 
 import java.io.IOException;
@@ -278,14 +276,7 @@ public class RunCmd implements Runnable, SessionState {
     }
 
     static boolean fileDescriptorIsTerminal(int fd) {
-        try {
-            if (OSUtils.IS_WINDOWS) {
-                return Kernel32.isatty(fd) != 0;
-            }
-            return CLibrary.isatty(fd) != 0;
-        } catch (Throwable ignored) {
-            return System.console() != null;
-        }
+        return InteractiveTty.fileDescriptorIsTerminal(fd);
     }
 
     private static void printMan() {

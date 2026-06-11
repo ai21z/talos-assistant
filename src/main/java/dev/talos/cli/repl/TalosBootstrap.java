@@ -195,7 +195,12 @@ public final class TalosBootstrap {
         modes.setSymbolChecker(new IndexedWorkspaceSymbolChecker(workspace));
 
         // ── Rendering (created early so progress sink can reference it) ──
-        RenderEngine render = new RenderEngine(cfg, redactor, out);
+        // Interactivity is decided by the caller's terminal selection, not
+        // re-detected here: a JLine LineReader exists only when RunCmd's
+        // isatty checks passed, and scripted/test paths (lineReader == null
+        // or a non-System.out sink) must stay plain (T769).
+        RenderEngine render = new RenderEngine(cfg, redactor, out,
+                lineReader != null && out == System.out);
 
         // ── Approval gate ─────────────────────────────────────────────────
         // When a JLine LineReader is available, approval reads through the same
