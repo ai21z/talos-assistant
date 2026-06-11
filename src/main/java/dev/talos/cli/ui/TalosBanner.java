@@ -4,6 +4,7 @@ import dev.talos.core.Config;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.function.IntSupplier;
 
 /**
  * Renders Talos startup status.
@@ -26,6 +27,12 @@ public final class TalosBanner {
 
     /** Prints the trusted startup dashboard with session debug level. */
     public static void print(Path workspace, Config cfg, String activeMode, String debug, PrintStream out) {
+        print(workspace, cfg, activeMode, debug, out, null);
+    }
+
+    /** Prints the trusted startup dashboard at the live terminal width (T771). */
+    public static void print(Path workspace, Config cfg, String activeMode, String debug,
+                             PrintStream out, IntSupplier terminalWidth) {
         out.println();
         var snapshot = CliStatusDashboard.snapshot(
                 workspace,
@@ -35,7 +42,8 @@ public final class TalosBanner {
                 debug,
                 "Type a request or /help");
         TerminalCapabilities caps = TerminalCapabilities.detectDefault();
-        int width = terminalWidth();
+        int width = TerminalWidths.resolve(
+                terminalWidth, System.getenv(), StartupBannerRenderer.DEFAULT_WIDTH);
         out.print(StartupBannerRenderer.render(
                 snapshot,
                 caps,
@@ -47,6 +55,12 @@ public final class TalosBanner {
      * Prints a compact no-icon banner for --no-logo mode.
      */
     public static void printCompact(Path workspace, Config cfg, String activeMode, PrintStream out) {
+        printCompact(workspace, cfg, activeMode, out, null);
+    }
+
+    /** Compact banner at the live terminal width, capped at the default (T771). */
+    public static void printCompact(Path workspace, Config cfg, String activeMode,
+                                    PrintStream out, IntSupplier terminalWidth) {
         var snapshot = CliStatusDashboard.snapshot(
                 workspace,
                 cfg,
@@ -58,7 +72,8 @@ public final class TalosBanner {
         out.print(StartupBannerRenderer.render(
                 snapshot,
                 TerminalCapabilities.detectDefault(),
-                Math.min(StartupBannerRenderer.DEFAULT_WIDTH, terminalWidth()),
+                Math.min(StartupBannerRenderer.DEFAULT_WIDTH, TerminalWidths.resolve(
+                        terminalWidth, System.getenv(), StartupBannerRenderer.DEFAULT_WIDTH)),
                 StartupBannerRenderer.Variant.COMPACT_NO_ICON));
     }
 
@@ -66,17 +81,6 @@ public final class TalosBanner {
 
     static String resolveModel(Config cfg) {
         return CliStatusDashboard.resolveModel(cfg);
-    }
-
-    private static int terminalWidth() {
-        String columns = System.getenv("COLUMNS");
-        if (columns != null && !columns.isBlank()) {
-            try {
-                int parsed = Integer.parseInt(columns.trim());
-                if (parsed >= 40) return parsed;
-            } catch (NumberFormatException ignored) { }
-        }
-        return StartupBannerRenderer.DEFAULT_WIDTH;
     }
 }
 
