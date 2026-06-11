@@ -16,7 +16,17 @@ class LlmClientSamplingConfigTest {
 
     @Test
     void samplingAbsentByDefault() {
-        LlmClient client = new LlmClient(new Config());
+        // Hermetic: Config() overlays the developer's real ~/.talos/config.yaml,
+        // which may carry a seeded llm.sampling block (T745 A/B harness seeding).
+        // "Absent by default" means "no sampling key present", so remove any
+        // machine-local overlay before asserting.
+        Config cfg = new Config();
+        Map<String, Object> llm = asMap(cfg.data.get("llm"));
+        if (llm != null) {
+            llm.remove("sampling");
+        }
+
+        LlmClient client = new LlmClient(cfg);
 
         assertFalse(client.configSampling().anySet());
     }
