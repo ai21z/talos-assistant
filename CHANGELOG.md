@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- [T753] Refreshed local Qodana evidence on the current head via the native
+  fallback (Docker mode failed with the documented Windows Gradle-import I/O
+  error): provenance now `qodana-results-match-current-candidate`, the three
+  T752 findings are gone, zero critical issues, and the two triaged noise
+  families are baselined in qodana.yaml with rationale.
 - [T752] Behavior-preserving clarity refactors for the stale-scan Qodana
   findings: explicit null-flow in `ContextItem.fromToolResult` and
   `MutationTargetReadbackVerifier`, and try-with-resources around the command
