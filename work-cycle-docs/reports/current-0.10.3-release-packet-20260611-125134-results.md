@@ -44,31 +44,34 @@ tickets T754–T762, all in `tickets/done/` with completion evidence:
 
 ## Gate status (see GATES.json for the authoritative ledger)
 
-PASS (this session, deterministic):
-- Scripted hermetic cut: bump → commit → installDist from the committed
-  tree → launcher/SHA cross-check → mandatory post-bump `check`
-  (unit 4,8xx + e2e + coverage floors 0.82/0.62 + per-package floors +
-  canary + arch ratchet) → all four quality summaries report 0.10.3.
-- Fresh native Qodana on the cut revision: provenance matches,
-  **0 critical, 88 findings** — down from 169 at 0.10.2 (the T753-triaged
-  noise families are baselined in qodana.yaml).
+**Every lane is green for both audited models** (live lanes completed
+2026-06-11 after the cut; verdicts recorded the same day).
 
-MANUAL_REQUIRED (owner steps — the local model backend was offline during
-this session; doctrine forbids recording live verdicts without evidence):
-- Sync-approval banks, both models (seed 424242). Rationale for rerun:
-  T758 kept all producer prose byte-identical and T756 is strictly
-  additive, but the approval-window content grew and capability-frame
-  fallbacks changed for ctx-less paths (T761) — confirm no model-behavior
-  regression. Watch the 5/31 bounded-rescue scenarios from the 0.10.2
-  Qwen bank (open NAMED-choice first-attempt investigation).
-- Safe-redirected talosbench banks, both models.
-- Capability/private-mode bank: T759 changed protected-path
-  classification — verify no protected-read approval regressions.
-- TRUE_PTY manual cycle: REQUIRED, not carryable from 0.10.1/0.10.2 —
-  the approval window now renders the diff block. Chrome strings and the
-  `Allow? [y=yes, a=yes for session, N=no]` prompt are byte-identical;
-  the cycle confirms real-terminal rendering (color + NO_COLOR/ASCII).
-- Packet-artifacts canary scan (runs over the live-lane artifact roots).
+| Lane | GPT-OSS | Qwen | Verdict |
+|---|---|---|---|
+| `SAFE_REDIRECTED_STDIN` | 19 PASS / 22 MANUAL_REQUIRED, 0 FAIL | 19 PASS / 22 MANUAL_REQUIRED, 0 FAIL | PASS (matches 0.10.2 baseline) |
+| `SYNC_APPROVAL` (full 31-scenario live bank, seed 424242) | 31/31, artifact scan PASS, 2 PASS_WITH_RUNTIME_REPAIR | 31/31, artifact scan PASS, **0 ladder rescues** (down from 5 at 0.10.2) | PASS |
+| `CAPABILITY_PRIVATE_MODE` | 24 prompts | 24 prompts | PASS — 48/48 runs, 0 secret/canary leaks, 0 overclaims; no protected-read approval regressions under the T759 classifier |
+| `TRUE_PTY_MANUAL` | — | fresh owner real-terminal run: validator + canary PASS; **diff-bearing approval window rendered cleanly** (`diff (+1 -1)`, `@@` hunk, checkpoint CREATED, verification PASSED) | PASS |
+| Canary scans | packet artifacts root (no allowlist) | pty + capability roots (fixture allowlists) | PASS |
+| Deterministic summaries + Qodana | all summaries 0.10.3; fresh native scan, 0 critical, 88 findings (169 → 88 vs 0.10.2) | (bundle) | PASS |
+
+Notes and honest deltas:
+- Qwen sync bank had ZERO bounded-T743 rescues this time (5/31 at 0.10.2)
+  — the NAMED-choice first-attempt anomaly did not reproduce on this
+  candidate. GPT-OSS picked up 2 PASS_WITH_RUNTIME_REPAIR scenarios
+  (0 at 0.10.2) — both verified-final, honestly recorded.
+- The 4 Qwen workspace-op scenarios score PASS with BLOCKED traces exactly
+  as at 0.10.2: a pre-existing TaskContractResolver quirk extracts a bogus
+  expected target ("by") from the prompt; the operation is applied and
+  checkpointed, then the turn fail-closes on the phantom remaining target.
+  Pre-existing, not a wave-2 delta; ticket candidate for the next wave.
+- Three aborted/empty Qwen+GPT-OSS talosbench run dirs (zero files) were
+  removed before the real runs: the initial runbook wrapped the runner in
+  Windows PowerShell 5.1, whose stderr handling aborts it at the first
+  case. Corrected in the packet OWNER-RUNBOOK (run from pwsh directly).
+- The PTY validator's result vocabulary is `"status": "PASSED"` (not
+  "PASS") — runbook corrected after one fail-closed validation round.
 
 ## Self-distrust notes
 
