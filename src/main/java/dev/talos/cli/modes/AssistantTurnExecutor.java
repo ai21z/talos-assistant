@@ -2303,190 +2303,22 @@ public final class AssistantTurnExecutor {
         return sanitizeAndTruncate(finalAnswer, opts);
     }
 
-    static final String GROUNDED_PROPOSAL_WARNING = "[Grounding warning: "
-            + "Some commands, dependencies, protected-path advice, or file-content claims below were not present "
-            + "in inspected workspace evidence. Treat unobserved items as conditional examples, "
-            + "not observed project facts.]";
-
-    private static final Set<String> READ_ONLY_PROPOSAL_MARKERS = Set.of(
-            "review",
-            "propose",
-            "proposal",
-            "improvement",
-            "improvements",
-            "suggest",
-            "suggestions");
-
-    private static final Set<String> UNVERIFIED_COMMAND_OR_DEPENDENCY_MARKERS = Set.of(
-            "npm install",
-            "npm start",
-            "yarn install",
-            "yarn start",
-            "pnpm install",
-            "pnpm start",
-            "node script.js",
-            "node.js",
-            "gradle",
-            "gradlew",
-            "maven",
-            "mvn ",
-            "pip install",
-            "python -m");
-
-    private static final Set<String> UNVERIFIED_INTERNAL_CONTENT_MARKERS = Set.of(
-            "behavior rules",
-            "how to work",
-            "what not to do",
-            "you are an action-capable local assistant",
-            "full read/write access",
-            "python",
-            "node",
-            "talos.write_file",
-            "talos.edit_file",
-            "talos.read_file",
-            "talos.list_dir",
-            "talos.grep",
-            "talos.retrieve");
-
-    private static final Set<String> UNVERIFIED_WORKSPACE_FILE_MARKERS = Set.of(
-            ".env",
-            "config.json",
-            "index.html",
-            "notes.md",
-            "report.docx",
-            "script.js",
-            "styles.css");
-
     static String groundedReadOnlyProposalAnswerIfNeeded(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult
     ) {
-        if (answer == null || answer.isBlank()) return answer;
+        // T762: the grounding postcondition lives in
+        // runtime.outcome.ReadOnlyProposalGroundingGuard (policy ownership
+        // doctrine - the executor orchestrates, it does not own marker sets).
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
-        if (!isReadOnlyReviewProposalTurn(safePlan, messages)) return answer;
-
-        String evidence = observedToolEvidence(loopResult).toLowerCase(Locale.ROOT);
-        String current = answer;
-        boolean warned = hasUnobservedCommandOrDependencyClaim(current, evidence)
-                || hasUnobservedInternalContentClaim(current, evidence)
-                || hasUnobservedWorkspaceFileMeaningClaim(current, evidence);
-        String request = latestUserRequest(safePlan, messages);
-        if (requestExcludesEnv(request) && !evidence.contains(".env") && current.toLowerCase(Locale.ROOT).contains(".env")) {
-            String stripped = removeLinesMentioningEnv(current);
-            if (!Objects.equals(stripped, current)) {
-                current = stripped;
-                warned = true;
-            }
-        }
-
-        if (!warned || current.startsWith(GROUNDED_PROPOSAL_WARNING)) return current;
-        return GROUNDED_PROPOSAL_WARNING + "\n\n" + current;
+        return dev.talos.runtime.outcome.ReadOnlyProposalGroundingGuard.apply(
+                answer,
+                safePlan.taskContract(),
+                latestUserRequest(safePlan, messages),
+                loopResult);
     }
-
-    private static boolean isReadOnlyReviewProposalTurn(
-            CurrentTurnPlan plan,
-            List<ChatMessage> messages
-    ) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
-        TaskContract contract = safePlan.taskContract();
-        if (contract.mutationRequested()) return false;
-        TaskType type = contract.type();
-        if (type != TaskType.DIAGNOSE_ONLY
-                && type != TaskType.READ_ONLY_QA
-                && type != TaskType.WORKSPACE_EXPLAIN) {
-            return false;
-        }
-        String lower = latestUserRequest(safePlan, messages).toLowerCase(Locale.ROOT);
-        boolean proposal = READ_ONLY_PROPOSAL_MARKERS.stream().anyMatch(lower::contains);
-        boolean documentTarget = lower.contains("readme") || lower.contains(".md");
-        return proposal && documentTarget;
-    }
-
-    private static String observedToolEvidence(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.messages() == null || loopResult.messages().isEmpty()) return "";
-        StringBuilder evidence = new StringBuilder();
-        for (ChatMessage message : loopResult.messages()) {
-            if (message == null || message.content() == null) continue;
-            if (!"tool".equals(message.role()) && !message.content().contains("[tool_result:")) continue;
-            evidence.append('\n').append(message.content());
-        }
-        return evidence.toString();
-    }
-
-    private static boolean hasUnobservedCommandOrDependencyClaim(String answer, String evidenceLower) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase(Locale.ROOT);
-        String evidence = evidenceLower == null ? "" : evidenceLower;
-        for (String marker : UNVERIFIED_COMMAND_OR_DEPENDENCY_MARKERS) {
-            if (!lower.contains(marker)) continue;
-            if (evidence.contains(marker)) continue;
-            if (markerAlreadyMarkedConditional(lower, marker)) continue;
-            return true;
-        }
-        return false;
-    }
-
-    private static boolean hasUnobservedInternalContentClaim(String answer, String evidenceLower) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase(Locale.ROOT);
-        String evidence = evidenceLower == null ? "" : evidenceLower;
-        for (String marker : UNVERIFIED_INTERNAL_CONTENT_MARKERS) {
-            if (lower.contains(marker) && !evidence.contains(marker)) return true;
-        }
-        return false;
-    }
-
-    private static boolean hasUnobservedWorkspaceFileMeaningClaim(String answer, String evidenceLower) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase(Locale.ROOT);
-        String evidence = evidenceLower == null ? "" : evidenceLower;
-        for (String marker : UNVERIFIED_WORKSPACE_FILE_MARKERS) {
-            if (lower.contains(marker) && !evidence.contains(marker)) return true;
-        }
-        return false;
-    }
-
-    private static boolean markerAlreadyMarkedConditional(String lowerAnswer, String marker) {
-        int index = lowerAnswer.indexOf(marker);
-        while (index >= 0) {
-            int start = Math.max(0, index - 120);
-            String context = lowerAnswer.substring(start, index);
-            if (context.contains("if applicable")
-                    || context.contains("for example")
-                    || context.contains("example")
-                    || context.contains("placeholder")
-                    || context.contains("optional")
-                    || context.contains("if this project")) {
-                return true;
-            }
-            index = lowerAnswer.indexOf(marker, index + marker.length());
-        }
-        return false;
-    }
-
-    private static boolean requestExcludesEnv(String request) {
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT);
-        return lower.contains(".env")
-                && (lower.contains("do not want")
-                || lower.contains("don't want")
-                || lower.contains("not the .env")
-                || lower.contains("do not inspect")
-                || lower.contains("don't inspect"));
-    }
-
-    private static String removeLinesMentioningEnv(String answer) {
-        StringBuilder out = new StringBuilder();
-        for (String line : answer.lines().toList()) {
-            if (line.toLowerCase(Locale.ROOT).contains(".env")) continue;
-            if (!out.isEmpty()) out.append('\n');
-            out.append(line);
-        }
-        return out.toString().strip();
-    }
-
     private static String directoryListingAnswerIfApplicable(
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
