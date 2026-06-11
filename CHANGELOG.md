@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Changed
+- [T766] A cross-surface byte-identity contract test
+  (`harness.ApprovalPromptContractTest`) now holds every approval-prompt
+  evidence surface to the same bytes: the production gate's line forms,
+  the scripted harness's published audit-event prompts, the true-PTY
+  manual-audit validator's required transcript substring (exercised
+  through a new string-level `auditTranscriptFindings` seam), the
+  talosbench forbidden-substring bank (parsed from
+  `tools/manual-eval/talosbench-cases.json`), and the process-driver REPL
+  prompt. `ScriptedApprovalGate`, the PTY validator, and the approval
+  smoke harness now reference `ApprovalPromptText` instead of retyped
+  literals, so harness/production prompt drift is now structurally
+  impossible rather than merely untested. No output bytes changed.
 - [T765] The approval-prompt chrome strings (`Allow? [y=yes, a=yes for
   session, N=no]`, `Allow? [y=yes, N=no]`, the `Allow? [y=yes` prefix, and
   the `approval required` window title) are now owned by a single

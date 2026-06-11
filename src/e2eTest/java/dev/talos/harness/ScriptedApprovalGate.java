@@ -1,5 +1,6 @@
 package dev.talos.harness;
 
+import dev.talos.cli.ui.ApprovalPromptText;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ApprovalResponse;
 
@@ -73,8 +74,11 @@ public final class ScriptedApprovalGate implements ApprovalGate {
         }
     }
 
-    private static final String SYNTHETIC_PROMPT = "Allow? [y=yes, a=yes for session, N=no]";
-    private static final String SYNTHETIC_ONCE_PROMPT = "Allow? [y=yes, N=no]";
+    // Core production prompt forms (T766): recorded into audit events and
+    // artifacts, so the harness must publish exactly the bytes production
+    // renders. The e2e ApprovalPromptContractTest pins this identity.
+    private static final String SYNTHETIC_PROMPT = ApprovalPromptText.SESSION_PROMPT;
+    private static final String SYNTHETIC_ONCE_PROMPT = ApprovalPromptText.ONCE_PROMPT;
 
     private final List<Step> steps;
     private final List<Event> events = new ArrayList<>();
