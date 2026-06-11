@@ -281,14 +281,12 @@ public final class ProtectedReadAnswerGuard {
     }
 
     private static boolean looksProtectedPathHint(String pathHint) {
-        if (pathHint == null || pathHint.isBlank()) return false;
-        String lower = pathHint.replace('\\', '/').toLowerCase(Locale.ROOT);
-        return lower.equals(".env")
-                || lower.endsWith("/.env")
-                || lower.contains("/.env.")
-                || lower.contains("secret")
-                || lower.contains("token")
-                || lower.contains("credential");
+        // T759: delegates to the single canonical classifier (the local
+        // substring copy false-positived on names like tokenizer.java).
+        // Delta vs the old copy: CONTROL-kind hints (.git, .gnupg) now count
+        // as protected too — consistent with the workspace-resolved branch
+        // beside this check, which already included CONTROL.
+        return dev.talos.runtime.policy.ProtectedContentPolicy.looksProtectedPathString(pathHint);
     }
 
     private static Set<String> priorProtectedSnippets(List<ChatMessage> messages) {

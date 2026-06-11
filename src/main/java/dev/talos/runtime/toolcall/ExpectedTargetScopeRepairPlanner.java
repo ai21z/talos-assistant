@@ -394,16 +394,10 @@ final class ExpectedTargetScopeRepairPlanner {
     }
 
     private static boolean isSensitiveReadbackPath(String path) {
-        if (path == null || path.isBlank()) return true;
-        String normalized = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
-        if (normalized.isBlank()) return true;
-        for (String segment : normalized.split("/")) {
-            if (segment.equals(".env") || segment.startsWith(".env.")) return true;
-            if (segment.equals(".git") || segment.equals(".ssh") || segment.equals(".gnupg")) return true;
-        }
-        return normalized.contains("id_rsa")
-                || normalized.contains("credentials")
-                || normalized.contains("secret");
+        // T759: delegates to the single canonical classifier (fail-closed:
+        // blank/unnormalizable -> sensitive). Four identical planner-local
+        // copies were removed.
+        return dev.talos.safety.ProtectedPathTokens.isSensitiveReadbackPath(path);
     }
 
     private static String truncateForCompactRepair(String readback) {
