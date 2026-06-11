@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Changed
+- [T775] The true-PTY manual-audit validator's prose-phrase checks (the
+  protected-read denial, private-document handoff, and withheld-content
+  phrases) now also match a wrap-tolerant view of the transcript: rail
+  prefixes are stripped and consecutive pane lines rejoined, so a
+  required phrase split by width-reactive soft wrapping (T772/T776)
+  still validates. Paragraph breaks deliberately do not rejoin, and
+  chrome checks — the byte-frozen approval prompt, isolation markers,
+  command echoes, and the approvals counter — keep strict raw matching.
+  Landed before the streaming wrap change so the evidence chain cannot
+  be broken by a wrap boundary landing inside a required phrase.
 - [T774] Interactive sessions now write through a single authoritative
   terminal-backed stream (`cli.ui.TerminalOutput.printStreamFor`): the
   banner, render engine, approval window, spinner, startup notices, and
