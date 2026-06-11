@@ -53,6 +53,13 @@
   not overclaimed.
 
 ### Fixed
+- [T768] `✓ Updated <path> (...)` mutation summaries (emitted when
+  `talos.write_file` overwrites an existing file) are now stripped from
+  conversation history like their `✓ Edited`/`✓ Created` siblings; they
+  previously leaked into the model's context, exposing the same
+  confidence-trick imitation surface as the documented BUG #1. The dead
+  `✓ Wrote ` stripper entry is kept as a documented defensive rule (a
+  line with that shape can only be chrome or a model imitating chrome).
 - [T763] Task-contract target extraction no longer treats bare English
   function words ("by", "to", "with", "into", "using", ...) as path-like
   expected mutation targets; names with a file extension or path separator

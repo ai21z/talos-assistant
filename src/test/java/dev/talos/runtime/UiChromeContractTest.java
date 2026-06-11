@@ -123,18 +123,19 @@ class UiChromeContractTest {
         assertEquals(prose, strip(prose));
     }
 
-    // ── Known gap, pinned deliberately (fixed in T768) ───────────────────
+    @Test
+    void updatedMutationSummaryIsStripped() {
+        // T768: FileWriteTool emits "Updated <path> (N lines, M bytes)" on
+        // overwrite; the composed "✓ Updated ..." status line previously
+        // leaked into conversation history (same confidence-trick surface
+        // as BUG #1 — pinned as a known gap in T767, fixed here).
+        assertStripped("✓ Updated app.css (12 lines, 310 bytes)");
+    }
 
     @Test
-    void updatedMutationSummaryCurrentlySurvivesStripping_knownGap() {
-        // FileWriteTool emits "Updated <path> ..." on overwrite, so the
-        // composed "✓ Updated ..." status line is NOT in the stripper's
-        // prefix list and leaks into conversation history — the same
-        // confidence-trick surface as BUG #1. Pinned here as current
-        // behavior; T768 flips this expectation when the gap is fixed.
-        String chrome = "✓ Updated app.css (310 bytes)";
-        String text = "Prose.\n" + chrome;
-        assertTrue(strip(text).contains(chrome),
-                "documents the T768 gap: '✓ Updated' lines are not yet stripped");
+    void wroteChromeShapeIsStrippedDefensively() {
+        // No current emitter produces "Wrote ..." — a "✓ Wrote ..." line can
+        // only be chrome or a model imitating chrome; both stay out of history.
+        assertStripped("✓ Wrote notes.md (3 lines, 40 bytes)");
     }
 }

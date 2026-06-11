@@ -56,11 +56,18 @@ public final class UiChrome {
     /** {@code "✓ " + FileEditTool} output ("Edited <path>: ..."). */
     public static final String EDITED_PREFIX = CHECK_PREFIX + "Edited ";
 
-    /** Historical stripper entry; no current emitter produces "Wrote ..." (T768). */
+    /**
+     * Defensive stripper entry with no current emitter (T768): no tool
+     * produces "Wrote ...", but a line shaped {@code ✓ Wrote ...} can only
+     * be chrome or a model imitating chrome — neither belongs in history.
+     */
     public static final String WROTE_PREFIX = CHECK_PREFIX + "Wrote ";
 
     /** {@code "✓ " + FileWriteTool/MakeDirectoryTool} output ("Created ..."). */
     public static final String CREATED_PREFIX = CHECK_PREFIX + "Created ";
+
+    /** {@code "✓ " + FileWriteTool} overwrite output ("Updated <path> (...)"), T768. */
+    public static final String UPDATED_PREFIX = CHECK_PREFIX + "Updated ";
 
     /** Repeated-edit-failure cushion suggestion injected into tool errors. */
     public static final String EDIT_FAILURE_SUGGESTION_PREFIX = "Suggestion: edit_file has failed";

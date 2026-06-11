@@ -137,6 +137,7 @@ public final class MemoryUpdateListener implements SessionListener {
             if (t.startsWith(UiChrome.EDITED_PREFIX)) continue;
             if (t.startsWith(UiChrome.WROTE_PREFIX)) continue;
             if (t.startsWith(UiChrome.CREATED_PREFIX)) continue;
+            if (t.startsWith(UiChrome.UPDATED_PREFIX)) continue;
             if (t.startsWith(UiChrome.EDIT_FAILURE_SUGGESTION_PREFIX)) continue;
             out.append(line).append('\n');
         }
