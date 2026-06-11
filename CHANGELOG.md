@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Changed
+- [T771] Width resolution is now owned by a single rule
+  (`cli.ui.TerminalWidths`): live JLine `Terminal.getWidth()` clamped to
+  60–120, then the `COLUMNS` environment variable (same clamp), then the
+  caller's surface default passed through unclamped so redirected and
+  scripted output stays byte-identical. The startup banner is the first
+  consumer — it now renders at the real terminal width in interactive
+  runs instead of assuming 80 (`COLUMNS` is never set by default on
+  Windows, so the env fallback effectively never fired there).
+  Deliberate rule change: `COLUMNS` values of 40–59 previously rendered
+  at face value; they now clamp to 60.
 - [T770] `TerminalCapabilities.detectDefault()` (the input behind
   color/unicode/glyph selection) now takes its interactivity signal from
   the `isatty` probe instead of `System.console() != null` — the same

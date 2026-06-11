@@ -122,10 +122,13 @@ public class RunCmd implements Runnable, SessionState {
 
             // Show banner unless --no-logo
             String activeMode = router.getModes().getActiveName();
+            final LineReader readerRef = reader;
+            java.util.function.IntSupplier terminalWidth =
+                    readerRef != null ? () -> readerRef.getTerminal().getWidth() : null;
             if (!noLogo) {
-                TalosBanner.print(ws, cfg, activeMode, getDebugLevel().label(), System.out);
+                TalosBanner.print(ws, cfg, activeMode, getDebugLevel().label(), System.out, terminalWidth);
             } else {
-                TalosBanner.printCompact(ws, cfg, activeMode, System.out);
+                TalosBanner.printCompact(ws, cfg, activeMode, System.out, terminalWidth);
             }
             if (!router.getStartupNotice().isBlank()) {
                 System.out.println(router.getStartupNotice());
