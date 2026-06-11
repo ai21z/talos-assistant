@@ -53,7 +53,8 @@ public final class AnswerPaneRenderer {
                 + " " + safe(footer)) + System.lineSeparator();
     }
 
-    private int contentWidth() {
+    /** Width available to body text inside the rail; the wrap oracle's input (T776). */
+    public int contentWidth() {
         return Math.max(16, width - INDENT.length() - glyphs.vertical().length() - 1);
     }
 
