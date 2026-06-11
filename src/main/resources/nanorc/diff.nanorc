@@ -1,0 +1,6 @@
+# Minimal Talos-authored diff syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "diff" "\.(diff|patch)$"
+color brightyellow "^(diff|index|---|\+\+\+).*$"
+color brightcyan "^@@.*$"
+color green "^\+.*$"
+color red "^-.*$"

@@ -1,0 +1,9 @@
+# Minimal Talos-authored Java syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "java" "\.java$"
+color green "\<(abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|final|finally|float|for|if|implements|import|instanceof|int|interface|long|native|new|package|permits|private|protected|public|record|return|sealed|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|var|void|volatile|while|yield)\>"
+color cyan "\<(true|false|null)\>"
+color yellow "\<[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?[fFdDlL]?\>"
+color brightcyan "@[A-Za-z][A-Za-z0-9_]*"
+color magenta ""[^"]*""
+color brightblack "//.*$"
+color brightblack "/\*.*\*/"

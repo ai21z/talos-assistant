@@ -114,13 +114,14 @@ class StreamingMarkdownShaperTest {
     }
 
     @Test
-    void fenceDelimitersToggleAndContentStaysPlainUntilT778() {
+    void fenceDelimitersToggleAndContentIsHighlighted() {
         String text = "```python\nvalue = compute()\n```\n**bold** prose resumes";
         String styled = shaped(text, List.of(text));
         String[] rows = styled.split("\n", -1);
-        assertTrue(rows[0].contains("```python") || stripAnsi(rows[0]).equals("```python"));
+        assertTrue(stripAnsi(rows[0]).equals("```python"), rows[0]);
         assertTrue(rows[0].startsWith("\u001B["), "delimiter styled as metadata: " + rows[0]);
-        assertEquals("value = compute()", rows[1], "fence content stays plain in T777");
+        assertEquals("value = compute()", stripAnsi(rows[1]),
+                "fence content chars must survive highlighting (T778): " + rows[1]);
         assertTrue(rows[3].contains("\u001B["), "prose styling must resume after the fence: " + rows[3]);
     }
 
