@@ -100,6 +100,7 @@ public final class ConfigView {
         public boolean showStatusDuringAnswer() { return CfgUtil.boolAt(m, "show_status_during_answer", true); }
         public boolean showTimingAfterAnswer()  { return CfgUtil.boolAt(m, "show_timing_after_answer", true); }
         public boolean showBreakdown()          { return CfgUtil.boolAt(m, "show_breakdown", false); }
+        public boolean markdown()               { return CfgUtil.boolAt(m, "markdown", true); }
         public String statusLabel()             { return strAt(m, "status_label", "Answering\u2026"); }
     }
 

@@ -40,6 +40,7 @@ public final class RenderEngine {
     private final String statusLabel;
     private final boolean showStatusDuringAnswer;
     private final boolean showTimingAfterAnswer;
+    private final boolean markdownEnabled;
     private final boolean interactive;
 
     // Spinner state
@@ -49,7 +50,7 @@ public final class RenderEngine {
     private Thread spinnerThread;
     private Instant spinnerStartTime;
     private AnswerPaneRenderer.Stream activeAnswerStream;
-    private dev.talos.cli.ui.StreamingAnswerShaper activeAnswerShaper;
+    private dev.talos.cli.ui.StreamShaper activeAnswerShaper;
     private Consumer<String> activeAnswerStreamWriter;
 
     // Braille spinner for Unicode-capable terminals, classic for others
@@ -102,6 +103,7 @@ public final class RenderEngine {
         this.statusLabel = terminalText(rawLabel);
         this.showStatusDuringAnswer = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
         this.showTimingAfterAnswer = ui == null || !(ui.get("show_timing_after_answer") instanceof Boolean b2) || b2;
+        this.markdownEnabled = ui == null || !(ui.get("markdown") instanceof Boolean b3) || b3;
         this.spinnerFrames = unicodeSafe() ? SPINNER_UNICODE : SPINNER_ASCII;
     }
 
@@ -306,9 +308,10 @@ public final class RenderEngine {
         if (activeAnswerStream == null) {
             AnswerPaneRenderer renderer = answerRenderer();
             activeAnswerStream = renderer.openStream("answer");
-            activeAnswerShaper = styledStreamingEnabled()
-                    ? new dev.talos.cli.ui.StreamingAnswerShaper(renderer.contentWidth())
-                    : null;
+            activeAnswerShaper = !styledStreamingEnabled() ? null
+                    : markdownEnabled
+                            ? new dev.talos.cli.ui.md.StreamingMarkdownShaper(renderer.contentWidth(), theme)
+                            : new dev.talos.cli.ui.StreamingAnswerShaper(renderer.contentWidth());
             activeAnswerStreamWriter = writer;
         } else if (activeAnswerStreamWriter == null && writer != null) {
             activeAnswerStreamWriter = writer;

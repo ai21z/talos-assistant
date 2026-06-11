@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Changed
+- [T777] Trusted streaming markdown in capable interactive terminals:
+  headings, bullets, inline `**bold**`/`*italic*`/`` `code` `` spans,
+  and ``` fence delimiters are styled by a renderer-owned state machine
+  (`cli.ui.md.StreamingMarkdownShaper` + `MarkdownLineStyler`) operating
+  on already-sanitized, already-wrapped rows. Markers stay visible —
+  styling only colors the original characters, so stripping ANSI always
+  recovers the plain wrapped text byte-for-byte (the pinned invariant),
+  and Talos chrome lines gain zero ANSI. Fenced code preserves spacing
+  and hard-cuts at the pane width instead of word-wrapping; an
+  unterminated fence flushes plain. Toggle: `ui.markdown` (default on;
+  redirected/NO_COLOR/ASCII/dumb output is always plain regardless).
 - [T776] Streamed answers now word-wrap at the live pane width in fully
   capable interactive terminals (color + Unicode + non-dumb), fixing the
   rail shear where long model lines overflowed and broke the answer-pane
