@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- [T778] Fenced code blocks are now syntax-highlighted in capable
+  interactive terminals using JLine's bundled nanorc engine with
+  Talos-authored minimal syntax definitions under `/nanorc/` (java,
+  python, javascript/typescript, json, yaml, bash, diff, xml, html,
+  css — GNU nano's GPLv3 files are deliberately not vendored). The
+  complete code line is highlighted once and cut ANSI-aware at the pane
+  width so token colors survive the cut; unknown languages, missing
+  definitions, and parse failures all degrade to plain text, and
+  highlighting never alters the characters (pinned).
 - [T777] Trusted streaming markdown in capable interactive terminals:
   headings, bullets, inline `**bold**`/`*italic*`/`` `code` `` spans,
   and ``` fence delimiters are styled by a renderer-owned state machine

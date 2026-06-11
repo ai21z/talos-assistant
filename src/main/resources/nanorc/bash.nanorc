@@ -1,0 +1,9 @@
+# Minimal Talos-authored shell syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "bash" "\.(sh|bash)$"
+color green "\<(if|then|else|elif|fi|for|in|do|done|while|until|case|esac|function|return|exit|break|continue|local|export|readonly|declare|set|unset|shift|source|alias)\>"
+color brightcyan "\<(echo|printf|cd|ls|grep|sed|awk|cat|rm|cp|mv|mkdir|chmod|chown|curl|git|find|test)\>"
+color cyan "\$\{?[A-Za-z0-9_]+\}?"
+color yellow "\<[0-9]+\>"
+color magenta ""[^"]*""
+color magenta "'[^']*'"
+color brightblack "#.*$"

@@ -1,0 +1,7 @@
+# Minimal Talos-authored XML syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "xml" "\.xml$"
+color brightcyan "</?[A-Za-z][A-Za-z0-9:._-]*"
+color brightcyan "/?>"
+color green "\<[A-Za-z][A-Za-z0-9:._-]*="
+color magenta ""[^"]*""
+color brightblack "<!--.*-->"

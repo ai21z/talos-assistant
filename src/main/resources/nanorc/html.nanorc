@@ -1,0 +1,8 @@
+# Minimal Talos-authored HTML syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "html" "\.html?$"
+color brightcyan "</?[A-Za-z][A-Za-z0-9-]*"
+color brightcyan "/?>"
+color green "\<[A-Za-z-]+="
+color magenta ""[^"]*""
+color magenta "'[^']*'"
+color brightblack "<!--.*-->"

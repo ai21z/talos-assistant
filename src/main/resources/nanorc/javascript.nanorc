@@ -1,0 +1,11 @@
+# Minimal Talos-authored JavaScript/TypeScript syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "javascript" "\.(js|jsx|ts|tsx|mjs|cjs)$"
+color green "\<(async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|enum|export|extends|finally|for|function|if|implements|import|in|instanceof|interface|let|new|of|private|protected|public|readonly|return|static|super|switch|this|throw|try|type|typeof|var|void|while|with|yield)\>"
+color cyan "\<(true|false|null|undefined|NaN|Infinity)\>"
+color yellow "\<[0-9][0-9_]*(\.[0-9_]+)?([eE][+-]?[0-9]+)?n?\>"
+color brightcyan "\<(console|window|document|Promise|Array|Object|String|Number|Boolean|Math|JSON|Map|Set)\>"
+color magenta ""[^"]*""
+color magenta "'[^']*'"
+color magenta "`[^`]*`"
+color brightblack "//.*$"
+color brightblack "/\*.*\*/"

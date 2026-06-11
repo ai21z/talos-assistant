@@ -36,8 +36,10 @@ public final class StreamingMarkdownShaper implements StreamShaper {
 
     private final StringBuilder classifyBuffer = new StringBuilder();
     private final StringBuilder fenceLineBuffer = new StringBuilder();
+    private final NanorcHighlighterCatalog highlighters = NanorcHighlighterCatalog.shared();
     private MarkdownLineStyler.LineClass lineClass;
     private boolean inFence;
+    private String fenceLanguage = "";
     private boolean firstRowOfLinePending;
     private boolean pendingCarriageReturn;
 
@@ -135,8 +137,14 @@ public final class StreamingMarkdownShaper implements StreamShaper {
         }
         switch (lineClass) {
             case FENCE_DELIMITER -> {
+                String delimiterLine = fenceLineBuffer.toString();
                 emitBufferedFenceLine(out, true);
                 inFence = !inFence;
+                // Opening delimiter carries the language tag ("```java");
+                // closing resets it.
+                fenceLanguage = inFence
+                        ? delimiterLine.substring(3).strip().split("\\s+", 2)[0]
+                        : "";
             }
             case FENCE_CONTENT -> emitBufferedFenceLine(out, true);
             default -> styleRows(wrapEngine.accept("\n"), out, true);
@@ -145,16 +153,29 @@ public final class StreamingMarkdownShaper implements StreamShaper {
         styler.lineEnd();
     }
 
-    /** Hard-cuts the buffered fence/delimiter line at the pane width, preserving spacing. */
+    /**
+     * Hard-cuts the buffered fence/delimiter line at the pane width,
+     * preserving spacing. Fence content is nanorc-highlighted when a
+     * definition exists for the fence language (T778): the complete line is
+     * highlighted once, then cut ANSI-aware via columnSubSequence so token
+     * colors survive the cut; any highlighter failure degrades to plain.
+     */
     private void emitBufferedFenceLine(StringBuilder out, boolean lineComplete) {
         String line = fenceLineBuffer.toString();
         fenceLineBuffer.setLength(0);
+        org.jline.utils.AttributedString highlighted =
+                lineClass == MarkdownLineStyler.LineClass.FENCE_CONTENT && !line.isEmpty()
+                        ? highlighters.highlight(fenceLanguage, line)
+                        : null;
         boolean first = true;
         int from = 0;
         do {
             int to = Math.min(line.length(), from + maxWidth);
-            String row = line.substring(from, to);
-            out.append(styler.styleRow(row, lineClass, first));
+            if (highlighted != null) {
+                out.append(highlighted.columnSubSequence(from, to).toAnsi());
+            } else {
+                out.append(styler.styleRow(line.substring(from, to), lineClass, first));
+            }
             boolean lastSegment = to >= line.length();
             if (!lastSegment || lineComplete) {
                 out.append('\n');
