@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T770] `TerminalCapabilities.detectDefault()` (the input behind
+  color/unicode/glyph selection) now takes its interactivity signal from
+  the `isatty` probe instead of `System.console() != null` — the same
+  JDK-22 hazard as T769, where redirected output would have been treated
+  as interactive and received ANSI color and Unicode glyphs instead of
+  byte-identical plain ASCII. The capability decision matrix itself is
+  unchanged and remains pinned by `TerminalCapabilitiesTest`.
 - [T769] Interactive-terminal detection now uses the OS-level `isatty`
   probe everywhere (new `cli.ui.InteractiveTty`, lifted from RunCmd's
   terminal selection) instead of `System.console() != null`, which on
