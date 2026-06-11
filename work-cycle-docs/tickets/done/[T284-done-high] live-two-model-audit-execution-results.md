@@ -1,6 +1,6 @@
 # T284 - Live Two-Model Audit Execution Results
 
-Status: still-open - current 0.10.1 execution packet exists, but it is not yet a clean beta pass
+Status: done - 0.10.2 packet report is the committed results record with pass/fail per model
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -361,3 +361,16 @@ runtime fixes (Qwen 31/31 first-ever complete bank, GPT-OSS 31/31 zero
 rescues; roots recorded in T280 and the packet report addendum). Keep T284
 open for the release-grade results packet from the committed `0.10.2`
 candidate.
+
+## 2026-06-11 closure
+
+The results record exists, is provenance-clean, and is committed:
+`work-cycle-docs/reports/current-0.10.2-release-packet-20260611-081900-results.md` (+ GATES.json with tooling-sourced SHA). It states branch, commit,
+talosVersion, exact installed launcher, model/backend/profile per lane,
+lane labels for every case class, native-tool coverage, capability outcomes,
+canary scan roots, and honest caveats (Qwen rescue count, carried PTY lane).
+AC drift recorded and accepted at closure: the original AC named
+`t267-live-two-model-audit-results.md`; every packet since 0.10.0 uses the
+packet-report naming scheme, and this closure supersedes the legacy filename.
+
+Close T284.

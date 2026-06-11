@@ -1,6 +1,6 @@
 # T746 - Wave-1 Stabilization Banks And Gate Reclassification
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: high
 Release gate: yes - produces the evidence that re-opens the T280/T284/T312 closure path
 Branch: codex/wave1-stability-and-cycle

@@ -1,6 +1,6 @@
 # T280 - Two-Model Live Audit Before Beta
 
-Status: still-open - current 0.10.1 two-model packet exists, but PTY completion and Qwen full-lane stability still block beta close
+Status: done - 0.10.2 release-grade two-model packet complete from a clean committed candidate (all executed lanes green for both models)
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -280,3 +280,17 @@ GPT-OSS 31/31 zero-rescue at
 Bank-position hypothesis falsified by byte-identical seeded provider bodies.
 Remaining for close: the release-grade two-model packet from the committed
 `0.10.2` candidate (wave close).
+
+## 2026-06-11 closure
+
+The 0.10.2 release-grade packet (commit `157aedc8`, scripted hermetic cut)
+satisfies the mandate: safe lanes 19 PASS / 22 MANUAL_REQUIRED per model with
+piped approvals disallowed, full 31-scenario synchronized banks green for both
+models (first release-grade Qwen full-bank pass; 5 bounded T743 rescues
+honestly recorded), capability lane 48/48 with zero leaks, PTY lane carried
+from the validated 0.10.1 owner run, canary scans PASS. Report:
+`work-cycle-docs/reports/current-0.10.2-release-packet-20260611-081900-results.md` + machine-checkable GATES ledger. Acceptance criteria met:
+pass/fail per model is stated, and no private-document release claim is made
+(that claim still gates on T276/T281/T283).
+
+Close T280.

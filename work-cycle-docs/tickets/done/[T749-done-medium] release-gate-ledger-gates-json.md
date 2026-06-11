@@ -1,6 +1,6 @@
 # T749 - Release Gate Ledger (GATES.json)
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: no (makes future gates machine-checkable)
 Branch: codex/wave1-stability-and-cycle

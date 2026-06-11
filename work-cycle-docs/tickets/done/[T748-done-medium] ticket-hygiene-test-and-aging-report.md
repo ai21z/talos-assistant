@@ -1,6 +1,6 @@
 # T748 - Ticket Hygiene Test And Aging Report
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: medium
 Release gate: no (cycle-integrity hardening)
 Branch: codex/wave1-stability-and-cycle

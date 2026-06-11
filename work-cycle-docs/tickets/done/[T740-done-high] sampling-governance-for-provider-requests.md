@@ -1,6 +1,6 @@
 # T740 - Sampling Governance For Provider Requests
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: high
 Release gate: yes - converts the flaky live bank into a reproducible regression gate
 Branch: codex/wave1-stability-and-cycle

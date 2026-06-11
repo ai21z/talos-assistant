@@ -1,6 +1,6 @@
 # T747 - Scripted Hermetic Candidate Cut
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: high
 Release gate: yes - removes the provenance-defect class found on the 0.10.1 cut
 Branch: codex/wave1-stability-and-cycle

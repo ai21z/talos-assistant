@@ -1,6 +1,6 @@
 # T752 - Qodana Finding Refactor And Pinning Tests
 
-Status: open
+Status: done - completed in wave 1; see completion evidence section
 Severity: low
 Release gate: no
 Branch: codex/wave1-stability-and-cycle
