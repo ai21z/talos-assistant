@@ -49,6 +49,7 @@ public final class RenderEngine {
     private Thread spinnerThread;
     private Instant spinnerStartTime;
     private AnswerPaneRenderer.Stream activeAnswerStream;
+    private dev.talos.cli.ui.StreamingAnswerShaper activeAnswerShaper;
     private Consumer<String> activeAnswerStreamWriter;
 
     // Braille spinner for Unicode-capable terminals, classic for others
@@ -303,24 +304,52 @@ public final class RenderEngine {
     private String streamChunk(String chunk, Consumer<String> writer) {
         if (chunk == null || chunk.isEmpty()) return "";
         if (activeAnswerStream == null) {
-            activeAnswerStream = answerRenderer().openStream("answer");
+            AnswerPaneRenderer renderer = answerRenderer();
+            activeAnswerStream = renderer.openStream("answer");
+            activeAnswerShaper = styledStreamingEnabled()
+                    ? new dev.talos.cli.ui.StreamingAnswerShaper(renderer.contentWidth())
+                    : null;
             activeAnswerStreamWriter = writer;
         } else if (activeAnswerStreamWriter == null && writer != null) {
             activeAnswerStreamWriter = writer;
         }
-        return activeAnswerStream.accept(chunk);
+        if (activeAnswerShaper == null) {
+            return activeAnswerStream.accept(chunk);
+        }
+        String shaped = activeAnswerShaper.accept(chunk);
+        return shaped.isEmpty() ? "" : activeAnswerStream.accept(shaped);
+    }
+
+    /**
+     * Width-reactive wrapping (T776) — and from T777 markdown styling — is
+     * an interactive-only enhancement. Every degraded mode (redirected,
+     * scripted, NO_COLOR, ASCII glyphs, dumb terminal) keeps the historical
+     * pass-through stream bytes: the evidence chain string-matches those
+     * transcripts.
+     */
+    private boolean styledStreamingEnabled() {
+        var caps = theme.capabilities();
+        return interactive && caps.colorEnabled() && caps.unicodeSafe() && !caps.dumbTerminal();
     }
 
     private void closeAnswerStream(String footer) {
         if (activeAnswerStream == null) return;
-        String rendered = activeAnswerStream.close(footer);
+        StringBuilder rendered = new StringBuilder();
+        if (activeAnswerShaper != null) {
+            String tail = activeAnswerShaper.flush();
+            if (!tail.isEmpty()) {
+                rendered.append(activeAnswerStream.accept(tail));
+            }
+            activeAnswerShaper = null;
+        }
+        rendered.append(activeAnswerStream.close(footer));
         Consumer<String> writer = activeAnswerStreamWriter;
         activeAnswerStream = null;
         activeAnswerStreamWriter = null;
         if (writer != null) {
-            writer.accept(rendered);
+            writer.accept(rendered.toString());
         } else {
-            print(rendered);
+            print(rendered.toString());
         }
     }
 

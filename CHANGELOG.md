@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Changed
+- [T776] Streamed answers now word-wrap at the live pane width in fully
+  capable interactive terminals (color + Unicode + non-dumb), fixing the
+  rail shear where long model lines overflowed and broke the answer-pane
+  border. The new `StreamingAnswerShaper` replicates the block renderer's
+  wrap byte-for-byte under arbitrary chunk boundaries (parity-tested
+  against `renderBlock` as the oracle under 1-char, word-sized, and
+  seeded-random chunkings at widths 60/80/96/120), emitting each row as
+  soon as it fills — latency is bounded by one row plus one in-flight
+  word. Degraded modes (redirected, scripted, NO_COLOR, ASCII, dumb)
+  keep the historical pass-through bytes, pinned by goldens.
 - [T775] The true-PTY manual-audit validator's prose-phrase checks (the
   protected-read denial, private-document handoff, and withheld-content
   phrases) now also match a wrap-tolerant view of the transcript: rail
