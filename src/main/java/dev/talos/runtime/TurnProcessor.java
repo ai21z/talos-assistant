@@ -609,6 +609,7 @@ public final class TurnProcessor {
                                 + " (" + permissionDecision.reasonCode() + ")");
             }
             return ToolResult.fail(ToolError.denied(
+                    ToolFailureReason.PERMISSION_POLICY_DENIED,
                     "Permission policy denied the " + call.toolName()
                             + " call. " + permissionDecision.userMessage()));
         }
@@ -663,6 +664,7 @@ public final class TurnProcessor {
                 // so the model interprets it as user intent, not auth failure.
                 String targetContext = approvalDeniedTargetContext(permissionDecision);
                 return ToolResult.fail(ToolError.denied(
+                        ToolFailureReason.USER_APPROVAL_DENIED,
                         "User did not approve the " + call.toolName()
                                 + " call." + targetContext
                                 + " The user is in control of the workspace; "
@@ -896,6 +898,7 @@ public final class TurnProcessor {
         String oldString = resolveParam(call, "old_string", "oldString", "old_text", "search", "find", "original");
         if (oldString == null || oldString.isEmpty()) {
             return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.EDIT_EMPTY_ARGUMENTS,
                     "Invalid talos.edit_file call: `old_string` must be present and non-empty. "
                             + "Call talos.read_file first, then provide the exact text to replace. "
                             + "No approval was requested and no file was changed."));
@@ -904,6 +907,7 @@ public final class TurnProcessor {
         String newString = resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement");
         if (newString == null) {
             return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.EDIT_EMPTY_ARGUMENTS,
                     "Invalid talos.edit_file call: missing required parameter `new_string`. "
                             + "No approval was requested and no file was changed."));
         }
@@ -960,6 +964,7 @@ public final class TurnProcessor {
         int occurrences = countOccurrences(content, oldString);
         if (occurrences == 0) {
             return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
                     "Invalid talos.edit_file call: old_string not found in `"
                             + path
                             + "` before approval. Call talos.read_file first, then retry with exact current text "
@@ -968,6 +973,7 @@ public final class TurnProcessor {
         }
         if (occurrences > 1) {
             return ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS,
                     "Invalid talos.edit_file call: old_string appears "
                             + occurrences
                             + " times in `"
@@ -1050,6 +1056,7 @@ public final class TurnProcessor {
             }
         }
         return ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
                 "Target outside expected targets before approval: `" + path
                         + "` is outside the current expected target set: "
                         + String.join(", ", orderedExpectedTargets(taskContract))
@@ -1094,11 +1101,13 @@ public final class TurnProcessor {
                 resolved = session.workspace().resolve(param.value()).normalize();
             } catch (Exception e) {
                 return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_PATH_INVALID,
                         "Invalid path before approval for `" + param.name() + "`: "
                                 + param.value() + ". No approval was requested and no file was changed."));
             }
             if (!ctx.sandbox().allowedPath(resolved)) {
                 return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_PATH_NOT_ALLOWED,
                         "Path not allowed before approval for `" + param.name() + "`: "
                                 + param.value() + " (" + ctx.sandbox().explain(resolved) + "). "
                                 + "No approval was requested and no file was changed."));
@@ -1126,6 +1135,7 @@ public final class TurnProcessor {
             for (String forbidden : taskContract.forbiddenTargets()) {
                 if (sameScopedTarget(param.value(), forbidden)) {
                     return ToolResult.fail(ToolError.invalidParams(
+                            ToolFailureReason.PRE_APPROVAL_TARGET_FORBIDDEN,
                             "Target forbidden before approval: `" + param.value()
                                     + "` was explicitly excluded by the user's current request. "
                                     + "No approval was requested and no file was changed."));
@@ -1164,21 +1174,25 @@ public final class TurnProcessor {
     private static String preApprovalBlockReason(ToolCall call, ToolResult result) {
         String name = call == null ? "tool" : call.toolName();
         String message = result == null ? "" : result.errorMessage();
-        if (message != null && message.startsWith("Path not allowed before approval")) {
+        // T758: switch on the typed reason, keep the audit prose identical.
+        ToolFailureReason reason = result == null || result.error() == null
+                ? ToolFailureReason.NONE
+                : result.error().reason();
+        if (reason == ToolFailureReason.PRE_APPROVAL_PATH_NOT_ALLOWED) {
             return "path blocked before approval"
-                    + (message.isBlank() ? "" : ": " + shortReason(message));
+                    + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
         }
-        if (message != null && message.startsWith("Invalid path before approval")) {
+        if (reason == ToolFailureReason.PRE_APPROVAL_PATH_INVALID) {
             return "invalid path before approval"
-                    + (message.isBlank() ? "" : ": " + shortReason(message));
+                    + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
         }
-        if (message != null && message.startsWith("Target forbidden before approval")) {
+        if (reason == ToolFailureReason.PRE_APPROVAL_TARGET_FORBIDDEN) {
             return "forbidden target before approval"
-                    + (message.isBlank() ? "" : ": " + shortReason(message));
+                    + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
         }
-        if (message != null && message.startsWith("Target outside expected targets before approval")) {
+        if (reason == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED) {
             return "expected target scope before approval"
-                    + (message.isBlank() ? "" : ": " + shortReason(message));
+                    + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
         }
         if (isEditFileTool(name)) {
             return "invalid edit args before approval"

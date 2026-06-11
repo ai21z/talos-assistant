@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
@@ -81,7 +82,8 @@ class EditFailureRepairStateAccountingTest {
         LoopState state = loopState();
         state.pathsMutatedSinceRead.add("src/app.js");
         ToolCall edit = editFile("src\\app.js", "missing", "new");
-        ToolResult failure = ToolResult.fail(ToolError.invalidParams("old_string not found"));
+        ToolResult failure = ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, "old_string not found"));
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(edit, failure, "src\\app.js");
 
@@ -102,7 +104,8 @@ class EditFailureRepairStateAccountingTest {
         state.messages.add(ChatMessage.user("Fix the static web button behavior in script.js."));
         state.pathsReadThisTurn.add("script.js");
         ToolCall edit = editFile("script.js", "document.querySelector('.missing-button')", "document.querySelector('#submit')");
-        ToolResult failure = ToolResult.fail(ToolError.invalidParams("old_string not found"));
+        ToolResult failure = ToolResult.fail(ToolError.invalidParams(
+                ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND, "old_string not found"));
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(edit, failure, "script.js");
 

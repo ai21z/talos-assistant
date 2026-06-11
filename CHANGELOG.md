@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T758] Tool failure classification is now driven by typed
+  `ToolFailureReason` codes carried from producers through `ToolError` and
+  `ToolOutcome`; all six message-sniffing classifier sites are migrated and
+  the sniffing deleted, so error-message prose is free to change without
+  silently disabling repair or outcome-truth policy. Redaction
+  (`sanitizeToolResult`) now preserves the typed reason while rewriting
+  prose.
 - [T757] Mutation-intent blocking, pre-approval validators, and checkpoint
   capture now read `ToolOperationMetadata` from the registry-resolved tool
   instead of hand-maintained name lists (which failed open for tools missing

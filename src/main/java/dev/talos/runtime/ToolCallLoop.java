@@ -184,7 +184,8 @@ public final class ToolCallLoop {
             dev.talos.tools.VerificationStatus fileVerificationStatus,
             String errorCode,
             WorkspaceOperationPlan workspaceOperationPlan,
-            ToolMutationEvidence mutationEvidence
+            ToolMutationEvidence mutationEvidence,
+            dev.talos.tools.ToolFailureReason failureReason
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -193,6 +194,26 @@ public final class ToolCallLoop {
             errorMessage = errorMessage == null ? "" : errorMessage;
             errorCode = errorCode == null ? "" : errorCode;
             mutationEvidence = mutationEvidence == null ? ToolMutationEvidence.none() : mutationEvidence;
+            failureReason = failureReason == null ? dev.talos.tools.ToolFailureReason.NONE : failureReason;
+        }
+
+        /** Pre-T758 canonical shape: failure reason defaults to NONE. */
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                boolean denied,
+                String summary,
+                String errorMessage,
+                dev.talos.tools.VerificationStatus fileVerificationStatus,
+                String errorCode,
+                WorkspaceOperationPlan workspaceOperationPlan,
+                ToolMutationEvidence mutationEvidence
+        ) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    dev.talos.tools.ToolFailureReason.NONE);
         }
 
         public ToolOutcome(
@@ -260,6 +281,13 @@ public final class ToolCallLoop {
                 String errorMessage
         ) {
             this(toolName, pathHint, success, mutating, false, summary, errorMessage);
+        }
+
+        /** Copy with a typed failure reason (T758) — used where outcomes are assembled or simulated. */
+        public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
+            return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
+                    errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
+                    mutationEvidence, reason);
         }
 
         public boolean invalidEmptyEditArguments() {

@@ -51,7 +51,8 @@ public final class CommandOutcomeRenderer {
                     ? "No command result is available because the command was not approved or policy blocked it."
                     : detail);
         }
-        String prefix = detail.toLowerCase(Locale.ROOT).startsWith("command timed out:")
+        String prefix = (outcome != null
+                && outcome.failureReason() == dev.talos.tools.ToolFailureReason.COMMAND_TIMEOUT)
                 ? "[Command timed out: talos.run_command did not finish successfully.]"
                 : "[Command failed: talos.run_command did not finish successfully.]";
         return prefix + "\n\n"

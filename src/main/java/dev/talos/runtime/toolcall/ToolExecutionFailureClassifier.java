@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 
 /**
@@ -41,22 +42,20 @@ final class ToolExecutionFailureClassifier {
         boolean denied = error != null && ToolError.DENIED.equals(error.code());
         boolean mutating = call != null && ToolCallSupport.isMutatingTool(call.toolName());
         boolean invalidParams = error != null && ToolError.INVALID_PARAMS.equals(error.code());
-        String message = result.errorMessage();
+        // T758: classification switches on the typed ToolFailureReason carried
+        // by the error — never on message prose, which is free to change.
+        ToolFailureReason reason = error == null ? ToolFailureReason.NONE : error.reason();
         boolean userApprovalDenial = denied
-                && message != null
-                && message.startsWith("User did not approve ");
+                && reason == ToolFailureReason.USER_APPROVAL_DENIED;
         boolean preApprovalPathPolicyBlock = invalidParams
-                && message != null
-                && (message.startsWith("Path not allowed before approval")
-                || message.startsWith("Invalid path before approval")
-                || message.startsWith("Target outside expected targets before approval"));
+                && (reason == ToolFailureReason.PRE_APPROVAL_PATH_NOT_ALLOWED
+                || reason == ToolFailureReason.PRE_APPROVAL_PATH_INVALID
+                || reason == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED);
         boolean expectedTargetScopeBlock = invalidParams
-                && message != null
-                && message.startsWith("Target outside expected targets before approval");
+                && reason == ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED;
         String unsupportedReadPath = unsupportedReadPath(call, error, pathHint);
         boolean oldStringNotFound = invalidParams
-                && message != null
-                && message.contains("old_string not found");
+                && reason == ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND;
 
         return new Classification(
                 failed,

@@ -64,7 +64,9 @@ public final class ProtectedContentPolicy {
         }
         ToolError error = result.error();
         if (error == null) return result;
-        return ToolResult.fail(new ToolError(error.code(), sanitizeText(error.message())));
+        // Preserve the typed failure reason (T758): redaction rewrites the
+        // message prose, never the classification.
+        return ToolResult.fail(new ToolError(error.code(), sanitizeText(error.message()), error.reason()));
     }
 
     public static boolean containsProtectedContentSignal(String text) {

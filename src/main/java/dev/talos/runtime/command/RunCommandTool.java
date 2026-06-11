@@ -7,6 +7,7 @@ import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
@@ -91,6 +92,10 @@ public final class RunCommandTool implements TalosTool {
         LocalTurnTraceCapture.recordCommandFinished("", call, result);
         if (result.success()) {
             return ToolResult.ok(renderSuccess(result));
+        }
+        if (result.timedOut()) {
+            return ToolResult.fail(ToolError.internal(
+                    ToolFailureReason.COMMAND_TIMEOUT, renderFailure(result)));
         }
         return ToolResult.fail(ToolError.internal(renderFailure(result)));
     }

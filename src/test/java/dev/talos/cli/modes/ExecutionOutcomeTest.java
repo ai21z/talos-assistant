@@ -13,6 +13,7 @@ import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -43,7 +44,7 @@ class ExecutionOutcomeTest {
                 List.of(new ToolCallLoop.ToolOutcome(
                         "talos.edit_file", "index.html", false, true, true,
                         "", "User did not approve the talos.edit_file call."
-                )));
+                ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 "manual replacement prose", messages, loopResult, null, 0);
@@ -104,7 +105,7 @@ class ExecutionOutcomeTest {
                         "talos.read_file", ".env", false, false, true,
                         "", "User did not approve the talos.read_file call.",
                         null, ToolError.DENIED
-                )));
+                ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 "The file says SECRET=original.", messages, loopResult, null, 0);
@@ -134,11 +135,13 @@ class ExecutionOutcomeTest {
                         new ToolCallLoop.ToolOutcome(
                                 "talos.edit_file", "index.html", false, true, false,
                                 "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
-                                null, ToolError.INVALID_PARAMS),
+                                null, ToolError.INVALID_PARAMS)
+                                .withFailureReason(ToolFailureReason.EDIT_EMPTY_ARGUMENTS),
                         new ToolCallLoop.ToolOutcome(
                                 "talos.edit_file", "index.html", false, true, true,
                                 "", "User did not approve the talos.edit_file call.",
                                 null, ToolError.DENIED)
+                                .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)
                 ));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
@@ -995,7 +998,7 @@ class ExecutionOutcomeTest {
                         "talos.edit_file", "index.html", false, true, true,
                         "", "User did not approve the talos.edit_file call.",
                         null, ToolError.DENIED
-                )));
+                ).withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 "manual replacement prose", plan, messages, loopResult, null, 0);
@@ -1341,7 +1344,8 @@ class ExecutionOutcomeTest {
                             new ToolCallLoop.ToolOutcome(
                                     "talos.edit_file", "index.html", false, true, false,
                                     "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
-                                    null, ToolError.INVALID_PARAMS),
+                                    null, ToolError.INVALID_PARAMS)
+                                    .withFailureReason(ToolFailureReason.EDIT_EMPTY_ARGUMENTS),
                             new ToolCallLoop.ToolOutcome(
                                     "talos.edit_file", "index.html", true, true, false,
                                     "Edited index.html", "", dev.talos.tools.VerificationStatus.UNKNOWN)
@@ -3315,7 +3319,8 @@ class ExecutionOutcomeTest {
                 0, 0, 0, 0,
                 List.of(new ToolCallLoop.ToolOutcome(
                         "talos.read_file", ".env", false, false, true,
-                        "", "User did not approve the talos.read_file call.", null, ToolError.DENIED)));
+                        "", "User did not approve the talos.read_file call.", null, ToolError.DENIED)
+                        .withFailureReason(ToolFailureReason.USER_APPROVAL_DENIED)));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 "The file says SECRET=original.", messages, loopResult, null, 0);

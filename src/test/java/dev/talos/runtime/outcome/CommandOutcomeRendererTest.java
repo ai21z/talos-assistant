@@ -3,6 +3,7 @@ package dev.talos.runtime.outcome;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -32,7 +33,8 @@ class CommandOutcomeRendererTest {
     @Test
     void timedOutCommandFailureUsesExistingTimeoutPrefix() {
         CommandOutcomeRenderer.Conclusion conclusion = CommandOutcomeRenderer.conclusion(loopResult(
-                failedRunCommand("Command timed out: gradle_test exceeded 1000ms.")));
+                failedRunCommand("Command timed out: gradle_test exceeded 1000ms.")
+                        .withFailureReason(ToolFailureReason.COMMAND_TIMEOUT)));
 
         assertEquals("""
                 [Command timed out: talos.run_command did not finish successfully.]
