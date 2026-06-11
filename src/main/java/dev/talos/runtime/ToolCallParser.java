@@ -96,11 +96,11 @@ public final class ToolCallParser {
             "```(?:json)?[ \\t]*\\R([\\s\\S]*?\"(?:name|function|function_name|tool_name|tool)\"[\\s\\S]*?)\\R?```"
     );
 
-    /** Bare JSON at line boundaries with "talos." prefix (model forgot XML wrapper). */
-    private static final Pattern BARE_JSON_PATTERN = Pattern.compile(
-            "(?:^|\\n)\\s*(\\{\\s*\"(?:name|function|function_name|tool_name|tool)\"\\s*:\\s*\"talos\\.(?:[^{}]*|\\{[^{}]*\\})*\\})",
-            Pattern.DOTALL
-    );
+    /** Bare JSON at line boundaries with "talos." prefix (model forgot XML wrapper).
+     *  Owned by {@link ToolProtocolText#bareToolJsonPattern()} so the parser and the
+     *  protocol stripper cannot drift; see that field for the possessive-quantifier
+     *  backtracking rationale (T754). */
+    private static final Pattern BARE_JSON_PATTERN = ToolProtocolText.bareToolJsonPattern();
 
     private ToolCallParser() {} // utility class
 

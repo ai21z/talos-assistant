@@ -460,6 +460,32 @@ class ToolCallParserTest {
                 "\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"x\"}}"));
     }
 
+    // ── Protocol hardening: backtracking resistance (T754) ──────────
+    // BARE_JSON_PATTERN's alternation uses possessive quantifiers; a long
+    // unclosed candidate must fail in linear time. Before T754 these inputs
+    // hung the regex engine via exponential backtracking.
+
+    @Test
+    void adversarialUnclosedBareJsonFailsFast() {
+        String adversarial = "\n{\"name\": \"talos." + "x".repeat(200_000);
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+            assertTrue(ToolCallParser.parse(adversarial).isEmpty());
+            assertFalse(ToolCallParser.containsToolCalls(adversarial));
+            assertNotNull(ToolCallParser.stripToolCalls(adversarial));
+        });
+    }
+
+    @Test
+    void adversarialRepeatedOpenBraceFragmentsFailFast() {
+        String adversarial = "\n{\"name\": \"talos.read_file\", \"arguments\": "
+                + "{\"a\":".repeat(50_000);
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+            assertTrue(ToolCallParser.parse(adversarial).isEmpty());
+            assertFalse(ToolCallParser.containsToolCalls(adversarial));
+            assertNotNull(ToolCallParser.stripToolCalls(adversarial));
+        });
+    }
+
     @Test
     void containsToolCallsDetectsAdjacentJsonWithBraceInStringValue() {
         // Both objects have brace-containing string values — BARE_JSON_PATTERN misses both.
