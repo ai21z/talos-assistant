@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.util.UiChrome;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.trace.TraceRedactor;
 import org.slf4j.Logger;
@@ -127,16 +128,16 @@ public final class MemoryUpdateListener implements SessionListener {
         StringBuilder out = new StringBuilder(text.length());
         for (String line : text.split("\\R", -1)) {
             String t = line.trim();
-            if (t.startsWith("[Used ") && t.contains("tool(s)")) continue;
-            if (t.startsWith("[Tool-call limit reached")) continue;
-            if (t.startsWith("[turn aborted")) continue;
-            if (t.startsWith("[iteration limit")) continue;
-            if (t.startsWith("[Engine error")) continue;
-            if (t.startsWith("[Model '") && t.contains("' not found")) continue;
-            if (t.startsWith("✓ Edited ")) continue;
-            if (t.startsWith("✓ Wrote ")) continue;
-            if (t.startsWith("✓ Created ")) continue;
-            if (t.startsWith("Suggestion: edit_file has failed")) continue;
+            if (t.startsWith(UiChrome.TOOL_SUMMARY_OPEN) && t.contains(UiChrome.TOOL_SUMMARY_MARKER)) continue;
+            if (t.startsWith(UiChrome.TOOL_CALL_LIMIT_PREFIX)) continue;
+            if (t.startsWith(UiChrome.TURN_ABORTED_PREFIX)) continue;
+            if (t.startsWith(UiChrome.ITERATION_LIMIT_PREFIX)) continue;
+            if (t.startsWith(UiChrome.ENGINE_ERROR_PREFIX)) continue;
+            if (t.startsWith(UiChrome.MODEL_NOT_FOUND_OPEN) && t.contains(UiChrome.MODEL_NOT_FOUND_MARKER)) continue;
+            if (t.startsWith(UiChrome.EDITED_PREFIX)) continue;
+            if (t.startsWith(UiChrome.WROTE_PREFIX)) continue;
+            if (t.startsWith(UiChrome.CREATED_PREFIX)) continue;
+            if (t.startsWith(UiChrome.EDIT_FAILURE_SUGGESTION_PREFIX)) continue;
             out.append(line).append('\n');
         }
         String stripped = out.toString().replaceAll("\\n{3,}", "\n\n").strip();
@@ -157,8 +158,9 @@ public final class MemoryUpdateListener implements SessionListener {
         if (!(result instanceof Result.Ok || result instanceof Result.Streamed)) return false;
         if (stripped == null || stripped.isBlank()) return false;
         String lower = stripped.stripLeading().toLowerCase();
-        if (lower.startsWith("[engine error")) return false;
-        if (lower.startsWith("[model '") && lower.contains("' not found")) return false;
+        if (lower.startsWith(UiChrome.ENGINE_ERROR_PREFIX.toLowerCase(java.util.Locale.ROOT))) return false;
+        if (lower.startsWith(UiChrome.MODEL_NOT_FOUND_OPEN.toLowerCase(java.util.Locale.ROOT))
+                && lower.contains(UiChrome.MODEL_NOT_FOUND_MARKER.toLowerCase(java.util.Locale.ROOT))) return false;
         if (looksLikeToolRefusal(lower)) return false;
         return true;
     }

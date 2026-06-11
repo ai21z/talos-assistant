@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -65,7 +66,8 @@ final class EditFailureRepairStateAccounting {
                 state.cushionFiresE1Suggestion++;
                 adjusted = ToolResult.fail(ToolError.invalidParams(
                         result.errorMessage()
-                                + "\nSuggestion: edit_file has failed on this file multiple times. "
+                                + "\n" + UiChrome.EDIT_FAILURE_SUGGESTION_PREFIX
+                                + " on this file multiple times. "
                                 + "Consider using talos.write_file with the complete updated file content instead."));
             }
         }

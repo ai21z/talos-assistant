@@ -1,5 +1,7 @@
 package dev.talos.core.llm;
 
+import dev.talos.core.util.UiChrome;
+
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -77,7 +79,7 @@ final class LlmCallBudget implements AutoCloseable {
         } catch (TimeoutException te) {
             closeActiveStream(activeStream);
             future.cancel(true);
-            String msg = "[turn aborted: " + label + " exceeded "
+            String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " exceeded "
                     + (wallClockMs / 1000) + "s wall-clock budget — model is hung "
                     + "or producing tokens too slowly. Try a smaller model, a shorter prompt, "
                     + "or raise limits.llm_timeout_ms in config.]";
@@ -87,7 +89,7 @@ final class LlmCallBudget implements AutoCloseable {
             if (cause instanceof IdleStreamException idle) {
                 closeActiveStream(activeStream);
                 future.cancel(true);
-                String msg = "[turn aborted: " + label + " produced no tokens for "
+                String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " produced no tokens for "
                         + (idle.idleMs / 1000) + "s — model appears wedged. "
                         + "Try a smaller model or raise limits.llm_idle_ms in config.]";
                 return new LlmClient.StreamResult(msg, List.of());
@@ -95,7 +97,7 @@ final class LlmCallBudget implements AutoCloseable {
             if (cause instanceof RepetitionException repetition) {
                 closeActiveStream(activeStream);
                 future.cancel(true);
-                String msg = "[turn aborted: " + label + " entered a repetition loop — "
+                String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " entered a repetition loop — "
                         + "the same " + repetition.substringLen + "-character pattern repeated "
                         + repetition.maxRepeats + "+ times in the streamed output. "
                         + "Try a smaller model, rephrase the prompt, or clear session memory with /clear.]";
@@ -108,7 +110,7 @@ final class LlmCallBudget implements AutoCloseable {
             closeActiveStream(activeStream);
             future.cancel(true);
             Thread.currentThread().interrupt();
-            return new LlmClient.StreamResult("[turn aborted: interrupted]", List.of());
+            return new LlmClient.StreamResult(UiChrome.TURN_ABORTED_PREFIX + ": interrupted]", List.of());
         } finally {
             if (watchdog != null) watchdog.cancel(false);
         }

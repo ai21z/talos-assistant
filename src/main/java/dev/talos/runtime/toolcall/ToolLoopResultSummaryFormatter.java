@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.ToolCallLoop;
 
 import java.util.LinkedHashSet;
@@ -14,14 +15,14 @@ public final class ToolLoopResultSummaryFormatter {
         if (result == null || result.toolsInvoked() <= 0) return null;
         var unique = new LinkedHashSet<>(result.toolNames() != null ? result.toolNames() : List.of());
         String names = unique.isEmpty() ? "" : ": " + String.join(", ", unique);
-        String base = "[Used " + result.toolsInvoked() + " tool(s)" + names
-                + " | " + result.iterations() + " iteration(s)]";
+        String base = UiChrome.TOOL_SUMMARY_OPEN + result.toolsInvoked() + " " + UiChrome.TOOL_SUMMARY_MARKER
+                + names + " | " + result.iterations() + " iteration(s)]";
         int displayFailedCalls = displayFailedCalls(result.failedCalls(), result.toolOutcomes());
         if (displayFailedCalls > 0) {
             base += " [" + displayFailedCalls + " failed]";
         }
         if (result.hitIterLimit()) {
-            base += " [iteration limit reached]";
+            base += " " + UiChrome.ITERATION_LIMIT_PREFIX + " reached]";
         }
         if (result.failureDecision() != null && result.failureDecision().shouldStop()) {
             base += " [failure policy stopped]";

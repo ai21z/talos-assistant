@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.util.UiChrome;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 
@@ -39,7 +40,7 @@ final class ToolMutationStateAccounting {
         recordMutationSuccess(state, pathHint);
 
         String summary = ToolCallSupport.firstSentenceSummary(result.output());
-        String formattedSummary = summary.isBlank() ? "" : "✓ " + summary;
+        String formattedSummary = summary.isBlank() ? "" : UiChrome.CHECK_PREFIX + summary;
         if (!formattedSummary.isBlank()) {
             state.pendingMutationSummaries.add(formattedSummary);
         }

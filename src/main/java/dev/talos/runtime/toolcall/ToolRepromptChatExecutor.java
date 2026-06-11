@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.util.UiChrome;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -43,13 +44,13 @@ final class ToolRepromptChatExecutor {
         } catch (EngineException.ModelNotFound mnf) {
             LOG.warn("Model not found during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.value(mnf.model()));
-            state.finishWithAnswer("[Model '" + mnf.model() + "' not found — tool loop aborted. "
-                    + mnf.guidance() + "]");
+            state.finishWithAnswer(UiChrome.MODEL_NOT_FOUND_OPEN + mnf.model() + UiChrome.MODEL_NOT_FOUND_MARKER
+                    + " — tool loop aborted. " + mnf.guidance() + "]");
             return false;
         } catch (EngineException ee) {
             LOG.warn("Engine error during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(ee));
-            state.finishWithAnswer("[Engine error during tool loop: " + ee.getMessage() + "]");
+            state.finishWithAnswer(UiChrome.ENGINE_ERROR_PREFIX + " during tool loop: " + ee.getMessage() + "]");
             return false;
         } catch (Exception e) {
             LOG.warn("LLM call failed during {}: {}",

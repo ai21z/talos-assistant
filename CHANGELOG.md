@@ -3,6 +3,22 @@
 ## [Unreleased]
 
 ### Changed
+- [T767] The history-chrome line prefixes that
+  `MemoryUpdateListener.stripUiChromeForHistory` removes before assistant
+  text reaches conversation history (`[Used N tool(s)...]`,
+  `[Tool-call limit reached...]`, `[turn aborted...]`, `[Engine error...]`,
+  `[Model '...' not found...]`, `✓ Edited/Created ...`,
+  `Suggestion: edit_file has failed...`) are now shared constants
+  (`core.util.UiChrome`) composed by both the emitters (LlmCallBudget,
+  ToolLoopResultSummaryFormatter, ToolLoopFinalAnswerFinalizer,
+  ToolMutationStateAccounting, EditFailureRepairStateAccounting,
+  ToolReprompt* executors, AssistantTurnExecutor) and the stripper
+  (MemoryUpdateListener, JsonTurnLogAppender), so an emitter rewording can
+  no longer silently break stripping and reopen the BUG #1
+  confidence-trick surface. A round-trip contract test
+  (`runtime.UiChromeContractTest`) pins every emitter shape through the
+  stripper, including the known gap that `✓ Updated ...` overwrite
+  summaries are NOT yet stripped (fixed in T768). No output bytes changed.
 - [T766] A cross-surface byte-identity contract test
   (`harness.ApprovalPromptContractTest`) now holds every approval-prompt
   evidence surface to the same bytes: the production gate's line forms,

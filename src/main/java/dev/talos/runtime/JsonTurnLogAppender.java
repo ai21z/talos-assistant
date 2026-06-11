@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.core.util.UiChrome;
 import dev.talos.safety.SafeLogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -138,14 +139,17 @@ public final class JsonTurnLogAppender implements SessionListener {
     static boolean isAbortMarker(String text) {
         if (text == null) return false;
         String t = text.stripLeading();
-        return t.startsWith("[turn aborted");
+        return t.startsWith(UiChrome.TURN_ABORTED_PREFIX);
     }
 
     static String statusOfStreamed(String text) {
         if (text == null || text.isBlank()) return "ok";
         String rawLower = text.stripLeading().toLowerCase();
-        if (rawLower.startsWith("[engine error")) return "error";
-        if (rawLower.startsWith("[model '") && rawLower.contains("' not found")) return "error";
+        if (rawLower.startsWith(UiChrome.ENGINE_ERROR_PREFIX.toLowerCase(java.util.Locale.ROOT))) return "error";
+        if (rawLower.startsWith(UiChrome.MODEL_NOT_FOUND_OPEN.toLowerCase(java.util.Locale.ROOT))
+                && rawLower.contains(UiChrome.MODEL_NOT_FOUND_MARKER.toLowerCase(java.util.Locale.ROOT))) {
+            return "error";
+        }
         String stripped = MemoryUpdateListener.stripUiChromeForHistory(text);
         if (isAbortMarker(text)) return "aborted";
         String lower = stripped.stripLeading().toLowerCase();
