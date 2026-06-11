@@ -22,56 +22,56 @@
     {
       "name": "safe-redirected-gptoss",
       "lane": "SAFE_REDIRECTED_STDIN",
-      "status": "MANUAL_REQUIRED",
-      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/gptoss/talosbench",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/gptoss/talosbench/20260611-162518",
       "model": "llama_cpp/gpt-oss-20b",
-      "notes": "backend offline during the wave-2 cut session; owner: start llama-server and rerun"
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; piped approval inputs disallowed; StrictEvidence; matches the 0.10.2 baseline"
     },
     {
       "name": "safe-redirected-qwen",
       "lane": "SAFE_REDIRECTED_STDIN",
-      "status": "MANUAL_REQUIRED",
-      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/qwen/talosbench",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/qwen/talosbench/20260611-162145",
       "model": "llama_cpp/qwen2.5-coder-14b",
-      "notes": "backend offline during the wave-2 cut session; owner: start llama-server and rerun"
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; piped approval inputs disallowed; StrictEvidence; matches the 0.10.2 baseline. Three earlier aborted run dirs (zero files) were removed: runbook had wrapped the runner in Windows PowerShell 5.1, whose stderr handling kills it; runs completed from pwsh"
     },
     {
       "name": "sync-approval-gptoss",
       "lane": "SYNC_APPROVAL",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/gptoss/sync-approval",
       "model": "llama_cpp/gpt-oss-20b",
-      "notes": "rerun required to confirm no model-behavior regression: T758 kept producer prose byte-identical and T756 is additive, but the approval window content grew (diff block); seed 424242"
+      "notes": "31/31 PASS-family from the committed candidate, runner artifact scan PASS; 2 scenarios PASS_WITH_RUNTIME_REPAIR (mutation-append-line-verified, static-web-selector-script-only-verified - 0.10.2 had zero, honestly noted); t325 PASS_WITH_READBACK_ONLY_LIMITATION; seed 424242"
     },
     {
       "name": "sync-approval-qwen",
       "lane": "SYNC_APPROVAL",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/qwen/sync-approval",
       "model": "llama_cpp/qwen2.5-coder-14b",
-      "notes": "rerun required (same rationale as gptoss lane); watch the 5/31 bounded-rescue scenarios from the 0.10.2 bank; seed 424242"
+      "notes": "31/31 PASS-family from the committed candidate, runner artifact scan PASS; ZERO T743 ladder rescues (down from 5/31 at 0.10.2 - the NAMED-choice first-attempt anomaly did not reproduce on this candidate); t325 PASS_WITH_READBACK_ONLY_LIMITATION; 4 workspace-op scenarios score PASS with BLOCKED traces exactly as at 0.10.2 (pre-existing TaskContractResolver quirk extracts a bogus expected target 'by' from the prompt; op applied+checkpointed, then fail-closed stop - follow-up candidate); seed 424242"
     },
     {
       "name": "capability-private-mode-both-models",
       "lane": "CAPABILITY_PRIVATE_MODE",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134-capability",
-      "notes": "rerun recommended: T759 changed protected-path classification (equals-or-suffix, policy v3) - verify no protected-read approval regressions and no new leaks"
+      "notes": "48 runs (24/model incl. private-folder bank); 0 secret/canary leaks, 0 overclaims; PASS by process/tool-artifact heuristics; no protected-read approval regressions observed under the T759 classifier (policy v3); canary scan over capability roots + workspaces PASS with the documented fixture allowlist; OCR via controlled stub"
     },
     {
       "name": "true-pty-manual-qwen",
       "lane": "TRUE_PTY_MANUAL",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/pty-qwen/artifacts",
       "model": "llama_cpp/qwen2.5-coder-14b",
-      "notes": "REQUIRED, not carryable: T756 grew the approval window (colored unified diff block); chrome strings and the Allow? prompt are unchanged but a real-terminal visual cycle must confirm rendering"
+      "notes": "owner real-terminal run 2026-06-11 (PowerShell 7.6.2, packet-isolated home): validator PASS (manual-validated), targeted canary scan PASS; protected .env deny, private-doc handoff deny+approve, and the wave-2 diff-bearing approval window all rendered cleanly - diff (+1 -1) block with @@ hunk verified on the talos.edit_file turn, checkpoint CREATED, verification PASSED"
     },
     {
       "name": "release-clean-canary-scan",
       "lane": "DETERMINISTIC",
-      "status": "MANUAL_REQUIRED",
+      "status": "PASS",
       "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts",
-      "notes": "runs over the live-lane artifact roots once the owner reruns the banks; the build-tree canary scan already passed in the post-bump check"
+      "notes": "checkRuntimeArtifactCanaries PASS over the packet artifacts root (no allowlist), the pty-qwen artifacts+workspace (fixture .env allowlist), and the capability roots (documented fixture allowlist)"
     }
   ]
 }
