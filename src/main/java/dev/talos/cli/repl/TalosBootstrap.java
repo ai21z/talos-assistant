@@ -207,7 +207,8 @@ public final class TalosBootstrap {
                 lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null;
         RenderEngine render = new RenderEngine(cfg, redactor, out,
                 lineReader != null,
-                terminalWidth);
+                terminalWidth,
+                lineReader != null ? lineReader.getTerminal() : null);
 
         // ── Approval gate ─────────────────────────────────────────────────
         // When a JLine LineReader is available, approval reads through the same

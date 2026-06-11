@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Changed
+- [T779] The thinking spinner now renders as a JLine Status bottom row
+  on capable terminals (`cli.ui.StatusRowPresenter`): the row lives in a
+  managed scroll region below the output, so no raw `\r` frames ever
+  interleave with streamed answers and JLine's cursor model stays
+  authoritative (completing T774). Terminals without scroll-region
+  capabilities (dumb, legacy consoles) keep the legacy `\r` spinner; the
+  capability probe mirrors JLine's own protected check. The status
+  region is closed on session shutdown so the terminal scroll area is
+  restored. Content is unchanged this ticket (spinner glyph + label +
+  elapsed); the row is strictly additive — route hints, turn stats, and
+  approval lines remain printed scrollback lines.
 - [T778] Fenced code blocks are now syntax-highlighted in capable
   interactive terminals using JLine's bundled nanorc engine with
   Talos-authored minimal syntax definitions under `/nanorc/` (java,

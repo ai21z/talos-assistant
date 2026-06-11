@@ -209,6 +209,10 @@ public class RunCmd implements Runnable, SessionState {
                     (e.getMessage() == null ? "" : (": " + sanitizeErrorMessage(e.getMessage()))));
             if (Boolean.getBoolean("talos.debug")) e.printStackTrace(System.err);
         } finally {
+            // Restore the terminal scroll region before exiting (T779)
+            if (router != null) {
+                try { router.shutdownRendering(); } catch (Exception ignored) { }
+            }
             // Fire session lifecycle callbacks (memory flush, audit, listener cleanup)
             if (router != null) {
                 try { router.getRuntimeSession().close(); } catch (Exception ignored) { }

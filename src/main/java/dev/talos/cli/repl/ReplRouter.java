@@ -164,6 +164,9 @@ public final class ReplRouter {
     public CommandRegistry getRegistry() { return registry; }
     public String getStartupNotice()     { return startupNotice; }
 
+    /** Stops any spinner and closes the JLine status region (T779). */
+    public void shutdownRendering()      { render.shutdown(); }
+
     static String formatCurrentTurnTrace(TurnResult turnResult) {
         if (turnResult == null || turnResult.audit() == null) return "";
         var trace = turnResult.audit().policyTrace();
