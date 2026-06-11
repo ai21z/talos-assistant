@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
+import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.MutationIntent;
@@ -420,7 +421,8 @@ public final class AssistantTurnExecutor {
         if (ex instanceof EngineException.ModelNotFound mnf) {
             recordBackendFailureOutcome("BACKEND_MODEL_NOT_FOUND");
             LOG.warn("Model not found: {}", SafeLogFormatter.value(mnf.model()));
-            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
+            out.append("\n").append(UiChrome.MODEL_NOT_FOUND_OPEN).append(mnf.model())
+                    .append(UiChrome.MODEL_NOT_FOUND_MARKER).append(". ")
                     .append(mnf.guidance()).append("]\n");
             return;
         }
@@ -438,7 +440,7 @@ public final class AssistantTurnExecutor {
                     malformed.bodyChars());
             LOG.warn("Malformed engine response: context={}, bodyHash={}, bodyChars={}",
                     malformed.context(), malformed.bodyHash(), malformed.bodyChars());
-            out.append("\n[Engine error: Malformed engine response");
+            out.append("\n").append(UiChrome.ENGINE_ERROR_PREFIX).append(": Malformed engine response");
             if (!malformed.context().isBlank()) {
                 out.append(" for ").append(malformed.context());
             }
@@ -447,7 +449,7 @@ public final class AssistantTurnExecutor {
         }
         recordBackendFailureOutcome(engineFailureClassification(ex));
         LOG.warn("Engine error: {}", SafeLogFormatter.throwableMessage(ex));
-        out.append("\n[Engine error: ").append(ex.getMessage()).append("]\n");
+        out.append("\n").append(UiChrome.ENGINE_ERROR_PREFIX).append(": ").append(ex.getMessage()).append("]\n");
     }
 
     private static void appendGenericLlmFailure(StringBuilder out, Throwable e) {
@@ -2474,7 +2476,7 @@ public final class AssistantTurnExecutor {
         String lower = answer.toLowerCase(Locale.ROOT);
         return answer.contains("<function-name>")
                 || answer.contains("<args-json-object>")
-                || answer.contains("[Tool-call limit reached.")
+                || answer.contains(UiChrome.TOOL_CALL_LIMIT_PREFIX + ".")
                 || answer.contains("You already gathered this information")
                 || lower.contains("i cannot answer")
                 || obviousReadOnlyNonAnswer(lower)

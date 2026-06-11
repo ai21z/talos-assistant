@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.core.util.Sanitize;
+import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 
 import java.util.LinkedHashSet;
@@ -11,7 +12,7 @@ final class ToolLoopFinalAnswerFinalizer {
     private static final String UNRESOLVED_CONTINUATION =
             "[Tool-call continuation could not be completed. No further tool calls were executed.]";
     private static final String ITERATION_LIMIT =
-            "[Tool-call limit reached. Some tool calls were not executed.]";
+            UiChrome.TOOL_CALL_LIMIT_PREFIX + ". Some tool calls were not executed.]";
 
     private ToolLoopFinalAnswerFinalizer() {}
 
