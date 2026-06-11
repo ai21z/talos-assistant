@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -27,12 +28,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * and a smooth spinner during generation.
  */
 public final class RenderEngine {
+    /** Fixed answer-pane width for paths without a live terminal (pre-T772 value). */
+    private static final int ANSWER_PANE_DEFAULT_WIDTH = 96;
+
     private final Config cfg;
     private final Redactor redactor;
     private final PrintStream out;
     private final CliTheme theme;
     private final ProgressLineRenderer progressRenderer;
-    private final AnswerPaneRenderer answerRenderer;
+    private final IntSupplier terminalWidth;
     private final String statusLabel;
     private final boolean showStatusDuringAnswer;
     private final boolean showTimingAfterAnswer;
@@ -63,17 +67,33 @@ public final class RenderEngine {
      *                    hundreds of carriage-return lines.
      */
     public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive) {
-        this(cfg, redactor, out, interactive, CliTheme.current());
+        this(cfg, redactor, out, interactive, CliTheme.current(), null);
+    }
+
+    /**
+     * @param terminalWidth live terminal width source (JLine
+     *                      {@code Terminal::getWidth}), or {@code null} for
+     *                      redirected/scripted paths — those keep the fixed
+     *                      pre-T772 width so output bytes never change.
+     */
+    public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive,
+                        IntSupplier terminalWidth) {
+        this(cfg, redactor, out, interactive, CliTheme.current(), terminalWidth);
     }
 
     RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme) {
+        this(cfg, redactor, out, interactive, theme, null);
+    }
+
+    RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme,
+                 IntSupplier terminalWidth) {
         this.cfg = (cfg == null ? new Config() : cfg);
         this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
         this.interactive = interactive;
         this.theme = theme == null ? CliTheme.current() : theme;
         this.progressRenderer = new ProgressLineRenderer(this.theme);
-        this.answerRenderer = new AnswerPaneRenderer(this.theme, 96);
+        this.terminalWidth = terminalWidth;
 
         // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
@@ -263,10 +283,27 @@ public final class RenderEngine {
         println(sro(r.toString()));
     }
 
+    /**
+     * Answer-pane renderer at the current terminal width. Constructed
+     * per render/stream-open (cheap value object) so each answer picks up
+     * the live width; an in-flight stream keeps the renderer it opened
+     * with, so one answer is always internally consistent (T772).
+     *
+     * <p>COLUMNS is consulted only when a live terminal exists but cannot
+     * report its width — the pane never read COLUMNS before T772, so
+     * redirected/scripted output must not start depending on it.
+     */
+    private AnswerPaneRenderer answerRenderer() {
+        return new AnswerPaneRenderer(theme, dev.talos.cli.ui.TerminalWidths.resolve(
+                terminalWidth,
+                terminalWidth != null ? System.getenv() : Map.of(),
+                ANSWER_PANE_DEFAULT_WIDTH));
+    }
+
     private String streamChunk(String chunk, Consumer<String> writer) {
         if (chunk == null || chunk.isEmpty()) return "";
         if (activeAnswerStream == null) {
-            activeAnswerStream = answerRenderer.openStream("answer");
+            activeAnswerStream = answerRenderer().openStream("answer");
             activeAnswerStreamWriter = writer;
         } else if (activeAnswerStreamWriter == null && writer != null) {
             activeAnswerStreamWriter = writer;
@@ -317,7 +354,7 @@ public final class RenderEngine {
 
         println("");  // breathing room before response
         if (!body.isBlank()) {
-            print(answerRenderer.renderBlock(body, "answer"));
+            print(answerRenderer().renderBlock(body, "answer"));
         }
         if (!parts.sources().isEmpty()) {
             if (!body.isBlank()) println("");
