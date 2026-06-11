@@ -1,0 +1,77 @@
+{
+  "schema": "talos.releaseGates.v1",
+  "packet": "current-0.10.3-release-packet-20260611-125134",
+  "branch": "feature/wave2-trust-surface",
+  "sha": "a957d9f4f64e9478cec75925cc71355cdbdef74a",
+  "generated": "2026-06-11T12:51:34+02:00",
+  "gates": [
+    {
+      "name": "deterministic-candidate-summaries",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/candidate-manifest.json",
+      "notes": "scripted cut: all four summaries report 0.10.3; mandatory post-bump check passed (unit + e2e + coverage floors + canary + arch); launcher built after the cut commit"
+    },
+    {
+      "name": "qodana-static-analysis",
+      "lane": "STATIC_ANALYSIS",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/qodana-summary.json",
+      "notes": "fresh native scan on the cut revision (provenance matches); 0 critical, 88 findings (down from 169 at 0.10.2 - T753 noise families baselined in qodana.yaml)"
+    },
+    {
+      "name": "safe-redirected-gptoss",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/gptoss/talosbench",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "backend offline during the wave-2 cut session; owner: start llama-server and rerun"
+    },
+    {
+      "name": "safe-redirected-qwen",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/qwen/talosbench",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "backend offline during the wave-2 cut session; owner: start llama-server and rerun"
+    },
+    {
+      "name": "sync-approval-gptoss",
+      "lane": "SYNC_APPROVAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/gptoss/sync-approval",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "rerun required to confirm no model-behavior regression: T758 kept producer prose byte-identical and T756 is additive, but the approval window content grew (diff block); seed 424242"
+    },
+    {
+      "name": "sync-approval-qwen",
+      "lane": "SYNC_APPROVAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/qwen/sync-approval",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "rerun required (same rationale as gptoss lane); watch the 5/31 bounded-rescue scenarios from the 0.10.2 bank; seed 424242"
+    },
+    {
+      "name": "capability-private-mode-both-models",
+      "lane": "CAPABILITY_PRIVATE_MODE",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134-capability",
+      "notes": "rerun recommended: T759 changed protected-path classification (equals-or-suffix, policy v3) - verify no protected-read approval regressions and no new leaks"
+    },
+    {
+      "name": "true-pty-manual-qwen",
+      "lane": "TRUE_PTY_MANUAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/pty-qwen/artifacts",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "REQUIRED, not carryable: T756 grew the approval window (colored unified diff block); chrome strings and the Allow? prompt are unchanged but a real-terminal visual cycle must confirm rendering"
+    },
+    {
+      "name": "release-clean-canary-scan",
+      "lane": "DETERMINISTIC",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts",
+      "notes": "runs over the live-lane artifact roots once the owner reruns the banks; the build-tree canary scan already passed in the post-bump check"
+    }
+  ]
+}
