@@ -54,6 +54,22 @@ class FileWriteToolTest {
     }
 
     @Test
+    void contentIsWrittenVerbatimWithoutSanitization() throws IOException {
+        // T755: sanitization happens once, pre-approval, in the runtime's call
+        // normalization. The tool must write exactly the bytes it receives —
+        // re-sanitizing here would break approved-bytes == written-bytes.
+        String contentWithCommentary =
+                "body { color: red; }\n```\n## Summary\n- Adjusted the body color\n";
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "styles.css",
+                "content", contentWithCommentary));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertEquals(contentWithCommentary, Files.readString(workspace.resolve("styles.css")));
+    }
+
+    @Test
     void overwriteExistingFile() throws IOException {
         Files.writeString(workspace.resolve("existing.txt"), "old content");
 

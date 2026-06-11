@@ -74,6 +74,23 @@ class FileEditToolTest {
     }
 
     @Test
+    void newStringIsAppliedVerbatimWithoutSanitization() throws IOException {
+        // T755: sanitization happens once, pre-approval, in the runtime's call
+        // normalization. The tool must apply exactly the bytes it receives.
+        String newStringWithCommentary =
+                "Hello, Talos!\n```\n## Note\n- replaced the greeting\n";
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "hello.java",
+                "old_string", "Hello, world!",
+                "new_string", newStringWithCommentary));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        String content = Files.readString(workspace.resolve("hello.java"));
+        assertTrue(content.contains(newStringWithCommentary), content);
+    }
+
+    @Test
     void replaceMultiLineBlock() throws IOException {
         ToolCall call = new ToolCall("talos.edit_file", Map.of(
                 "path", "config.yaml",

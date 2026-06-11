@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- [T755] Markdown-commentary sanitization of write/edit content now runs
+  once, pre-approval, in the runtime's call normalization — the approval
+  preview, trace hashes, checkpoint, and written file all see identical
+  bytes (approved bytes == written bytes). Tools write received bytes
+  verbatim; sanitization is trace-recorded as a `TOOL_CONTENT_SANITIZED`
+  event with redacted summaries.
 - [T754] Hardened the bare tool-JSON detection regex (runtime parser and
   protocol stripper, which run on every model response) against catastrophic
   backtracking via possessive quantifiers; the pattern now has a single owner

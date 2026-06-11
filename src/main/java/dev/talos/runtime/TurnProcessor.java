@@ -341,6 +341,28 @@ public final class TurnProcessor {
             }
             call = protectedAliasNormalization.call();
         }
+        // Markdown-commentary sanitization runs HERE, before pre-approval
+        // validation and the approval preview, so approved bytes == written
+        // bytes (T755). It runs BEFORE the exact-literal corrector on purpose:
+        // the corrector is the runtime-owned ground truth for exact-write
+        // contracts and, running after, restores the user's literal payload
+        // even if sanitization touched it — exactness always wins.
+        if (isWriteFileTool(call.toolName()) || isEditFileTool(call.toolName())) {
+            MarkdownCommentaryCallNormalizer.Normalization sanitization =
+                    isWriteFileTool(call.toolName())
+                            ? MarkdownCommentaryCallNormalizer.normalizeWriteContent(call)
+                            : MarkdownCommentaryCallNormalizer.normalizeEditNewString(call);
+            if (sanitization.changed()) {
+                LocalTurnTraceCapture.recordContentSanitized(
+                        tracePhase,
+                        call,
+                        sanitization.key(),
+                        sanitization.strippedChars(),
+                        sanitization.beforeValue(),
+                        sanitization.afterValue());
+                call = sanitization.call();
+            }
+        }
         ExactLiteralWriteCallCorrector.Correction exactCorrection =
                 ExactLiteralWriteCallCorrector.correct(call, taskContract);
         if (exactCorrection.corrected()) {

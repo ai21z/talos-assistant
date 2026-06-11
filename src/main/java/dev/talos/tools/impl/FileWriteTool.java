@@ -2,10 +2,7 @@ package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
-import dev.talos.safety.SafeLogFormatter;
 import dev.talos.tools.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,7 +28,6 @@ import java.util.Map;
  */
 public final class FileWriteTool implements TalosTool {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileWriteTool.class);
     private static final String NAME = "talos.write_file";
     private static final long MAX_CONTENT_SIZE = 1024 * 1024L; // 1 MiB content cap
 
@@ -82,13 +78,10 @@ public final class FileWriteTool implements TalosTool {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: content"));
         }
 
-        // Strip trailing markdown commentary that LLMs accidentally include
-        String sanitized = ContentSanitizer.sanitize(content, pathParam);
-        if (sanitized.length() < content.length()) {
-            LOG.debug("Stripped {} chars of trailing markdown commentary from write_file content for {}",
-                    content.length() - sanitized.length(), SafeLogFormatter.value(pathParam));
-            content = sanitized;
-        }
+        // Content arrives exactly as approved: markdown-commentary sanitization
+        // happens once, pre-approval, in the runtime's call normalization (T755).
+        // Re-sanitizing here would break the approved-bytes == written-bytes
+        // invariant (the sanitizer is not idempotent).
 
         // Content size guard
         if (content.length() > MAX_CONTENT_SIZE) {

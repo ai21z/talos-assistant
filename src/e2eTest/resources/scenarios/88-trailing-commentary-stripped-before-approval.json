@@ -1,0 +1,12 @@
+{
+  "name": "trailing markdown commentary stripped before approval",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "approved-bytes-equal-written-bytes-under-sanitization"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update style.css to use a dark background.",
+  "scriptedResponse": "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body { background: #222; color: #eee; }\\n```\\n## Summary\\n- Darkened the background\\n- Lightened the text\\n\"}}"
+}
