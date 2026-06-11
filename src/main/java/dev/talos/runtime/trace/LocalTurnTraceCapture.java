@@ -136,6 +136,29 @@ public final class LocalTurnTraceCapture {
                 afterValue));
     }
 
+    public static void recordApprovalDiffPreview(
+            String phase,
+            ToolCall call,
+            String renderedDiff,
+            int added,
+            int removed,
+            int diffLineCount,
+            boolean truncated,
+            String skippedReason
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(ApprovalDiffTraceEventFactory.preview(
+                phase,
+                call,
+                renderedDiff,
+                added,
+                removed,
+                diffLineCount,
+                truncated,
+                skippedReason));
+    }
+
     public static void recordToolCallBlocked(String phase, ToolCall call, String reason) {
         Bag bag = HOLDER.get();
         if (bag != null) {

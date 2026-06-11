@@ -612,6 +612,18 @@ public final class TurnProcessor {
                 LocalTurnTraceCapture.recordCommandApprovalRequired(tracePhase, call);
             }
 
+            ApprovalDiffPreview.Preview diffPreview = approvalDiffPreview(call, path, session.workspace());
+            if (diffPreview != null) {
+                LocalTurnTraceCapture.recordApprovalDiffPreview(
+                        tracePhase,
+                        call,
+                        diffPreview.text(),
+                        diffPreview.added(),
+                        diffPreview.removed(),
+                        diffPreview.diffLineCount(),
+                        diffPreview.truncated(),
+                        diffPreview.skippedReason());
+            }
             String desc = approvalDescription(call, risk, permissionDecision);
             String detail = buildApprovalDetail(
                     call,
@@ -619,7 +631,8 @@ public final class TurnProcessor {
                     scopeWarning,
                     permissionDecision.userMessage(),
                     session.workspace(),
-                    session.config());
+                    session.config(),
+                    diffPreview);
             ApprovalResponse response = approvalGate.approveFull(desc, detail);
 
             if (response == ApprovalResponse.DENIED) {
@@ -1329,13 +1342,39 @@ public final class TurnProcessor {
      * <p>If a {@code scopeWarning} is present, it is prepended on its own
      * line so the user sees the scope concern before the approval choice.
      */
+    /**
+     * Computes the unified-diff preview for the approval window (T756).
+     * Only write/edit calls get one; the sandbox and pre-approval validators
+     * have already run by the time this is called, and the builder itself
+     * fail-closes (protected path, oversized, binary, unreadable → skipped).
+     */
+    private static ApprovalDiffPreview.Preview approvalDiffPreview(
+            ToolCall call,
+            String path,
+            Path workspace
+    ) {
+        if (isWriteFileTool(call.toolName())) {
+            String content = resolveParam(call, "content", "text", "body", "data", "file_content");
+            if (content == null) return null;
+            return ApprovalDiffPreview.forWrite(workspace, path, content);
+        }
+        if (isEditFileTool(call.toolName())) {
+            String oldStr = resolveParam(call, "old_string", "oldString", "old_text", "search", "find", "original");
+            String newStr = resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement");
+            if (oldStr == null || newStr == null) return null;
+            return ApprovalDiffPreview.forEdit(workspace, path, oldStr, newStr);
+        }
+        return null;
+    }
+
     private static String buildApprovalDetail(
             ToolCall call,
             String path,
             String scopeWarning,
             String permissionMessage,
             java.nio.file.Path workspace,
-            dev.talos.core.Config cfg
+            dev.talos.core.Config cfg,
+            ApprovalDiffPreview.Preview diffPreview
     ) {
         var sb = new StringBuilder();
 
@@ -1413,6 +1452,23 @@ public final class TurnProcessor {
             String newPreview = newStr.length() > 60 ? newStr.substring(0, 57) + "..." : newStr;
             sb.append("\n    replace: ").append(oldPreview.replace("\n", "\\n"));
             sb.append("\n    with:    ").append(newPreview.replace("\n", "\\n"));
+        }
+
+        // Unified diff block (T756): strictly additive, appended after every
+        // legacy detail line so existing prompt content stays byte-identical.
+        // CliApprovalGate.inferRisk deliberately ignores everything from the
+        // "diff (+" marker on — keep the marker in sync with riskScanScope().
+        if (diffPreview != null && !diffPreview.skipped()) {
+            sb.append("\n    diff (+").append(diffPreview.added())
+                    .append(" -").append(diffPreview.removed()).append("):");
+            if (!diffPreview.note().isEmpty()) {
+                sb.append(' ').append(diffPreview.note());
+            }
+            if (!diffPreview.text().isEmpty()) {
+                for (String line : diffPreview.text().split("\n", -1)) {
+                    sb.append("\n    ").append(line);
+                }
+            }
         }
 
         return sb.toString();

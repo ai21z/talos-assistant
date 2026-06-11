@@ -35,9 +35,19 @@ public final class ApprovalPromptRenderer {
         String safeDetail = detail == null ? "" : detail.strip();
         if (!safeDetail.isBlank()) {
             sb.append(blank());
+            // The diff block is the final detail section (TurnProcessor
+            // appends it last), so once entered it never closes — diff
+            // context lines are indistinguishable from prose after strip().
+            boolean inDiffBlock = false;
             for (String line : safeDetail.lines().toList()) {
+                String stripped = line.strip();
+                if (!inDiffBlock && stripped.startsWith("diff (+") && stripped.contains("):")) {
+                    inDiffBlock = true;
+                }
                 for (String wrapped : wrap(line, contentWidth() - 2)) {
-                    sb.append(rail()).append(wrapped).append(System.lineSeparator());
+                    sb.append(rail())
+                            .append(inDiffBlock ? colorizeDiffLine(wrapped, stripped) : wrapped)
+                            .append(System.lineSeparator());
                 }
             }
         }
@@ -84,6 +94,22 @@ public final class ApprovalPromptRenderer {
 
     private int contentWidth() {
         return Math.max(24, width - INDENT.length() - glyphs.vertical().length() - 1);
+    }
+
+    /**
+     * Diff-block colorization (T756). Scoped to lines inside a block opened
+     * by a "diff (+A -R):" marker so YAML-style "- item" lines elsewhere in
+     * the detail are never colorized. With color disabled,
+     * {@link CliTheme#sgr} returns "" and output stays byte-identical plain.
+     */
+    private String colorizeDiffLine(String renderedLine, String strippedLine) {
+        if (strippedLine.startsWith("diff (+")) return theme.metadata(renderedLine);
+        if (strippedLine.startsWith("+")) return theme.success(renderedLine);
+        if (strippedLine.startsWith("-")) return theme.error(renderedLine);
+        if (strippedLine.startsWith("@") || strippedLine.startsWith("...")) {
+            return theme.metadata(renderedLine);
+        }
+        return renderedLine;
     }
 
     private static List<String> wrap(String line, int maxWidth) {

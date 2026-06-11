@@ -461,6 +461,134 @@ class TurnProcessorTest {
         assertEquals("T155 exact literal\nLine two", Files.readString(workspace.resolve("README.md")));
     }
 
+    // ---- T756: unified diff in the approval window ----
+
+    @Test
+    void approvalDetailAppendsDiffBlockAfterLegacyWriteContent(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("app.css"), "a { x: 1; }\n");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t756", "session-t756", 1, "2026-06-11T00:00:00Z",
+                "workspace-hash", "auto", "test", "model", "test");
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.write_file", Map.of(
+                            "path", "app.css",
+                            "content", "a { x: 2; }\n")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(result.success(), result.errorMessage());
+            String detail = approvalDetails.getFirst();
+            // Legacy detail block byte-identical and contiguous.
+            assertTrue(detail.contains(
+                    "target: app.css (12 bytes, 2 lines)\n    preview:\n      a { x: 2; }"), detail);
+            // Diff block appended strictly after the legacy content.
+            int previewIdx = detail.indexOf("preview:");
+            int diffIdx = detail.indexOf("\n    diff (+1 -1):");
+            assertTrue(diffIdx > previewIdx, detail);
+            assertTrue(detail.contains("\n    @@"), detail);
+            assertTrue(detail.contains("\n    -a { x: 1; }"), detail);
+            assertTrue(detail.contains("\n    +a { x: 2; }"), detail);
+            // Trace event: hash + counts only.
+            var diffEvent = trace.events().stream()
+                    .filter(e -> "APPROVAL_DIFF_PREVIEW".equals(e.type()))
+                    .findFirst().orElseThrow();
+            assertEquals(1, diffEvent.data().get("addedLines"));
+            assertEquals(1, diffEvent.data().get("removedLines"));
+            assertEquals("", diffEvent.data().get("skippedReason"));
+            assertTrue(diffEvent.data().get("diffHash").toString().startsWith("sha256:"));
+            assertFalse(diffEvent.data().containsKey("diffText"), "raw diff must not be traced");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void approvalDetailKeepsLegacyReplaceWithLinesAndAppendsEditDiff(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("hello.txt"), "alpha\nbeta\ngamma\n");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "hello.txt",
+                        "old_string", "beta",
+                        "new_string", "delta")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        String detail = approvalDetails.getFirst();
+        int replaceIdx = detail.indexOf("\n    replace: beta");
+        int withIdx = detail.indexOf("\n    with:    delta");
+        int diffIdx = detail.indexOf("\n    diff (+1 -1):");
+        assertTrue(replaceIdx >= 0, detail);
+        assertTrue(withIdx > replaceIdx, detail);
+        assertTrue(diffIdx > withIdx, detail);
+        assertTrue(detail.contains("\n    -beta"), detail);
+        assertTrue(detail.contains("\n    +delta"), detail);
+        assertTrue(detail.contains("\n     alpha"), "context line expected: " + detail);
+    }
+
+    @Test
+    void newFileWriteApprovalShowsCountsOnlyDiffNote(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "fresh.css",
+                        "content", "a { x: 1; }\nb { x: 2; }\n")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        String detail = approvalDetails.getFirst();
+        assertTrue(detail.contains("\n    diff (+2 -0): new file"), detail);
+        assertFalse(detail.contains("@@"), detail);
+    }
+
+    @Test
+    void protectedPathApprovalDetailHasNoDiffBlock(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve(".env"), "TALOS_FAKE_SECRET=old\n");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, true));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t756p", "session-t756p", 1, "2026-06-11T00:00:00Z",
+                "workspace-hash", "auto", "test", "model", "test");
+        try {
+            tp.executeTool(session,
+                    new ToolCall("talos.write_file", Map.of(
+                            "path", ".env",
+                            "content", "TALOS_FAKE_SECRET=new\n")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            if (!approvalDetails.isEmpty()) {
+                assertFalse(approvalDetails.getFirst().contains("diff (+"),
+                        approvalDetails.getFirst());
+            }
+            trace.events().stream()
+                    .filter(e -> "APPROVAL_DIFF_PREVIEW".equals(e.type()))
+                    .findFirst()
+                    .ifPresent(e -> assertEquals("protected-path", e.data().get("skippedReason")));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     @Test
     void forbiddenTargetFromTaskContractFailsBeforeApproval(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<h1>original</h1>");
