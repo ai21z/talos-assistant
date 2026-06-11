@@ -3,6 +3,7 @@ package dev.talos.cli.approval;
 import dev.talos.cli.ui.ApprovalPromptRenderer;
 import dev.talos.cli.ui.ApprovalPromptText;
 import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.TerminalWidths;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ApprovalResponse;
 
@@ -10,6 +11,7 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.util.Scanner;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 
 /**
  * CLI-based approval gate that prompts the user for confirmation
@@ -39,9 +41,13 @@ import java.util.function.Function;
  */
 public final class CliApprovalGate implements ApprovalGate {
 
+    /** Fixed approval-window width for paths without a live terminal (pre-T773 value). */
+    private static final int APPROVAL_WINDOW_DEFAULT_WIDTH = 80;
+
     private final Function<String, String> lineReader;
     private final PrintStream out;
     private final Runnable prePromptHook;
+    private final IntSupplier terminalWidth;
 
     /**
      * Primary constructor: JLine / REPL-integrated.
@@ -55,9 +61,21 @@ public final class CliApprovalGate implements ApprovalGate {
      *                      (e.g. stop spinner); may be {@code null}
      */
     public CliApprovalGate(Function<String, String> lineReader, PrintStream out, Runnable prePromptHook) {
+        this(lineReader, out, prePromptHook, null);
+    }
+
+    /**
+     * JLine / REPL-integrated with a live terminal width source (T773).
+     * The bordered approval window follows the terminal width (clamped
+     * 60–120); the prompt strings themselves are width-independent and
+     * stay byte-frozen via {@link dev.talos.cli.ui.ApprovalPromptText}.
+     */
+    public CliApprovalGate(Function<String, String> lineReader, PrintStream out, Runnable prePromptHook,
+                           IntSupplier terminalWidth) {
         this.lineReader = (lineReader != null) ? lineReader : prompt -> null;
         this.out = (out != null) ? out : System.out;
         this.prePromptHook = prePromptHook;
+        this.terminalWidth = terminalWidth;
     }
 
     /**
@@ -77,6 +95,7 @@ public final class CliApprovalGate implements ApprovalGate {
         };
         this.out = effectiveOut;
         this.prePromptHook = null;
+        this.terminalWidth = null;
     }
 
     /** Default constructor using Scanner on System.in / System.out. */
@@ -105,7 +124,7 @@ public final class CliApprovalGate implements ApprovalGate {
 
         String risk = inferRisk(description, detail);
         out.println();
-        out.print(new ApprovalPromptRenderer(CliTheme.current(), 80)
+        out.print(new ApprovalPromptRenderer(CliTheme.current(), windowWidth())
                 .render(description, detail, risk));
         out.flush();
 
@@ -143,7 +162,7 @@ public final class CliApprovalGate implements ApprovalGate {
 
         String risk = inferRisk(description, detail);
         out.println();
-        out.print(new ApprovalPromptRenderer(CliTheme.current(), 80)
+        out.print(new ApprovalPromptRenderer(CliTheme.current(), windowWidth())
                 .renderOnce(description, detail, risk));
         out.flush();
 
@@ -163,6 +182,18 @@ public final class CliApprovalGate implements ApprovalGate {
             return ApprovalResponse.APPROVED;
         }
         return ApprovalResponse.DENIED;
+    }
+
+    /**
+     * COLUMNS is consulted only when a live terminal exists but cannot report
+     * its width — the approval window never read COLUMNS before T773, so
+     * redirected/scripted output must not start depending on it.
+     */
+    private int windowWidth() {
+        return TerminalWidths.resolve(
+                terminalWidth,
+                terminalWidth != null ? System.getenv() : java.util.Map.of(),
+                APPROVAL_WINDOW_DEFAULT_WIDTH);
     }
 
     private static String inferRisk(String description, String detail) {
