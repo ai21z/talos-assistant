@@ -127,14 +127,19 @@ public final class StartupBannerRenderer {
 
         appendLine(out, style.frame("┌" + repeat("─", LEFT_PANEL) + "┬" + repeat("─", rightPanel) + "┐"));
 
-        String[] left = {"TALOS", version(s.version()), "", "", ""};
-        String[][] right = {
-                {"Workspace", fitWorkspace(s.workspace(), rightValueWidth)},
-                {"Mode", fitText(s.mode(), rightValueWidth)},
-                {"Model", fitModel(s.model(), rightValueWidth)},
-                {"Engine", fitEngine(s.engine(), rightValueWidth)},
-                {"Index", fitIndex(s.index(), rightValueWidth)}
-        };
+        String[] left = {"TALOS", version(s.version()), "", "", "", ""};
+        java.util.List<String[]> rightRows = new java.util.ArrayList<>(java.util.List.of(
+                new String[]{"Workspace", fitWorkspace(s.workspace(), rightValueWidth)},
+                new String[]{"Mode", fitText(s.mode(), rightValueWidth)},
+                new String[]{"Model", fitModel(s.model(), rightValueWidth)},
+                new String[]{"Engine", fitEngine(s.engine(), rightValueWidth)},
+                new String[]{"Index", fitIndex(s.index(), rightValueWidth)}));
+        // T791: additive verify row — absent (blank) renders byte-identically
+        // to the pre-T791 banner.
+        if (!s.verify().isBlank()) {
+            rightRows.add(new String[]{"Verify", fitText(s.verify(), rightValueWidth)});
+        }
+        String[][] right = rightRows.toArray(String[][]::new);
 
         int rows = Math.max(iconRows.length, right.length);
         for (int i = 0; i < rows; i++) {
@@ -181,6 +186,9 @@ public final class StartupBannerRenderer {
         appendStatusRow(out, style, "Model", fitModel(s.model(), valueWidth), valueWidth, s);
         appendStatusRow(out, style, "Engine", fitEngine(s.engine(), valueWidth), valueWidth, s);
         appendStatusRow(out, style, "Index", fitIndex(s.index(), valueWidth), valueWidth, s);
+        if (!s.verify().isBlank()) {
+            appendStatusRow(out, style, "Verify", fitText(s.verify(), valueWidth), valueWidth, s);
+        }
         appendLine(out, style.frame("├" + repeat("─", width - 2) + "┤"));
         appendLine(out, governanceRow(s, caps, width));
         appendLine(out, style.frame("└" + repeat("─", width - 2) + "┘"));
@@ -220,6 +228,9 @@ public final class StartupBannerRenderer {
         appendLine(out, "runtime    " + s.mode() + sep + s.model() + sep + shortEngine(s.engine()));
         appendLine(out, "trust      " + s.policy() + sep + "debug " + s.debug());
         appendLine(out, "index      " + compactIndex(s.index()));
+        if (!s.verify().isBlank()) {
+            appendLine(out, "verify     " + s.verify());
+        }
         appendLine(out, compactHint(s));
         return out.toString();
     }
@@ -234,6 +245,9 @@ public final class StartupBannerRenderer {
         appendAsciiRow(out, asciiPair("Mode", s.mode(), "Model", s.model(), contentWidth), contentWidth);
         appendAsciiRow(out, asciiPair("Engine", s.engine(), "Index", compactIndex(s.index()), contentWidth), contentWidth);
         appendAsciiRow(out, asciiPair("Policy", s.policy(), "Debug", s.debug(), contentWidth), contentWidth);
+        if (!s.verify().isBlank()) {
+            appendAsciiRow(out, asciiField("Verify", s.verify(), contentWidth - 12), contentWidth);
+        }
         appendLine(out, "+" + repeat("-", w - 2) + "+");
         Hint hint = hint(s);
         appendAsciiRow(out, "[ok] " + hint.state() + " - " + hint.rest().replace(" · ", " - "), contentWidth);
@@ -469,7 +483,8 @@ public final class StartupBannerRenderer {
                 clean(s.index(), unicodeSafe),
                 clean(s.policy(), unicodeSafe),
                 clean(s.debug(), unicodeSafe),
-                clean(s.next(), unicodeSafe));
+                clean(s.next(), unicodeSafe),
+                clean(s.verify(), unicodeSafe));
     }
 
     private static String clean(String value, boolean unicodeSafe) {

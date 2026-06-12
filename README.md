@@ -425,6 +425,8 @@ Run the approved Gradle test command profile.
 | `/status` | show runtime and indexing details |
 | `/tools` | show the registered tool set |
 | `/doctor` | run environment preflight checks |
+| `/profiles` | inspect or trust workspace verification profiles |
+| `/verify` | run a trusted workspace verification profile |
 | `/checkpoint` | manage local mutation checkpoints |
 | `/undo` | undo the last file write/edit |
 | `/privacy status` | show privacy mode, protected-read scope, RAG/retrieve, and artifact persistence |

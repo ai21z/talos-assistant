@@ -43,6 +43,43 @@ class CliStatusDashboardTest {
                 output);
     }
 
+    /** T791: a non-blank verify value adds exactly one row; blank stays byte-identical (pin above). */
+    @Test
+    void verify_row_renders_only_when_present() {
+        var withVerify = new CliStatusDashboard.Snapshot(
+                "0.0.0-test", "C:/ws/demo", "auto", "model-x",
+                "llama.cpp (managed)", "not indexed", "ask before mutation",
+                "off", "next-hint", "1 profile(s) (trusted)");
+
+        String output = CliStatusDashboard.render(withVerify, UNICODE_NO_COLOR, 80);
+
+        assertTrue(output.contains("Verify"), output);
+        assertTrue(output.contains("1 profile(s) (trusted)"), output);
+    }
+
+    @Test
+    void verify_state_reports_the_declaration_lifecycle(@TempDir Path temp) throws Exception {
+        var store = new dev.talos.runtime.command.WorkspaceProfileTrustStore(
+                temp.resolve("trust"));
+        Path ws = temp.resolve("ws");
+        java.nio.file.Files.createDirectories(ws.resolve(".talos"));
+
+        assertTrue(CliStatusDashboard.verifyState(ws, store).equals("none declared"));
+
+        java.nio.file.Files.writeString(ws.resolve(".talos").resolve("profiles.yaml"),
+                "profiles:\n  - id: check\n    executable: npm\n");
+        assertTrue(CliStatusDashboard.verifyState(ws, store)
+                .equals("1 profile(s) (untrusted - run /profiles trust)"));
+
+        var loaded = dev.talos.runtime.command.WorkspaceCommandProfilesLoader.load(ws);
+        store.pin(ws, loaded.declarationSha256(), 1, java.time.Instant.parse("2026-06-12T00:00:00Z"));
+        assertTrue(CliStatusDashboard.verifyState(ws, store).equals("1 profile(s) (trusted)"));
+
+        java.nio.file.Files.writeString(ws.resolve(".talos").resolve("profiles.yaml"),
+                "profiles: [unclosed");
+        assertTrue(CliStatusDashboard.verifyState(ws, store).startsWith("invalid: "));
+    }
+
     @Test
     void render_includes_required_dashboard_rows() {
         String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(

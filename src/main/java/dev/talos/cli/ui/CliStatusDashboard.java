@@ -28,8 +28,16 @@ public final class CliStatusDashboard {
             String index,
             String policy,
             String debug,
-            String next
-    ) {}
+            String next,
+            String verify
+    ) {
+        /** Pre-T791 shape: no verify row (renders byte-identically when blank). */
+        public Snapshot(String version, String workspace, String mode, String model,
+                        String engine, String index, String policy, String debug,
+                        String next) {
+            this(version, workspace, mode, model, engine, index, policy, debug, next, "");
+        }
+    }
 
     public static Snapshot snapshot(
             Path workspace,
@@ -50,7 +58,39 @@ public final class CliStatusDashboard {
                 indexState(ws),
                 trustPolicy(mode),
                 blankDefault(debug, "off"),
-                blankDefault(next, "Type a request or /help"));
+                blankDefault(next, "Type a request or /help"),
+                verifyState(ws));
+    }
+
+    /** T791: the workspace verification-profile declaration state, one line. */
+    static String verifyState(Path workspace) {
+        return verifyState(workspace, null);
+    }
+
+    /** Test seam: an explicit trust store keeps reads out of the real home. */
+    static String verifyState(Path workspace,
+                              dev.talos.runtime.command.WorkspaceProfileTrustStore trustStore) {
+        try {
+            var loaded = dev.talos.runtime.command.WorkspaceCommandProfilesLoader.load(workspace);
+            var store = trustStore != null
+                    ? trustStore
+                    : new dev.talos.runtime.command.WorkspaceProfileTrustStore();
+            var state = store.state(workspace, loaded);
+            int count = loaded.profiles().profiles().size();
+            return switch (state) {
+                case NONE_DECLARED -> "none declared";
+                case INVALID -> fitReason("invalid: " + loaded.profiles().rejectionReason());
+                case UNTRUSTED_NEW, UNTRUSTED_CHANGED ->
+                        count + " profile(s) (untrusted - run /profiles trust)";
+                case TRUSTED -> count + " profile(s) (trusted)";
+            };
+        } catch (Exception e) {
+            return "unavailable";
+        }
+    }
+
+    private static String fitReason(String text) {
+        return text.length() <= 72 ? text : text.substring(0, 69) + "...";
     }
 
     public static String render(Snapshot snapshot) {
