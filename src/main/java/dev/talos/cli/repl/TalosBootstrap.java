@@ -430,6 +430,8 @@ public final class TalosBootstrap {
         registry.register(new RouteCommand(modes));
         // Tool introspection
         registry.register(new ToolsCommand());
+        // Environment preflight
+        registry.register(new DoctorCommand(workspace));
         // File undo
         registry.register(new UndoCommand(undoStack));
         registry.register(new CheckpointCommand(workspace, checkpointService));

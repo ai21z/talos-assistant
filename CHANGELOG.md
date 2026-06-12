@@ -21,6 +21,12 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Added
+- [T786] New `/doctor` REPL command running the same default doctor probe
+  set from inside a session (DEBUG group, listed by `/help`). It
+  deliberately has no `--start` equivalent: a slash command must not block
+  the session on a multi-minute model load or churn the GPU
+  mid-conversation — end-to-end server verification stays CLI-only
+  (`talos doctor --start`).
 - [T784] New `talos doctor` subcommand: a fast environment preflight that
   verifies the config loads (and the user config parses), the engine
   backend resolves and a model is configured, the managed llama.cpp server
