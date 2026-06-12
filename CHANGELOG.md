@@ -45,6 +45,21 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Added
+- [T789] Workspace verification-profile declaration model (inert until
+  T790 registers it): `<workspace>/.talos/profiles.yaml` declares up to 8
+  fixed-argv command profiles (id, executable, args, timeout_ms,
+  expected_writes — approval, network, interactivity, and risk are NOT
+  declarable and always pinned to the hardened values). The loader
+  validates fail-closed: one bad profile rejects the whole file with one
+  human-readable reason, unknown keys are rejected so typos cannot
+  silently default, args are screened against shell syntax, and
+  workspace-relative executables (wrappers like `./gradlew`) must exist
+  inside the workspace and register as their resolved absolute path
+  (displayed in every trust and approval prompt). A new content-hash
+  trust store (`~/.talos/trust/workspace-profiles/`) records explicit
+  user consent over the declaration's raw bytes — any byte change
+  returns the workspace to untrusted and requires re-consent; corrupted
+  pins fail closed.
 - [T786] New `/doctor` REPL command running the same default doctor probe
   set from inside a session (DEBUG group, listed by `/help`). It
   deliberately has no `--start` equivalent: a slash command must not block
