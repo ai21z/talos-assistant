@@ -62,7 +62,8 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 List.of(pathParam),
                 traceId,
                 turnNumber,
-                "file-bundle");
+                "file-bundle",
+                call.toolName() + " " + pathParam);
     }
 
     @Override
@@ -86,7 +87,30 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 checkpointPaths,
                 traceId,
                 turnNumber,
-                "workspace-operation");
+                "workspace-operation",
+                "workspace operation: " + String.join(", ", checkpointPaths));
+    }
+
+    @Override
+    public CheckpointCaptureResult captureBeforeRestore(
+            Path workspace,
+            Config config,
+            List<String> relativePaths,
+            String trigger,
+            String traceId,
+            int turnNumber
+    ) {
+        if (workspace == null) {
+            return CheckpointCaptureResult.failure("Restore-safety capture requires a workspace.");
+        }
+        return captureRelativePaths(
+                workspace.toAbsolutePath().normalize(),
+                config,
+                relativePaths,
+                traceId,
+                turnNumber,
+                "restore-safety",
+                trigger == null || trigger.isBlank() ? "restore safety" : trigger);
     }
 
     private CheckpointCaptureResult captureRelativePaths(
@@ -95,7 +119,8 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             List<String> relativePaths,
             String traceId,
             int turnNumber,
-            String backend
+            String backend,
+            String trigger
     ) {
         if (ws == null || relativePaths == null || relativePaths.isEmpty()) {
             return CheckpointCaptureResult.failure("Checkpoint requires at least one target path.");
@@ -142,6 +167,10 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             metadata.put("turnNumber", turnNumber);
             metadata.put("traceId", traceId == null ? "" : traceId);
             metadata.put("backend", backend == null || backend.isBlank() ? "file-bundle" : backend);
+            // T793: optional human trigger; schemaVersion stays 1 — pre-T793
+            // readers ignore unknown keys, pre-T793 checkpoints render
+            // "(unknown)".
+            metadata.put("trigger", trigger == null ? "" : trigger);
             metadata.put("status", "CREATED");
             metadata.put("fileCount", files.size());
             metadata.put("byteCount", byteCount);
@@ -250,18 +279,111 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
 
     @Override
     public List<String> listIds(Path workspace) {
+        // T793: ids now follow the summary ordering — truly newest-first by
+        // createdAt instead of reverse-lexicographic on random UUIDs.
+        return listSummaries(workspace).stream().map(CheckpointSummary::id).toList();
+    }
+
+    @Override
+    public List<CheckpointSummary> listSummaries(Path workspace) {
         if (workspace == null) return List.of();
         String workspaceId = JsonSessionStore.sessionIdFor(workspace.toAbsolutePath().normalize());
         Path dir = root.resolve(workspaceId).resolve("checkpoints");
         if (!Files.isDirectory(dir)) return List.of();
+        List<CheckpointSummary> summaries = new ArrayList<>();
         try (var stream = Files.list(dir)) {
-            return stream
-                    .filter(Files::isDirectory)
-                    .map(path -> path.getFileName().toString())
-                    .sorted(Comparator.reverseOrder())
-                    .toList();
+            for (Path checkpointDir : stream.filter(Files::isDirectory).toList()) {
+                summaries.add(readSummary(checkpointDir));
+            }
         } catch (IOException e) {
             return List.of();
+        }
+        summaries.sort(Comparator.comparing(CheckpointSummary::createdAt).reversed()
+                .thenComparing(CheckpointSummary::id, Comparator.reverseOrder()));
+        return List.copyOf(summaries);
+    }
+
+    @Override
+    public java.util.Optional<CheckpointDetail> describe(Path workspace, String checkpointId) {
+        if (workspace == null || checkpointId == null || checkpointId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        String workspaceId = JsonSessionStore.sessionIdFor(workspace.toAbsolutePath().normalize());
+        Path dir = checkpointDir(workspaceId, sanitizeId(checkpointId));
+        if (!Files.isDirectory(dir)) return java.util.Optional.empty();
+        List<CheckpointDetail.Entry> entries = new ArrayList<>();
+        try {
+            Map<String, Object> manifest = MAPPER.readValue(
+                    Files.readString(dir.resolve("manifest.json")),
+                    new TypeReference<>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> files =
+                    (List<Map<String, Object>>) manifest.getOrDefault("files", List.of());
+            for (Map<String, Object> entry : files) {
+                entries.add(new CheckpointDetail.Entry(
+                        String.valueOf(entry.getOrDefault("relativePath", "")),
+                        String.valueOf(entry.getOrDefault("entryType", "FILE")),
+                        Boolean.TRUE.equals(entry.get("existedBefore")),
+                        String.valueOf(entry.getOrDefault("blobSha256", "")),
+                        asLong(entry.get("sizeBytes"))));
+            }
+        } catch (Exception e) {
+            return java.util.Optional.of(new CheckpointDetail(readSummary(dir), List.of()));
+        }
+        return java.util.Optional.of(new CheckpointDetail(readSummary(dir), entries));
+    }
+
+    @Override
+    public java.util.Optional<byte[]> blob(Path workspace, String checkpointId, String blobSha256) {
+        if (workspace == null || checkpointId == null || checkpointId.isBlank()
+                || blobSha256 == null || blobSha256.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        String workspaceId = JsonSessionStore.sessionIdFor(workspace.toAbsolutePath().normalize());
+        Path blobFile = checkpointDir(workspaceId, sanitizeId(checkpointId))
+                .resolve("blobs")
+                .resolve(sanitizeId(blobSha256));
+        if (!Files.isRegularFile(blobFile)) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(Files.readAllBytes(blobFile));
+        } catch (IOException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Tolerant metadata read: a corrupt or pre-T793 checkpoint still lists. */
+    private static CheckpointSummary readSummary(Path checkpointDir) {
+        String id = checkpointDir.getFileName().toString();
+        try {
+            Map<String, Object> metadata = MAPPER.readValue(
+                    Files.readString(checkpointDir.resolve("metadata.json")),
+                    new TypeReference<>() {});
+            Instant createdAt;
+            try {
+                createdAt = Instant.parse(String.valueOf(metadata.getOrDefault("createdAt", "")));
+            } catch (Exception e) {
+                createdAt = Instant.EPOCH;
+            }
+            return new CheckpointSummary(
+                    id,
+                    createdAt,
+                    (int) asLong(metadata.getOrDefault("turnNumber", -1L)),
+                    String.valueOf(metadata.getOrDefault("trigger", "")),
+                    (int) asLong(metadata.getOrDefault("fileCount", 0L)),
+                    asLong(metadata.getOrDefault("byteCount", 0L)),
+                    String.valueOf(metadata.getOrDefault("status", "")));
+        } catch (Exception e) {
+            return new CheckpointSummary(id, Instant.EPOCH, -1, "", 0, 0L,
+                    "(metadata unavailable)");
+        }
+    }
+
+    private static long asLong(Object value) {
+        if (value instanceof Number number) return number.longValue();
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception e) {
+            return 0L;
         }
     }
 

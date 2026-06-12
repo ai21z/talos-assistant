@@ -30,4 +30,35 @@ public interface CheckpointStore {
     default List<String> listIds(Path workspace) {
         return List.of();
     }
+
+    /** T793: summaries sorted newest-first by {@code createdAt} (id tiebreak). */
+    default List<CheckpointSummary> listSummaries(Path workspace) {
+        return List.of();
+    }
+
+    /** T793: summary plus manifest entries for one checkpoint, if it exists. */
+    default java.util.Optional<CheckpointDetail> describe(Path workspace, String checkpointId) {
+        return java.util.Optional.empty();
+    }
+
+    /** T793: raw captured bytes of one blob (for restore diff previews). */
+    default java.util.Optional<byte[]> blob(Path workspace, String checkpointId, String blobSha256) {
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * T793: capture the CURRENT state of the given workspace-relative paths
+     * before a restore overwrites them — the safety checkpoint that makes
+     * {@code /undo} itself undoable.
+     */
+    default CheckpointCaptureResult captureBeforeRestore(
+            Path workspace,
+            Config config,
+            List<String> relativePaths,
+            String trigger,
+            String traceId,
+            int turnNumber
+    ) {
+        return CheckpointCaptureResult.failure("Restore-safety capture is not supported by this store.");
+    }
 }

@@ -31,6 +31,29 @@ final class CheckpointTraceRecorder {
                 data));
     }
 
+    /** T793: restore outcome event (counts only, no content). */
+    static void recordRestore(
+            LocalTurnTrace.Builder builder,
+            String checkpointId,
+            boolean success,
+            int restoredFiles,
+            int deletedFiles,
+            String reason
+    ) {
+        if (builder == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("checkpointId", safe(checkpointId));
+        data.put("restoredFiles", restoredFiles);
+        data.put("deletedFiles", deletedFiles);
+        if (reason != null && !reason.isBlank()) {
+            data.put("reason", reason.strip());
+        }
+        builder.event(TurnTraceEvent.simple(
+                success ? "CHECKPOINT_RESTORED" : "CHECKPOINT_RESTORE_FAILED",
+                Instant.now().toString(),
+                data));
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value.strip();
     }

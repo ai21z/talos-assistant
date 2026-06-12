@@ -55,4 +55,36 @@ public final class CheckpointService {
     public List<String> listIds(Path workspace) {
         return store.listIds(workspace);
     }
+
+    public List<CheckpointSummary> listSummaries(Path workspace) {
+        return store.listSummaries(workspace);
+    }
+
+    public java.util.Optional<CheckpointDetail> describe(Path workspace, String checkpointId) {
+        return store.describe(workspace, checkpointId);
+    }
+
+    public java.util.Optional<byte[]> blob(Path workspace, String checkpointId, String blobSha256) {
+        return store.blob(workspace, checkpointId, blobSha256);
+    }
+
+    /**
+     * T793: capture the current state of the given paths before a restore
+     * overwrites them. Honors the same enabled/disabled config gate as the
+     * mutation captures.
+     */
+    public CheckpointCaptureResult captureBeforeRestore(
+            Path workspace,
+            Config config,
+            List<String> relativePaths,
+            String trigger,
+            String traceId,
+            int turnNumber
+    ) {
+        CheckpointConfig cfg = CheckpointConfig.from(config);
+        if (!cfg.enabled()) {
+            return CheckpointCaptureResult.skipped("Checkpointing is disabled.");
+        }
+        return store.captureBeforeRestore(workspace, config, relativePaths, trigger, traceId, turnNumber);
+    }
 }

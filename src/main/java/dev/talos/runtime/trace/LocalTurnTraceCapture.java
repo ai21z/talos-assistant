@@ -311,6 +311,19 @@ public final class LocalTurnTraceCapture {
         CheckpointTraceRecorder.record(bag.builder, status, checkpointId, reason, capturedFiles);
     }
 
+    /**
+     * T793: best-effort restore trace — emits CHECKPOINT_RESTORED or
+     * CHECKPOINT_RESTORE_FAILED. A no-op without an active trace bag (the
+     * slash-command path today), so callers never depend on it.
+     */
+    public static void recordCheckpointRestore(
+            String checkpointId, boolean success, int restoredFiles, int deletedFiles, String reason) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        CheckpointTraceRecorder.recordRestore(
+                bag.builder, checkpointId, success, restoredFiles, deletedFiles, reason);
+    }
+
     public static void recordProtocolSanitized(String reason) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
