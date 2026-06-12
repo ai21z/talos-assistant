@@ -594,9 +594,106 @@ public final class JsonSessionStore implements SessionStore {
     /**
      * Derive a session ID from a workspace path.
      * Uses SHA-1 of the absolute normalized path string.
+     *
+     * <p>Since T799 this is the <em>workspace id</em>: the listing prefix
+     * for {@link #listSessions} and the key for per-workspace artifacts
+     * (checkpoints, trace metadata). New session files are written under
+     * {@link #newSessionInstanceId} so one workspace can hold many
+     * sessions; legacy bare-hash files remain loadable.
      */
     public static String sessionIdFor(Path workspace) {
         return Hash.sha1Hex(workspace.toAbsolutePath().normalize().toString());
+    }
+
+    private static final java.time.format.DateTimeFormatter INSTANCE_ID_TIMESTAMP =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+                    .withZone(java.time.ZoneOffset.UTC);
+
+    /**
+     * Mint the storage id for a new session of this workspace:
+     * {@code <ws-hash>-<UTC yyyyMMddHHmmss>}. The clock is a parameter so
+     * tests stay deterministic. The hash prefix is fixed-length 40-hex
+     * (no {@code -}), so prefix matching against {@link #sessionIdFor}
+     * is unambiguous across workspaces.
+     */
+    public static String newSessionInstanceId(Path workspace, Instant createdAt) {
+        return sessionIdFor(workspace) + "-" + INSTANCE_ID_TIMESTAMP.format(createdAt);
+    }
+
+    @Override
+    public List<SessionSummary> listSessions(String workspaceId) {
+        if (workspaceId == null || workspaceId.isBlank()) return List.of();
+        if (!Files.isDirectory(sessionsDir)) return List.of();
+
+        java.util.Set<String> snapshotIds = new java.util.LinkedHashSet<>();
+        java.util.Set<String> turnLogIds = new java.util.LinkedHashSet<>();
+        try (var stream = Files.list(sessionsDir)) {
+            for (Path path : (Iterable<Path>) stream::iterator) {
+                String name = path.getFileName().toString();
+                if (name.endsWith(TURNS_SUFFIX)) {
+                    String id = name.substring(0, name.length() - TURNS_SUFFIX.length());
+                    if (belongsTo(id, workspaceId)) turnLogIds.add(id);
+                } else if (name.endsWith(".json")) {
+                    String id = name.substring(0, name.length() - ".json".length());
+                    if (belongsTo(id, workspaceId)) snapshotIds.add(id);
+                }
+            }
+        } catch (IOException e) {
+            LOG.warn("Failed to list sessions in {}: {}",
+                    SafeLogFormatter.value(sessionsDir), SafeLogFormatter.throwableMessage(e));
+            return List.of();
+        }
+
+        List<SessionSummary> out = new java.util.ArrayList<>();
+        for (String id : snapshotIds) {
+            out.add(snapshotSummary(id, workspaceId, turnLogIds.contains(id)));
+        }
+        for (String id : turnLogIds) {
+            if (!snapshotIds.contains(id)) out.add(turnLogSummary(id, workspaceId));
+        }
+        out.sort(Comparator.comparing(SessionSummary::createdAt).reversed()
+                .thenComparing(SessionSummary::sessionId, Comparator.reverseOrder()));
+        return List.copyOf(out);
+    }
+
+    private static boolean belongsTo(String sessionId, String workspaceId) {
+        return sessionId.equals(workspaceId) || sessionId.startsWith(workspaceId + "-");
+    }
+
+    /** Tolerant snapshot read: unparseable metadata lists as EPOCH, never throws. */
+    private SessionSummary snapshotSummary(String sessionId, String workspaceId, boolean hasTurnLog) {
+        Instant created = Instant.EPOCH;
+        int turnCount = 0;
+        String model = "";
+        try {
+            Map<String, Object> root = MAPPER.readValue(
+                    Files.readString(fileFor(sessionId)), new TypeReference<>() {});
+            created = parseInstantOrEpoch(root.get("createdAt"));
+            turnCount = intVal(root, "turnCount");
+            model = str(root, "model");
+        } catch (Exception e) {
+            LOG.warn("Listing session {} without metadata: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
+        }
+        return new SessionSummary(sessionId, created, turnCount, model,
+                true, hasTurnLog, sessionId.equals(workspaceId));
+    }
+
+    /** Orphan crash log (no snapshot): synthesize createdAt/turnCount from the rows. */
+    private SessionSummary turnLogSummary(String sessionId, String workspaceId) {
+        List<TurnRecord> turns = loadTurns(sessionId);
+        Instant created = turns.stream()
+                .map(TurnRecord::timestamp)
+                .filter(java.util.Objects::nonNull)
+                .min(Comparator.naturalOrder())
+                .orElse(Instant.EPOCH);
+        return new SessionSummary(sessionId, created, turns.size(), "",
+                false, true, sessionId.equals(workspaceId));
+    }
+
+    private static Instant parseInstantOrEpoch(Object v) {
+        try { return Instant.parse(String.valueOf(v)); }
+        catch (Exception e) { return Instant.EPOCH; }
     }
 
     /** The directory where session files are stored. */
@@ -606,13 +703,15 @@ public final class JsonSessionStore implements SessionStore {
 
     // ── Internal ──────────────────────────────────────────────────────
 
+    private static final String TURNS_SUFFIX = ".turns.jsonl";
+
     private Path fileFor(String sessionId) {
         return sessionsDir.resolve(sessionId + ".json");
     }
 
     /** Companion JSONL file for per-turn append-only durability. */
     private Path turnsFileFor(String sessionId) {
-        return sessionsDir.resolve(sessionId + ".turns.jsonl");
+        return sessionsDir.resolve(sessionId + TURNS_SUFFIX);
     }
 
     private Path traceDirFor(String sessionId) {

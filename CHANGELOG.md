@@ -120,6 +120,24 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T799] One workspace can now hold many sessions. Each REPL run
+  persists under its own session instance id
+  (`<workspace-hash>-<UTC timestamp>`) instead of overwriting the
+  workspace's single bare-hash file: the close snapshot, the per-turn
+  crash log, and turn traces all key on the instance id, and `/last`
+  reads the active session's log through an injected id rather than
+  re-deriving the workspace hash (which would have silently read the
+  wrong log). Startup auto-restore and the "saved session found" notice
+  pick the NEWEST stored session across legacy and instance files —
+  legacy bare-hash files remain loadable and win when they are all that
+  exists. Empty sessions (no turns, no sketch, no active task context)
+  are no longer saved on close, so quitting an idle REPL leaves no
+  file behind. `SessionStore` gains `listSessions(workspaceId)`
+  (newest-first summaries covering snapshots, crash logs, and corrupt
+  files, which list with epoch timestamps instead of hiding). The
+  workspace hash itself is unchanged and still keys checkpoints and
+  trace metadata. `/session list`/`resume` arrive in T800; until then
+  `/session save`/`load` keep operating on the legacy bare-hash file.
 - [T798] Core context-meter and manual-compaction machinery (consumed by
   the `/context`, `/compact`, and compaction-notice tickets):
   `ConversationManager.meter(assistMode)` snapshots history-token

@@ -38,9 +38,26 @@ public final class ExplainLastTurnCommand implements Command {
             SessionStore store,
             java.time.Instant activeSessionStartedAt
     ) {
+        this(workspace, store, activeSessionStartedAt, null);
+    }
+
+    /**
+     * T799: the active session id is injected by the composition root.
+     * Re-deriving the workspace hash here would silently read the wrong
+     * (legacy) log once sessions moved to per-run instance ids. The
+     * hash-derived fallback remains for legacy callers and tests.
+     */
+    public ExplainLastTurnCommand(
+            Path workspace,
+            SessionStore store,
+            java.time.Instant activeSessionStartedAt,
+            String sessionId
+    ) {
         this.workspace = workspace == null ? Path.of(".") : workspace;
         this.store = store;
-        this.sessionId = JsonSessionStore.sessionIdFor(this.workspace);
+        this.sessionId = sessionId == null || sessionId.isBlank()
+                ? JsonSessionStore.sessionIdFor(this.workspace)
+                : sessionId;
         this.activeSessionStartedAt = activeSessionStartedAt;
     }
 

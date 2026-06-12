@@ -203,12 +203,77 @@ class TalosBootstrapReconcileTest {
 
             router.getRuntimeSession().close();
 
+            // T799: the close snapshot lands under this run's instance id,
+            // not the legacy bare workspace hash.
             JsonSessionStore store = new JsonSessionStore(home.resolve(".talos").resolve("sessions"));
-            SessionData saved = store.load(JsonSessionStore.sessionIdFor(workspace)).orElseThrow();
+            String workspaceId = JsonSessionStore.sessionIdFor(workspace);
+            var sessions = store.listSessions(workspaceId);
+            assertEquals(1, sessions.size());
+            assertTrue(sessions.get(0).sessionId().startsWith(workspaceId + "-"),
+                    "close save uses a per-run instance id");
+            SessionData saved = store.load(sessions.get(0).sessionId()).orElseThrow();
             assertEquals(ActiveTaskContext.State.ACTIVE, saved.activeTaskContext().state());
             assertEquals(List.of("README.md"), saved.activeTaskContext().targets());
             assertEquals(ArtifactGoal.ArtifactKind.README, saved.artifactGoal().artifactKind());
         });
+    }
+
+    /**
+     * T799: an empty session (no turns, no sketch, no active task context)
+     * is not worth a file. Before this, every REPL start-and-quit overwrote
+     * the workspace's single session file with an empty snapshot; with
+     * per-run instance ids it would instead litter one file per launch.
+     */
+    @Test
+    void closeSaveSkipsEmptySession(@TempDir Path home) throws Exception {
+        Path workspace = home.resolve("workspace");
+        java.nio.file.Files.createDirectories(workspace);
+
+        withUserHome(home, () -> {
+            ReplRouter router = TalosBootstrap.create(
+                    sessionState(),
+                    configWithSessionPolicy(true, false),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()),
+                    workspace);
+
+            router.getRuntimeSession().close();
+
+            JsonSessionStore store = new JsonSessionStore(home.resolve(".talos").resolve("sessions"));
+            assertTrue(store.listSessions(JsonSessionStore.sessionIdFor(workspace)).isEmpty(),
+                    "an empty session must not be saved on close");
+        });
+    }
+
+    @Test
+    void latestSessionIdPicksNewestAcrossLegacyAndInstanceFiles(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        Path workspace = dir.resolve("ws");
+        String workspaceId = JsonSessionStore.sessionIdFor(workspace);
+        String instance = JsonSessionStore.newSessionInstanceId(
+                workspace, Instant.parse("2026-06-11T10:00:00Z"));
+
+        store.save(new SessionData(workspaceId, "/ws", "", 1, Instant.parse("2026-06-09T10:00:00Z"),
+                List.of(new SessionData.Turn("user", "old-u", ""),
+                        new SessionData.Turn("assistant", "old-a", "ok"))));
+        store.save(new SessionData(instance, "/ws", "", 1, Instant.parse("2026-06-11T10:00:00Z"),
+                List.of(new SessionData.Turn("user", "new-u", ""),
+                        new SessionData.Turn("assistant", "new-a", "ok"))));
+
+        assertEquals(instance, TalosBootstrap.latestSessionId(store, workspaceId));
+
+        // Auto-restore through the latest id replays the newest session only.
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.restoreSavedSession(store,
+                TalosBootstrap.latestSessionId(store, workspaceId), mem, cm(mem));
+        assertTrue(mem.get().contains("new-a"));
+        assertFalse(mem.get().contains("old-a"));
+    }
+
+    @Test
+    void latestSessionIdFallsBackToLegacyIdWhenNothingIsStored(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        assertEquals("ws-hash", TalosBootstrap.latestSessionId(store, "ws-hash"),
+                "empty store keeps the pre-T799 bare-hash lookup");
     }
 
     @Test

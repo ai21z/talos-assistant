@@ -191,6 +191,10 @@ public final class TurnProcessor {
         TurnUserRequestCapture.set(userInput);
         TurnAuditCapture.begin();
         String traceId = LocalTurnTraceCapture.newTraceId();
+        // Deliberately the bare workspace hash, NOT the per-run session
+        // instance id (T799): this value only identifies the workspace
+        // inside trace metadata. The storage key for turn logs and trace
+        // files is owned by JsonTurnLogAppender's injected id.
         String sessionId = JsonSessionStore.sessionIdFor(session.workspace());
         String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
         LocalTurnTraceCapture.begin(

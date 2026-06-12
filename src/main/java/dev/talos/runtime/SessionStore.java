@@ -66,4 +66,15 @@ public interface SessionStore {
     default Optional<LocalTurnTrace> loadLatestTrace(String sessionId) {
         return Optional.empty();
     }
+
+    /**
+     * List stored sessions for a workspace, newest first. Covers the
+     * legacy bare-hash file, instance files
+     * ({@code <ws-hash>-<UTC timestamp>}), and orphan per-turn crash
+     * logs that never got a snapshot. Default implementation returns
+     * empty.
+     */
+    default List<SessionSummary> listSessions(String workspaceId) {
+        return List.of();
+    }
 }
