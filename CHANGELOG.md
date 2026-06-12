@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-06-12
+
 ### Changed
 - [T788] The workspace `.talos` directory is now a protected CONTROL
   path (like `.git` and `.github/workflows`): it will hold
