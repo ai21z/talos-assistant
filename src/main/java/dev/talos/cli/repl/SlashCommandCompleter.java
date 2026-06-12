@@ -29,6 +29,7 @@ import java.util.Objects;
 public final class SlashCommandCompleter implements Completer {
 
     private final CommandRegistry registry;
+    private final WorkspaceCommandTemplates templates;
 
     /**
      * Create a completer backed by the given command registry.
@@ -36,7 +37,13 @@ public final class SlashCommandCompleter implements Completer {
      * @param registry the registry containing all registered slash commands
      */
     public SlashCommandCompleter(CommandRegistry registry) {
+        this(registry, null);
+    }
+
+    /** T806: workspace template commands complete beside the built-ins. */
+    public SlashCommandCompleter(CommandRegistry registry, WorkspaceCommandTemplates templates) {
         this.registry = Objects.requireNonNull(registry, "registry");
+        this.templates = templates == null ? WorkspaceCommandTemplates.none() : templates;
     }
 
     @Override
@@ -69,6 +76,19 @@ public final class SlashCommandCompleter implements Completer {
                         }
                     }
                 }
+            }
+        }
+
+        for (String name : templates.names()) {
+            if (name.startsWith(prefix)) {
+                candidates.add(new Candidate(
+                        "/" + name,
+                        "/" + name,
+                        "Workspace",
+                        "workspace template (.talos/commands/" + name + ".md)",
+                        null,
+                        null,
+                        true));
             }
         }
     }

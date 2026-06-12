@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
  */
 public final class HelpCommand implements Command {
     private final CommandRegistry reg;
+    private final dev.talos.cli.repl.WorkspaceCommandTemplates templates;
 
     /** Visual width of group header rules. */
     private static final int RULE_WIDTH = 46;
@@ -31,7 +32,17 @@ public final class HelpCommand implements Command {
             CommandGroup.DEBUG
     );
 
-    public HelpCommand(CommandRegistry reg) { this.reg = reg; }
+    public HelpCommand(CommandRegistry reg) {
+        this(reg, null);
+    }
+
+    /** T806: the workspace template catalog feeds the "/help all" section. */
+    public HelpCommand(CommandRegistry reg, dev.talos.cli.repl.WorkspaceCommandTemplates templates) {
+        this.reg = reg;
+        this.templates = templates == null
+                ? dev.talos.cli.repl.WorkspaceCommandTemplates.none()
+                : templates;
+    }
 
     @Override public CommandSpec spec() {
         return new CommandSpec("help", List.of("h", "?"), "/help [all|debug|security|rag|cmd]",
@@ -145,6 +156,25 @@ public final class HelpCommand implements Command {
                   .append('\n');
             }
             sb.append('\n');
+        }
+
+        // ── workspace template commands (T806) ─────────────────────────
+        if (!templates.isEmpty()) {
+            sb.append("  ")
+              .append(AnsiColor.violet("Workspace commands"))
+              .append(' ')
+              .append(AnsiColor.dim(rule("Workspace commands".length())))
+              .append('\n');
+            for (String name : templates.names()) {
+                sb.append("    ")
+                  .append(AnsiColor.blue(pad("/" + name + " [args]", USAGE_COL)))
+                  .append(AnsiColor.grey(".talos/commands/" + name + ".md"))
+                  .append('\n');
+            }
+            sb.append("    ")
+              .append(AnsiColor.grey("Workspace templates run as typed prompts; restart to reload."))
+              .append('\n')
+              .append('\n');
         }
 
         // ── footer ─────────────────────────────────────────────────────

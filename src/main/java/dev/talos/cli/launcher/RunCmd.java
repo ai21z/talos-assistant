@@ -127,7 +127,7 @@ public class RunCmd implements Runnable, SessionState {
             // Now that the router (and its command registry) exist, activate
             // slash completion on the same LineReader used by approval prompts.
             // Scripted stdin has no completer and no competing reader.
-            completerRef.set(new SlashCommandCompleter(router.getRegistry()));
+            completerRef.set(new SlashCommandCompleter(router.getRegistry(), router.getTemplates()));
 
             // Show banner unless --no-logo
             String activeMode = router.getModes().getActiveName();

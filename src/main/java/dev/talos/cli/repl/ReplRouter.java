@@ -34,6 +34,7 @@ public final class ReplRouter {
     private final RenderEngine render;
     private final CommandRegistry registry;
     private final Path workspace;
+    private final WorkspaceCommandTemplates templates;
     private final LineClassifier classifier = new LineClassifier();
     private final ExecutionPipeline pipe = new ExecutionPipeline();
     private final AtomicBoolean quit;
@@ -46,7 +47,8 @@ public final class ReplRouter {
      */
     ReplRouter(ModeController modes, TurnProcessor turnProcessor, Session runtimeSession,
                Context ctx, RenderEngine render, CommandRegistry registry,
-               Path workspace, AtomicBoolean quit, String startupNotice) {
+               Path workspace, AtomicBoolean quit, String startupNotice,
+               WorkspaceCommandTemplates templates) {
         this.modes          = modes;
         this.turnProcessor  = turnProcessor;
         this.runtimeSession = runtimeSession;
@@ -56,6 +58,7 @@ public final class ReplRouter {
         this.workspace      = workspace == null ? Path.of(".") : workspace;
         this.quit           = quit;
         this.startupNotice  = startupNotice == null ? "" : startupNotice;
+        this.templates      = templates == null ? WorkspaceCommandTemplates.none() : templates;
     }
 
     /**
@@ -92,6 +95,7 @@ public final class ReplRouter {
         this.workspace      = wired.workspace;
         this.quit           = wired.quit;
         this.startupNotice  = wired.startupNotice;
+        this.templates      = wired.templates;
     }
 
     // ── Dispatch ─────────────────────────────────────────────────────────
@@ -101,7 +105,16 @@ public final class ReplRouter {
         LineClassifier.Classified c = classifier.classify(line);
         if (c.type() != LineClassifier.LineType.COMMAND) return false;
         String name = c.commandName();
-        if (!registry.has(name)) return false;
+        if (!registry.has(name)) {
+            // T806: registry miss → workspace template commands. Built-ins
+            // always win (collisions were dropped at load). The expansion
+            // runs the UNMODIFIED prompt pipeline directly — single-level,
+            // never re-classified, exactly typed-input capability.
+            String expansion = templates.expand(name, c.argsText());
+            if (expansion == null) return false;
+            processPrompt(expansion);
+            return true;
+        }
 
         Result r = pipe.run(() ->
                         registry.execute(name, c.argsText(), ctx),
@@ -117,7 +130,15 @@ public final class ReplRouter {
     public boolean tryHandlePrompt(String rawLine) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
+        processPrompt(rawLine);
+        return true;
+    }
 
+    /**
+     * The prompt pipeline body, shared by classified prompts and T806
+     * template expansions (which bypass classification by design).
+     */
+    private void processPrompt(String rawLine) {
         // Show routing indicator in auto mode (dimmed, one line)
         if ("auto".equals(modes.getActiveName())) {
             PromptClassifier.Route preview = PromptClassifier.route(rawLine, modes.lastRoute(),
@@ -181,8 +202,6 @@ public final class ReplRouter {
                         compaction.summarizedPairs(), compaction.keptPairs());
             }
         }
-
-        return true;
     }
 
     // ── Accessors ────────────────────────────────────────────────────────
@@ -191,6 +210,7 @@ public final class ReplRouter {
     public ModeController getModes()     { return modes; }
     public Session getRuntimeSession()   { return runtimeSession; }
     public CommandRegistry getRegistry() { return registry; }
+    public WorkspaceCommandTemplates getTemplates() { return templates; }
     public String getStartupNotice()     { return startupNotice; }
 
     /** Stops any spinner and closes the JLine status region (T779). */

@@ -250,6 +250,40 @@ class TalosBootstrapTest {
         assertFalse(router.tryHandle("hello world"));
     }
 
+    /**
+     * T806: a registry miss now consults workspace templates before giving
+     * up. The expansion runs the unmodified prompt pipeline (placeholder
+     * transport under the temp home keeps this hermetic); unknown commands
+     * with no matching template keep the pinned pre-T806 behavior.
+     */
+    @Test
+    void workspaceTemplateDispatchesThroughThePromptPipeline(@TempDir Path home) throws Exception {
+        Path workspace = home.resolve("workspace");
+        Path commands = workspace.resolve(".talos").resolve("commands");
+        java.nio.file.Files.createDirectories(commands);
+        java.nio.file.Files.writeString(commands.resolve("hello.md"),
+                "Say hello politely.\n\n$ARGS\n");
+
+        withUserHome(home, () -> {
+            SessionState session = new SessionState() {
+                private int k = 6; private boolean dbg;
+                public int getK() { return k; } public void setK(int v) { k = v; }
+                public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
+            };
+            ReplRouter router = TalosBootstrap.create(session,
+                    configWithSessionPolicy(false, false),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()), workspace);
+
+            assertTrue(router.getTemplates().has("hello"));
+            assertTrue(router.tryHandle("/hello to the new user"),
+                    "template miss-path dispatch must handle the line");
+            assertFalse(router.tryHandle("/nonexistent"),
+                    "unknown commands without a template stay unhandled (pre-T806 pin)");
+            assertFalse(router.getRegistry().has("hello"),
+                    "templates are a separate catalog, never registry entries");
+        });
+    }
+
     @Test
     void quitCommandDoesNotRenderInternalToken() {
         SessionState session = new SessionState() {

@@ -387,6 +387,14 @@ public final class TalosBootstrap {
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
                 sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth,
                 sessionId, assistModeCompaction);
+        // T806: workspace template commands load AFTER registration so the
+        // collision guard sees every built-in name and alias (builtin-wins;
+        // a workspace help.md can never shadow /help). The templates-aware
+        // HelpCommand then deliberately overwrites the plain one registered
+        // above — same spec, richer dependencies.
+        WorkspaceCommandTemplates templates =
+                WorkspaceCommandTemplates.load(workspace, registry.names());
+        registry.register(new HelpCommand(registry, templates));
 
         // ── Assemble router ──────────────────────────────────────────────
         String sessionNotice = restoreSummary.hasSavedSession()
@@ -398,7 +406,7 @@ public final class TalosBootstrap {
                 buildSensitiveWorkspaceNotice(workspace),
                 buildWorkspaceProfilesNotice(workspaceProfilesLoaded));
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
-                              registry, workspace, quit, startupNotice);
+                              registry, workspace, quit, startupNotice, templates);
     }
 
     /**

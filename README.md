@@ -439,6 +439,7 @@ Run the approved Gradle test command profile.
 | `/session resume [id]` | restore a previous session (latest by default) |
 | `/session export [id]` | export a session transcript to `~/.talos/exports/` |
 | `/clear` | clear conversation memory |
+| `/<template>` | workspace template commands from `.talos/commands/*.md` (`$ARGS` substitution; restart to reload) |
 | `/q` | exit |
 
 ## The Talos Work Cycle
