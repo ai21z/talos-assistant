@@ -101,6 +101,54 @@ class CheckpointCommandTest {
                 "newest (by createdAt) must list first regardless of id order:\n" + text);
     }
 
+    /** T794: timeline columns rendered deterministically with a fixed zone. */
+    @Test
+    void timelineRendersTimeTurnTriggerAndSize() {
+        var summary = new dev.talos.runtime.checkpoint.CheckpointSummary(
+                "chk-abc", java.time.Instant.parse("2026-06-12T10:30:00Z"), 7,
+                "talos.write_file app.js", 2, 2048, "CREATED");
+
+        String text = CheckpointCommand.renderTimeline(
+                java.util.List.of(summary), java.time.ZoneId.of("UTC"));
+
+        assertTrue(text.startsWith("Checkpoints (newest first):"), text);
+        assertTrue(text.contains(
+                "chk-abc | 2026-06-12 10:30 | turn 7 | talos.write_file app.js | 2 file(s), 2.0 KiB"),
+                text);
+        assertTrue(text.contains("/undo to restore the newest"), text);
+    }
+
+    /** T794: show renders per-file stats, restore diffs, and delete warnings. */
+    @Test
+    void showRendersRestoreDiffAndDeleteAnnotations(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("index.html"), "before");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        // Captures "before" for index.html AND records new.txt as absent.
+        String withFile = service.captureBeforeMutation(workspace, config(),
+                new ToolCall("talos.write_file", Map.of("path", "index.html", "content", "after")),
+                "trc", 1).checkpointId();
+        String withAbsent = service.captureBeforeMutation(workspace, config(),
+                new ToolCall("talos.write_file", Map.of("path", "new.txt", "content", "x")),
+                "trc", 2).checkpointId();
+        Files.writeString(workspace.resolve("index.html"), "after");
+        CheckpointCommand command = new CheckpointCommand(workspace, service);
+
+        String shown = ((Result.Info) command.execute("show " + withFile, contextDenied())).text;
+        assertTrue(shown.contains("index.html"), shown);
+        assertTrue(shown.contains("restore diff (+1 -1):"), shown);
+        assertTrue(shown.contains("-after"), shown);
+        assertTrue(shown.contains("+before"), shown);
+
+        String shownAbsent = ((Result.Info) command.execute("show " + withAbsent, contextDenied())).text;
+        assertTrue(shownAbsent.contains("new.txt  (did not exist at capture - restore DELETES it)"),
+                shownAbsent);
+
+        assertInstanceOf(Result.Error.class, command.execute("show chk-missing", contextDenied()));
+    }
+
     private static void setCreatedAt(Path storeRoot, Path workspace,
                                      String checkpointId, String instant) throws Exception {
         String workspaceId = dev.talos.runtime.JsonSessionStore
