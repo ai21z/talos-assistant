@@ -433,6 +433,8 @@ Run the approved Gradle test command profile.
 | `/privacy private on` | enable stricter private-mode defaults for this current session/config state |
 | `/privacy private off` | restore developer/default privacy behavior explicitly |
 | `/session info` | inspect current session state |
+| `/session list` | list this workspace's saved sessions |
+| `/session resume [id]` | restore a previous session (latest by default) |
 | `/clear` | clear conversation memory |
 | `/q` | exit |
 
