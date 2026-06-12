@@ -45,6 +45,20 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Added
+- [T790] Trusted workspace profiles are now invocable through
+  `talos.run_command` as `ws:<id>`: one merged `CommandProfileRegistry`
+  (built at session start) is threaded through the planner, the tool,
+  and the turn processor, replacing three hardcoded default-registry
+  call sites. Declared profiles register ONLY when the declaration is
+  content-hash trusted; an untrusted, changed, invalid, or undeclared
+  state is rejected at plan time with an instructive message (review
+  with `/profiles trust`) — before any approval prompt is spent, which
+  is the chain's proof obligation. Workspace profiles accept no caller
+  arguments (declared fixed argv only), keep the per-run approval and
+  BUILD_OR_TEST risk gates, and render through the same approval-detail
+  format (the gradle byte-pins are unchanged). An invalid declaration
+  prints one visible startup notice; the tool descriptor now mentions
+  workspace profiles to the model.
 - [T789] Workspace verification-profile declaration model (inert until
   T790 registers it): `<workspace>/.talos/profiles.yaml` declares up to 8
   fixed-argv command profiles (id, executable, args, timeout_ms,

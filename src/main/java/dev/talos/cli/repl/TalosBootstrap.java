@@ -44,7 +44,12 @@ import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.runtime.command.CommandProfileRegistry;
+import dev.talos.runtime.command.ProcessCommandRunner;
 import dev.talos.runtime.command.RunCommandTool;
+import dev.talos.runtime.command.WorkspaceCommandProfiles;
+import dev.talos.runtime.command.WorkspaceCommandProfilesLoader;
+import dev.talos.runtime.command.WorkspaceProfileTrustStore;
 import org.jline.reader.LineReader;
 
 import java.io.PrintStream;
@@ -144,6 +149,17 @@ public final class TalosBootstrap {
         llm.setCancelSupplier(cancelFlag::get);
         llm.setCancelResetHook(() -> cancelFlag.set(false));
 
+        // ── Workspace verification profiles (T789/T790) ─────────────────
+        // Loaded once at startup; ws: profiles register ONLY when the
+        // declaration is content-hash TRUSTED. Untrusted/invalid states are
+        // carried for instructive plan-time rejections — they never reach
+        // an approval prompt.
+        var workspaceProfilesLoaded = WorkspaceCommandProfilesLoader.load(workspace);
+        var profileTrustStore = new WorkspaceProfileTrustStore();
+        var profileTrustState = profileTrustStore.state(workspace, workspaceProfilesLoaded);
+        CommandProfileRegistry commandProfiles = CommandProfileRegistry.defaultRegistry()
+                .withWorkspaceDeclaration(workspaceProfilesLoaded.profiles(), profileTrustState);
+
         // ── Tools ────────────────────────────────────────────────────────
         FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry toolRegistry = new ToolRegistry();
@@ -156,7 +172,7 @@ public final class TalosBootstrap {
         toolRegistry.register(new CopyPathTool());
         toolRegistry.register(new RenamePathTool());
         toolRegistry.register(new DeletePathTool());
-        toolRegistry.register(new RunCommandTool());
+        toolRegistry.register(new RunCommandTool(commandProfiles, new ProcessCommandRunner()));
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new ListDirTool());
         toolRegistry.register(new RetrieveTool(rag));
@@ -248,7 +264,8 @@ public final class TalosBootstrap {
                 new dev.talos.runtime.SessionApprovalPolicy();
         CheckpointService checkpointService = new CheckpointService();
         TurnProcessor  turnProcessor  = new TurnProcessor(
-                modes, approvalGate, toolRegistry, approvalPolicy, checkpointService);
+                modes, approvalGate, toolRegistry, approvalPolicy, checkpointService,
+                commandProfiles);
 
         // Tool progress sink: renders lightweight status lines via RenderEngine.
         // Connected before ToolCallLoop so progress events flow during tool execution.
@@ -360,7 +377,8 @@ public final class TalosBootstrap {
         String startupNotice = joinStartupNotices(
                 buildConfigNotice(cfg.getReport()),
                 sessionNotice,
-                buildSensitiveWorkspaceNotice(workspace));
+                buildSensitiveWorkspaceNotice(workspace),
+                buildWorkspaceProfilesNotice(workspaceProfilesLoaded));
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
                               registry, workspace, quit, startupNotice);
     }
@@ -442,6 +460,17 @@ public final class TalosBootstrap {
     private static String buildSensitiveWorkspaceNotice(Path workspace) {
         var assessment = SensitiveWorkspaceDetector.assess(workspace);
         return assessment.sensitive() ? assessment.warning() : "";
+    }
+
+    /** T790: an invalid declaration registers nothing — say so once, visibly. */
+    private static String buildWorkspaceProfilesNotice(
+            WorkspaceCommandProfilesLoader.Loaded loaded) {
+        WorkspaceCommandProfiles profiles = loaded == null
+                ? WorkspaceCommandProfiles.none()
+                : loaded.profiles();
+        if (!profiles.declared() || profiles.valid()) return "";
+        return "Workspace verification profiles were not loaded (.talos/profiles.yaml): "
+                + profiles.rejectionReason();
     }
 
     // ── Session reconciliation helpers ──────────────────────────────────

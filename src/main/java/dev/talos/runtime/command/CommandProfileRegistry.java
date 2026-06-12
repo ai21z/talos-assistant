@@ -3,6 +3,7 @@ package dev.talos.runtime.command;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -10,8 +11,18 @@ import java.util.Set;
 /** Registry of supported non-shell command profiles. Does not execute commands. */
 public final class CommandProfileRegistry {
     private final Map<String, CommandProfile> profiles;
+    private final WorkspaceProfileTrustStore.TrustState workspaceTrustState;
+    private final String workspaceRejectionReason;
+    private final Set<String> workspaceProfileIds;
 
     public CommandProfileRegistry(List<CommandProfile> profiles) {
+        this(profiles, WorkspaceProfileTrustStore.TrustState.NONE_DECLARED, "", Set.of());
+    }
+
+    private CommandProfileRegistry(List<CommandProfile> profiles,
+                                   WorkspaceProfileTrustStore.TrustState workspaceTrustState,
+                                   String workspaceRejectionReason,
+                                   Set<String> workspaceProfileIds) {
         Map<String, CommandProfile> out = new LinkedHashMap<>();
         if (profiles != null) {
             for (CommandProfile profile : profiles) {
@@ -21,6 +32,64 @@ public final class CommandProfileRegistry {
             }
         }
         this.profiles = Map.copyOf(out);
+        this.workspaceTrustState = workspaceTrustState == null
+                ? WorkspaceProfileTrustStore.TrustState.NONE_DECLARED
+                : workspaceTrustState;
+        this.workspaceRejectionReason = workspaceRejectionReason == null ? "" : workspaceRejectionReason;
+        this.workspaceProfileIds = Set.copyOf(workspaceProfileIds == null ? Set.of() : workspaceProfileIds);
+    }
+
+    /**
+     * Merge a workspace declaration into this registry (T790). Declared
+     * profiles register ONLY when the trust state is {@code TRUSTED} — an
+     * untrusted, changed, or invalid declaration leaves the registry's
+     * runnable surface unchanged and only records the state for instructive
+     * plan-time rejections. Built-ins win on id collision, which the
+     * {@code ws:} namespace makes structurally impossible (built-in ids
+     * carry no colon) — asserted anyway.
+     */
+    public CommandProfileRegistry withWorkspaceDeclaration(
+            WorkspaceCommandProfiles declaration,
+            WorkspaceProfileTrustStore.TrustState state) {
+        WorkspaceCommandProfiles safe = declaration == null
+                ? WorkspaceCommandProfiles.none()
+                : declaration;
+        WorkspaceProfileTrustStore.TrustState effectiveState = state == null
+                ? WorkspaceProfileTrustStore.TrustState.NONE_DECLARED
+                : state;
+        if (effectiveState != WorkspaceProfileTrustStore.TrustState.TRUSTED || !safe.valid()) {
+            return new CommandProfileRegistry(
+                    new ArrayList<>(profiles.values()),
+                    effectiveState,
+                    safe.rejectionReason(),
+                    Set.of());
+        }
+        List<CommandProfile> merged = new ArrayList<>(profiles.values());
+        Set<String> declaredIds = new LinkedHashSet<>();
+        for (CommandProfile profile : safe.profiles()) {
+            if (profiles.containsKey(profile.id())) {
+                throw new IllegalStateException(
+                        "workspace profile id collides with a built-in: " + profile.id());
+            }
+            merged.add(profile);
+            declaredIds.add(profile.id());
+        }
+        return new CommandProfileRegistry(merged, effectiveState, "", declaredIds);
+    }
+
+    /** Trust state of the workspace declaration this registry was built with. */
+    public WorkspaceProfileTrustStore.TrustState workspaceTrustState() {
+        return workspaceTrustState;
+    }
+
+    /** Why an invalid declaration registered nothing (blank otherwise). */
+    public String workspaceRejectionReason() {
+        return workspaceRejectionReason;
+    }
+
+    /** The ws:-prefixed ids that actually registered (empty unless TRUSTED). */
+    public Set<String> workspaceProfileIds() {
+        return workspaceProfileIds;
     }
 
     public static CommandProfileRegistry defaultRegistry() {
