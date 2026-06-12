@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+- [T784] New `talos doctor` subcommand: a fast environment preflight that
+  verifies the config loads (and the user config parses), the engine
+  backend resolves and a model is configured, the managed llama.cpp server
+  binary and GGUF model file exist (reusing the engine's own pre-launch
+  validation through a new public `LlamaCppPreflight` facade — one source
+  of truth, the manager now delegates), the server responds (a managed
+  server that simply is not running is honestly a WARN, since Talos starts
+  it automatically on first prompt; unreachable connect-only servers FAIL),
+  and the index/home directories are writable. Exit code 0 only when no
+  check fails. `--start` opt-in additionally starts the managed server and
+  runs a one-word chat inside try-with-resources, so the model is always
+  released again; doctor never loads a model otherwise. Output is plain
+  ASCII one-line-per-probe (`PASS/WARN/FAIL/SKIP`) with fix hints on
+  failures. Unlike `talos diagnose` (a retrieval/answer deep dive), doctor
+  is side-effect-light and finishes in seconds.
+
 ### Fixed
 - [T783] `talos.delete_path` is now documented in the README tool table —
   it was registered and approval-gated since its introduction but missing
