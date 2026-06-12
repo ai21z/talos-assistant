@@ -15,6 +15,20 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ProtectedPathTokensTest {
 
+    // ── T787 pin: the workspace .talos directory is NOT protected yet ──
+    // The wave-4 verification-profile declaration will live at
+    // <workspace>/.talos/profiles.yaml; today the model could write it with
+    // one ordinary write approval. T788 flips these to "CONTROL" (and bumps
+    // POLICY_VERSION) — this pin documents the gap being closed.
+
+    @Test
+    void workspaceTalosDirIsNotProtectedYet_T788ClosesThisGap() {
+        assertEquals("", ProtectedPathTokens.protectedKind(".talos"));
+        assertEquals("", ProtectedPathTokens.protectedKind(".talos/profiles.yaml"));
+        assertEquals("", ProtectedPathTokens.protectedKind(".talos/commands/review.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("sub/.talos/profiles.yaml"));
+    }
+
     // ── exact-rule families: identical before and after T759 ───────────
 
     @Test

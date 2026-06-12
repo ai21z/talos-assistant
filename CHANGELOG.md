@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- [T787] Characterization pins ahead of the wave-4 trust work (tests
+  only, no behavior change): the not-yet-protected `.talos` workspace
+  directory, the gradle `run_command` approval-detail bytes, the `/status`
+  dashboard render bytes, `/undo`'s pre-existing approval/protected-path
+  bypass, and the `/checkpoint` list shape (id-sorted, not
+  chronological) plus restore approval bytes — the byte baselines the
+  following tickets are reviewed against.
 - [T785] First run is now an honest preflight: the flow runs the same
   doctor probe set as `talos doctor` (default probes only — it never loads
   a model) and prints per-check PASS/WARN/FAIL/SKIP lines instead of the

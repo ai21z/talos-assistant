@@ -15,6 +15,34 @@ class CliStatusDashboardTest {
     @TempDir
     Path workspace;
 
+    /**
+     * T787 byte pin of the rendered dashboard for a fixed synthetic
+     * snapshot. T791 adds a `verify` row — the diff of this pin must show a
+     * pure row addition (every existing byte unchanged).
+     */
+    @Test
+    void render_byte_pin_for_fixed_snapshot_T791_additivity_baseline() throws Exception {
+        var snapshot = new CliStatusDashboard.Snapshot(
+                "0.0.0-test", "C:/ws/demo", "auto", "model-x",
+                "llama.cpp (managed)", "not indexed", "ask before mutation",
+                "off", "next-hint");
+
+        String output = CliStatusDashboard.render(snapshot, UNICODE_NO_COLOR, 80);
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "┌──────────────────────────────────────────────────────────────────────────────┐\n"
+                + "│ TALOS       v0.0.0-test                                                      │\n"
+                + "│ Workspace   C:/ws/demo                                                       │\n"
+                + "│ Mode        auto                                                             │\n"
+                + "│ Model       model-x                                                          │\n"
+                + "│ Engine      llama.cpp (managed)                                              │\n"
+                + "│ Index       not indexed                                                      │\n"
+                + "├──────────────────────────────────────────────────────────────────────────────┤\n"
+                + "│ Policy  ask before mutation                Debug  off                        │\n"
+                + "└──────────────────────────────────────────────────────────────────────────────┘\n",
+                output);
+    }
+
     @Test
     void render_includes_required_dashboard_rows() {
         String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(
