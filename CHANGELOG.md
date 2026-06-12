@@ -44,6 +44,21 @@
   runner, output stream, and sentinel path — the old test wrote the
   developer's real `~/.talos/first_run_done`).
 
+### Changed (checkpoints)
+- [T793] Checkpoints gained a read model: `listSummaries`/`describe`/
+  `blob` expose createdAt, turn number, a new human `trigger` (the tool
+  and target that caused the capture; pre-T793 checkpoints render
+  "(unknown)" — schemaVersion stays 1), file/byte counts, and manifest
+  entries. `/checkpoint list` (and `listIds`) is now truly
+  newest-first by `createdAt` — it was reverse-lexicographic on random
+  UUIDs, i.e. arbitrary. Restores can now be traced
+  (`CHECKPOINT_RESTORED`/`CHECKPOINT_RESTORE_FAILED`, counts only,
+  best-effort), and a new `captureBeforeRestore` records the CURRENT
+  state of the affected paths under a `restore-safety` backend before a
+  restore overwrites them — the mechanism that makes `/undo` itself
+  undoable in T795. Corrupt or pre-T793 metadata stays listable
+  (tolerant reads).
+
 ### Changed (verification)
 - [T792] A user-approved, successful, verification-class `run_command`
   (gradle_test / gradle_check / gradle_e2e_test, or any trusted `ws:`

@@ -70,34 +70,46 @@ class CheckpointCommandTest {
     }
 
     /**
-     * T787 pin: {@code /checkpoint list} renders ids only, ordered
-     * reverse-lexicographically on random {@code chk-<uuid>} names — i.e.
-     * the order is ARBITRARY, not chronological. T793 deliberately changes
-     * the listing to createdAt-descending with timestamp/trigger detail.
+     * T787 pinned the pre-T793 ordering (reverse-lexicographic on random
+     * UUIDs — arbitrary). T793 deliberately flipped the listing to true
+     * createdAt-descending; this test now pins THAT, with fabricated
+     * timestamps that would invert any id-based ordering.
      */
     @Test
-    void listShapeAndArbitraryOrderingPin(@TempDir Path temp) throws Exception {
+    void listOrdersNewestFirstByCreatedAtSinceT793(@TempDir Path temp) throws Exception {
         Path workspace = temp.resolve("workspace");
         Files.createDirectories(workspace);
         Files.writeString(workspace.resolve("a.txt"), "a");
+        Path storeRoot = temp.resolve("checkpoints");
         CheckpointService service = new CheckpointService(
-                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+                new FileBundleCheckpointStore(storeRoot));
         String first = service.captureBeforeMutation(workspace, config(),
                 new ToolCall("talos.write_file", Map.of("path", "a.txt", "content", "x")),
                 "trc-1", 1).checkpointId();
         String second = service.captureBeforeMutation(workspace, config(),
                 new ToolCall("talos.write_file", Map.of("path", "a.txt", "content", "y")),
                 "trc-2", 2).checkpointId();
+        setCreatedAt(storeRoot, workspace, first, "2026-06-12T10:00:00Z");
+        setCreatedAt(storeRoot, workspace, second, "2026-06-12T09:00:00Z");
         CheckpointCommand command = new CheckpointCommand(workspace, service);
 
         Result result = command.execute("list", contextDenied());
 
         assertInstanceOf(Result.Info.class, result);
-        String expectedNewestByName = first.compareTo(second) > 0 ? first : second;
-        String expectedOldestByName = first.compareTo(second) > 0 ? second : first;
-        assertEquals("Checkpoints:\n  " + expectedNewestByName + "\n  " + expectedOldestByName,
-                ((Result.Info) result).text,
-                "pre-T793 listing is id-sorted (descending), not time-sorted");
+        String text = ((Result.Info) result).text;
+        assertTrue(text.indexOf(first) < text.indexOf(second),
+                "newest (by createdAt) must list first regardless of id order:\n" + text);
+    }
+
+    private static void setCreatedAt(Path storeRoot, Path workspace,
+                                     String checkpointId, String instant) throws Exception {
+        String workspaceId = dev.talos.runtime.JsonSessionStore
+                .sessionIdFor(workspace.toAbsolutePath().normalize());
+        Path file = storeRoot.resolve(workspaceId).resolve("checkpoints")
+                .resolve(checkpointId).resolve("metadata.json");
+        Files.writeString(file, Files.readString(file)
+                .replaceAll("\"createdAt\"\\s*:\\s*\"[^\"]*\"",
+                        "\"createdAt\" : \"" + instant + "\""));
     }
 
     /** T787 pin: the /checkpoint restore approval bytes are frozen this wave. */
