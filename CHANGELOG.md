@@ -45,6 +45,27 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Changed (checkpoints)
+- [T795] `/undo` is re-routed through checkpoints — the headline trust
+  fix of the wave. It now restores the NEWEST checkpoint behind a full
+  approval whose detail shows the capture time, trigger, affected files
+  (with explicit "will be DELETED" warnings for paths that did not
+  exist at capture), and capped redacted diffs; a safety checkpoint of
+  the current state is captured FIRST, so `/undo` is itself undoable
+  (`/undo` twice = redo) and a failed safety capture aborts with zero
+  changes. The previous implementation popped an in-memory per-file
+  stack and wrote files directly — including protected paths like
+  `.env` — with no approval gate, no checkpoint, and no protected-path
+  classification, and its memory vanished at session end. Semantic
+  change to be aware of: undo now operates on the last CHECKPOINTED
+  mutation set (which can span multiple files for batch operations),
+  not the last single write/edit; with checkpointing disabled, `/undo`
+  says so explicitly instead of silently reverting from memory. The
+  "Nothing to undo." empty-state wording is preserved byte-for-byte;
+  restores are traced (`CHECKPOINT_RESTORED`). Checkpoint metadata also
+  gained a monotonic capture `sequence` used as the createdAt tiebreak:
+  two checkpoints captured within the same clock tick (exactly the
+  undo-then-safety pattern) previously fell to a random UUID tiebreak,
+  making "newest" a coin flip.
 - [T794] `/checkpoint list` renders the unified timeline — id, local
   capture time, turn number, trigger, file count, and size, newest
   first — and a new `/checkpoint show <id>` renders per-file stats with

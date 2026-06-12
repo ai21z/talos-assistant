@@ -25,6 +25,16 @@ import java.util.UUID;
 public final class FileBundleCheckpointStore implements CheckpointStore {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    /**
+     * Monotonic capture sequence (T795): two checkpoints captured within the
+     * same clock tick (the undo safety checkpoint follows the original by
+     * milliseconds) would tie on createdAt and fall to a RANDOM UUID
+     * tiebreak — making "newest" a coin flip. The sequence disambiguates
+     * same-instant captures within a session; cross-session ordering stays
+     * on createdAt.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong CAPTURE_SEQUENCE =
+            new java.util.concurrent.atomic.AtomicLong();
     private final Path root;
 
     public FileBundleCheckpointStore(Path root) {
@@ -171,6 +181,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             // readers ignore unknown keys, pre-T793 checkpoints render
             // "(unknown)".
             metadata.put("trigger", trigger == null ? "" : trigger);
+            metadata.put("sequence", CAPTURE_SEQUENCE.incrementAndGet());
             metadata.put("status", "CREATED");
             metadata.put("fileCount", files.size());
             metadata.put("byteCount", byteCount);
@@ -290,17 +301,30 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         String workspaceId = JsonSessionStore.sessionIdFor(workspace.toAbsolutePath().normalize());
         Path dir = root.resolve(workspaceId).resolve("checkpoints");
         if (!Files.isDirectory(dir)) return List.of();
-        List<CheckpointSummary> summaries = new ArrayList<>();
+        record Sortable(CheckpointSummary summary, long sequence) {}
+        List<Sortable> sortable = new ArrayList<>();
         try (var stream = Files.list(dir)) {
             for (Path checkpointDir : stream.filter(Files::isDirectory).toList()) {
-                summaries.add(readSummary(checkpointDir));
+                sortable.add(new Sortable(readSummary(checkpointDir), readSequence(checkpointDir)));
             }
         } catch (IOException e) {
             return List.of();
         }
-        summaries.sort(Comparator.comparing(CheckpointSummary::createdAt).reversed()
-                .thenComparing(CheckpointSummary::id, Comparator.reverseOrder()));
-        return List.copyOf(summaries);
+        sortable.sort(Comparator.comparing((Sortable s) -> s.summary().createdAt()).reversed()
+                .thenComparing(Comparator.comparingLong(Sortable::sequence).reversed())
+                .thenComparing(s -> s.summary().id(), Comparator.reverseOrder()));
+        return sortable.stream().map(Sortable::summary).toList();
+    }
+
+    private static long readSequence(Path checkpointDir) {
+        try {
+            Map<String, Object> metadata = MAPPER.readValue(
+                    Files.readString(checkpointDir.resolve("metadata.json")),
+                    new TypeReference<>() {});
+            return asLong(metadata.getOrDefault("sequence", 0L));
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     @Override
