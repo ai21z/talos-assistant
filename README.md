@@ -263,6 +263,7 @@ Talos has a focused tool set for local workspace work:
 | `copy_path` | copy a file or directory inside the workspace | required |
 | `move_path` | move a file or directory inside the workspace | required |
 | `rename_path` | rename a file or directory inside its parent | required |
+| `delete_path` | delete a file or directory inside the workspace | required |
 | `apply_workspace_batch` | apply a small approved batch of workspace operations | required |
 | `run_command` | run approved bounded command profiles | required |
 
@@ -422,6 +423,8 @@ Run the approved Gradle test command profile.
 | `/workspace` | show current workspace status |
 | `/status` | show runtime and indexing details |
 | `/tools` | show the registered tool set |
+| `/checkpoint` | manage local mutation checkpoints |
+| `/undo` | undo the last file write/edit |
 | `/privacy status` | show privacy mode, protected-read scope, RAG/retrieve, and artifact persistence |
 | `/privacy private on` | enable stricter private-mode defaults for this current session/config state |
 | `/privacy private off` | restore developer/default privacy behavior explicitly |

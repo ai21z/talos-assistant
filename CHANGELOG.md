@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+- [T783] `talos.delete_path` is now documented in the README tool table —
+  it was registered and approval-gated since its introduction but missing
+  from the user-facing table, a claims drift on the most dangerous tool.
+  The `/checkpoint` and `/undo` commands gained their missing README rows
+  (wording taken from their `spec()` summaries so docs and `/help` agree).
+  A new `ReadmeToolTableDriftTest` pins the tool table bidirectionally
+  against the canonical descriptor catalog — names and approval columns
+  both — so a registered tool can never silently vanish from the docs
+  again. Ride-along: `TokenBudgetFromConfigTest` was reading the
+  developer's real `~/.talos/config.yaml` (a machine-local 32k
+  `llm_context_max_tokens` failed its built-in-default assertion); it now
+  removes the machine overlay first, the same hermeticity fix
+  `LlmClientSamplingConfigTest` received at 0.10.3.
+
 ## [0.10.4] - 2026-06-11
 
 ### Changed

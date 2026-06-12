@@ -25,8 +25,13 @@ class TokenBudgetFromConfigTest {
 
     @Test
     void fromConfig_fallsBackToDefault_whenLimitsMissing() {
+        // Hermetic: Config() overlays the developer's real ~/.talos/config.yaml,
+        // which may carry a machine-local limits block (observed: a 32k
+        // llm_context_max_tokens from local model experiments). "Missing"
+        // means "no limits key present", so remove any overlay before
+        // asserting — same pattern as LlmClientSamplingConfigTest.
         Config cfg = new Config();
-        // no "limits" key at all
+        cfg.data.remove("limits");
 
         TokenBudget budget = TokenBudget.fromConfig(cfg);
 
