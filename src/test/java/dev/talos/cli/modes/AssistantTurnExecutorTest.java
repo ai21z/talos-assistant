@@ -371,9 +371,8 @@ class AssistantTurnExecutorTest {
         memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
 
         var registry = new dev.talos.tools.ToolRegistry();
-        var undoStack = new dev.talos.tools.FileUndoStack();
         registry.register(new dev.talos.tools.impl.ReadFileTool());
-        registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+        registry.register(new dev.talos.tools.impl.FileWriteTool());
         var processor = new dev.talos.runtime.TurnProcessor(
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
         var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -558,10 +557,9 @@ class AssistantTurnExecutorTest {
         memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
 
         var registry = new dev.talos.tools.ToolRegistry();
-        var undoStack = new dev.talos.tools.FileUndoStack();
         registry.register(new dev.talos.tools.impl.ReadFileTool());
-        registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
-        registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+        registry.register(new dev.talos.tools.impl.FileWriteTool());
+        registry.register(new dev.talos.tools.impl.FileEditTool());
         var processor = new dev.talos.runtime.TurnProcessor(
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
         var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -685,8 +683,7 @@ class AssistantTurnExecutorTest {
         void explicitMutationNoToolAnswerRetriesAndExecutesWrite(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1139,9 +1136,8 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve(".env"), "SECRET_MARKER=do-not-read");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1192,9 +1188,8 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve(".env"), "SECRET_MARKER=do-not-read");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1247,9 +1242,8 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve("brief.txt"), brief);
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
@@ -1314,9 +1308,8 @@ class AssistantTurnExecutorTest {
                     """);
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1357,9 +1350,8 @@ class AssistantTurnExecutorTest {
                     """);
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
@@ -1422,9 +1414,8 @@ class AssistantTurnExecutorTest {
                     """);
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1458,9 +1449,8 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve("long-notes.txt"), "Grounded source text.");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1506,8 +1496,7 @@ class AssistantTurnExecutorTest {
         void explicitMutationNoToolCapabilityDenialRetriesAndExecutesWrite(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1543,8 +1532,7 @@ class AssistantTurnExecutorTest {
         void explicitMutationRetryStillRefusesReturnsDeterministicNoActionAnswer(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1576,8 +1564,7 @@ class AssistantTurnExecutorTest {
         void postDenialRepairFollowUpNoToolAnswerRetriesAndExecutesPriorWrite(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1620,9 +1607,8 @@ class AssistantTurnExecutorTest {
         void staticVerificationRepairRetryPromptIncludesVerifierFindings(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
-            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1850,8 +1836,7 @@ class AssistantTurnExecutorTest {
         void freshExactWriteSupersedesDisjointExistingStaticRepairContext(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -1936,9 +1921,8 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve("index.html"), "BEFORE");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
-            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -2061,9 +2045,8 @@ class AssistantTurnExecutorTest {
         void naturalRepairFollowUpWithoutCurrentMutationDoesNotSurfaceStaleSuccess(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
-            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -4421,8 +4404,7 @@ class AssistantTurnExecutorTest {
                     """);
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileEditTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -4520,8 +4502,7 @@ class AssistantTurnExecutorTest {
             Files.writeString(script, "console.log('old');");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -4560,8 +4541,7 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -4614,8 +4594,7 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
 
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileEditTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
@@ -5224,8 +5203,7 @@ class AssistantTurnExecutorTest {
                 throws Exception {
             var visibleChunks = new ArrayList<String>();
             var registry = new dev.talos.tools.ToolRegistry();
-            var undoStack = new dev.talos.tools.FileUndoStack();
-            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);

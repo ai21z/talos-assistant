@@ -6,7 +6,6 @@ import dev.talos.runtime.Result;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -577,13 +576,12 @@ class UnifiedAssistantModeTest {
 
     private static Context context(String response, SessionMemory memory) {
         ToolRegistry registry = new ToolRegistry();
-        FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
         registry.register(new ListDirTool());
         registry.register(new GrepTool());
         registry.register(new RetrieveTool(null));
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         return Context.builder(new Config())
                 .memory(memory)
                 .toolRegistry(registry)
@@ -593,13 +591,12 @@ class UnifiedAssistantModeTest {
 
     private static Context contextWithCommandTool(String response) {
         ToolRegistry registry = new ToolRegistry();
-        FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
         registry.register(new ListDirTool());
         registry.register(new GrepTool());
         registry.register(new RetrieveTool(null));
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
                 plan, 0, 1, false, false, "", "", false, false, false, "")));
         return Context.builder(new Config())

@@ -29,7 +29,6 @@ import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.policy.SensitiveWorkspaceDetector;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
@@ -161,11 +160,10 @@ public final class TalosBootstrap {
                 .withWorkspaceDeclaration(workspaceProfilesLoaded.profiles(), profileTrustState);
 
         // ── Tools ────────────────────────────────────────────────────────
-        FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry toolRegistry = new ToolRegistry();
         toolRegistry.register(new ReadFileTool());
-        toolRegistry.register(new FileWriteTool(undoStack));
-        toolRegistry.register(new FileEditTool(undoStack));
+        toolRegistry.register(new FileWriteTool());
+        toolRegistry.register(new FileEditTool());
         toolRegistry.register(new BatchWorkspaceApplyTool());
         toolRegistry.register(new MakeDirectoryTool());
         toolRegistry.register(new MovePathTool());
@@ -367,7 +365,7 @@ public final class TalosBootstrap {
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
-        registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack,
+        registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
                 sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth);
 
         // ── Assemble router ──────────────────────────────────────────────
@@ -406,7 +404,7 @@ public final class TalosBootstrap {
     private static void registerCommands(CommandRegistry registry, SessionState session,
                                           Config cfg, Context ctx, ModeController modes,
                                           Path workspace, AtomicBoolean quit,
-                                          FileUndoStack undoStack, SessionStore sessionStore,
+                                          SessionStore sessionStore,
                                           CheckpointService checkpointService,
                                           java.time.Instant activeSessionStartedAt,
                                           java.util.function.IntSupplier terminalWidth) {

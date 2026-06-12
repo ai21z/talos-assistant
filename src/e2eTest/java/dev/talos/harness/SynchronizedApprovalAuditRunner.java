@@ -29,7 +29,6 @@ import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.CopyPathTool;
@@ -240,11 +239,10 @@ public final class SynchronizedApprovalAuditRunner {
     }
 
     private static ToolRegistry standardToolRegistry(Config cfg) {
-        FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry registry = new ToolRegistry(false);
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());

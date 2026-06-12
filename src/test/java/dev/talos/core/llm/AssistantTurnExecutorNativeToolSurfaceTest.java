@@ -7,7 +7,6 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -164,10 +163,9 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
 
     private static Context context(RecordingResolver resolver) {
         ToolRegistry registry = new ToolRegistry();
-        FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());

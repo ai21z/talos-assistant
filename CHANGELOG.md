@@ -45,6 +45,13 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Changed (checkpoints)
+- [T796] `FileUndoStack` is deleted along with its write/edit tool push
+  sites — its sole functional consumer was the pre-T795 ungated `/undo`,
+  and checkpoints capture a strict superset (every gated mutation
+  including batch/move/delete operations, durable on disk rather than
+  20 in-memory entries lost at session end). One undo system remains:
+  the governed one. The write/edit tools' output bytes are unchanged
+  (the snapshot push was side-effect-only).
 - [T795] `/undo` is re-routed through checkpoints — the headline trust
   fix of the wave. It now restores the NEWEST checkpoint behind a full
   approval whose detail shows the capture time, trigger, affected files

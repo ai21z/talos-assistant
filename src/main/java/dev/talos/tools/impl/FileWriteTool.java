@@ -31,10 +31,7 @@ public final class FileWriteTool implements TalosTool {
     private static final String NAME = "talos.write_file";
     private static final long MAX_CONTENT_SIZE = 1024 * 1024L; // 1 MiB content cap
 
-    private final FileUndoStack undoStack;
-
-    public FileWriteTool() { this(null); }
-    public FileWriteTool(FileUndoStack undoStack) { this.undoStack = undoStack; }
+    public FileWriteTool() { }
 
     @Override public String name() { return NAME; }
     @Override public String description() { return "Create or overwrite a file in the workspace."; }
@@ -120,13 +117,8 @@ public final class FileWriteTool implements TalosTool {
 
             boolean existed = Files.exists(resolved);
 
-            // Snapshot for undo before mutating
-            if (undoStack != null) {
-                String prev = existed ? Files.readString(resolved) : null;
-                undoStack.push(new FileUndoStack.UndoEntry(
-                        resolved, prev, !existed, NAME, Instant.now()));
-            }
-
+            // Undo snapshots moved to the governed checkpoint machinery
+            // (T795/T796) — captured pre-approval by the runtime, not here.
             Files.writeString(resolved, content);
 
             long lines = content.chars().filter(c -> c == '\n').count() + (content.isEmpty() ? 0 : 1);

@@ -715,7 +715,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
 
             final int[] approvalRequests = {0};
             var processor = new TurnProcessor(
@@ -780,7 +780,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
 
             final int[] approvalRequests = {0};
             var processor = new TurnProcessor(
@@ -842,7 +842,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
 
             final int[] approvalRequests = {0};
             var processor = new TurnProcessor(
@@ -912,7 +912,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
 
             final int[] approvalRequests = {0};
             var processor = new TurnProcessor(
@@ -973,7 +973,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
 
             final int[] approvalRequests = {0};
             var processor = new TurnProcessor(
@@ -2734,7 +2734,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
             registry.register(new FileWriteTool());
             var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
             var loop = new ToolCallLoop(processor, 10);
@@ -2822,7 +2822,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
             registry.register(new FileWriteTool());
             var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
             var loop = new ToolCallLoop(processor, 10);
@@ -2916,7 +2916,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
             registry.register(new FileWriteTool());
             var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
             var loop = new ToolCallLoop(processor, 10);
@@ -3751,7 +3751,7 @@ class ToolCallLoopTest {
 
             var registry = new ToolRegistry();
             registry.register(new ReadFileTool());
-            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileEditTool());
             var approvals = new int[]{0};
             var sessionPolicy = new SessionApprovalPolicy();
             var processor = new TurnProcessor(
