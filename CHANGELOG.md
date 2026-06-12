@@ -120,6 +120,20 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T801] `/session export [id-prefix] [path] [--raw]` writes a markdown
+  transcript of a stored session — header (id, workspace, created,
+  model, exchanges, sketch) plus `## Turn N` blocks — from the snapshot
+  when one exists, else from the crash log's completed-ok rows (aborted/
+  error-turn residue never leaves the machine as transcript). Content
+  was already redacted when it was written to the session store; the
+  assembled document gets one more idempotent redaction pass, and a
+  seeded placeholder is pinned to survive export verbatim. The default
+  target is `~/.talos/exports/talos-session-<id>-<timestamp>.md` — the
+  user's own home, never the workspace unless an explicit path says so
+  — and explicit paths are never overwritten. No approval is asked
+  (PromptCommand precedent: a user-initiated write of the user's own
+  data to the user's own directory); the absolute path is reported.
+  `--raw` copies the per-turn JSONL beside the markdown.
 - [T800] `/session list` and `/session resume [id]`. `list` renders the
   workspace's stored sessions newest-first — display id (the UTC
   timestamp suffix; the one possible legacy file shows its short hash),

@@ -8,12 +8,18 @@ import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.SessionSummary;
+import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 /**
@@ -42,11 +48,14 @@ import java.util.List;
 @SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
 public final class SessionCommand implements Command {
     private static final String USAGE = "/session [info|list|resume|save|load|clear|export]";
+    private static final DateTimeFormatter EXPORT_FILE_TS =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final Path workspace;
     private final SessionStore store;
     private final String workspaceId;
     private final String activeSessionId;
+    private final Path exportsDir;
 
     /** Legacy wiring: the active session IS the bare-hash slot (pre-T799 tests). */
     public SessionCommand(Path workspace, SessionStore store) {
@@ -54,12 +63,19 @@ public final class SessionCommand implements Command {
     }
 
     public SessionCommand(Path workspace, SessionStore store, String activeSessionId) {
+        this(workspace, store, activeSessionId,
+                Path.of(System.getProperty("user.home"), ".talos", "exports"));
+    }
+
+    public SessionCommand(Path workspace, SessionStore store, String activeSessionId,
+                          Path exportsDir) {
         this.workspace = workspace;
         this.store = store;
         this.workspaceId = JsonSessionStore.sessionIdFor(workspace);
         this.activeSessionId = activeSessionId == null || activeSessionId.isBlank()
                 ? this.workspaceId
                 : activeSessionId;
+        this.exportsDir = exportsDir;
     }
     @Override
     public CommandSpec spec() {
@@ -80,6 +96,7 @@ public final class SessionCommand implements Command {
             case "load"   -> resume(rest, ctx);
             case "save"   -> save(ctx);
             case "clear"  -> clear();
+            case "export" -> export(rest);
             default -> new Result.Error(
                     "Unknown subcommand: " + sub + "\nUsage: " + USAGE, 200);
         };
@@ -202,6 +219,199 @@ public final class SessionCommand implements Command {
         return deleted
                 ? new Result.Info("Saved session deleted.")
                 : new Result.Info("No saved session to delete.");
+    }
+    // -- Export (T801) --
+    /**
+     * {@code export [id-prefix] [path] [--raw]}: write a markdown
+     * transcript of a stored session. No approval — the default target
+     * lives under the user's own {@code ~/.talos/exports/}, never the
+     * workspace unless an explicit path says so (PromptCommand
+     * precedent). Content was redacted at write time; the assembled
+     * document gets one more idempotent
+     * {@link ProtectedContentPolicy#sanitizeText} pass.
+     */
+    private Result export(String args) {
+        boolean raw = false;
+        List<String> positionals = new ArrayList<>();
+        for (String token : args.isBlank() ? new String[0] : args.split("\\s+")) {
+            if ("--raw".equals(token)) raw = true;
+            else positionals.add(token);
+        }
+        if (positionals.size() > 2) {
+            return new Result.Error("Usage: /session export [id-prefix] [path] [--raw]", 200);
+        }
+
+        List<SessionSummary> sessions = store.listSessions(workspaceId);
+        if (sessions.isEmpty()) {
+            return new Result.Info("No saved session found for this workspace.");
+        }
+
+        // Positional split: [prefix, path] when two; a single token is a
+        // prefix when it matches a session, otherwise an explicit path.
+        String prefix = null;
+        String explicitPath = null;
+        if (positionals.size() == 2) {
+            prefix = positionals.get(0);
+            explicitPath = positionals.get(1);
+        } else if (positionals.size() == 1) {
+            String token = positionals.get(0);
+            boolean anyMatch = sessions.stream()
+                    .anyMatch(s -> matchesPrefix(s.sessionId(), token));
+            if (anyMatch) prefix = token;
+            else if (looksLikePath(token)) explicitPath = token;
+            else return new Result.Error("No session matches '" + token + "'. See /session list.", 200);
+        }
+
+        String targetId;
+        if (prefix == null) {
+            targetId = sessions.get(0).sessionId(); // newest
+        } else {
+            final String p = prefix;
+            List<String> matches = sessions.stream()
+                    .map(SessionSummary::sessionId)
+                    .filter(id -> matchesPrefix(id, p))
+                    .toList();
+            if (matches.isEmpty()) {
+                return new Result.Error("No session matches '" + prefix + "'. See /session list.", 200);
+            }
+            if (matches.size() > 1) {
+                return new Result.Error("Ambiguous session id '" + prefix + "': matches "
+                        + String.join(", ", matches.stream().map(this::displayId).toList()), 200);
+            }
+            targetId = matches.get(0);
+        }
+
+        String document = renderTranscript(targetId);
+        if (document == null) {
+            return new Result.Info("Session '" + displayId(targetId) + "' has no exportable turns.");
+        }
+
+        try {
+            Path target;
+            if (explicitPath != null) {
+                target = workspace.resolve(explicitPath).toAbsolutePath().normalize();
+            } else {
+                Files.createDirectories(exportsDir);
+                target = exportsDir.resolve("talos-session-" + fileSafeId(targetId) + "-"
+                        + EXPORT_FILE_TS.format(LocalDateTime.now()) + ".md")
+                        .toAbsolutePath().normalize();
+            }
+            if (Files.exists(target)) {
+                return new Result.Error("Refusing to overwrite existing file: " + target, 200);
+            }
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
+            Files.writeString(target, document, StandardCharsets.UTF_8);
+
+            StringBuilder message = new StringBuilder("Session exported to: ").append(target);
+            if (raw) {
+                message.append('\n').append(copyRawTurnLog(targetId, target));
+            }
+            return new Result.TrustedInfo(message.toString());
+        } catch (Exception e) {
+            return new Result.Error("Export failed: " + e.getMessage(), 200);
+        }
+    }
+
+    /** Markdown transcript: snapshot turns, else ok-status turn-log rows. Null when empty. */
+    private String renderTranscript(String sessionId) {
+        SessionData data = store.load(sessionId).orElse(null);
+        StringBuilder body = new StringBuilder();
+        Instant created = null;
+        String model = "";
+        String sketch = "";
+        int exchanges = 0;
+
+        if (data != null && data.turns() != null && !data.turns().isEmpty()) {
+            created = data.createdAt();
+            model = data.model();
+            sketch = data.sketch();
+            exchanges = data.turnCount();
+            int turnNo = 0;
+            for (SessionData.Turn t : data.turns()) {
+                boolean isUser = "user".equals(t.role());
+                if (isUser || turnNo == 0) {
+                    turnNo++;
+                    body.append("\n## Turn ").append(turnNo).append('\n');
+                }
+                body.append("\n**").append(isUser ? "User" : "Assistant").append(":**\n\n")
+                        .append(t.content() == null ? "" : t.content()).append('\n');
+            }
+        } else {
+            // Crash log: only completed-ok rows are part of the record the
+            // user can vouch for (same filter as restore — no aborted-turn
+            // confabulation in an artifact that leaves the machine).
+            List<TurnRecord> rows = store.loadTurns(sessionId).stream()
+                    .filter(r -> r.status() == null || r.status().isEmpty() || "ok".equals(r.status()))
+                    .filter(r -> r.userInput() != null && !r.userInput().isBlank()
+                            && r.assistantText() != null && !r.assistantText().isBlank())
+                    .toList();
+            if (rows.isEmpty()) return null;
+            if (data != null) {
+                created = data.createdAt();
+                model = data.model();
+                sketch = data.sketch();
+            } else if (rows.get(0).timestamp() != null) {
+                created = rows.get(0).timestamp();
+            }
+            exchanges = rows.size();
+            int turnNo = 0;
+            for (TurnRecord row : rows) {
+                turnNo++;
+                body.append("\n## Turn ").append(turnNo).append('\n');
+                body.append("\n**User:**\n\n").append(row.userInput()).append('\n');
+                body.append("\n**Assistant:**\n\n").append(row.assistantText()).append('\n');
+            }
+        }
+
+        StringBuilder doc = new StringBuilder();
+        doc.append("# Talos session ").append(displayId(sessionId)).append('\n');
+        doc.append('\n');
+        doc.append("- Session ID: ").append(sessionId).append('\n');
+        doc.append("- Workspace: ").append(workspace.toAbsolutePath().normalize()).append('\n');
+        doc.append("- Created: ").append(created == null ? "unknown" : created.toString()).append('\n');
+        doc.append("- Model: ").append(model == null || model.isBlank() ? "-" : model).append('\n');
+        doc.append("- Exchanges: ").append(exchanges).append('\n');
+        doc.append("- Sketch: ").append(sketch == null || sketch.isBlank() ? "no" : "yes").append('\n');
+        if (sketch != null && !sketch.isBlank()) {
+            doc.append("\n## Context sketch\n\n").append(sketch).append('\n');
+        }
+        doc.append(body);
+        return ProtectedContentPolicy.sanitizeText(doc.toString());
+    }
+
+    /** Best-effort raw copy of the per-turn JSONL beside the markdown export. */
+    private String copyRawTurnLog(String sessionId, Path markdownTarget) {
+        if (!(store instanceof JsonSessionStore js)) {
+            return "Raw turn log unavailable: sessions are not file-backed in this process.";
+        }
+        Path source = js.sessionsDir().resolve(sessionId + ".turns.jsonl");
+        if (!Files.exists(source)) {
+            return "No turn log exists for this session; raw copy skipped.";
+        }
+        String name = markdownTarget.getFileName().toString();
+        Path rawTarget = markdownTarget.resolveSibling(
+                (name.endsWith(".md") ? name.substring(0, name.length() - 3) : name) + ".jsonl");
+        try {
+            if (Files.exists(rawTarget)) {
+                return "Refusing to overwrite existing file: " + rawTarget;
+            }
+            Files.copy(source, rawTarget);
+            return "Raw turn log copied to: " + rawTarget;
+        } catch (Exception e) {
+            return "Raw turn log copy failed: " + e.getMessage();
+        }
+    }
+
+    private static boolean looksLikePath(String token) {
+        return token.contains("/") || token.contains("\\") || token.contains(".");
+    }
+
+    /** Display id without the ellipsis — safe inside a file name. */
+    private String fileSafeId(String id) {
+        if (id.startsWith(workspaceId + "-")) {
+            return id.substring(workspaceId.length() + 1);
+        }
+        return id.length() <= 8 ? id : id.substring(0, 8);
     }
     // -- Snapshot / Restore --
     /** Capture current conversation state into a SessionData record. */

@@ -435,6 +435,7 @@ Run the approved Gradle test command profile.
 | `/session info` | inspect current session state |
 | `/session list` | list this workspace's saved sessions |
 | `/session resume [id]` | restore a previous session (latest by default) |
+| `/session export [id]` | export a session transcript to `~/.talos/exports/` |
 | `/clear` | clear conversation memory |
 | `/q` | exit |
 
