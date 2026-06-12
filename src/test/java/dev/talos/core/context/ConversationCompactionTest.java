@@ -463,9 +463,15 @@ class ConversationCompactionTest {
                     "the operational skip string is pinned exactly - /context renders it");
         }
 
-        /** T797 pin: today compaction is silent — it exposes status, no event. */
+        /**
+         * T797 pin, deliberately updated by T805: auto compaction is no
+         * longer silent. It sets the status AND the one-shot event (T798)
+         * that drives the render-side {@code [context compacted: ...]}
+         * notice — which is interactive chrome only and never enters
+         * history (defensive stripper entry pinned by UiChromeContractTest).
+         */
         @Test
-        void t797_compactionSetsStatusOnly_noUserVisibleSignalExistsYet() {
+        void compactionSetsStatusAndTheOneShotRenderEvent() {
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
             addOverflowingTurns(cm);
@@ -477,8 +483,8 @@ class ConversationCompactionTest {
 
             assertTrue(compacted);
             assertEquals("SUCCEEDED", cm.lastCompactionStatus().status());
-            // T798 deliberately adds pollCompactionEvent() + the render-side
-            // notice (T805); until then the only observable is this status.
+            assertNotNull(cm.pollCompactionEvent(),
+                    "the render-side T805 notice is driven by this event");
         }
 
         @Test

@@ -186,6 +186,20 @@ public final class RenderEngine {
     }
 
     /**
+     * T805: one muted line when the automatic compactor just summarized
+     * older exchanges — the user must see their context change shape.
+     * Interactive-only: scripted/redirected transcripts stay unchanged,
+     * and the line never enters any Result (render-side chrome with a
+     * defensive UiChrome stripper entry).
+     */
+    public void printCompactionNotice(int summarizedPairs, int keptPairs) {
+        if (!interactive) return;
+
+        out.println(progressRenderer.compactionNotice(summarizedPairs, keptPairs));
+        out.flush();
+    }
+
+    /**
      * Starts the spinner (non-blocking).
      * Suppressed in non-interactive mode to avoid flooding piped output.
      */

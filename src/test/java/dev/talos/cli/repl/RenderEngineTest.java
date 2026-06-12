@@ -112,6 +112,42 @@ class RenderEngineTest {
         }
     }
 
+    // ── printCompactionNotice (T805) ─────────────────────────────────────
+
+    @Nested
+    class CompactionNotice {
+
+        @Test
+        void printsOneNoticeLineComposedFromTheUiChromeConstant() {
+            var re = semanticEngine(true);
+            re.printCompactionNotice(6, 4);
+
+            String text = output();
+            assertTrue(text.contains(
+                            dev.talos.core.util.UiChrome.CONTEXT_COMPACTED_PREFIX
+                                    + ": 6 older exchanges summarized"),
+                    text);
+            assertTrue(text.contains("4 kept verbatim]"), text);
+        }
+
+        @Test
+        void singularExchangeReadsNaturally() {
+            var re = semanticEngine(true);
+            re.printCompactionNotice(1, 4);
+
+            assertTrue(output().contains("1 older exchange summarized"), output());
+        }
+
+        @Test
+        void suppressedInNonInteractiveMode() {
+            var re = semanticEngine(false);
+            re.printCompactionNotice(6, 4);
+
+            assertEquals("", output(),
+                    "scripted/redirected transcripts must stay byte-identical");
+        }
+    }
+
     // ── printRouteHint ───────────────────────────────────────────────────
 
     @Nested

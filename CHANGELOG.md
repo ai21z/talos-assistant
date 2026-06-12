@@ -120,6 +120,18 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T805] Automatic context compaction is no longer invisible. When the
+  auto-compactor summarizes older exchanges mid-session, one muted line
+  now renders after the turn stats — `[context compacted: 6 older
+  exchanges summarized · 4 kept verbatim]` — so the user sees their
+  context change shape at the moment it happens instead of discovering
+  it later through degraded recall. The notice is interactive-only
+  render chrome: scripted and redirected transcripts are byte-identical
+  to before, it never enters any Result, and it gets a defensive
+  history-stripper entry (`UiChrome.CONTEXT_COMPACTED_PREFIX`, the
+  WROTE_PREFIX precedent) so a model imitating the visible line cannot
+  seed history with fake compaction claims. Driven by the one-shot
+  T798 compaction event, polled race-free after the turn completes.
 - [T804] `/compact` compacts the conversation on demand. The forced
   path skips the pair-threshold and over-budget gates and runs even
   when the auto-compaction failure breaker is open (explicit user

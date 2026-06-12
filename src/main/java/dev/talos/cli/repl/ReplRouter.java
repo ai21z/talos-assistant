@@ -169,6 +169,19 @@ public final class ReplRouter {
             lastTurnResult = null;
         }
 
+        // T805: the auto-compaction notice renders strictly AFTER the turn
+        // stats. Listeners fire synchronously inside turnProcessor.process,
+        // so by this point the one-shot event is already set (or not) —
+        // polling here is race-free. The notice is interactive-gated render
+        // chrome; scripted/redirected transcripts stay unchanged.
+        if (ctx.conversationManager() != null) {
+            var compaction = ctx.conversationManager().pollCompactionEvent();
+            if (compaction != null) {
+                render.printCompactionNotice(
+                        compaction.summarizedPairs(), compaction.keptPairs());
+            }
+        }
+
         return true;
     }
 

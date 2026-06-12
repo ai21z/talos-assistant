@@ -147,4 +147,14 @@ class UiChromeContractTest {
         // only be chrome or a model imitating chrome; both stay out of history.
         assertStripped("✓ Wrote notes.md (3 lines, 40 bytes)");
     }
+
+    @Test
+    void compactionNoticeIsStrippedDefensively() {
+        // T805: pins ProgressLineRenderer.compactionNotice's plain body in
+        // both glyph variants. The notice is render-side only and never
+        // enters a Result — this entry exists so a model IMITATING the
+        // visible line cannot seed history with fake compaction claims.
+        assertStripped("[context compacted: 6 older exchanges summarized · 4 kept verbatim]");
+        assertStripped("[context compacted: 1 older exchange summarized - 4 kept verbatim]");
+    }
 }

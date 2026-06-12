@@ -40,6 +40,18 @@ public final class ProgressLineRenderer {
         };
     }
 
+    /**
+     * T805: the auto-compaction notice, composed FROM the UiChrome
+     * constant so the emitter and the history stripper cannot drift
+     * (the T767 pattern).
+     */
+    public String compactionNotice(int summarizedPairs, int keptPairs) {
+        String body = dev.talos.core.util.UiChrome.CONTEXT_COMPACTED_PREFIX + ": "
+                + summarizedPairs + " older exchange" + (summarizedPairs == 1 ? "" : "s")
+                + " summarized " + glyphs.dot() + " " + keptPairs + " kept verbatim]";
+        return "  " + theme.muted(body);
+    }
+
     public String turnStats(int turnNumber, long elapsedMs, int responseLen) {
         StringBuilder sb = new StringBuilder("Turn ");
         sb.append(turnNumber);
