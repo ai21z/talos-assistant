@@ -90,6 +90,45 @@ class UndoCommandTest {
             assertEquals("int x = 1;", Files.readString(workspace.resolve("c.java")));
         }
     }
+    /**
+     * T787 pin of the PRE-T795 contract: {@code /undo} mutates workspace
+     * files with NO approval gate, NO checkpoint, and NO protected-path
+     * classification — the trust hole the 2026-06-10 evaluation flagged.
+     * T795 deliberately replaces this behavior (gated checkpoint restore);
+     * these tests are then rewritten, and their diff documents the change.
+     */
+    @Nested class ApprovalBypassCharacterization {
+        @Test void undoWritesFilesWithoutConsultingAnyApprovalGate() throws IOException {
+            Files.writeString(workspace.resolve("app.js"), "original");
+            writeTool.execute(new ToolCall("talos.write_file",
+                    Map.of("path", "app.js", "content", "changed")), toolCtx);
+            Context gateTrap = Context.builder(new Config())
+                    .approvalGate((description, detail) -> {
+                        throw new AssertionError("/undo consulted the approval gate pre-T795: "
+                                + description);
+                    })
+                    .build();
+
+            Result r = undoCmd.execute("", gateTrap);
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertEquals("original", Files.readString(workspace.resolve("app.js")));
+        }
+
+        @Test void undoRewritesProtectedPathsWithoutEscalation() throws IOException {
+            // .env is a protected (SECRET) path for every governed surface,
+            // yet pre-T795 /undo writes it back directly.
+            Files.writeString(workspace.resolve(".env"), "API_TOKEN=before");
+            writeTool.execute(new ToolCall("talos.write_file",
+                    Map.of("path", ".env", "content", "API_TOKEN=after")), toolCtx);
+
+            Result r = undoCmd.execute("", ctx);
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertEquals("API_TOKEN=before", Files.readString(workspace.resolve(".env")));
+        }
+    }
+
     @Nested class MultiUndo {
         @Test void reverseOrder() throws IOException {
             writeTool.execute(new ToolCall("talos.write_file",

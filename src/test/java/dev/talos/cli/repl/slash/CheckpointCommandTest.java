@@ -69,6 +69,70 @@ class CheckpointCommandTest {
         assertEquals("after", Files.readString(workspace.resolve("index.html")));
     }
 
+    /**
+     * T787 pin: {@code /checkpoint list} renders ids only, ordered
+     * reverse-lexicographically on random {@code chk-<uuid>} names — i.e.
+     * the order is ARBITRARY, not chronological. T793 deliberately changes
+     * the listing to createdAt-descending with timestamp/trigger detail.
+     */
+    @Test
+    void listShapeAndArbitraryOrderingPin(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("a.txt"), "a");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        String first = service.captureBeforeMutation(workspace, config(),
+                new ToolCall("talos.write_file", Map.of("path", "a.txt", "content", "x")),
+                "trc-1", 1).checkpointId();
+        String second = service.captureBeforeMutation(workspace, config(),
+                new ToolCall("talos.write_file", Map.of("path", "a.txt", "content", "y")),
+                "trc-2", 2).checkpointId();
+        CheckpointCommand command = new CheckpointCommand(workspace, service);
+
+        Result result = command.execute("list", contextDenied());
+
+        assertInstanceOf(Result.Info.class, result);
+        String expectedNewestByName = first.compareTo(second) > 0 ? first : second;
+        String expectedOldestByName = first.compareTo(second) > 0 ? second : first;
+        assertEquals("Checkpoints:\n  " + expectedNewestByName + "\n  " + expectedOldestByName,
+                ((Result.Info) result).text,
+                "pre-T793 listing is id-sorted (descending), not time-sorted");
+    }
+
+    /** T787 pin: the /checkpoint restore approval bytes are frozen this wave. */
+    @Test
+    void restoreApprovalDescriptionAndDetailBytesPin(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("index.html"), "before");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        String id = service.captureBeforeMutation(workspace, config(),
+                new ToolCall("talos.write_file", Map.of("path", "index.html", "content", "after")),
+                "trc-test", 1).checkpointId();
+        String[] captured = new String[2];
+        Context ctx = Context.builder(config())
+                .approvalGate(new ApprovalGate() {
+                    @Override public boolean approve(String description, String detail) {
+                        return approveFull(description, detail).isApproved();
+                    }
+                    @Override public ApprovalResponse approveFull(String description, String detail) {
+                        captured[0] = description;
+                        captured[1] = detail;
+                        return ApprovalResponse.DENIED;
+                    }
+                })
+                .build();
+        CheckpointCommand command = new CheckpointCommand(workspace, service);
+
+        command.execute("restore " + id, ctx);
+
+        assertEquals("restore checkpoint: " + id, captured[0]);
+        assertEquals("Restore files captured by checkpoint " + id + " in workspace " + workspace,
+                captured[1]);
+    }
+
     private static Config config() {
         Config config = new Config();
         config.data.put("checkpoint", Map.of("enabled", true, "fail_closed", true));
