@@ -120,6 +120,25 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T800] `/session list` and `/session resume [id]`. `list` renders the
+  workspace's stored sessions newest-first — display id (the UTC
+  timestamp suffix; the one possible legacy file shows its short hash),
+  age, exchange count, model, and `(current)`/`(legacy)`/`(crash log
+  only)` markers. `resume` restores the latest OTHER session by default
+  ("pick up where the previous session left off"); an id prefix selects
+  a specific one (matched against the display id, ambiguous prefixes
+  list the candidates) and may explicitly target the current session as
+  a reload-from-disk. `/session load` is now an alias of `resume` — its
+  former meaning ("re-read this workspace's single file") stopped
+  existing when T799 introduced per-run instance files. `save`, `clear`,
+  and the info block's `Saved file` row now operate on the ACTIVE
+  session's instance id (save→quit no longer leaves two files for one
+  session), `/session info` gained a `Session:` row showing the active
+  instance id, and the usage line is now
+  `/session [info|list|resume|save|load|clear|export]` (`export` lands
+  in T801). Restored-session bytes ("Session restored: N exchanges
+  (saved X ago).") and the no-saved-session/save/clear strings are
+  unchanged.
 - [T799] One workspace can now hold many sessions. Each REPL run
   persists under its own session instance id
   (`<workspace-hash>-<UTC timestamp>`) instead of overwriting the
@@ -136,8 +155,7 @@
   (newest-first summaries covering snapshots, crash logs, and corrupt
   files, which list with epoch timestamps instead of hiding). The
   workspace hash itself is unchanged and still keys checkpoints and
-  trace metadata. `/session list`/`resume` arrive in T800; until then
-  `/session save`/`load` keep operating on the legacy bare-hash file.
+  trace metadata. The `/session` command catches up in T800.
 - [T798] Core context-meter and manual-compaction machinery (consumed by
   the `/context`, `/compact`, and compaction-notice tickets):
   `ConversationManager.meter(assistMode)` snapshots history-token

@@ -475,8 +475,8 @@ public final class TalosBootstrap {
         // Undo (gated checkpoint restore since T795)
         registry.register(new UndoCommand(workspace, checkpointService));
         registry.register(new CheckpointCommand(workspace, checkpointService));
-        // Session persistence
-        registry.register(new SessionCommand(workspace, sessionStore));
+        // Session persistence (T800: list/resume need the active instance id)
+        registry.register(new SessionCommand(workspace, sessionStore, activeSessionId));
     }
 
     private static String buildSensitiveWorkspaceNotice(Path workspace) {
