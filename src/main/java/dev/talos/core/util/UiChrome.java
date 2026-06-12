@@ -72,6 +72,15 @@ public final class UiChrome {
     /** Repeated-edit-failure cushion suggestion injected into tool errors. */
     public static final String EDIT_FAILURE_SUGGESTION_PREFIX = "Suggestion: edit_file has failed";
 
+    /**
+     * Auto-compaction notice (T805): {@code [context compacted: N older
+     * exchanges summarized · M kept verbatim]}. Render-side only — the
+     * emitter is RenderEngine, after turn stats — but stripped
+     * defensively like all chrome: a model imitating the line must not
+     * seed history with fake compaction claims.
+     */
+    public static final String CONTEXT_COMPACTED_PREFIX = "[context compacted";
+
     private UiChrome() {
     }
 }

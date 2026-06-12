@@ -139,6 +139,7 @@ public final class MemoryUpdateListener implements SessionListener {
             if (t.startsWith(UiChrome.CREATED_PREFIX)) continue;
             if (t.startsWith(UiChrome.UPDATED_PREFIX)) continue;
             if (t.startsWith(UiChrome.EDIT_FAILURE_SUGGESTION_PREFIX)) continue;
+            if (t.startsWith(UiChrome.CONTEXT_COMPACTED_PREFIX)) continue;
             out.append(line).append('\n');
         }
         String stripped = out.toString().replaceAll("\\n{3,}", "\n\n").strip();
