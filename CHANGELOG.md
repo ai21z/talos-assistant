@@ -120,6 +120,19 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T804] `/compact` compacts the conversation on demand. The forced
+  path skips the pair-threshold and over-budget gates and runs even
+  when the auto-compaction failure breaker is open (explicit user
+  intent — a forced failure still counts toward the breaker, a forced
+  success resets it). Outcomes are reported honestly: "Compacted: N
+  older exchanges summarized - M kept verbatim (~before -> ~after
+  tokens, est.)", "Nothing to compact" when everything already fits
+  (or the conversation is empty — that fast path never touches the
+  model), and a failure renders the full status/category/reason with
+  the guarantee that applies: history is preserved verbatim, nothing
+  is lost. Uses the same compaction-mode flag as the auto path and
+  `/context`, so the budget `/compact` enforces is the budget the
+  meter shows.
 - [T803] `/context` shows what occupies the context window — previously
   invisible state: an estimated history meter bar against the active
   compaction budget, the configured maximum
