@@ -39,7 +39,9 @@ public final class RunCommandTool implements TalosTool {
 
     @Override
     public String description() {
-        return "Run an approved bounded command profile. V1 supports Gradle verification profiles only.";
+        return "Run an approved bounded command profile: Gradle verification profiles,"
+                + " plus workspace-declared ws:<id> verification profiles when the"
+                + " workspace declaration is trusted.";
     }
 
     @Override
@@ -49,8 +51,8 @@ public final class RunCommandTool implements TalosTool {
                 description(),
                 """
                 {"type":"object","properties":{
-                  "profile":{"type":"string","description":"Approved Gradle profile: gradle_test, gradle_check, gradle_build, gradle_install_dist, gradle_e2e_test"},
-                  "args_json":{"type":"string","description":"Optional JSON array of validated profile arguments, e.g. [\\"--tests\\",\\"dev.talos.SomeTest\\"]"},
+                  "profile":{"type":"string","description":"Approved profile: gradle_test, gradle_check, gradle_build, gradle_install_dist, gradle_e2e_test, or a trusted workspace profile ws:<id>"},
+                  "args_json":{"type":"string","description":"Optional JSON array of validated profile arguments, e.g. [\\"--tests\\",\\"dev.talos.SomeTest\\"]. Workspace ws: profiles accept no arguments."},
                   "cwd":{"type":"string","description":"Optional workspace-relative working directory. Defaults to workspace root."},
                   "timeout_ms":{"type":"string","description":"Optional timeout in milliseconds, 1000-600000."}
                 },"required":["profile"]}""",
@@ -78,7 +80,7 @@ public final class RunCommandTool implements TalosTool {
 
         CommandPlan plan;
         try {
-            plan = CommandToolPlanner.planGradleV1(call, ctx.workspace(), registry);
+            plan = CommandToolPlanner.plan(call, ctx.workspace(), registry);
         } catch (CommandPlanRejectedException | IllegalArgumentException e) {
             LocalTurnTraceCapture.recordCommandDenied(
                     "",

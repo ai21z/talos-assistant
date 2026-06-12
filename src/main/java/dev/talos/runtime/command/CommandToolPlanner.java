@@ -32,10 +32,91 @@ public final class CommandToolPlanner {
         return "run_command".equals(ToolAliasPolicy.localCanonicalName(toolName));
     }
 
+    /** True for workspace-declared profile ids ({@code ws:<id>}, T789/T790). */
+    public static boolean isWorkspaceProfile(String profileId) {
+        return profileId != null && profileId.strip()
+                .startsWith(WorkspaceCommandProfilesLoader.PROFILE_ID_PREFIX);
+    }
+
+    /**
+     * Dispatching entry point (T790): {@code ws:} profile ids plan through
+     * the workspace branch (trust-gated at plan time, no caller args);
+     * everything else keeps the byte-identical gradle V1 path.
+     */
+    public static CommandPlan plan(ToolCall call, Path workspace, CommandProfileRegistry registry) {
+        if (call == null) {
+            throw new CommandPlanRejectedException("Command tool call is required.");
+        }
+        String profileId = param(call, "profile", "profile_id", "id");
+        if (isWorkspaceProfile(profileId)) {
+            return planWorkspace(call, profileId.strip(), workspace, registry);
+        }
+        return planGradleV1(call, workspace, registry);
+    }
+
+    /**
+     * Workspace-profile planning. The trust gate fires HERE, at plan time,
+     * before any approval prompt is spent: an untrusted, changed, invalid,
+     * or undeclared workspace declaration can never reach the approval gate
+     * (T790 proof obligation).
+     */
+    private static CommandPlan planWorkspace(
+            ToolCall call,
+            String profile,
+            Path workspace,
+            CommandProfileRegistry registry
+    ) {
+        rejectRawCommandShape(call);
+        CommandProfileRegistry effectiveRegistry = registry == null
+                ? CommandProfileRegistry.defaultRegistry()
+                : registry;
+        if (!effectiveRegistry.workspaceProfileIds().contains(profile)) {
+            throw new CommandPlanRejectedException(
+                    workspaceUnavailableMessage(profile, effectiveRegistry));
+        }
+        String rawArgs = param(call, "args_json", "arguments_json", "args");
+        if (rawArgs != null && !rawArgs.isBlank()) {
+            throw new CommandPlanRejectedException(
+                    "Workspace profiles run their declared fixed argv only; caller"
+                            + " arguments are not accepted.");
+        }
+        CommandPlan plan = effectiveRegistry.plan(
+                profile,
+                List.of(),
+                workspace,
+                param(call, "cwd", "working_dir", "working_directory"));
+        validateRisk(plan);
+        long timeout = timeoutMs(call);
+        return timeout > 0 ? plan.withTimeoutMs(timeout) : plan;
+    }
+
+    private static String workspaceUnavailableMessage(
+            String profile, CommandProfileRegistry registry) {
+        return switch (registry.workspaceTrustState()) {
+            case NONE_DECLARED -> "Workspace profile " + profile
+                    + " is not available: this workspace declares no verification"
+                    + " profiles (.talos/profiles.yaml).";
+            case INVALID -> "Workspace profile " + profile
+                    + " is not available: the declaration is invalid — "
+                    + registry.workspaceRejectionReason()
+                    + " Nothing was registered.";
+            case UNTRUSTED_NEW, UNTRUSTED_CHANGED -> "Workspace profile " + profile
+                    + " is not available: the workspace declaration is untrusted or"
+                    + " has changed. Review and pin it with /profiles trust, then retry.";
+            case TRUSTED -> "Unknown workspace profile " + profile + ". Declared: "
+                    + String.join(", ", registry.workspaceProfileIds()) + ".";
+        };
+    }
+
     public static Optional<String> validateBeforeApproval(ToolCall call, Path workspace) {
+        return validateBeforeApproval(call, workspace, CommandProfileRegistry.defaultRegistry());
+    }
+
+    public static Optional<String> validateBeforeApproval(
+            ToolCall call, Path workspace, CommandProfileRegistry registry) {
         if (call == null || !isRunCommandTool(call.toolName())) return Optional.empty();
         try {
-            planGradleV1(call, workspace, CommandProfileRegistry.defaultRegistry());
+            plan(call, workspace, registry);
             return Optional.empty();
         } catch (CommandPlanRejectedException | IllegalArgumentException e) {
             return Optional.of(invalidMessage(e.getMessage()));
@@ -83,8 +164,12 @@ public final class CommandToolPlanner {
     }
 
     public static String approvalDetail(ToolCall call, Path workspace) {
-        CommandPlan plan = planGradleV1(call, workspace, CommandProfileRegistry.defaultRegistry());
-        return approvalDetail(plan);
+        return approvalDetail(call, workspace, CommandProfileRegistry.defaultRegistry());
+    }
+
+    public static String approvalDetail(
+            ToolCall call, Path workspace, CommandProfileRegistry registry) {
+        return approvalDetail(plan(call, workspace, registry));
     }
 
     public static String approvalDetail(CommandPlan plan) {

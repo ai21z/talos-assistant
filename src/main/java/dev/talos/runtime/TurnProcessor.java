@@ -70,6 +70,7 @@ public final class TurnProcessor {
     private final ApprovalPolicy approvalPolicy;
     private final dev.talos.runtime.policy.PermissionPolicy permissionPolicy;
     private final CheckpointService checkpointService;
+    private final dev.talos.runtime.command.CommandProfileRegistry commandProfiles;
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
@@ -94,6 +95,14 @@ public final class TurnProcessor {
     public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate,
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy,
                          CheckpointService checkpointService) {
+        this(modes, approvalGate, toolRegistry, approvalPolicy, checkpointService,
+                dev.talos.runtime.command.CommandProfileRegistry.defaultRegistry());
+    }
+
+    public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate,
+                         ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy,
+                         CheckpointService checkpointService,
+                         dev.talos.runtime.command.CommandProfileRegistry commandProfiles) {
         this.modes = modes;
         this.approvalGate = Objects.requireNonNull(approvalGate,
                 "approvalGate must not be null — pass NoOpApprovalGate() explicitly "
@@ -105,6 +114,8 @@ public final class TurnProcessor {
         this.permissionPolicy = new DeclarativePermissionPolicy(this.approvalPolicy);
         this.checkpointService = Objects.requireNonNull(checkpointService,
                 "checkpointService must not be null");
+        this.commandProfiles = Objects.requireNonNullElseGet(commandProfiles,
+                dev.talos.runtime.command.CommandProfileRegistry::defaultRegistry);
     }
 
     public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
@@ -511,7 +522,8 @@ public final class TurnProcessor {
 
         if (risk.requiresApproval()) {
             ToolResult preApprovalValidation =
-                    validateBeforeApproval(call, session, ctx, taskContract, mutatingTool);
+                    validateBeforeApproval(call, session, ctx, taskContract, mutatingTool,
+                            commandProfiles);
             if (preApprovalValidation != null) {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
@@ -532,10 +544,10 @@ public final class TurnProcessor {
 
         if (commandTool) {
             try {
-                CommandPlan commandPlan = CommandToolPlanner.planGradleV1(
+                CommandPlan commandPlan = CommandToolPlanner.plan(
                         call,
                         session.workspace(),
-                        dev.talos.runtime.command.CommandProfileRegistry.defaultRegistry());
+                        commandProfiles);
                 LocalTurnTraceCapture.recordCommandPlanCreated(tracePhase, call, commandPlan);
             } catch (Exception e) {
                 String reason = CommandToolPlanner.invalidMessage(e.getMessage());
@@ -641,7 +653,8 @@ public final class TurnProcessor {
                     permissionDecision.userMessage(),
                     session.workspace(),
                     session.config(),
-                    diffPreview);
+                    diffPreview,
+                    commandProfiles);
             ApprovalResponse response = approvalGate.approveFull(desc, detail);
 
             if (response == ApprovalResponse.DENIED) {
@@ -823,7 +836,8 @@ public final class TurnProcessor {
             Session session,
             RuntimeTurnContext ctx,
             TaskContract taskContract,
-            boolean mutatingTool
+            boolean mutatingTool,
+            dev.talos.runtime.command.CommandProfileRegistry commandProfiles
     ) {
         ToolResult sandboxPathValidation =
                 validateSandboxPathBeforeApproval(call, session, ctx, mutatingTool);
@@ -856,7 +870,7 @@ public final class TurnProcessor {
         }
 
         Optional<String> commandValidation =
-                CommandToolPlanner.validateBeforeApproval(call, session.workspace());
+                CommandToolPlanner.validateBeforeApproval(call, session.workspace(), commandProfiles);
         if (commandValidation.isPresent()) {
             return ToolResult.fail(ToolError.invalidParams(commandValidation.get()));
         }
@@ -1413,7 +1427,8 @@ public final class TurnProcessor {
             String permissionMessage,
             java.nio.file.Path workspace,
             dev.talos.core.Config cfg,
-            ApprovalDiffPreview.Preview diffPreview
+            ApprovalDiffPreview.Preview diffPreview,
+            dev.talos.runtime.command.CommandProfileRegistry commandProfiles
     ) {
         var sb = new StringBuilder();
 
@@ -1435,7 +1450,7 @@ public final class TurnProcessor {
         if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
             try {
                 sb.append(ProtectedContentPolicy.sanitizeText(
-                        CommandToolPlanner.approvalDetail(call, workspace)));
+                        CommandToolPlanner.approvalDetail(call, workspace, commandProfiles)));
             } catch (RuntimeException e) {
                 sb.append("command: invalid talos.run_command request");
             }
