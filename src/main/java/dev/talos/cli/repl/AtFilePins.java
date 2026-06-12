@@ -50,6 +50,22 @@ public final class AtFilePins {
     private AtFilePins() {}
 
     /**
+     * Last prompt's resolution, recorded by the router for the
+     * {@code /context} pinned-bytes row (T803; LastPromptCapture
+     * precedent). The resolver itself stays pure — recording is an
+     * explicit call at the dispatch site.
+     */
+    private static volatile Resolution lastResolution = new Resolution(List.of(), List.of());
+
+    public static void recordLast(Resolution resolution) {
+        lastResolution = resolution == null ? Resolution.empty() : resolution;
+    }
+
+    public static Resolution lastResolution() {
+        return lastResolution;
+    }
+
+    /**
      * One pinned file: workspace-relative display path (forward slashes),
      * the capped content head, and whether/how much was cut.
      */

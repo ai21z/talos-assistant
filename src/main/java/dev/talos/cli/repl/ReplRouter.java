@@ -132,6 +132,7 @@ public final class ReplRouter {
         // turn-scoped Context copy; the long-lived ctx never carries them.
         AtFilePins.Resolution pinResolution =
                 AtFilePins.resolve(rawLine, workspace, ctx.sandbox());
+        AtFilePins.recordLast(pinResolution); // /context pinned-bytes row (T803)
         for (String notice : pinResolution.notices()) {
             render.render(new Result.TrustedInfo(notice));
         }

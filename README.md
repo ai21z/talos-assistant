@@ -432,6 +432,7 @@ Run the approved Gradle test command profile.
 | `/privacy status` | show privacy mode, protected-read scope, RAG/retrieve, and artifact persistence |
 | `/privacy private on` | enable stricter private-mode defaults for this current session/config state |
 | `/privacy private off` | restore developer/default privacy behavior explicitly |
+| `/context` | show context-window usage and compaction state |
 | `/session info` | inspect current session state |
 | `/session list` | list this workspace's saved sessions |
 | `/session resume [id]` | restore a previous session (latest by default) |
