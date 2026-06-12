@@ -34,10 +34,7 @@ public final class FileEditTool implements TalosTool {
     private static final String NAME = "talos.edit_file";
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB
 
-    private final FileUndoStack undoStack;
-
-    public FileEditTool() { this(null); }
-    public FileEditTool(FileUndoStack undoStack) { this.undoStack = undoStack; }
+    public FileEditTool() { }
 
     @Override public String name() { return NAME; }
     @Override public String description() {
@@ -154,12 +151,8 @@ public final class FileEditTool implements TalosTool {
             // Exactly one match - safe to replace
             String updated = content.replace(oldString, newString);
 
-            // Snapshot for undo before mutating
-            if (undoStack != null) {
-                undoStack.push(new FileUndoStack.UndoEntry(
-                        resolved, content, false, NAME, Instant.now()));
-            }
-
+            // Undo snapshots moved to the governed checkpoint machinery
+            // (T795/T796) — captured pre-approval by the runtime, not here.
             Files.writeString(resolved, updated);
 
             // Report what changed

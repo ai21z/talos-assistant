@@ -11,7 +11,6 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileWriteTool;
@@ -101,7 +100,7 @@ class MissingMutationRetryTest {
 
     private Context testContext() {
         var registry = new ToolRegistry();
-        registry.register(new FileWriteTool(new FileUndoStack()));
+        registry.register(new FileWriteTool());
         var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         var loop = new ToolCallLoop(processor, 3);
         return Context.builder(new Config())

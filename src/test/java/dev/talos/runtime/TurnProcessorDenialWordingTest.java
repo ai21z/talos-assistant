@@ -89,10 +89,8 @@ class TurnProcessorDenialWordingTest {
     private static TurnProcessor makeTp() {
         ToolRegistry registry = new ToolRegistry();
         // Real write/edit tools so riskLevel() triggers the approval gate.
-        registry.register(new dev.talos.tools.impl.FileWriteTool(
-                new dev.talos.tools.FileUndoStack()));
-        registry.register(new dev.talos.tools.impl.FileEditTool(
-                new dev.talos.tools.FileUndoStack()));
+        registry.register(new dev.talos.tools.impl.FileWriteTool());
+        registry.register(new dev.talos.tools.impl.FileEditTool());
         return new TurnProcessor(ModeController.defaultController(), DENY, registry);
     }
 }

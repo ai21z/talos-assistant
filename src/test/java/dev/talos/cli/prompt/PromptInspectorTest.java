@@ -4,7 +4,6 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -185,7 +184,7 @@ class PromptInspectorTest {
     void fromMessagesReportsPerTurnNativeToolSurfaceWhenPresent() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(new FileUndoStack()));
+        registry.register(new FileWriteTool());
         Context ctx = Context.builder(new Config())
                 .toolRegistry(registry)
                 .nativeToolSpecs(List.of(new ToolSpec("talos.read_file", "Read", "{}")))
@@ -208,7 +207,7 @@ class PromptInspectorTest {
     void fromMessagesDoesNotReportToolSectionWhenNativeOverrideIsEmpty() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(new FileUndoStack()));
+        registry.register(new FileWriteTool());
         Context ctx = Context.builder(new Config())
                 .toolRegistry(registry)
                 .nativeToolSpecs(List.of())
@@ -245,10 +244,9 @@ class PromptInspectorTest {
 
     private static Context fullToolContext(Config cfg) {
         ToolRegistry registry = new ToolRegistry();
-        FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         return Context.builder(cfg)
                 .toolRegistry(registry)
                 .build();
@@ -256,10 +254,9 @@ class PromptInspectorTest {
 
     private static Context commandToolContext(Config cfg) {
         ToolRegistry registry = new ToolRegistry();
-        FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
                 plan, 0, 1, false, false, "", "", false, false, false, "")));
         return Context.builder(cfg)

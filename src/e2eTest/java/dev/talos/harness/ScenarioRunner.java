@@ -122,11 +122,10 @@ public final class ScenarioRunner {
 
         // 2. Wire tool registry against the workspace.
         //    Strict mode disables fuzzy/alias tool-name rescue.
-        var undoStack = new FileUndoStack();
         var registry  = new ToolRegistry(strict);
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
         // RetrieveTool intentionally omitted — requires full RAG stack
@@ -375,11 +374,10 @@ public final class ScenarioRunner {
         var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
 
         // 2. Tool registry against the fixture workspace.
-        var undoStack = new FileUndoStack();
         var registry  = new ToolRegistry(false);
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
 
@@ -455,11 +453,10 @@ public final class ScenarioRunner {
 
         var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
 
-        var undoStack = new FileUndoStack();
         var registry  = new ToolRegistry(false);
         registry.register(new ReadFileTool());
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
 

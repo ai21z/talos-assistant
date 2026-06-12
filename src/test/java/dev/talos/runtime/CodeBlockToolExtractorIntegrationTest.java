@@ -65,9 +65,8 @@ class CodeBlockToolExtractorIntegrationTest {
         assertTrue(calls.get(0).param("content").contains("--bg-color"));
 
         // Now verify end-to-end: set up tool registry and execute
-        FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry toolRegistry = new ToolRegistry();
-        toolRegistry.register(new FileWriteTool(undoStack));
+        toolRegistry.register(new FileWriteTool());
 
         Sandbox sandbox = new Sandbox(workspace, Map.of());
         ToolContext toolCtx = new ToolContext(workspace, sandbox, new Config());
@@ -108,9 +107,8 @@ class CodeBlockToolExtractorIntegrationTest {
         assertEquals(2, calls.size(), "Should extract two write_file calls");
 
         // Execute both
-        FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry toolRegistry = new ToolRegistry();
-        toolRegistry.register(new FileWriteTool(undoStack));
+        toolRegistry.register(new FileWriteTool());
         Sandbox sandbox = new Sandbox(workspace, Map.of());
         ToolContext toolCtx = new ToolContext(workspace, sandbox, new Config());
 

@@ -5,7 +5,6 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
@@ -736,13 +735,12 @@ class ToolSurfacePlannerTest {
 
     private static ToolRegistry registry() {
         ToolRegistry registry = new ToolRegistry();
-        FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
         registry.register(new ListDirTool());
         registry.register(new GrepTool());
         registry.register(new RetrieveTool(null));
-        registry.register(new FileWriteTool(undoStack));
-        registry.register(new FileEditTool(undoStack));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
         registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());

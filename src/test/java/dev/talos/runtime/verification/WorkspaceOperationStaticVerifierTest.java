@@ -14,7 +14,6 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.FileUndoStack;
 import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.DeletePathTool;
@@ -232,7 +231,7 @@ class WorkspaceOperationStaticVerifierTest {
         String request = "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.";
         ToolCallLoop.LoopResult loopResult = runLoop(
                 request,
-                tools(new FileWriteTool(new FileUndoStack())),
+                tools(new FileWriteTool()),
                 """
                 {"name":"talos.write_file","arguments":{"path":"archive/readme-renamed.md","content":"source\\n"}}
                 """);

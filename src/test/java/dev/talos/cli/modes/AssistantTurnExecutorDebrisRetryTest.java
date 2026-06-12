@@ -32,8 +32,7 @@ class AssistantTurnExecutorDebrisRetryTest {
                 """);
 
         var registry = new dev.talos.tools.ToolRegistry();
-        var undoStack = new dev.talos.tools.FileUndoStack();
-        registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+        registry.register(new dev.talos.tools.impl.FileEditTool());
         var processor = new dev.talos.runtime.TurnProcessor(
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
         var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
