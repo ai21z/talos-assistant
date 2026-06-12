@@ -120,6 +120,22 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T806] Workspace template commands: a markdown file at
+  `.talos/commands/review.md` makes `/review` expand to the file's
+  content and run through the unmodified prompt pipeline. Templates are
+  workspace content — untrusted — so they get exactly typed-input
+  capability: the same classification, tool policy, and approvals as if
+  the user had typed the text; expansion is single-level (the result is
+  never re-classified as a command) and since T788 the directory is a
+  protected CONTROL path the model cannot write with an ordinary
+  approval. `$ARGS` is replaced with the typed arguments (appended as a
+  new paragraph when absent). Built-ins always win: templates live in a
+  separate catalog consulted only on a registry miss, and names
+  colliding with any built-in command or alias are dropped at load.
+  Limits: 24 templates per workspace, 16 KiB each, names
+  `[a-z0-9][a-z0-9-]*`; loaded once at startup (restart to reload — the
+  footer in `/help all` says so). Templates appear in `/help all` under
+  "Workspace commands" and in tab completion.
 - [T805] Automatic context compaction is no longer invisible. When the
   auto-compactor summarizes older exchanges mid-session, one muted line
   now renders after the turn stats — `[context compacted: 6 older

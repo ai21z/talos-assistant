@@ -19,6 +19,11 @@ public final class CommandRegistry {
         return name != null && byName.containsKey(name);
     }
 
+    /** Every reachable name including aliases (T806: template-collision guard). */
+    public Set<String> names() {
+        return Set.copyOf(byName.keySet());
+    }
+
     public Result execute(String name, String args, dev.talos.cli.repl.Context ctx) throws Exception {
         Command c = byName.get(name);
         if (c == null) return new Result.Error("Unknown command: :" + name, 204);
