@@ -61,10 +61,10 @@
     {
       "name": "true-pty-manual-qwen",
       "lane": "TRUE_PTY_MANUAL",
-      "status": "MANUAL_REQUIRED",
+      "status": "NOT_RUN",
       "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/pty-qwen/artifacts",
       "model": "llama_cpp/qwen2.5-coder-14b",
-      "notes": "REQUIRED, not carryable: every wave-3 ticket touches rendering. Owner must validate on a real terminal: streaming markdown styling (markers visible, colorize-only), nanorc-highlighted code fences, the JLine Status bottom row including resize behavior (3.30.13 fixed the duplication bug), width-reactive banner/answer pane/approval window (clamped 60-120), the wave-2 diff-bearing approval window at a non-default width, single-writer interleaving (no display corruption), and NO_COLOR/redirected degradation spot-checks; validator PASS + targeted canary scan PASS"
+      "notes": "OWNER-WAIVED 2026-06-12 (explicit decision, recorded verbatim intent: TUI-only wave, proceed to wave 4): the real-terminal visual cycle was NOT executed for this packet and is deliberately not claimed. What this leaves uncovered: live visual confirmation of streaming markdown, nanorc fences, the status row incl. resize, dynamic-width windows, and the JLine 3.30.13 bump (T781's planned PTY revalidation is waived with it). What still covers the surface: the T766 byte-identity contract test, redirected-path goldens, wrap parity tests, both talosbench banks with zero ANSI bytes, and the wave-2 PTY baseline on the same inline JLine stack. The generated packet (RUN-PTY-MANUAL-AUDIT.ps1 + runbook Step 6) remains valid if a real-terminal regression surfaces in daily use"
     },
     {
       "name": "release-clean-canary-scan",

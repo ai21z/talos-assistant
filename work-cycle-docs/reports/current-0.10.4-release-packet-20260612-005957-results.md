@@ -92,20 +92,31 @@ Carried trust-surface fixes:
 
 **Every scripted lane is green for both audited models** (live lanes
 executed by the close session on 2026-06-12, immediately after the packet
-ledger was recorded). `TRUE_PTY_MANUAL` remains open: it is owner-run and
-mandatory this wave (every ticket touches rendering).
+ledger was recorded). `TRUE_PTY_MANUAL` was **owner-waived** (explicit
+decision 2026-06-12) and is recorded `NOT_RUN`, not PASS — see the
+self-distrust notes for exactly what that leaves uncovered.
 
 | Lane | GPT-OSS | Qwen | Verdict |
 |---|---|---|---|
 | `SAFE_REDIRECTED_STDIN` | 19 PASS / 22 MANUAL_REQUIRED, 0 FAIL | 19 PASS / 22 MANUAL_REQUIRED, 0 FAIL | PASS (matches 0.10.2/0.10.3 baseline); **all 38 transcripts carry zero ANSI bytes** — the wave's byte-plain redirected claim verified live |
 | `SYNC_APPROVAL` (full 31-scenario live bank, seed 424242) | 31/31, artifact scan PASS, 2 PASS_WITH_RUNTIME_REPAIR (same two as 0.10.3) | 31/31, artifact scan PASS, **0 rescues, all six workspace-op scenarios trace COMPLETE** (T763 fix confirmed live, T764 claim active; 0.10.2/0.10.3 had PASS-with-BLOCKED-traces) | PASS |
 | `CAPABILITY_PRIVATE_MODE` | 24 prompts | 24 prompts | PASS — 48/48 runs, 0 secret/canary leaks, 0 overclaims; pptx row identical to 0.10.3 baseline; OCR via controlled stub |
-| `TRUE_PTY_MANUAL` | — | owner-run pending — wave-3 visual surface (markdown, fences, status row + resize, dynamic widths, JLine 3.30.13); see the packet OWNER-RUNBOOK Step 6 | MANUAL_REQUIRED |
-| Canary scans | packet artifacts root (no allowlist) | capability roots (fixture allowlist) | PASS; pty-targeted scan runs in the owner cycle |
+| `TRUE_PTY_MANUAL` | — | owner-waived 2026-06-12 (TUI-only wave, proceed to wave 4); packet stays valid if a regression surfaces | NOT_RUN (waived, not claimed) |
+| Canary scans | packet artifacts root (no allowlist) | capability roots (fixture allowlist) | PASS; the pty-targeted scan lapses with the waived owner cycle |
 | Deterministic summaries + Qodana | all summaries 0.10.4; fresh native scan, 0 critical, 113 findings (88 → 113 vs 0.10.3 — wave-3 growth + linter bump) | (bundle) | PASS |
 
 ## Self-distrust notes
 
+- **The true-PTY cycle did not run for this packet** (owner-waived
+  2026-06-12). The wave's visual surface — streaming markdown, nanorc
+  fences, the status row including resize, dynamic-width windows, and the
+  JLine 3.30.13 bump (whose CHANGELOG entry conditioned it on this cycle) —
+  has byte-level and parity test coverage plus zero-ANSI redirected
+  evidence, but NO fresh real-terminal visual confirmation. The first true
+  validation will be daily interactive use; the generated PTY packet
+  remains executable as a regression tool. This is the first packet since
+  the lane existed to close without it, and the ledger says NOT_RUN, not
+  PASS, on purpose.
 - **Qodana provenance:** the qodana.yaml-pinned 2026.1 linter
   (build 253.31821) no longer writes `metaInformation.json` /
   `result-allProblems.json`, so `qodana-summary.json` reports
