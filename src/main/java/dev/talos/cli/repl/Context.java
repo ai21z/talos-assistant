@@ -42,11 +42,26 @@ public record Context(
         Consumer<String> streamSink,
         Runnable onStreamComplete,
         ExecutionPhaseState executionPhaseState,
-        List<ToolSpec> nativeToolSpecs
+        List<ToolSpec> nativeToolSpecs,
+        List<AtFilePins.PinnedFile> pinnedFiles
 ) implements RuntimeTurnContext {
     public Context {
         if (executionPhaseState == null) executionPhaseState = new ExecutionPhaseState();
         if (nativeToolSpecs != null) nativeToolSpecs = List.copyOf(nativeToolSpecs);
+        pinnedFiles = pinnedFiles == null ? List.of() : List.copyOf(pinnedFiles);
+    }
+
+    /** Backward-compatible constructor without pinnedFiles. */
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
+                   ToolRegistry toolRegistry, ConversationManager conversationManager,
+                   ToolCallLoop toolCallLoop, Consumer<String> streamSink,
+                   Runnable onStreamComplete, ExecutionPhaseState executionPhaseState,
+                   List<ToolSpec> nativeToolSpecs) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
+             onStreamComplete, executionPhaseState, nativeToolSpecs, null);
     }
 
     /** Backward-compatible constructor without onStreamComplete. */
@@ -103,7 +118,16 @@ public record Context(
     public Context withNativeToolSpecs(List<ToolSpec> specs) {
         return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm,
                 netPolicy, memory, approvalGate, toolRegistry, conversationManager,
-                toolCallLoop, streamSink, onStreamComplete, executionPhaseState, specs);
+                toolCallLoop, streamSink, onStreamComplete, executionPhaseState, specs,
+                pinnedFiles);
+    }
+
+    /** Turn-scoped copy carrying the prompt's resolved @-file pins (T802). */
+    public Context withPinnedFiles(List<AtFilePins.PinnedFile> pins) {
+        return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm,
+                netPolicy, memory, approvalGate, toolRegistry, conversationManager,
+                toolCallLoop, streamSink, onStreamComplete, executionPhaseState,
+                nativeToolSpecs, pins);
     }
 
     /** Fluent builder for tests and advanced wiring. Prefer explicit setter calls over withDefaults in prod. */
@@ -199,7 +223,7 @@ public record Context(
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
                     memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
-                    onStreamComplete, executionPhaseState, nativeToolSpecs);
+                    onStreamComplete, executionPhaseState, nativeToolSpecs, null);
         }
     }
 }
