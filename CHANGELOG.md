@@ -120,6 +120,24 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T802] `@file` pinning in prompts (unified/auto mode). Typing
+  `@src/Main.java` (or `@"path with spaces"`) in a prompt pins that
+  file's content into the turn: up to 4 explicit workspace-relative
+  paths per prompt — no fuzzy matching, no directory walks — at 4,000
+  chars per file and 12,000 total, with visible truncation markers. The
+  content rides as ONE user-role `[PinnedFiles]` message injected
+  immediately before the user's line, framed as untrusted reference
+  data (ProjectMemory pattern); it never reaches task classification
+  and never gains system authority, and the `@token` stays visible in
+  the user's own words. Everything skipped says so before the spinner
+  starts: missing files, directories, paths outside the workspace,
+  files over 2 MiB, and binary content all produce one-line notices —
+  and protected paths (`.env`, `.talos/**`, `.git/**`, keys) are
+  refused with a pointer at the approval-gated `read_file` flow, with
+  the identical refusal whether or not the file exists, so pinning can
+  neither leak protected content nor probe for its existence. RAG mode
+  (`/mode rag`) keeps its existing implicit pinning unchanged; e-mail
+  addresses and mid-word `@` are never treated as pins.
 - [T801] `/session export [id-prefix] [path] [--raw]` writes a markdown
   transcript of a stored session — header (id, workspace, created,
   model, exchanges, sketch) plus `## Turn N` blocks — from the snapshot

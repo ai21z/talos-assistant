@@ -33,6 +33,7 @@ public final class ReplRouter {
     private final Context ctx;
     private final RenderEngine render;
     private final CommandRegistry registry;
+    private final Path workspace;
     private final LineClassifier classifier = new LineClassifier();
     private final ExecutionPipeline pipe = new ExecutionPipeline();
     private final AtomicBoolean quit;
@@ -52,6 +53,7 @@ public final class ReplRouter {
         this.ctx            = ctx;
         this.render         = render;
         this.registry       = registry;
+        this.workspace      = workspace == null ? Path.of(".") : workspace;
         this.quit           = quit;
         this.startupNotice  = startupNotice == null ? "" : startupNotice;
     }
@@ -87,6 +89,7 @@ public final class ReplRouter {
         this.ctx            = wired.ctx;
         this.render         = wired.render;
         this.registry       = wired.registry;
+        this.workspace      = wired.workspace;
         this.quit           = wired.quit;
         this.startupNotice  = wired.startupNotice;
     }
@@ -124,10 +127,22 @@ public final class ReplRouter {
             render.printRouteHint(label);
         }
 
+        // T802: resolve @-file pins before the spinner so skip/refusal
+        // notices print as plain lines above the turn. Pins ride a
+        // turn-scoped Context copy; the long-lived ctx never carries them.
+        AtFilePins.Resolution pinResolution =
+                AtFilePins.resolve(rawLine, workspace, ctx.sandbox());
+        for (String notice : pinResolution.notices()) {
+            render.render(new Result.TrustedInfo(notice));
+        }
+        final Context turnCtx = pinResolution.pins().isEmpty()
+                ? ctx
+                : ctx.withPinnedFiles(pinResolution.pins());
+
         render.startSpinner();
 
         Result r = pipe.run(() -> {
-                    TurnResult tr = turnProcessor.process(runtimeSession, rawLine, ctx);
+                    TurnResult tr = turnProcessor.process(runtimeSession, rawLine, turnCtx);
                     if (tr == null) return null;
                     lastTurnResult = tr;
                     return tr.result();
