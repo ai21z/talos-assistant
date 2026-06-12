@@ -20,6 +20,12 @@
   protects them from un-escalated model WRITES — closing a
   memory-injection vector); nothing else under `.talos` is exempt, so
   `.talos/profiles.yaml` can never flow into a prompt.
+- [T797] Characterization pins ahead of the context/session work (tests
+  only, no behavior change): the compaction failure-breaker's exact
+  operational skip string, the fact that compaction today sets a status
+  and nothing else (no event, no notice — T798/T805 change that
+  deliberately), and the exact `/session` info/save/load/clear/usage
+  bytes that T799–T801 evolve.
 - [T787] Characterization pins ahead of the wave-4 trust work (tests
   only, no behavior change): the not-yet-protected `.talos` workspace
   directory, the gradle `run_command` approval-detail bytes, the `/status`
