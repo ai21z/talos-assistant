@@ -124,6 +124,15 @@ class UiChromeContractTest {
     }
 
     @Test
+    void commandVerificationSummaryIsVerificationProseNotChrome() {
+        // T792: the upgraded verifier summary rides the existing verification
+        // annotation shape — it is legitimate verification text, introduces
+        // no new whole-line chrome prefix, and must survive history.
+        String prose = "Command verification passed: gradle_check exited 0.";
+        assertEquals(prose, strip(prose));
+    }
+
+    @Test
     void updatedMutationSummaryIsStripped() {
         // T768: FileWriteTool emits "Updated <path> (N lines, M bytes)" on
         // overwrite; the composed "✓ Updated ..." status line previously

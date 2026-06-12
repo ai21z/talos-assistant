@@ -44,6 +44,21 @@
   runner, output stream, and sentinel path — the old test wrote the
   developer's real `~/.talos/first_run_done`).
 
+### Changed (verification)
+- [T792] A user-approved, successful, verification-class `run_command`
+  (gradle_test / gradle_check / gradle_e2e_test, or any trusted `ws:`
+  workspace profile) that ran AFTER the turn's last successful mutation
+  now upgrades the post-apply verification verdict from READBACK_ONLY to
+  PASSED ("Command verification passed: <profile> exited 0.") —
+  command-level proof is strictly stronger than readback, and this is
+  what makes workspace profiles useful on non-Java workspaces. The
+  upgrade is additive only: FAILED is never overridden (failed runs
+  already dominate the answer), runs ordered before the mutation prove
+  nothing, build profiles (gradle_build/install_dist) are deliberately
+  not verification-class in v1, and ambiguous outcome shapes change
+  nothing (fail closed). Turns that already ran a passing gradle check
+  after a mutation will now read PASSED instead of READBACK_ONLY.
+
 ### Added
 - [T791] New `/profiles` and `/verify` commands plus a `Verify` status
   row. `/profiles list` shows the declaration state and resolved

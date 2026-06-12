@@ -233,7 +233,30 @@ public final class StaticTaskVerifier {
                 exactEditVerification,
                 sourceDerivedVerification,
                 claimReport);
+        compatibilityResult = withCommandVerificationUpgrade(compatibilityResult, outcomes);
         return TaskVerificationEvidence.postApply(compatibilityResult, claimReport);
+    }
+
+    /**
+     * T792: a user-approved, successful, verification-class run_command
+     * ordered after the last successful mutation upgrades a would-be
+     * READBACK_ONLY verdict to PASSED. Additive only — FAILED is never
+     * overridden, and ambiguous evidence changes nothing (fail closed).
+     */
+    private static TaskVerificationResult withCommandVerificationUpgrade(
+            TaskVerificationResult result,
+            List<ToolCallLoop.ToolOutcome> outcomes) {
+        if (result == null || result.status() != TaskVerificationStatus.READBACK_ONLY) {
+            return result;
+        }
+        return CommandVerificationEvidence.verificationProfilePassedAfterMutations(outcomes)
+                .map(profile -> {
+                    String summary = "Command verification passed: " + profile + " exited 0.";
+                    List<String> upgradedFacts = new ArrayList<>(result.facts());
+                    upgradedFacts.add(summary);
+                    return TaskVerificationResult.passed(summary, upgradedFacts);
+                })
+                .orElse(result);
     }
 
     static void verifyPrimaryWebMutationCoverage(
