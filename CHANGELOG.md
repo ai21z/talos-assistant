@@ -45,6 +45,21 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Added
+- [T791] New `/profiles` and `/verify` commands plus a `Verify` status
+  row. `/profiles list` shows the declaration state and resolved
+  profiles; `/profiles trust` is the chain's explicit-consent step — it
+  renders the resolved profiles (absolute executable paths) and the
+  declaration's SHA-256 behind an approval, then pins those exact bytes;
+  `/profiles revoke` withdraws the pin. `/verify [ws:<id>]` evaluates
+  the declaration and trust live (a just-pinned profile runs
+  immediately; the model-facing run_command surface still registers at
+  session start), plans through the same validation pipeline, asks
+  per-run approval with the standard command detail, and prints the exit
+  verdict with capped output tails. `/status`, `talos status`, and the
+  startup banner gain a `Verify` row (`none declared` / `N profile(s)
+  (untrusted - run /profiles trust)` / `N profile(s) (trusted)` /
+  `invalid: ...`) — strictly additive: a blank value renders
+  byte-identically to the pre-T791 output, pinned.
 - [T790] Trusted workspace profiles are now invocable through
   `talos.run_command` as `ws:<id>`: one merged `CommandProfileRegistry`
   (built at session start) is threaded through the planner, the tool,

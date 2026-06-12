@@ -450,6 +450,9 @@ public final class TalosBootstrap {
         registry.register(new ToolsCommand());
         // Environment preflight
         registry.register(new DoctorCommand(workspace));
+        // Workspace verification profiles (T791)
+        registry.register(new ProfilesCommand(workspace));
+        registry.register(new VerifyCommand(workspace));
         // File undo
         registry.register(new UndoCommand(undoStack));
         registry.register(new CheckpointCommand(workspace, checkpointService));
