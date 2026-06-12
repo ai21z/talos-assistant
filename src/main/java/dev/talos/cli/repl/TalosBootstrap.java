@@ -481,8 +481,9 @@ public final class TalosBootstrap {
         registry.register(new CheckpointCommand(workspace, checkpointService));
         // Session persistence (T800: list/resume need the active instance id)
         registry.register(new SessionCommand(workspace, sessionStore, activeSessionId));
-        // Context-window meter (T803)
+        // Context-window meter (T803) + manual compaction (T804)
         registry.register(new ContextCommand(terminalWidth, assistModeCompaction));
+        registry.register(new CompactCommand(assistModeCompaction));
     }
 
     private static String buildSensitiveWorkspaceNotice(Path workspace) {
