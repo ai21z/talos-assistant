@@ -377,6 +377,169 @@ class SessionCommandTest {
                     ((Result.Info) cmd.execute("resume", minimalCtx())).text);
         }
     }
+    // -- Export (T801) --
+    @Nested class Export {
+        private Path exportsDir() {
+            return tempDir.resolve("exports");
+        }
+
+        private SessionCommand command(Path ws, JsonSessionStore st, String activeId) {
+            return new SessionCommand(ws, st, activeId, exportsDir());
+        }
+
+        private void saveSnapshot(JsonSessionStore st, Path ws, String id, Instant createdAt,
+                                  String user, String assistant) {
+            st.save(new SessionData(id, ws.toString(), "", 1, createdAt,
+                    List.of(new SessionData.Turn("user", user, ""),
+                            new SessionData.Turn("assistant", assistant, "ok")),
+                    "ollama/qwen2.5-coder:14b"));
+        }
+
+        private Path exportedPath(Result r) {
+            assertInstanceOf(Result.TrustedInfo.class, r);
+            String firstLine = ((Result.TrustedInfo) r).text.lines().findFirst().orElseThrow();
+            assertTrue(firstLine.startsWith("Session exported to: "), firstLine);
+            return Path.of(firstLine.substring("Session exported to: ".length()));
+        }
+
+        @Test void export_defaultExportsLatestSessionAsMarkdown() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-ws");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"),
+                    "older question", "older answer");
+            saveSnapshot(st, ws, wsId + "-20260611090000", Instant.parse("2026-06-11T09:00:00Z"),
+                    "newer question", "newer answer");
+
+            Path exported = exportedPath(cmd.execute("export", minimalCtx()));
+
+            assertTrue(exported.startsWith(exportsDir().toAbsolutePath().normalize()),
+                    "default export lands under the injected exports dir");
+            String doc = java.nio.file.Files.readString(exported);
+            assertTrue(doc.startsWith("# Talos session 20260611090000\n"), "newest session wins");
+            assertTrue(doc.contains("- Session ID: " + wsId + "-20260611090000"));
+            assertTrue(doc.contains("- Model: ollama/qwen2.5-coder:14b"));
+            assertTrue(doc.contains("- Exchanges: 1"));
+            assertTrue(doc.contains("## Turn 1"));
+            assertTrue(doc.contains("**User:**\n\nnewer question"));
+            assertTrue(doc.contains("**Assistant:**\n\nnewer answer"));
+            assertFalse(doc.contains("older question"));
+        }
+
+        @Test void export_prefixSelectsASpecificSession() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-prefix-ws");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"),
+                    "older question", "older answer");
+            saveSnapshot(st, ws, wsId + "-20260611090000", Instant.parse("2026-06-11T09:00:00Z"),
+                    "newer question", "newer answer");
+
+            Path exported = exportedPath(cmd.execute("export 20260610", minimalCtx()));
+
+            String doc = java.nio.file.Files.readString(exported);
+            assertTrue(doc.contains("older question"));
+            assertFalse(doc.contains("newer question"));
+        }
+
+        @Test void export_crashLogFallbackSkipsNonOkRows() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-crash-ws");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            String crashed = wsId + "-20260610090000";
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            st.appendTurn(crashed, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
+                    "good question", "good answer", List.of(), 0, 0, 0, "", "ok"));
+            st.appendTurn(crashed, new TurnRecord(2, Instant.parse("2026-06-10T09:02:00Z"), 0L,
+                    "doomed question", "confabulated garbage", List.of(), 0, 0, 0, "", "aborted"));
+
+            Path exported = exportedPath(cmd.execute("export", minimalCtx()));
+
+            String doc = java.nio.file.Files.readString(exported);
+            assertTrue(doc.contains("good answer"));
+            assertFalse(doc.contains("confabulated garbage"),
+                    "aborted-turn residue must not leave the machine as transcript");
+        }
+
+        @Test void export_rawAlsoCopiesTheTurnLog() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-raw-ws");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            String id = wsId + "-20260610090000";
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, id, Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+            st.appendTurn(id, new TurnRecord(1, Instant.parse("2026-06-10T09:01:00Z"), 0L,
+                    "q", "a", List.of(), 0, 0, 0, "", "ok"));
+
+            Result r = cmd.execute("export --raw", minimalCtx());
+
+            String text = ((Result.TrustedInfo) r).text;
+            assertTrue(text.contains("Raw turn log copied to: "), text);
+            String rawLine = text.lines().filter(l -> l.startsWith("Raw turn log copied to: "))
+                    .findFirst().orElseThrow();
+            Path raw = Path.of(rawLine.substring("Raw turn log copied to: ".length()));
+            assertTrue(java.nio.file.Files.exists(raw));
+            assertTrue(raw.getFileName().toString().endsWith(".jsonl"));
+        }
+
+        @Test void export_refusesToOverwriteAnExplicitPath() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-overwrite-ws");
+            java.nio.file.Files.createDirectories(ws);
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+            java.nio.file.Files.writeString(ws.resolve("out.md"), "precious");
+
+            Result r = cmd.execute("export 20260610 out.md", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertTrue(((Result.Error) r).message.startsWith("Refusing to overwrite existing file: "));
+            assertEquals("precious", java.nio.file.Files.readString(ws.resolve("out.md")));
+        }
+
+        /**
+         * Privacy pin: content is redacted when it is WRITTEN to the
+         * session store; export must pass placeholders through verbatim
+         * (the sanitize pass is idempotent), never reconstruct anything.
+         */
+        @Test void export_redactionPlaceholderSurvivesVerbatim() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-redaction-ws");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            String canary = dev.talos.runtime.policy.ProtectedContentPolicy.REDACTED_CANARY;
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"),
+                    "what is in my env file?", "It contains " + canary + " and nothing else.");
+
+            Path exported = exportedPath(cmd.execute("export", minimalCtx()));
+
+            String doc = java.nio.file.Files.readString(exported);
+            assertTrue(doc.contains("It contains " + canary + " and nothing else."),
+                    "the seeded redaction placeholder must survive export verbatim");
+        }
+
+        @Test void export_noSessions_reportsNoSavedSession() throws Exception {
+            var cmd = command(tempDir.resolve("export-empty-ws"), store(), null);
+            assertEquals("No saved session found for this workspace.",
+                    ((Result.Info) cmd.execute("export", minimalCtx())).text);
+        }
+
+        @Test void export_unknownPrefixPointsAtList() throws Exception {
+            var st = store();
+            Path ws = tempDir.resolve("export-nomatch-ws");
+            String wsId = JsonSessionStore.sessionIdFor(ws);
+            var cmd = command(ws, st, wsId + "-20260612090000");
+            saveSnapshot(st, ws, wsId + "-20260610090000", Instant.parse("2026-06-10T09:00:00Z"), "q", "a");
+
+            Result r = cmd.execute("export zzz", minimalCtx());
+
+            assertInstanceOf(Result.Error.class, r);
+            assertEquals("No session matches 'zzz'. See /session list.", ((Result.Error) r).message);
+        }
+    }
     // -- Unknown subcommand --
     @Nested class Unknown {
         @Test void unknownSubcommand_returnsError() throws Exception {
