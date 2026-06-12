@@ -78,6 +78,8 @@ public final class ConversationManager {
     private int consecutiveCompactionFailures;
     private volatile ConversationCompactionStatus lastCompactionStatus =
             ConversationCompactionStatus.neverAttempted();
+    /** One-shot auto-compaction signal, consumed by {@link #pollCompactionEvent()}. */
+    private volatile CompactionEvent pendingEvent;
 
     public ConversationManager(ConversationMemory memory, TokenBudget budget) {
         this.memory = Objects.requireNonNull(memory, "memory must not be null");
@@ -235,33 +237,83 @@ public final class ConversationManager {
             BiFunction<String, List<ChatMessage>, ConversationCompactor.CompactionResult> compactor,
             int pairThreshold,
             double budgetFraction) {
-        if (compactor == null) return false;
+        CompactionOutcome outcome = compactInternal(compactor, pairThreshold, budgetFraction, false);
+        if (outcome.performed()) {
+            // One-shot signal for the render-side notice (T798/T805). Set
+            // ONLY by the auto path — /compact reports its own outcome.
+            pendingEvent = new CompactionEvent(
+                    outcome.summarizedPairs(),
+                    outcome.keptPairs(),
+                    outcome.beforeTokens(),
+                    outcome.afterTokens());
+        }
+        return outcome.performed();
+    }
+
+    /**
+     * Manual compaction for {@code /compact} (T798): skips the pair-threshold
+     * and over-budget gates (explicit user intent) and bypasses an OPEN
+     * failure breaker — the user consented to spend the LLM call — but a
+     * forced failure still increments the breaker counter. The recent tail
+     * that fits the mode's history budget stays verbatim, exactly like the
+     * auto path.
+     */
+    public CompactionOutcome compactNow(LlmClient llm, boolean assistMode) {
+        if (llm == null) {
+            return CompactionOutcome.noOp("no-llm", estimateHistoryTokens(), turnCount());
+        }
+        return compactNowWith(
+                (existingSketch, oldTurns) ->
+                        ConversationCompactor.tryCompact(existingSketch, oldTurns, llm),
+                assistMode ? ASSIST_HISTORY_BUDGET_FRACTION : HISTORY_BUDGET_FRACTION);
+    }
+
+    CompactionOutcome compactNowWith(
+            BiFunction<String, List<ChatMessage>, ConversationCompactor.CompactionResult> compactor,
+            double budgetFraction) {
+        return compactInternal(compactor, 0, budgetFraction, true);
+    }
+
+    private CompactionOutcome compactInternal(
+            BiFunction<String, List<ChatMessage>, ConversationCompactor.CompactionResult> compactor,
+            int pairThreshold,
+            double budgetFraction,
+            boolean forced) {
+        int beforeTokens = estimateHistoryTokens();
+        if (compactor == null) {
+            return CompactionOutcome.noOp("no-compactor", beforeTokens, turnCount());
+        }
         List<ChatMessage> allTurns = memory.getTurns();
+        if (allTurns.isEmpty()) {
+            return CompactionOutcome.noOp("empty", beforeTokens, 0);
+        }
         if (!completeUserAssistantPairs(allTurns)) {
             LOG.warn("Compaction skipped: stored conversation history is not complete user/assistant pairs");
-            return false;
+            return CompactionOutcome.noOp("odd-shape", beforeTokens, allTurns.size() / 2);
         }
         int pairs = allTurns.size() / 2;
-        if (pairs < pairThreshold) {
-            return false;
+        if (!forced && pairs < pairThreshold) {
+            return CompactionOutcome.noOp("below-threshold", beforeTokens, pairs);
         }
 
         int historyBudget = (int) (budget.contextMaxTokens() * budgetFraction);
-        int totalTokens = estimateHistoryTokens();
+        int totalTokens = beforeTokens;
 
-        if (totalTokens <= historyBudget) {
-            return false; // everything fits, no need to compact
+        if (!forced && totalTokens <= historyBudget) {
+            return CompactionOutcome.noOp("within-budget", beforeTokens, pairs);
         }
 
-        synchronized (this) {
-            if (consecutiveCompactionFailures >= MAX_CONSECUTIVE_COMPACTION_FAILURES) {
-                LOG.warn("Compaction skipped: {} consecutive failures reached session breaker",
-                        consecutiveCompactionFailures);
-                lastCompactionStatus = ConversationCompactionStatus.skipped(
-                        "failure-breaker-open",
-                        consecutiveCompactionFailures,
-                        allTurns.size());
-                return false;
+        if (!forced) {
+            synchronized (this) {
+                if (consecutiveCompactionFailures >= MAX_CONSECUTIVE_COMPACTION_FAILURES) {
+                    LOG.warn("Compaction skipped: {} consecutive failures reached session breaker",
+                            consecutiveCompactionFailures);
+                    lastCompactionStatus = ConversationCompactionStatus.skipped(
+                            "failure-breaker-open",
+                            consecutiveCompactionFailures,
+                            allTurns.size());
+                    return CompactionOutcome.noOp("failure-breaker-open", beforeTokens, pairs);
+                }
             }
         }
 
@@ -290,14 +342,14 @@ public final class ConversationManager {
 
         // Collect old turns (everything before splitIndex)
         if (splitIndex <= 0) {
-            return false; // nothing to compact
+            return CompactionOutcome.noOp("nothing-to-compact", beforeTokens, pairs);
         }
         for (int i = 0; i < splitIndex; i++) {
             oldTurns.add(allTurns.get(i));
         }
 
         if (oldTurns.isEmpty()) {
-            return false;
+            return CompactionOutcome.noOp("nothing-to-compact", beforeTokens, pairs);
         }
         int preservedTailTurns = Math.max(0, allTurns.size() - oldTurns.size());
 
@@ -332,7 +384,7 @@ public final class ConversationManager {
                     result != null ? result.reason() : "null-result",
                     result != null ? result.category() : "NULL_RESULT",
                     oldTurns.size());
-            return false;
+            return CompactionOutcome.failed(lastCompactionStatus, beforeTokens, pairs);
         }
 
         String newSketch = result.sketch();
@@ -353,7 +405,68 @@ public final class ConversationManager {
                 oldTurns.size(), (newSketch != null ? newSketch.length() : 0),
                 memory.getTurns().size());
 
-        return true;
+        return new CompactionOutcome(
+                true,
+                "",
+                oldTurns.size() / 2,
+                preservedTailTurns / 2,
+                beforeTokens,
+                estimateHistoryTokens(),
+                lastCompactionStatus);
+    }
+
+    /** Outcome of one compaction attempt (auto or forced), for command rendering. */
+    public record CompactionOutcome(
+            boolean performed,
+            String noOpReason,
+            int summarizedPairs,
+            int keptPairs,
+            int beforeTokens,
+            int afterTokens,
+            ConversationCompactionStatus status
+    ) {
+        static CompactionOutcome noOp(String reason, int beforeTokens, int pairs) {
+            return new CompactionOutcome(false, reason, 0, pairs, beforeTokens, beforeTokens, null);
+        }
+
+        static CompactionOutcome failed(
+                ConversationCompactionStatus status, int beforeTokens, int pairs) {
+            return new CompactionOutcome(false, "", 0, pairs, beforeTokens, beforeTokens, status);
+        }
+
+        /** True when an attempt ran and failed (distinct from a gate no-op). */
+        public boolean attemptedAndFailed() {
+            return !performed && noOpReason.isEmpty();
+        }
+    }
+
+    /** One-shot signal that an automatic compaction just happened (T798/T805). */
+    public record CompactionEvent(
+            int summarizedPairs, int keptPairs, int beforeTokens, int afterTokens) {}
+
+    /** Returns and clears the pending auto-compaction event, if any. */
+    public CompactionEvent pollCompactionEvent() {
+        CompactionEvent event = pendingEvent;
+        pendingEvent = null;
+        return event;
+    }
+
+    /** Context-window usage snapshot for the /context meter (T798). */
+    public ContextMeter meter(boolean assistMode) {
+        double fraction = assistMode ? ASSIST_HISTORY_BUDGET_FRACTION : HISTORY_BUDGET_FRACTION;
+        int threshold = assistMode ? ASSIST_COMPACTION_THRESHOLD_PAIRS : COMPACTION_THRESHOLD_PAIRS;
+        String currentSketch = sketch();
+        return new ContextMeter(
+                estimateHistoryTokens(),
+                (int) (budget.contextMaxTokens() * fraction),
+                budget.contextMaxTokens(),
+                budget.responseReserveFraction(),
+                budget.overheadTokens(),
+                turnCount(),
+                currentSketch != null && !currentSketch.isBlank(),
+                currentSketch == null ? 0 : currentSketch.length(),
+                threshold,
+                lastCompactionStatus);
     }
 
     /** Estimate total token count of all stored history. */
@@ -411,6 +524,7 @@ public final class ConversationManager {
             sketch = null;
             consecutiveCompactionFailures = 0;
             lastCompactionStatus = ConversationCompactionStatus.neverAttempted();
+            pendingEvent = null;
         }
     }
 
