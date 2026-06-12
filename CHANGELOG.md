@@ -120,6 +120,18 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T798] Core context-meter and manual-compaction machinery (consumed by
+  the `/context`, `/compact`, and compaction-notice tickets):
+  `ConversationManager.meter(assistMode)` snapshots history-token
+  estimates, the active mode's budget and pair threshold, sketch state,
+  and the last compaction status; `compactNow` forces a compaction that
+  skips the pair-threshold and over-budget gates and bypasses an OPEN
+  failure breaker (explicit user intent — forced failures still count
+  toward it, successes reset it) while keeping the recent
+  budget-fitting tail verbatim exactly like the auto path (shared body,
+  proven behavior-preserving by the T797 pins); and a one-shot
+  `pollCompactionEvent()` signal set only by the automatic path, the
+  hook for the T805 render-side notice. No user-visible change yet.
 - [T791] New `/profiles` and `/verify` commands plus a `Verify` status
   row. `/profiles list` shows the declaration state and resolved
   profiles; `/profiles trust` is the chain's explicit-consent step — it
