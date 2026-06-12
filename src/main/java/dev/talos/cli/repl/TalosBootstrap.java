@@ -366,7 +366,10 @@ public final class TalosBootstrap {
         // Auto mode routes to UnifiedAssistantMode by default — use the larger
         // assist-mode compaction budget (55%, 10-pair threshold) to prevent
         // premature context loss during multi-turn editing sessions.
-        memoryListener.setAssistMode(true);
+        // T803: ONE flag feeds the listener, /context, and /compact so the
+        // three surfaces can never disagree about the active mode.
+        final boolean assistModeCompaction = true;
+        memoryListener.setAssistMode(assistModeCompaction);
         turnProcessor.addListener(memoryListener);
         turnProcessor.addListener(new ActiveTaskContextUpdateListener(memory));
 
@@ -383,7 +386,7 @@ public final class TalosBootstrap {
         CommandRegistry registry = new CommandRegistry();
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
                 sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth,
-                sessionId);
+                sessionId, assistModeCompaction);
 
         // ── Assemble router ──────────────────────────────────────────────
         String sessionNotice = restoreSummary.hasSavedSession()
@@ -425,7 +428,8 @@ public final class TalosBootstrap {
                                           CheckpointService checkpointService,
                                           java.time.Instant activeSessionStartedAt,
                                           java.util.function.IntSupplier terminalWidth,
-                                          String activeSessionId) {
+                                          String activeSessionId,
+                                          boolean assistModeCompaction) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -477,6 +481,8 @@ public final class TalosBootstrap {
         registry.register(new CheckpointCommand(workspace, checkpointService));
         // Session persistence (T800: list/resume need the active instance id)
         registry.register(new SessionCommand(workspace, sessionStore, activeSessionId));
+        // Context-window meter (T803)
+        registry.register(new ContextCommand(terminalWidth, assistModeCompaction));
     }
 
     private static String buildSensitiveWorkspaceNotice(Path workspace) {

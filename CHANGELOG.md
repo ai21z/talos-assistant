@@ -120,6 +120,22 @@
   after a mutation will now read PASSED instead of READBACK_ONLY.
 
 ### Added
+- [T803] `/context` shows what occupies the context window — previously
+  invisible state: an estimated history meter bar against the active
+  compaction budget, the configured maximum
+  (`limits.llm_context_max_tokens`), the response reserve and
+  structural overhead, both mode budgets (assist 55% / rag 25%, active
+  one marked), exchange count, sketch size, the last prompt's pinned
+  @-files, the auto-compaction rule, and the last compaction attempt's
+  full status line. The engine row surfaces the silent divergence
+  between `limits.llm_context_max_tokens` and
+  `engines.llama_cpp.context`: a smaller engine context warns about
+  overflow risk, a larger one is noted as safe-but-unused, and Ollama
+  shows "managed by Ollama" (reconciling the two keys stays deferred —
+  this makes the gap visible). All figures are the chars/4 estimates
+  the budget logic itself uses, labeled `(est.)`. One bootstrap flag
+  now feeds the compaction listener, `/context`, and the upcoming
+  `/compact`, so the surfaces cannot drift apart.
 - [T802] `@file` pinning in prompts (unified/auto mode). Typing
   `@src/Main.java` (or `@"path with spaces"`) in a prompt pins that
   file's content into the turn: up to 4 explicit workspace-relative
