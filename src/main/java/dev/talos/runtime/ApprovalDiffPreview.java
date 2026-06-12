@@ -85,6 +85,35 @@ public final class ApprovalDiffPreview {
         }
     }
 
+    /**
+     * Diff for a checkpoint restore (T794): CURRENT file content vs the
+     * captured blob that a restore would write back. All write/edit guards
+     * apply — protected paths (including {@code .talos} since T788), binary
+     * and oversized content fail closed to a skipped preview.
+     */
+    public static Preview forRestore(Path workspace, String relPath, byte[] blobBytes) {
+        try {
+            Path target = guardedTarget(workspace, relPath);
+            if (target == null) return guardSkip(workspace, relPath);
+            if (blobBytes == null) return Preview.skippedBecause("missing-blob");
+            if (blobBytes.length > MAX_FILE_SIZE) throw new SkipException("file-too-large");
+            for (byte b : blobBytes) {
+                if (b == 0) throw new SkipException("binary-content");
+            }
+            String restored = new String(blobBytes, StandardCharsets.UTF_8);
+            if (!Files.exists(target)) {
+                Preview diff = render("", restored);
+                return new Preview(diff.text(), diff.added(), diff.removed(),
+                        diff.diffLineCount(), diff.truncated(), "", "recreates missing file");
+            }
+            return render(readDiffableContent(target), restored);
+        } catch (SkipException e) {
+            return Preview.skippedBecause(e.reason);
+        } catch (Exception e) {
+            return Preview.skippedBecause("diff-error");
+        }
+    }
+
     /** Diff for a targeted edit: file content with old_string spliced to new_string. */
     public static Preview forEdit(Path workspace, String relPath, String oldString, String newString) {
         try {

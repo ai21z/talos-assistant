@@ -45,6 +45,17 @@
   developer's real `~/.talos/first_run_done`).
 
 ### Changed (checkpoints)
+- [T794] `/checkpoint list` renders the unified timeline — id, local
+  capture time, turn number, trigger, file count, and size, newest
+  first — and a new `/checkpoint show <id>` renders per-file stats with
+  capped, redacted restore diffs (captured content vs the CURRENT
+  files, via a new `ApprovalDiffPreview.forRestore` that reuses every
+  write/edit guard: protected paths including `.talos`, binary and
+  oversized content all fail closed; entries that did not exist at
+  capture are annotated "restore DELETES it"). Diff previews cap at 3
+  files per show with an honest "(N more...)" marker. The
+  `/checkpoint restore` approval description/detail bytes stay frozen —
+  the rich previewed restore path is `/undo` (T795).
 - [T793] Checkpoints gained a read model: `listSummaries`/`describe`/
   `blob` expose createdAt, turn number, a new human `trigger` (the tool
   and target that caused the capture; pre-T793 checkpoints render
