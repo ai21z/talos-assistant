@@ -407,6 +407,7 @@ Run the approved Gradle test command profile.
 | `talos rag-ask "..."` | ask through the retrieval lane directly |
 | `talos status` | inspect current workspace/config state |
 | `talos diagnose` | inspect retrieval and answer-generation behavior |
+| `talos doctor` | verify the local environment (config, engine, model files, server, index) |
 | `talos version` | print version information |
 | `talos setup` | first-run setup flow |
 | `talos setup models` | configure tested managed llama.cpp model profiles |

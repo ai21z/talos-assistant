@@ -190,36 +190,9 @@ final class LlamaCppServerManager implements AutoCloseable {
     }
 
     private String managedValidationFailure() {
-        if (!config.managed()) return "";
-        if (config.serverPath() == null || config.serverPath().isBlank()
-                || !Files.isRegularFile(Path.of(config.serverPath()))) {
-            return "llama_cpp server_path is missing or not a file: "
-                    + Objects.toString(config.serverPath(), "");
-        }
-        if (!config.hasHfSource()
-                && (config.modelPath() == null || config.modelPath().isBlank()
-                || !Files.isRegularFile(Path.of(config.modelPath())))) {
-            return "llama_cpp model_path or hf_repo is missing. model_path is not a file: "
-                    + Objects.toString(config.modelPath(), "");
-        }
-        if (config.hasHfSource()) {
-            return "";
-        }
-        String unsupportedModel = unsupportedModelMetadataFailure(Path.of(config.modelPath()));
-        if (!unsupportedModel.isBlank()) return unsupportedModel;
-        return "";
-    }
-
-    private String unsupportedModelMetadataFailure(Path modelPath) {
-        String architecture = GgufMetadata.architecture(modelPath).orElse("");
-        if (!"gptoss".equalsIgnoreCase(architecture)) return "";
-
-        String model = config.catalogFallbackModel();
-        return "llama_cpp model '" + model + "' at " + modelPath
-                + " uses unsupported GGUF architecture 'gptoss'. "
-                + "The managed llama.cpp runtime expects GPT-OSS GGUF architecture 'gpt-oss' "
-                + "with matching GPT-OSS tensor metadata. Use a llama.cpp-compatible GPT-OSS 20B GGUF "
-                + "or update the model artifact. No fallback model was selected.";
+        // Single source of truth shared with the doctor preflight (T784);
+        // the failure strings are pinned by both test suites.
+        return LlamaCppPreflight.validationFailure(config);
     }
 
     private Health httpHealth() {
