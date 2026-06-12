@@ -453,8 +453,8 @@ public final class TalosBootstrap {
         // Workspace verification profiles (T791)
         registry.register(new ProfilesCommand(workspace));
         registry.register(new VerifyCommand(workspace));
-        // File undo
-        registry.register(new UndoCommand(undoStack));
+        // Undo (gated checkpoint restore since T795)
+        registry.register(new UndoCommand(workspace, checkpointService));
         registry.register(new CheckpointCommand(workspace, checkpointService));
         // Session persistence
         registry.register(new SessionCommand(workspace, sessionStore));
