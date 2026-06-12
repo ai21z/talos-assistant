@@ -184,8 +184,11 @@ class SensitiveLogRedactionTest {
                 "src/main/java/dev/talos/runtime/toolcall/ToolRepromptOverlayContinuation.java");
         String support = source("src/main/java/dev/talos/runtime/toolcall/ToolCallSupport.java");
 
-        assertTrue(firstRun.contains("SafeLogFormatter.value(SENTINEL)"), firstRun);
+        // T785: writeSentinel takes the sentinel path as a parameter now; the
+        // safe-format pattern is unchanged, only the identifier case moved.
+        assertTrue(firstRun.contains("SafeLogFormatter.value(sentinel)"), firstRun);
         assertFalse(firstRun.contains("SENTINEL, ex"), firstRun);
+        assertFalse(firstRun.contains("sentinel, ex"), firstRun);
 
         assertTrue(embeddings.contains("SafeLogFormatter.value(this.host)"), embeddings);
         assertFalse(embeddings.contains("services.\", this.host"), embeddings);

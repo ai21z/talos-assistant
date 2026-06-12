@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed
+- [T785] First run is now an honest preflight: the flow runs the same
+  doctor probe set as `talos doctor` (default probes only — it never loads
+  a model) and prints per-check PASS/WARN/FAIL/SKIP lines instead of the
+  previous unconditional "✓ Setup complete", which verified nothing. The
+  verdict line is now truthful: "Setup verified." only when every check
+  passed, "Setup complete with warnings." when the only finding is e.g. a
+  managed server that has not started yet, and "Setup incomplete — N
+  check(s) failed." with fix hints and a pointer to `talos doctor`
+  otherwise. The stale hardcoded configuration block (which claimed model
+  `talos-agent` regardless of config) is gone. The sentinel is still
+  written once the flow has been shown — even on failure — because the
+  launcher exits when first-run refuses, and an unconfigured user must
+  never be locked out of the REPL; recurring verification belongs to
+  `talos doctor`. First-run tests are now hermetic (injected doctor
+  runner, output stream, and sentinel path — the old test wrote the
+  developer's real `~/.talos/first_run_done`).
+
 ### Added
 - [T784] New `talos doctor` subcommand: a fast environment preflight that
   verifies the config loads (and the user config parses), the engine
