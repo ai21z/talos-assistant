@@ -59,6 +59,35 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("User Request"));
     }
 
+    /**
+     * T799: the composition root injects the active session instance id.
+     * The command must read THAT log, not one re-derived from the
+     * workspace hash — turns written under the instance id were invisible
+     * to a hash-derived reader, and vice versa.
+     */
+    @Test
+    void injectedSessionIdSelectsTheActiveSessionLog() {
+        Path workspace = Path.of("/project/instance").toAbsolutePath().normalize();
+        var store = new JsonSessionStore(tempDir);
+        String instanceId = JsonSessionStore.newSessionInstanceId(
+                workspace, Instant.parse("2026-06-12T08:00:00Z"));
+        store.appendTurn(instanceId, record(
+                1, "Active-session question", "Active-session answer",
+                List.of(), 0, 0, 0, "ok"));
+        store.appendTurn(JsonSessionStore.sessionIdFor(workspace), record(
+                9, "Legacy question", "Legacy answer",
+                List.of(), 0, 0, 0, "ok"));
+
+        var cmd = new ExplainLastTurnCommand(workspace, store, null, instanceId);
+        Result result = cmd.execute("", minimalCtx());
+
+        assertInstanceOf(Result.TrustedInfo.class, result);
+        String text = ((Result.TrustedInfo) result).text;
+        assertTrue(text.contains("Active-session question"));
+        assertFalse(text.contains("Legacy question"),
+                "the legacy bare-hash log must not shadow the active session");
+    }
+
     @Test
     void specIncludesLastAlias() {
         var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));

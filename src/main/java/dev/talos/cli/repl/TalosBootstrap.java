@@ -190,14 +190,21 @@ public final class TalosBootstrap {
         boolean sessionPersistenceEnabled = cfg.view().session().persistence();
         boolean sessionAutoLoadEnabled = sessionPersistenceEnabled && cfg.view().session().autoLoad();
         SessionStore sessionStore = sessionPersistenceEnabled ? new JsonSessionStore() : new NoOpSessionStore();
-        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        // T799: one workspace, many sessions. The bare workspace hash keys
+        // per-workspace artifacts (checkpoints, trace metadata) and is the
+        // listing prefix; everything this process WRITES (close snapshot,
+        // turn log, traces) goes under a fresh per-run instance id.
+        String workspaceId = JsonSessionStore.sessionIdFor(workspace);
+        String sessionId = JsonSessionStore.newSessionInstanceId(workspace, java.time.Instant.now());
 
         RestoreSummary restoreSummary = new RestoreSummary(0, null, "");
         RestoreSummary savedSessionSummary = new RestoreSummary(0, null, "");
         if (sessionAutoLoadEnabled) {
-            restoreSummary = restoreSavedSession(sessionStore, sessionId, memory, conversationManager);
+            restoreSummary = restoreSavedSession(sessionStore,
+                    latestSessionId(sessionStore, workspaceId), memory, conversationManager);
         } else if (sessionPersistenceEnabled) {
-            savedSessionSummary = inspectSavedSession(sessionStore, sessionId);
+            savedSessionSummary = inspectSavedSession(sessionStore,
+                    latestSessionId(sessionStore, workspaceId));
         }
         if (restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
             llm.setModel(restoreSummary.model());
@@ -285,10 +292,19 @@ public final class TalosBootstrap {
             final Path wsRef = workspace;
             runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
                 @Override public void onSessionEnd() {
+                    String sketch = cmRef.sketch();
+                    // T799: an empty session is not worth a file. Skip when
+                    // there are no turns, no sketch, and no active task
+                    // context to carry forward (context-only snapshots are a
+                    // real restore case and must still save).
+                    if (memRef.getTurns().isEmpty()
+                            && (sketch == null || sketch.isBlank())
+                            && !hasLiveActiveContext(memRef)) {
+                        return;
+                    }
                     java.util.List<SessionData.Turn> turns = memRef.getTurns().stream()
                             .map(m -> new SessionData.Turn(m.role(), m.content(), "assistant".equals(m.role()) ? "ok" : ""))
                             .toList();
-                    String sketch = cmRef.sketch();
                     SessionData data = new SessionData(sidRef, wsRef.toString(),
                             sketch != null ? sketch : "", cmRef.turnCount(),
                             runtimeSession.startedAt(), turns, llm.getModel(),
@@ -366,7 +382,8 @@ public final class TalosBootstrap {
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
-                sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth);
+                sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth,
+                sessionId);
 
         // ── Assemble router ──────────────────────────────────────────────
         String sessionNotice = restoreSummary.hasSavedSession()
@@ -407,7 +424,8 @@ public final class TalosBootstrap {
                                           SessionStore sessionStore,
                                           CheckpointService checkpointService,
                                           java.time.Instant activeSessionStartedAt,
-                                          java.util.function.IntSupplier terminalWidth) {
+                                          java.util.function.IntSupplier terminalWidth,
+                                          String activeSessionId) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -429,7 +447,10 @@ public final class TalosBootstrap {
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, workspace, terminalWidth));
-        registry.register(new ExplainLastTurnCommand(workspace, sessionStore, activeSessionStartedAt));
+        // T799: /last must read the ACTIVE session's log — the injected id,
+        // not a re-derived workspace hash (the pre-T799 silent breaker).
+        registry.register(new ExplainLastTurnCommand(workspace, sessionStore,
+                activeSessionStartedAt, activeSessionId));
         registry.register(new PromptCommand(modes, workspace));
         registry.register(new PromptDebugCommand());
         registry.register(new WorkspaceCommand(workspace));
@@ -475,6 +496,25 @@ public final class TalosBootstrap {
     }
 
     // ── Session reconciliation helpers ──────────────────────────────────
+
+    /**
+     * The newest stored session for this workspace (legacy bare-hash and
+     * instance files compete on createdAt), or the legacy id itself when
+     * nothing is stored — keeping the pre-T799 lookup behavior byte-for-byte
+     * for empty stores.
+     */
+    static String latestSessionId(SessionStore store, String workspaceId) {
+        var sessions = store.listSessions(workspaceId);
+        return sessions.isEmpty() ? workspaceId : sessions.get(0).sessionId();
+    }
+
+    /** Live-memory twin of {@link #hasSavedActiveContext}: is there context worth saving? */
+    private static boolean hasLiveActiveContext(SessionMemory memory) {
+        ActiveTaskContext context = memory.activeTaskContext();
+        ArtifactGoal goal = memory.artifactGoal();
+        return (context != null && context.state() != ActiveTaskContext.State.NONE)
+                || (goal != null && goal.source() != ArtifactGoal.Source.NONE);
+    }
 
     /** Restore saved session context through snapshot-first, JSONL-fallback replay. */
     public static RestoreSummary restoreSavedSession(SessionStore store, String sessionId,
