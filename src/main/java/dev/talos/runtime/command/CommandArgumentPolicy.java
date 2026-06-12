@@ -7,7 +7,9 @@ import java.util.Locale;
 
 /** Profile-specific argument validator for non-shell command plans. */
 public final class CommandArgumentPolicy {
-    private static final List<String> SHELL_SYNTAX = List.of(
+    // Package-private since T789: the workspace-profile loader screens
+    // declared fixed args against the same vocabulary.
+    static final List<String> SHELL_SYNTAX = List.of(
             ";", "&&", "||", "|", ">", "<", "`", "$(", "\n", "\r");
     private static final List<String> NETWORK_TOKENS = List.of(
             "curl", "wget", "invoke-webrequest", "iwr", "fetch", "pull", "push", "--scan");
