@@ -428,6 +428,59 @@ class ConversationCompactionTest {
                     "Turns should be pruned: before=" + turnsBefore + ", after=" + cm.turnCount());
         }
 
+        /**
+         * T797 pin: the failure breaker opens after three consecutive
+         * failures, the skip status renders this exact operational string,
+         * and a success resets the counter. T798 builds compactNow on the
+         * same internals (the forced path bypasses the OPEN breaker by
+         * explicit user intent, but its failures still count).
+         */
+        @Test
+        void t797_failureBreakerOpensAfterThreeAndRendersTheExactSkipString() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+
+            for (int i = 0; i < ConversationManager.MAX_CONSECUTIVE_COMPACTION_FAILURES; i++) {
+                assertFalse(cm.maybeCompactWith(
+                        (sketch, oldTurns) ->
+                                ConversationCompactor.CompactionResult.failed(sketch, "llm-down"),
+                        ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                        ConversationManager.HISTORY_BUDGET_FRACTION));
+            }
+
+            // Breaker open: the next attempt skips without calling the compactor.
+            assertFalse(cm.maybeCompactWith(
+                    (sketch, oldTurns) -> {
+                        throw new AssertionError("breaker-open attempts must not reach the compactor");
+                    },
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION));
+            assertEquals(
+                    "status=SKIPPED category=SKIPPED reason=failure-breaker-open"
+                            + " failures=3 oldTurns=0 preservedTail=16 integrity=NOT_DERIVED",
+                    cm.lastCompactionStatus().renderCompact(),
+                    "the operational skip string is pinned exactly - /context renders it");
+        }
+
+        /** T797 pin: today compaction is silent — it exposes status, no event. */
+        @Test
+        void t797_compactionSetsStatusOnly_noUserVisibleSignalExistsYet() {
+            SessionMemory mem = new SessionMemory();
+            ConversationManager cm = new ConversationManager(mem, new TokenBudget(200));
+            addOverflowingTurns(cm);
+
+            boolean compacted = cm.maybeCompactWith(
+                    (sketch, oldTurns) -> ConversationCompactor.CompactionResult.succeeded("S"),
+                    ConversationManager.COMPACTION_THRESHOLD_PAIRS,
+                    ConversationManager.HISTORY_BUDGET_FRACTION);
+
+            assertTrue(compacted);
+            assertEquals("SUCCEEDED", cm.lastCompactionStatus().status());
+            // T798 deliberately adds pollCompactionEvent() + the render-side
+            // notice (T805); until then the only observable is this status.
+        }
+
         @Test
         void maybeCompact_failedCompactionPreservesTurnsAndSketch() {
             SessionMemory mem = new SessionMemory();
