@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Changed
+- [T788] The workspace `.talos` directory is now a protected CONTROL
+  path (like `.git` and `.github/workflows`): it will hold
+  workspace-declared verification profiles (`.talos/profiles.yaml`) and
+  template commands (`.talos/commands/*.md`) — content that influences
+  what Talos executes — so the model can no longer write it with an
+  ordinary write approval; writes escalate through the protected-path
+  flow and diff previews of its content fail closed. The protected-path
+  `POLICY_VERSION` was bumped v3 → v4, which makes existing RAG indexes
+  rebuild their privacy partition once on the next index check (stale
+  partitions would misclassify `.talos` content). Names merely
+  containing the word talos (`docs/talos-notes.md`) stay unprotected.
+  One deliberate read-side exemption: the project-memory loader still
+  reads its own canonical `<dir>/.talos/rules.md` memory tiers into the
+  prompt (that is their purpose, and the CONTROL classification now
+  protects them from un-escalated model WRITES — closing a
+  memory-injection vector); nothing else under `.talos` is exempt, so
+  `.talos/profiles.yaml` can never flow into a prompt.
 - [T787] Characterization pins ahead of the wave-4 trust work (tests
   only, no behavior change): the not-yet-protected `.talos` workspace
   directory, the gradle `run_command` approval-detail bytes, the `/status`

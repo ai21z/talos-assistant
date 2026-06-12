@@ -188,6 +188,7 @@ public final class ProjectMemoryLoader {
             return ReadDecision.skip(candidate.decision("REFUSED_UNSUPPORTED_BOUNDARY", "PATH_ESCAPE"));
         }
         if (candidate.trust() == ProjectMemoryTrust.WORKSPACE_PROVIDED
+                && !isCanonicalTalosMemoryFile(candidate.path())
                 && ProtectedContentPolicy.isProtectedPath(workspace, candidate.path())) {
             return ReadDecision.skip(candidate.decision("EXCLUDED_BY_PRIVACY_OR_TRUST_POLICY", "PROTECTED_PATH"));
         }
@@ -225,6 +226,25 @@ public final class ProjectMemoryLoader {
         } catch (Exception e) {
             return ReadDecision.skip(candidate.decision("WITHHELD_FROM_MODEL", "READ_FAILED"));
         }
+    }
+
+    /**
+     * The loader's own canonical memory file ({@code <dir>/.talos/rules.md})
+     * is the product's designated model-facing memory surface. T788 made the
+     * workspace {@code .talos} directory a protected CONTROL segment so the
+     * model cannot WRITE it with an ordinary approval (memory injection via
+     * a tool write now escalates through the protected-path flow) — but
+     * Talos itself still reads exactly this file into the prompt as
+     * untrusted context; that is its purpose. Nothing else under
+     * {@code .talos} is exempt: {@code .talos/profiles.yaml} (verification
+     * profiles) must never flow into a prompt.
+     */
+    private static boolean isCanonicalTalosMemoryFile(Path path) {
+        if (path == null || path.getFileName() == null) return false;
+        Path parent = path.getParent();
+        return parent != null && parent.getFileName() != null
+                && "rules.md".equalsIgnoreCase(path.getFileName().toString())
+                && ".talos".equalsIgnoreCase(parent.getFileName().toString());
     }
 
     private boolean candidateInsideTrustBoundary(Candidate candidate, Path workspace, Path userHome) {

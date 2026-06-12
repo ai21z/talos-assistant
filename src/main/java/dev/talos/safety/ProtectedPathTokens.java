@@ -66,7 +66,13 @@ public final class ProtectedPathTokens {
         if (lowerRelative == null || lowerRelative.isBlank()) return "";
         List<String> segments = List.of(lowerRelative.split("/+"));
 
-        if (segments.contains(".git") || segments.contains(".gnupg")) return "CONTROL";
+        // .talos is CONTROL since T788: it holds workspace-declared
+        // verification profiles (.talos/profiles.yaml) and template commands
+        // (.talos/commands/*.md) — content that influences what Talos
+        // executes, so the model must not write it with an ordinary
+        // write approval.
+        if (segments.contains(".git") || segments.contains(".gnupg")
+                || segments.contains(".talos")) return "CONTROL";
         for (int i = 0; i + 1 < segments.size(); i++) {
             if (".github".equals(segments.get(i)) && "workflows".equals(segments.get(i + 1))) {
                 return "CONTROL";

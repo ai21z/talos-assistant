@@ -19,6 +19,23 @@ class ProtectedWorkspacePathsTest {
     Path workspace;
 
     @Test
+    void policyVersionIsV4_sinceT788TalosControlSegment() {
+        // Typed literal on purpose (never constant-vs-constant): bumping the
+        // version is a deliberate act that forces stale RAG privacy
+        // partitions to rebuild, and this pin makes the bump reviewable.
+        assertEquals("protected-content-policy-v4", ProtectedWorkspacePaths.POLICY_VERSION);
+    }
+
+    @Test
+    void workspaceTalosDeclarationsClassifyProtected() {
+        ProtectedWorkspacePaths.Decision decision =
+                ProtectedWorkspacePaths.classify(workspace, ".talos/profiles.yaml");
+
+        assertTrue(decision.protectedPath());
+        assertEquals("CONTROL", decision.protectedKind());
+    }
+
+    @Test
     void direct_classifier_matches_runtime_path_policy_for_workspace_paths() throws Exception {
         Files.writeString(workspace.resolve(".env"), "SECRET=redacted\n");
 
