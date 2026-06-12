@@ -15,18 +15,23 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ProtectedPathTokensTest {
 
-    // ── T787 pin: the workspace .talos directory is NOT protected yet ──
-    // The wave-4 verification-profile declaration will live at
-    // <workspace>/.talos/profiles.yaml; today the model could write it with
-    // one ordinary write approval. T788 flips these to "CONTROL" (and bumps
-    // POLICY_VERSION) — this pin documents the gap being closed.
+    // ── T788: the workspace .talos directory is a CONTROL path ─────────
+    // (T787 pinned the pre-existing gap: these all classified "".) The
+    // wave-4 verification-profile declaration lives at
+    // <workspace>/.talos/profiles.yaml and template commands under
+    // .talos/commands/ — content that influences what Talos executes, so
+    // the model cannot write it with an ordinary write approval anymore.
 
     @Test
-    void workspaceTalosDirIsNotProtectedYet_T788ClosesThisGap() {
-        assertEquals("", ProtectedPathTokens.protectedKind(".talos"));
-        assertEquals("", ProtectedPathTokens.protectedKind(".talos/profiles.yaml"));
-        assertEquals("", ProtectedPathTokens.protectedKind(".talos/commands/review.md"));
-        assertEquals("", ProtectedPathTokens.protectedKind("sub/.talos/profiles.yaml"));
+    void workspaceTalosDirIsAControlPath_sinceT788() {
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".talos"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".talos/profiles.yaml"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".talos/commands/review.md"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind("sub/.talos/profiles.yaml"));
+        // Names merely containing the word talos stay unprotected.
+        assertEquals("", ProtectedPathTokens.protectedKind("talos"));
+        assertEquals("", ProtectedPathTokens.protectedKind("docs/talos-notes.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("my.talos.txt"));
     }
 
     // ── exact-rule families: identical before and after T759 ───────────
