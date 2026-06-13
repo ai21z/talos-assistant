@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
+last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -12,16 +12,19 @@ evidence_inputs:
     ref: "AGENTS.md"
     selector: "Work-Test Cycle and Talos-specific architecture priorities"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T807-in-progress-high] architecture-intelligence-report-discipline.md"
-    selector: "Current Evidence and Hardening Evidence"
+    ref: "work-cycle-docs/tickets/done/[T807-done-high] architecture-intelligence-report-discipline.md"
+    selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T808-open-high] living-evidence-wiki-discipline.md"
-    selector: "Required Behavior"
+    ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
+    selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T809-open-high] wiki-evidence-liveness-lint.md"
-    selector: "Required Behavior"
+    ref: "work-cycle-docs/tickets/done/[T809-done-high] wiki-evidence-liveness-lint.md"
+    selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T810-open-high] living-wiki-operating-loop-and-close-gate.md"
+    ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
+    selector: "Completion State"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T811-open-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
     selector: "Required Behavior"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
@@ -41,21 +44,19 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d`
+- Commit: `48c9608056f7d7891fbcef952bef7d45e2f1db82`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: `T807`, `T808`, `T809`, `T810`
-- Active wave context: Wave 5 planning readiness after architecture/report
-  discipline hardening.
-- Known caveats: T807 generated reports are ignored build evidence; Qodana is
-  read-only input for T807; wiki evidence-liveness lint is limited to generated
-  JSON report claims in T809; no Wave 5 refactor has started in T807, T808, or
-  T809; T810 adds the operating loop and close gate without starting Wave 5.
-- Next move: open the first Wave 5 refactor ticket against
-  `cli.modes.AssistantTurnExecutor` with lifecycle ownership as the primary
-  invariant.
+- Active tickets: `T811`
+- Active wave context: first Wave 5 lifecycle-ownership characterization.
+- Known caveats: T807 generated reports are ignored build evidence; Qodana
+  remains read-only input for architecture reporting; wiki evidence-liveness
+  lint is limited to generated JSON report claims; T811 has not started a
+  runtime refactor yet.
+- Next move: work T811 by characterizing `cli.modes.AssistantTurnExecutor`
+  before extracting any responsibility.
 
 ```talos-wiki-claims
 {
@@ -111,21 +112,25 @@ confidence_histogram:
 
 ## Current Architecture Discipline State
 
-T807 is in progress. Its purpose is to make Wave 5 refactoring evidence-driven:
+T807 is done. Its purpose was to make Wave 5 refactoring evidence-driven:
 package cycles, method hotspots, manual Java wiring, lifecycle ownership,
 approval/tool ownership, trace/privacy ownership, quality overlays, toolchain
 readiness, and sequencing must be visible before class movement begins.
 
-T808 is open. Its purpose is to create a small committed wiki layer that
+T808 is done. Its purpose was to create a small committed wiki layer that
 captures resolved, source-backed conclusions for future human and LLM
 collaboration.
 
-T809 is open. Its purpose is to prove selected generated-report claims in the
+T809 is done. Its purpose was to prove selected generated-report claims in the
 wiki are still live against generated JSON evidence.
 
-T810 is open. Its purpose is to make the wiki evidence-liveness loop
+T810 is done. Its purpose was to make the wiki evidence-liveness loop
 load-bearing through a close/candidate gate, evidence registry, and explicit
 Ingest/Query/Lint/Log/Reject operating rules.
+
+T811 is open. Its purpose is to begin Wave 5 at
+`cli.modes.AssistantTurnExecutor` through characterization and lifecycle
+ownership mapping before extraction.
 
 ## Wave 5 Readiness Status
 

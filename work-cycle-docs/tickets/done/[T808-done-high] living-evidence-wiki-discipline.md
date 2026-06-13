@@ -1,9 +1,9 @@
 # T808 - Living Evidence Wiki Discipline
 
-Status: open
+Status: done
 Severity: high
 Release gate: no - pre-Wave-5 shared-knowledge discipline
-Branch: feature/wave4-ergonomics
+Branch: v0.9.0-beta-dev
 Created/updated: 2026-06-13
 Owner: unassigned
 
@@ -92,7 +92,15 @@ git status --short
 - Runtime loading of wiki pages into Talos project memory.
 - `llms.txt` as a possible future entry-point experiment.
 
-## Owner Review State
+## Completion State
 
-This ticket is created as an open design/tooling discipline ticket. Do not move
-it to `done/` or commit it without owner approval.
+Completed after owner review. The committed wiki spine exists under
+`work-cycle-docs/wiki/`, uses `INDEX.md` and `CURRENT-STATE.md` as entry
+points, and is covered by deterministic structural lint.
+
+Completion evidence:
+
+- `.\gradlew.bat wikiLintStructural --no-daemon` is covered by
+  `.\gradlew.bat wikiEvidenceCloseGate --no-daemon`.
+- `.\gradlew.bat check --no-daemon` passed after T807-T810 merge.
+- Required wiki pages exist and are indexed.

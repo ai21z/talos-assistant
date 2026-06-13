@@ -3,10 +3,10 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Evidence Registry"
 kind: registry
 status: active
-last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
+last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
 evidence_inputs:
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T810-open-high] living-wiki-operating-loop-and-close-gate.md"
+    ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Evidence registry scope"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"

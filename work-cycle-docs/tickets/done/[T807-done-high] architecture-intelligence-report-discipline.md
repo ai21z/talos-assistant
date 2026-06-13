@@ -1,9 +1,9 @@
 # T807 - Architecture Intelligence Report Discipline
 
-Status: in-progress - hardening implemented, awaiting owner review
+Status: done
 Severity: high
 Release gate: no - pre-Wave-5 architecture evidence tooling
-Branch: feature/wave4-ergonomics
+Branch: v0.9.0-beta-dev
 Created/updated: 2026-06-13
 Owner: unassigned
 
@@ -160,8 +160,17 @@ git status --short
     hits with file, line, signal, and snippet, preferring behavioral source
     lines over imports.
 
-## Owner Review State
+## Completion State
 
-This ticket intentionally remains in `open/` as `in-progress` until the owner
-reviews the hardened report suite. Do not move it to `done/` or commit it
-without owner approval.
+Completed after owner review. The architecture intelligence report suite is
+implemented, score explainability is machine-readable, evidence hits are
+bounded and visible, and generated reports remain ignored evidence.
+
+Completion evidence:
+
+- `.\gradlew.bat check --no-daemon` passed after T807-T810 merge.
+- `.\gradlew.bat wikiEvidenceCloseGate --no-daemon` passed after T807-T810
+  merge.
+- The regenerated Wave 5 sequence ranks
+  `dev.talos.cli.modes.AssistantTurnExecutor` first with priority index `466`
+  and confidence `INFERRED_REVIEW`.

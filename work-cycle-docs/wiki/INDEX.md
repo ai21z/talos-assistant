@@ -3,23 +3,26 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
+last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
     selector: "Talos Development, Work-Test, And Audit Instructions"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T807-in-progress-high] architecture-intelligence-report-discipline.md"
+    ref: "work-cycle-docs/tickets/done/[T807-done-high] architecture-intelligence-report-discipline.md"
     selector: "Architecture intelligence report discipline"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T808-open-high] living-evidence-wiki-discipline.md"
+    ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
     selector: "Living evidence wiki discipline"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T809-open-high] wiki-evidence-liveness-lint.md"
+    ref: "work-cycle-docs/tickets/done/[T809-done-high] wiki-evidence-liveness-lint.md"
     selector: "Wiki evidence-liveness lint"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T810-open-high] living-wiki-operating-loop-and-close-gate.md"
+    ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Living wiki operating loop and close gate"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T811-open-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    selector: "First Wave 5 lifecycle ownership ticket"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -62,10 +65,7 @@ or generated reports.
 
 ## Active Tickets
 
-- [T807 architecture intelligence report discipline](../tickets/open/%5BT807-in-progress-high%5D%20architecture-intelligence-report-discipline.md)
-- [T808 living evidence wiki discipline](../tickets/open/%5BT808-open-high%5D%20living-evidence-wiki-discipline.md)
-- [T809 wiki evidence-liveness lint](../tickets/open/%5BT809-open-high%5D%20wiki-evidence-liveness-lint.md)
-- [T810 living wiki operating loop and close gate](../tickets/open/%5BT810-open-high%5D%20living-wiki-operating-loop-and-close-gate.md)
+- [T811 AssistantTurnExecutor lifecycle ownership characterization](../tickets/open/%5BT811-open-high%5D%20assistant-turn-executor-lifecycle-ownership-characterization.md)
 
 ## Update Rule
 

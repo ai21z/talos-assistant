@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Schema"
 kind: schema
 status: active
-last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
+last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
 evidence_inputs:
   - type: external_source
     ref: "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
@@ -18,7 +18,7 @@ evidence_inputs:
     ref: "https://genai.owasp.org/llmrisk/llm01-prompt-injection/"
     selector: "LLM01 prompt injection risk"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T810-open-high] living-wiki-operating-loop-and-close-gate.md"
+    ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Evidence registry and operating loop"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
