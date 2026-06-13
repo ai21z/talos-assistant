@@ -246,6 +246,39 @@ passed before the bump. Evidence must belong to the version declared in
 `gradle.properties` and described in `CHANGELOG.md`; do not present a pre-bump
 `check` run as sufficient review evidence.
 
+## Step 6A: Run The Wiki Evidence Close Gate
+
+Goal: prove the living evidence wiki still matches freshly generated
+architecture intelligence evidence.
+
+What the developer does:
+
+1. Run the wiki evidence close gate after the mandatory candidate `check`.
+2. Force rerun so the architecture intelligence report is regenerated for this
+   close/candidate decision.
+3. Fix wiki or report issues before collecting the rest of the candidate
+   packet.
+
+Command:
+
+```powershell
+./gradlew.bat wikiEvidenceCloseGate --rerun-tasks
+```
+
+Expected result:
+
+- Architecture intelligence reports regenerate under
+  `build/reports/talos/architecture-intelligence/current/`.
+- Wiki structural lint passes.
+- Wiki generated-report evidence-liveness lint passes.
+- `build/reports/talos/wiki-lint/current/identity-freshness.json` records
+  branch, commit, `last_verified_commit`, and version freshness as advisory
+  evidence.
+
+Important: this is intentionally separate from the fast `check` loop. It is
+required for wiki/ticket close and candidate cuts, but it should not slow every
+inner-loop verification run.
+
 ## Step 7: Run Qodana Community Locally
 
 Goal: run static analysis without paid Qodana services.
@@ -390,6 +423,7 @@ Suggested handoff text:
 Candidate version: <version>
 Checks run:
 - ./gradlew.bat check
+- ./gradlew.bat wikiEvidenceCloseGate --rerun-tasks
 - ./gradlew.bat qodanaLocal
 - ./gradlew.bat talosQualitySummaries
 

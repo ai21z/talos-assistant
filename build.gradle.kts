@@ -683,6 +683,74 @@ val candidateTest by tasks.registering(Test::class) {
     shouldRunAfter(tasks.test)
 }
 
+tasks.test {
+    filter {
+        excludeTestsMatching("dev.talos.architecture.intelligence.*")
+        excludeTestsMatching("dev.talos.wiki.WikiEvidenceLivenessTest")
+    }
+}
+
+val cleanArchitectureIntelligenceReport by tasks.registering(Delete::class) {
+    description = "Deletes generated architecture intelligence evidence before liveness validation."
+    group = "reporting"
+    delete(layout.buildDirectory.dir("reports/talos/architecture-intelligence/current"))
+}
+
+val architectureIntelligenceReport by tasks.registering(Test::class) {
+    description = "Generates the report-only architecture intelligence Markdown and JSON suite for Wave 5 planning."
+    group = "reporting"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    inputs.file(layout.projectDirectory.file("gradle.properties"))
+    inputs.property("gitHead", providers.provider { gitOutput("rev-parse", "HEAD") ?: "unknown" })
+    inputs.property("gitBranch", providers.provider { gitOutput("rev-parse", "--abbrev-ref", "HEAD") ?: "unknown" })
+    filter {
+        includeTestsMatching("dev.talos.architecture.intelligence.*")
+    }
+    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/architectureIntelligenceReport"))
+    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/architectureIntelligenceReport"))
+    outputs.dir(layout.buildDirectory.dir("reports/talos/architecture-intelligence/current"))
+    mustRunAfter(cleanArchitectureIntelligenceReport)
+    shouldRunAfter(tasks.test)
+}
+
+val wikiLintStructural by tasks.registering(Test::class) {
+    description = "Runs the structural lint for the committed Talos living evidence wiki."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    inputs.dir(layout.projectDirectory.dir("work-cycle-docs/wiki"))
+    filter {
+        includeTestsMatching("dev.talos.wiki.WikiLintStructuralTest")
+    }
+    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/wikiLintStructural"))
+    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/wikiLintStructural"))
+    shouldRunAfter(tasks.test)
+}
+
+val wikiLintWithEvidence by tasks.registering(Test::class) {
+    description = "Runs living evidence wiki lint against generated Talos architecture report JSON."
+    group = "verification"
+    dependsOn(cleanArchitectureIntelligenceReport, architectureIntelligenceReport, wikiLintStructural)
+    mustRunAfter(architectureIntelligenceReport, wikiLintStructural)
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    inputs.dir(layout.projectDirectory.dir("work-cycle-docs/wiki"))
+    inputs.dir(layout.buildDirectory.dir("reports/talos/architecture-intelligence/current/data"))
+    outputs.file(layout.buildDirectory.file("reports/talos/wiki-lint/current/identity-freshness.json"))
+    filter {
+        includeTestsMatching("dev.talos.wiki.WikiEvidenceLivenessTest")
+    }
+    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/wikiLintWithEvidence"))
+    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/wikiLintWithEvidence"))
+}
+
+val wikiEvidenceCloseGate by tasks.registering {
+    description = "Runs the living evidence wiki close/candidate gate with generated-report liveness."
+    group = "verification"
+    dependsOn(wikiLintWithEvidence)
+}
+
 val candidateE2eTest by tasks.registering(Test::class) {
     description = "Runs the candidate deterministic scripted e2e harness lane and preserves results even when scenarios fail."
     group = "verification"
