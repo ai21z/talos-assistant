@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "b871e208b7bb03a5487f9b638ad02af613f52a78"
+last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -40,17 +40,17 @@ confidence_histogram:
 
 ## Run Identity
 
-- Branch: `feature/wave4-ergonomics`
-- Commit: `b871e208b7bb03a5487f9b638ad02af613f52a78`
+- Branch: `v0.9.0-beta-dev`
+- Commit: `a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d`
 - Talos version: `0.10.5`
 - Active tickets: `T807`, `T808`, `T809`, `T810`
-- Active wave context: pre-Wave 5 architecture/report discipline hardening.
+- Active wave context: Wave 5 planning readiness after architecture/report
+  discipline hardening.
 - Known caveats: T807 generated reports are ignored build evidence; Qodana is
   read-only input for T807; wiki evidence-liveness lint is limited to generated
   JSON report claims in T809; no Wave 5 refactor has started in T807, T808, or
   T809; T810 adds the operating loop and close gate without starting Wave 5.
-- Next move: commit the T807/T808/T809/T810 discipline batch after owner
-  review, then open the first Wave 5 refactor ticket against
+- Next move: open the first Wave 5 refactor ticket against
   `cli.modes.AssistantTurnExecutor` with lifecycle ownership as the primary
   invariant.
 
@@ -127,10 +127,11 @@ Ingest/Query/Lint/Log/Reject operating rules.
 ## Wave 5 Readiness Status
 
 Talos is ready for the first Wave 5 refactor ticket after the T807-T810
-discipline batch is committed. The readiness claim is limited: it means
-architecture planning evidence is current, wiki claim liveness is gated through
-`wikiEvidenceCloseGate`, and the normal local `check` gate does not depend on
-stale generated architecture report output.
+discipline batch was committed and fast-forwarded into `v0.9.0-beta-dev`.
+The readiness claim is limited: it means architecture planning evidence is
+current, wiki claim liveness is gated through `wikiEvidenceCloseGate`, and the
+normal local `check` gate does not depend on stale generated architecture report
+output.
 
 The first Wave 5 ticket should start with `cli.modes.AssistantTurnExecutor`.
 The invariant is lifecycle ownership first, class movement second.
