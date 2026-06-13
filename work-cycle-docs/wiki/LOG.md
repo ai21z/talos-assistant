@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "b871e208b7bb03a5487f9b638ad02af613f52a78"
+last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/open/[T808-open-high] living-evidence-wiki-discipline.md"
@@ -64,3 +64,10 @@ mechanically.
 - Excluded report-generation and generated-report liveness tests from the
   default `test` task so `check` does not depend on stale ignored build output
   or JUnit class ordering.
+
+## [2026-06-13] refresh | Post-merge current state
+
+- Updated current-state identity to `v0.9.0-beta-dev` at
+  `a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d`.
+- Recorded Wave 5 as ready for first-ticket planning after the T807-T810
+  batch was committed and fast-forwarded.
