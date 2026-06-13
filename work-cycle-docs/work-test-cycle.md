@@ -46,7 +46,7 @@ The candidate loop is for trustworthy review.
     +------------+-------------+
                  |
                  v
-    build -> test -> e2eTest -> JaCoCo -> optional Qodana/security -> summaries -> review
+    build -> test -> e2eTest -> JaCoCo -> wiki evidence -> optional Qodana/security -> summaries -> review
                                                               |
                                          not good enough -----'
                                                               |
@@ -95,9 +95,10 @@ The order is:
 4. Build the jar.
 5. Run the normal test lane.
 6. Run the candidate test and deterministic scripted E2E evidence lanes.
-7. Run JaCoCo and optional Qodana/security inputs.
-8. Generate summary artifacts.
-9. Review the candidate as one unit.
+7. Run the wiki evidence close gate for architecture/wiki claim liveness.
+8. Run JaCoCo and optional Qodana/security inputs.
+9. Generate summary artifacts.
+10. Review the candidate as one unit.
 
 This ordering is deliberate.
 Versioning happens before the evidence run, not after it.
@@ -143,6 +144,8 @@ For Talos, a serious candidate packet is:
 - `build/reports/talos/coverage-summary.json`
 - `build/reports/talos/qodana-summary.json`
 - `build/reports/talos/e2e-summary.json`
+- `build/reports/talos/architecture-intelligence/current/`
+- `build/reports/talos/wiki-lint/current/identity-freshness.json`
 
 That packet is what makes a patch version comparable to the next one.
 
@@ -181,6 +184,7 @@ Current branch-ready sequence:
 ./scripts/bump-patch.ps1
 ./gradlew.bat jar
 ./gradlew.bat check
+./gradlew.bat wikiEvidenceCloseGate --rerun-tasks
 ./gradlew.bat qodanaLocal
 ./gradlew.bat talosQualitySummaries
 ```
@@ -198,6 +202,9 @@ Notes:
   beta milestone; reserve `1.0.0` for stable beta exit
 - `./gradlew.bat check` is the hard local gate: release-ledger validation, unit
   tests, deterministic `e2eTest`, and coverage baseline must pass
+- `./gradlew.bat wikiEvidenceCloseGate --rerun-tasks` is the wiki close/candidate
+  gate; it refreshes architecture intelligence evidence and checks live wiki
+  claim bindings without slowing every inner-loop `check`
 - a pre-bump `./gradlew.bat check` is allowed as a readiness check, but it is not candidate evidence
 - the candidate `./gradlew.bat check` run is mandatory after the patch version and changelog entry are declared, even if the same command passed before the bump
 - review evidence must belong to the named candidate version in `gradle.properties` and `CHANGELOG.md`
