@@ -38,11 +38,14 @@ confidence_histogram:
 
 # Current Talos Engineering State
 
-## Run Identity
+## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
 - Commit: `a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d`
 - Talos version: `0.10.5`
+- Note: branch and commit here identify the last generated evidence run tracked
+  by the wiki. They are advisory metadata, not a claim that this Markdown file
+  contains the SHA of its own containing commit.
 - Active tickets: `T807`, `T808`, `T809`, `T810`
 - Active wave context: Wave 5 planning readiness after architecture/report
   discipline hardening.
