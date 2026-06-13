@@ -3,17 +3,20 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
+last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
 evidence_inputs:
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T808-open-high] living-evidence-wiki-discipline.md"
+    ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
     selector: "Initial wiki spine"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T809-open-high] wiki-evidence-liveness-lint.md"
+    ref: "work-cycle-docs/tickets/done/[T809-done-high] wiki-evidence-liveness-lint.md"
     selector: "Initial evidence-liveness lint"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T810-open-high] living-wiki-operating-loop-and-close-gate.md"
+    ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Operating loop and close gate"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T811-open-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    selector: "Wave 5 first ticket"
 min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
@@ -71,3 +74,12 @@ mechanically.
   `a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d`.
 - Recorded Wave 5 as ready for first-ticket planning after the T807-T810
   batch was committed and fast-forwarded.
+
+## [2026-06-13] ledger | Close T807-T810 and open T811
+
+- Moved T807, T808, T809, and T810 to the done ticket ledger after owner
+  review and green gates.
+- Added T811 as the first Wave 5 ticket for
+  `cli.modes.AssistantTurnExecutor` lifecycle ownership characterization.
+- Updated the current-state page so the active ticket is T811 and the next
+  move is characterization before extraction.

@@ -1,9 +1,9 @@
 # T809 - Wiki Evidence-Liveness Lint
 
-Status: open
+Status: done
 Severity: high
 Release gate: no - wiki/report discipline hardening
-Branch: feature/wave4-ergonomics
+Branch: v0.9.0-beta-dev
 Created/updated: 2026-06-13
 Owner: unassigned
 
@@ -119,7 +119,16 @@ git diff --check
 git status --short
 ```
 
-## Owner Review State
+## Completion State
 
-This ticket is open. Do not move it to `done/`, commit, recut a candidate, or
-change Qodana behavior without owner approval.
+Completed after owner review. The wiki evidence-liveness lint validates
+generated-report claim blocks against regenerated architecture intelligence
+JSON, keeps branch/commit freshness advisory, and avoids Qodana mutation.
+
+Completion evidence:
+
+- `.\gradlew.bat wikiEvidenceCloseGate --no-daemon` passed after T807-T810
+  merge.
+- `CURRENT-STATE.md` generated-report claims use registry-backed evidence IDs.
+- Hard liveness checks cover schema, version equality with `gradle.properties`,
+  and Wave 5 report path presence.

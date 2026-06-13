@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Living Evidence Wiki"
 kind: concept
 status: active
-last_verified_commit: "a5a963540e1bf7979d4d31f2ec4f5a30b6a8e87d"
+last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
 evidence_inputs:
   - type: external_source
     ref: "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"
@@ -24,7 +24,7 @@ evidence_inputs:
     ref: "AGENTS.md"
     selector: "Talos policy and work-test doctrine"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T807-in-progress-high] architecture-intelligence-report-discipline.md"
+    ref: "work-cycle-docs/tickets/done/[T807-done-high] architecture-intelligence-report-discipline.md"
     selector: "Architecture intelligence report discipline"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:

@@ -1,9 +1,9 @@
 # T810 - Living Wiki Operating Loop And Close Gate
 
-Status: open
+Status: done
 Severity: high
 Release gate: no - pre-Wave-5 wiki/report discipline hardening
-Branch: feature/wave4-ergonomics
+Branch: v0.9.0-beta-dev
 Created/updated: 2026-06-13
 Owner: unassigned
 
@@ -95,7 +95,7 @@ registering stale reports that the gate cannot refresh.
   evidence paths.
 - Quality summaries and wiki identity-freshness JSON are documented as deferred
   registry inputs, not active entries.
-- T807, T808, T809, and T810 remain open until owner review.
+- T807, T808, T809, and T810 move to `done/` after owner review.
 
 ## Verification
 
@@ -112,7 +112,19 @@ git diff --check
 git status --short
 ```
 
-## Owner Review State
+## Completion State
 
-This ticket is open. Do not move it to `done/`, commit, recut a candidate, or
-change Qodana behavior without owner approval.
+Completed after owner review. The close/candidate wiki gate exists, is not
+wired into `check`, excludes generated-report liveness from the default `test`
+task, regenerates architecture evidence before liveness validation, and is
+wired into `scripts/cut-candidate.ps1`.
+
+Completion evidence:
+
+- `.\gradlew.bat check --no-daemon` passed after deleting generated
+  architecture-intelligence evidence during review.
+- `.\gradlew.bat wikiEvidenceCloseGate --no-daemon` regenerated missing
+  architecture evidence and passed.
+- `.\scripts\cut-candidate.ps1 -SelfTest` passed.
+- `.\scripts\cut-candidate.ps1 -DryRun` prints
+  `gradlew check -> wikiEvidenceCloseGate --rerun-tasks -> talosQualitySummaries`.
