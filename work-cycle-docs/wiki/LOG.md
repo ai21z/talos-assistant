@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "f3ae8818f277d1bbf7e7f20b2a58ec49013c54f3"
+last_verified_commit: "a1b261b62aaca7b619d6fb18ad032c3e37c9ceec"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -29,6 +29,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T815-done-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
     selector: "Tool-loop outcome resolver extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T816-open-high] assistant-turn-executor-no-tool-outcome-characterization.md"
+    selector: "No-tool outcome characterization"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -36,7 +39,7 @@ min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 7
+  DETERMINISTIC_STATIC: 8
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -211,3 +214,11 @@ mechanically.
   `AssistantTurnExecutor`.
 - Set the next Wave 5 move to T816, a characterization-only no-tool outcome
   boundary ticket.
+
+## [2026-06-15] characterization | Open T816 no-tool outcome
+
+- Added T816 as a characterization-only ticket for
+  `AssistantTurnExecutor.resolveNoToolAnswer(...)`.
+- Pinned the future T817 owner as package-private
+  `AssistantNoToolOutcomeResolver`.
+- Kept production extraction out of T816.

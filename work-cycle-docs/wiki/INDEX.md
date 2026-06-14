@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "f3ae8818f277d1bbf7e7f20b2a58ec49013c54f3"
+last_verified_commit: "a1b261b62aaca7b619d6fb18ad032c3e37c9ceec"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -35,11 +35,14 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T815-done-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
     selector: "Tool-loop outcome resolver extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T816-open-high] assistant-turn-executor-no-tool-outcome-characterization.md"
+    selector: "No-tool outcome characterization"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 2
-  DETERMINISTIC_STATIC: 6
+  INFERRED_REVIEW: 3
+  DETERMINISTIC_STATIC: 7
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -77,10 +80,8 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
-
-Next planned ticket: `T816` no-tool outcome characterization for
-`AssistantTurnExecutor.resolveNoToolAnswer(...)`.
+- `T816` - no-tool outcome characterization for
+  `AssistantTurnExecutor.resolveNoToolAnswer(...)`.
 
 ## Update Rule
 
