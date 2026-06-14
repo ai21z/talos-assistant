@@ -485,53 +485,28 @@ public final class AssistantTurnExecutor {
             Context ctx,
             Options opts
     ) {
-        answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
-
-        MissingMutationRetry.Result mrr = mutationRequestRetryIfNeeded(
-                answer, messages, plan, loopResult, workspace, ctx);
-        answer = mrr.answer();
-
-        InspectCompletenessRetry.Result irr = inspectCompletenessRetryIfNeeded(
-                answer, messages, plan, loopResult, workspace, ctx);
-        answer = irr.answer();
-
-        ToolCallLoop.LoopResult outcomeLoopResult = mrr.retryLoopResult() != null
-                ? MissingMutationRetry.mergeEvidence(loopResult, mrr.retryLoopResult())
-                : irr.loopResult() != null ? irr.loopResult() : loopResult;
-        ReadEvidenceHandoff.Result evidenceRecovery = readEvidenceRecoveryForPartialTargetsIfNeeded(
-                answer, messages, plan, outcomeLoopResult, workspace, ctx);
-        if (evidenceRecovery.loopResult() != null) {
-            answer = evidenceRecovery.answer();
-            outcomeLoopResult = evidenceRecovery.loopResult();
-        }
-        int outcomeExtraMutationSuccesses = 0;
-
-        moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, outcomeExtraMutationSuccesses);
-
-        String finalAnswer = shapeAnswerAfterToolLoop(
-                answer, messages, plan, outcomeLoopResult, workspace,
-                outcomeExtraMutationSuccesses, mrr.actionObligationFailed(), opts);
-
-        return new ToolLoopAnswerResolution(
-                finalAnswer,
-                joinExtraSummaries(
-                        visibleToolLoopSummary(loopResult, mrr, irr),
-                        evidenceRecovery.extraSummary())
+        AssistantToolLoopOutcomeResolver.Resolution resolution = AssistantToolLoopOutcomeResolver.resolve(
+                answer,
+                messages,
+                plan,
+                loopResult,
+                workspace,
+                ctx,
+                retryMessages -> compatibilityPlanFromMessages(retryMessages, ctx),
+                (outcomeLoopResult, extraMutationSuccesses) ->
+                        moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, extraMutationSuccesses),
+                (resolvedAnswer, outcomeLoopResult, extraMutationSuccesses, actionObligationFailed) ->
+                        shapeAnswerAfterToolLoop(
+                                resolvedAnswer,
+                                messages,
+                                plan,
+                                outcomeLoopResult,
+                                workspace,
+                                extraMutationSuccesses,
+                                actionObligationFailed,
+                                opts)
         );
-    }
-
-    private static String visibleToolLoopSummary(
-            ToolCallLoop.LoopResult loopResult,
-            MissingMutationRetry.Result mutationRetry,
-            InspectCompletenessRetry.Result inspectRetry
-    ) {
-        String baseSummary = loopResult == null ? null : loopResult.summary();
-        String mutationRetrySummary = mutationRetry == null ? null : mutationRetry.extraSummary();
-        if (inspectRetry != null && inspectRetry.loopResult() != null) {
-            return joinExtraSummaries(mutationRetrySummary, inspectRetry.extraSummary());
-        }
-        String withMutationRetry = joinExtraSummaries(baseSummary, mutationRetrySummary);
-        return joinExtraSummaries(withMutationRetry, inspectRetry == null ? null : inspectRetry.extraSummary());
+        return new ToolLoopAnswerResolution(resolution.answer(), resolution.extraSummary());
     }
 
     private static ToolLoopAnswerResolution resolveNoToolAnswer(
@@ -715,13 +690,6 @@ public final class AssistantTurnExecutor {
 
     private static void appendExtraSummary(StringBuilder out, String extraSummary) {
         if (extraSummary != null) out.append(extraSummary).append("\n\n");
-    }
-
-    private static String joinExtraSummaries(String first, String second) {
-        if ((first == null || first.isBlank()) && (second == null || second.isBlank())) return null;
-        if (first == null || first.isBlank()) return second;
-        if (second == null || second.isBlank()) return first;
-        return first + "\n\n" + second;
     }
 
     private static CurrentTurnPlan compatibilityPlanFromMessages(List<ChatMessage> messages, Context ctx) {
