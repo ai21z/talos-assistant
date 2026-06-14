@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "0ae6f3084fc3274a7682c73a454b35c952d86639"
+last_verified_commit: "b3ed424b4c17567b64842ffa38c14f2ed4103d82"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -17,6 +17,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T811-done-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
     selector: "Wave 5 first ticket closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T812-open-high] assistant-turn-executor-model-dispatch-characterization.md"
+    selector: "Model dispatch characterization"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -24,7 +27,7 @@ min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 4
+  DETERMINISTIC_STATIC: 5
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -116,3 +119,13 @@ mechanically.
   dispatch.
 - Set the next Wave 5 move to a separate characterization-only T812 model
   dispatch boundary ticket.
+
+## [2026-06-14] characterization | Open T812 model dispatch
+
+- Added T812 as a characterization-only Wave 5 ticket for the
+  `AssistantTurnExecutor` model-dispatch boundary.
+- Kept production extraction deferred to T813 after provider controls,
+  zero-temperature retry dispatch, streaming/buffered answer shape, and
+  tool-only streaming completion ordering are pinned by tests.
+- Recorded that provider-body and prompt-debug capture remain downstream in
+  `LlmClient`, `OllamaChatClient`, and `CompatChatClient`.
