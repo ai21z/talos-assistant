@@ -1,11 +1,11 @@
 # T811 - AssistantTurnExecutor Lifecycle Ownership Characterization
 
-Status: open
+Status: in-progress
 Severity: high
 Release gate: no - first Wave 5 refactor entry ticket
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-06-13
-Owner: unassigned
+Created/updated: 2026-06-14
+Owner: Codex
 
 ## Problem
 
@@ -52,9 +52,9 @@ approval-memory bleed, trace bleed, privacy leakage, or false-success behavior.
 ## Architecture Metadata
 
 - Capability: Wave 5 lifecycle ownership characterization and first
-  behavior-preserving extraction planning.
+  behavior-preserving extraction.
 - Operation(s): source inspection, characterization tests, focused refactor
-  planning, and later small behavior-preserving extraction if evidence permits.
+  planning, and small behavior-preserving turn-preparation extraction.
 - Owning package/class:
   `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`.
 - Related evidence:
@@ -101,7 +101,7 @@ Initial planning/characterization commands:
 If wiki/report claims are updated during this ticket:
 
 ```powershell
-.\gradlew.bat wikiEvidenceCloseGate --no-daemon
+.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 ```
 
 ## Current Evidence
@@ -109,8 +109,21 @@ If wiki/report claims are updated during this ticket:
 - `build/reports/talos/architecture-intelligence/current/11-wave5-ticket-sequence.md`
   ranks `cli.modes.AssistantTurnExecutor` first.
 - `build/reports/talos/architecture-intelligence/current/data/wave5-sequence-recommendations.json`
-  records priority index `466`, with hotspot `355`, lifecycle `56`,
-  approval/tool `30`, trace/privacy `25`, and confidence
-  `INFERRED_REVIEW`.
+  currently records `cli.modes.AssistantTurnExecutor` first on this commit with
+  priority index `401`, hotspot `290`, lifecycle `56`, approval/tool `30`,
+  trace/privacy `25`, and confidence `INFERRED_REVIEW`.
+- The previous `466` / hotspot `355` value was pre-extraction evidence. It is
+  useful as before/after signal, not a stable requirement.
 - The score is an unnormalized priority index for ordering review work, not a
   grade, proof of ownership correctness, or extraction mandate.
+- `src/main/java/dev/talos/cli/modes/AssistantTurnPreparation.java` contains
+  the first extracted ordered turn-preparation collaborator. Current generated
+  evidence lists it as a point-in-time candidate with priority index `136`.
+- `work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md`
+  records the first Wave 5 lifecycle ownership map, source anchors, existing
+  behavior coverage, extraction order, stop conditions, and post-extraction
+  result.
+- `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorLifecycleCharacterizationTest.java`
+  pins stable report sections and the public `AssistantTurnExecutor.execute(...)`
+  API shape. It intentionally does not pin internal helper call sites or
+  transient status sentences.

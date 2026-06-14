@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
+last_verified_commit: "1e499b2bcab4b43f8ecbc7d060ded9ac98a26628"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -21,8 +21,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Living wiki operating loop and close gate"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T811-open-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
-    selector: "First Wave 5 lifecycle ownership ticket"
+    ref: "work-cycle-docs/tickets/open/[T811-in-progress-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    selector: "First Wave 5 lifecycle ownership ticket and turn-preparation extraction"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -65,7 +65,7 @@ or generated reports.
 
 ## Active Tickets
 
-- [T811 AssistantTurnExecutor lifecycle ownership characterization](../tickets/open/%5BT811-open-high%5D%20assistant-turn-executor-lifecycle-ownership-characterization.md)
+- [T811 AssistantTurnExecutor lifecycle ownership characterization](../tickets/open/%5BT811-in-progress-high%5D%20assistant-turn-executor-lifecycle-ownership-characterization.md)
 
 ## Update Rule
 

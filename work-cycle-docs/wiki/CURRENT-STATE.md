@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
+last_verified_commit: "1e499b2bcab4b43f8ecbc7d060ded9ac98a26628"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -24,15 +24,18 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T811-open-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    ref: "work-cycle-docs/tickets/open/[T811-in-progress-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
     selector: "Required Behavior"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
+    selector: "Lifecycle Ownership Map"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
     selector: "/schema, /branch, /commit, /talosVersion, /reportPaths, /jsonPaths"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 4
+  INFERRED_REVIEW: 5
   DETERMINISTIC_STATIC: 6
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
@@ -44,19 +47,21 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `48c9608056f7d7891fbcef952bef7d45e2f1db82`
+- Commit: `1e499b2bcab4b43f8ecbc7d060ded9ac98a26628`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: `T811`
-- Active wave context: first Wave 5 lifecycle-ownership characterization.
+- Active tickets: `T811-in-progress`
+- Active wave context: first Wave 5 lifecycle-ownership ticket with
+  turn-preparation extraction implemented.
 - Known caveats: T807 generated reports are ignored build evidence; Qodana
   remains read-only input for architecture reporting; wiki evidence-liveness
-  lint is limited to generated JSON report claims; T811 has not started a
-  runtime refactor yet.
-- Next move: work T811 by characterizing `cli.modes.AssistantTurnExecutor`
-  before extracting any responsibility.
+  lint is limited to generated JSON report claims; T811 has implemented the
+  first behavior-preserving turn-preparation extraction but remains in progress
+  until the evidence reconciliation is committed and reviewed.
+- Next move: commit only T811 code/docs after green gates, then plan T812 as
+  the model-dispatch boundary rather than package-cycle cleanup.
 
 ```talos-wiki-claims
 {
@@ -128,21 +133,23 @@ T810 is done. Its purpose was to make the wiki evidence-liveness loop
 load-bearing through a close/candidate gate, evidence registry, and explicit
 Ingest/Query/Lint/Log/Reject operating rules.
 
-T811 is open. Its purpose is to begin Wave 5 at
-`cli.modes.AssistantTurnExecutor` through characterization and lifecycle
-ownership mapping before extraction.
+T811 is in progress. Its purpose is to begin Wave 5 at
+`cli.modes.AssistantTurnExecutor` through characterization, lifecycle ownership
+mapping, and the first behavior-preserving turn-preparation extraction.
 
 ## Wave 5 Readiness Status
 
-Talos is ready for the first Wave 5 refactor ticket after the T807-T810
+Talos has entered the first Wave 5 refactor ticket after the T807-T810
 discipline batch was committed and fast-forwarded into `v0.9.0-beta-dev`.
 The readiness claim is limited: it means architecture planning evidence is
 current, wiki claim liveness is gated through `wikiEvidenceCloseGate`, and the
 normal local `check` gate does not depend on stale generated architecture report
 output.
 
-The first Wave 5 ticket should start with `cli.modes.AssistantTurnExecutor`.
-The invariant is lifecycle ownership first, class movement second.
+The first Wave 5 ticket started with `cli.modes.AssistantTurnExecutor`.
+The invariant remains lifecycle ownership first, class movement second. The next
+refactor candidate should be the model-dispatch boundary, not package-cycle
+cleanup.
 
 ## Operating Boundaries
 
