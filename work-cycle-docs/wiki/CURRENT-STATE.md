@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "6e7a39655eaa1c18dbefad35894b7f530c69d024"
+last_verified_commit: "79403f5f5ccb9bfc7e6f0a6e6cfc3903a1417f23"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -30,8 +30,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T812-done-high] assistant-turn-executor-model-dispatch-characterization.md"
     selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T813-open-high] assistant-turn-executor-model-dispatch-extraction.md"
-    selector: "Move Table"
+    ref: "work-cycle-docs/tickets/done/[T813-done-high] assistant-turn-executor-model-dispatch-extraction.md"
+    selector: "Completion State"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -53,22 +53,23 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `6e7a39655eaa1c18dbefad35894b7f530c69d024`
+- Commit: `79403f5f5ccb9bfc7e6f0a6e6cfc3903a1417f23`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: `T813-open`
+- Active tickets: none between T813 closure and T814 planning.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
-  turn-preparation extraction; T812 completed model-dispatch characterization
-  before any extraction.
+  turn-preparation extraction; T812 completed model-dispatch characterization;
+  T813 completed the model-dispatch extraction.
 - Known caveats: T807 generated reports are ignored build evidence; Qodana
   remains read-only input for architecture reporting; wiki evidence-liveness
   lint is limited to generated JSON report claims; T811 completed the first
   behavior-preserving turn-preparation extraction but did not complete Wave 5
-  and did not extract model dispatch.
-- Next move: implement T813 as the first production model-dispatch extraction,
-  guarded by T812 characterization tests.
+  and T813 completed model-dispatch extraction while leaving outcome ownership
+  in `AssistantTurnExecutor`.
+- Next move: plan T814 as the tool-loop outcome boundary, still
+  characterization-first and ownership-first.
 
 ```talos-wiki-claims
 {
@@ -149,7 +150,7 @@ any production extraction: provider controls, escalated retry sampling,
 streaming versus buffered final-answer shape, and tool-only streaming
 completion ordering.
 
-T813 is open. Its purpose is to extract model-dispatch mechanics into a
+T813 is done. Its purpose was to extract model-dispatch mechanics into a
 package-private `TurnModelDispatcher` without moving retry decisions, trace
 begin/set/clear, tool-loop/no-tool outcome resolution, answer shaping, or
 truthfulness repair out of `AssistantTurnExecutor`.
@@ -166,8 +167,9 @@ output.
 The first Wave 5 ticket started with `cli.modes.AssistantTurnExecutor` and
 completed the turn-preparation extraction into `AssistantTurnPreparation`.
 The invariant remains lifecycle ownership first, class movement second. The next
-refactor candidate is the model-dispatch boundary, now characterized by T812 and
-tracked by T813 for the first production extraction.
+refactor candidate was the model-dispatch boundary, now characterized by T812
+and extracted by T813. The next Wave 5 move should be T814, focused on the
+tool-loop outcome boundary rather than package-cycle cleanup.
 
 ## Operating Boundaries
 

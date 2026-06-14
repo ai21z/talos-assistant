@@ -1,6 +1,6 @@
 # T813 - AssistantTurnExecutor Model Dispatch Extraction
 
-Status: open
+Status: done
 Severity: high
 Release gate: no - Wave 5 behavior-preserving extraction ticket
 Branch: v0.9.0-beta-dev
@@ -73,7 +73,7 @@ is not a success metric and must not drive cosmetic class movement.
   `TurnModelDispatcher`, focused tests only if an existing characterization
   proves brittle against a behavior-preserving move.
 
-## Source Anchors
+## Pre-Extraction Source Anchors
 
 - Streaming dispatch starts at
   `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java:221` through
@@ -150,18 +150,23 @@ Required method surface for T813:
 
 ```java
 static LlmClient.StreamResult dispatchStreaming(
-        AssistantTurnExecutor.Context ctx,
+        Context ctx,
         List<ChatMessage> messages,
         CurrentTurnPlan plan);
 
-static LlmClient.StreamResult dispatchBuffered(
-        AssistantTurnExecutor.Context ctx,
+static LlmClient.StreamResult dispatchBufferedWithTimeout(
+        Context ctx,
         List<ChatMessage> messages,
         CurrentTurnPlan plan,
-        long timeoutMs) throws Exception;
+        long timeoutMs) throws TimeoutException, ExecutionException, InterruptedException;
+
+static LlmClient.StreamResult dispatchBuffered(
+        Context ctx,
+        List<ChatMessage> messages,
+        CurrentTurnPlan plan);
 
 static LlmClient.StreamResult dispatchEscalatedRetry(
-        AssistantTurnExecutor.Context ctx,
+        Context ctx,
         List<ChatMessage> messages,
         CurrentTurnPlan plan,
         List<ToolSpec> requestToolSpecs);
@@ -179,6 +184,11 @@ collaborator into outcome resolution.
 - Preserve the existing non-streaming asynchronous timeout shape exactly:
   `CompletableFuture.supplyAsync(...)` and `get(timeoutMs, TimeUnit.MILLISECONDS)`.
 - Move the temperature `0.0` escalated-retry pin with dispatch.
+- Keep the four ordinary retry callbacks synchronous and no-timeout. They must
+  use `dispatchBuffered(...)`, never `dispatchBufferedWithTimeout(...)`.
+- Resolve the four ordinary retry plans executor-side from the retry messages:
+  `compatibilityPlanFromMessages(retryMessages, ctx)` or equivalent
+  `safePlanFromMessages(null, retryMessages, ctx)`.
 - Rebind the missing-mutation retry lambda to
   `TurnModelDispatcher.dispatchEscalatedRetry(...)`.
 - Rebind both `ExactWriteContextFallback.prepare(...)` method references from
@@ -204,20 +214,40 @@ collaborator into outcome resolution.
   policy trace, prompt-debug state, project memory, approval blocking, retry,
   verification-status override, and final-answer postconditions.
 
+## Binding Table
+
+| Call site | Current dispatch | T813 dispatch |
+|---|---|---|
+| Main streaming turn at `AssistantTurnExecutor.java:222` | `chatStreamFullWithInitialContextFallback(ctx, messages, currentTurnPlan)` | `TurnModelDispatcher.dispatchStreaming(ctx, messages, currentTurnPlan)` |
+| Main buffered turn at `AssistantTurnExecutor.java:280` | `CompletableFuture.supplyAsync(() -> chatFull(turnContext, llmMessages, currentTurnPlan))` plus `fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS)` | `TurnModelDispatcher.dispatchBufferedWithTimeout(turnContext, llmMessages, currentTurnPlan, opts.llmTimeoutMs)` |
+| Read-only inspection retry at `AssistantTurnExecutor.java:711` | `retryMessages -> chatFull(ctx, retryMessages)` | `retryMessages -> TurnModelDispatcher.dispatchBuffered(ctx, retryMessages, compatibilityPlanFromMessages(retryMessages, ctx))` |
+| Post-tool synthesis retry at `AssistantTurnExecutor.java:2290` | `retryMessages -> chatFull(ctx, retryMessages)` | `retryMessages -> TurnModelDispatcher.dispatchBuffered(ctx, retryMessages, compatibilityPlanFromMessages(retryMessages, ctx))` |
+| Inspect-completeness retry at `AssistantTurnExecutor.java:2544` | `retryMessages -> chatFull(ctx, retryMessages)` | `retryMessages -> TurnModelDispatcher.dispatchBuffered(ctx, retryMessages, compatibilityPlanFromMessages(retryMessages, ctx))` |
+| No-tool grounding retry at `AssistantTurnExecutor.java:3005` | `retryMessages -> chatFull(ctx, retryMessages)` | `retryMessages -> TurnModelDispatcher.dispatchBuffered(ctx, retryMessages, compatibilityPlanFromMessages(retryMessages, ctx))` |
+| Missing-mutation escalated retry at `AssistantTurnExecutor.java:2451` | `(retryMessages, retryPlan, retryToolSpecs) -> chatFullEscalatedRetry(ctx, retryMessages, retryPlan, retryToolSpecs)` | `(retryMessages, retryPlan, retryToolSpecs) -> TurnModelDispatcher.dispatchEscalatedRetry(ctx, retryMessages, retryPlan, retryToolSpecs)` |
+
+`dispatchBufferedWithTimeout(...)` must surface `TimeoutException`,
+`ExecutionException`, and `InterruptedException` with the same observable
+catch-ladder behavior as `AssistantTurnExecutor.execute(...)` has today. It may
+consume only `EngineException.ContextBudgetExceeded` internally to perform the
+current exact-write compact fallback before rethrowing or returning.
+
 ## Implementation Steps
 
 1. Run the focused T812 characterization test before production edits.
 2. Add package-private `TurnModelDispatcher`.
 3. Move provider request-control helpers into `TurnModelDispatcher`.
 4. Move streaming dispatch and streaming context-budget fallback helpers.
-5. Move buffered dispatch and buffered context-budget fallback while preserving
-   the asynchronous timeout shape.
-6. Move escalated retry dispatch and rebind the missing-mutation retry lambda.
-7. Keep `AssistantTurnExecutor` branch logic and outcome handling unchanged.
-8. Run the focused T812 characterization test.
-9. Run `dev.talos.cli.modes.*`.
-10. Run full `check`.
-11. Regenerate architecture intelligence only if the ticket or wiki closeout
+5. Move buffered main-turn dispatch and buffered context-budget fallback while
+   preserving the asynchronous timeout shape.
+6. Move synchronous buffered retry dispatch without adding timeout behavior.
+7. Move escalated retry dispatch and rebind all five retry dispatch call sites
+   according to the binding table.
+8. Keep `AssistantTurnExecutor` branch logic and outcome handling unchanged.
+9. Run the focused T812 characterization test.
+10. Run `dev.talos.cli.modes.*`.
+11. Run full `check`.
+12. Regenerate architecture intelligence only if the ticket or wiki closeout
     needs updated report evidence.
 
 ## Acceptance Criteria
@@ -232,6 +262,31 @@ collaborator into outcome resolution.
 - Full `dev.talos.cli.modes.*` tests pass.
 - Full `check` passes.
 - No `site/` files are staged or committed with T813.
+
+## Completion State
+
+- T813 extracted model-dispatch mechanics into package-private
+  `TurnModelDispatcher`.
+- `AssistantTurnExecutor` now delegates:
+  - main streaming dispatch to `TurnModelDispatcher.dispatchStreaming(...)`;
+  - main buffered dispatch and exact-write context fallback to
+    `TurnModelDispatcher.dispatchBufferedWithTimeout(...)`;
+  - four ordinary retry dispatch callbacks to synchronous no-timeout
+    `TurnModelDispatcher.dispatchBuffered(...)` with retry-message plan
+    resolution kept executor-side;
+  - missing-mutation escalated retry dispatch to
+    `TurnModelDispatcher.dispatchEscalatedRetry(...)`.
+- `AssistantTurnExecutor` still owns branch selection, trace begin/set/clear,
+  tool-loop/no-tool outcome resolution, retry decisions, answer shaping, and
+  `TurnOutput` assembly.
+- Provider-body and prompt-debug capture remain downstream in `LlmClient`,
+  `OllamaChatClient`, and `CompatChatClient`.
+- Generated architecture evidence after the extraction records
+  `cli.modes.AssistantTurnExecutor` with point-in-time priority index `384`
+  and `INFERRED_REVIEW` confidence. This is review-order evidence, not a
+  success metric.
+- T813 did not start package-cycle cleanup and did not extract tool-loop or
+  no-tool outcome ownership.
 
 ## Verification
 
@@ -249,7 +304,7 @@ Run this only if wiki/report claims change during closeout:
 .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 ```
 
-## Current Evidence
+## Starting Evidence
 
 - T811 turn preparation extraction committed at
   `0ae6f3084fc3274a7682c73a454b35c952d86639`.
@@ -257,9 +312,9 @@ Run this only if wiki/report claims change during closeout:
   `bde6081bcf57880812ab089a037624473440e0f4`.
 - T812 closeout ledger committed at
   `6e7a39655eaa1c18dbefad35894b7f530c69d024`.
-- Current generated architecture evidence records
+- Generated architecture evidence before the T813 extraction recorded
   `cli.modes.AssistantTurnExecutor` first with priority index `401`.
-- Current generated architecture evidence records
+- Generated architecture evidence before the T813 extraction recorded
   `cli.modes.AssistantTurnPreparation` with priority index `136`.
 - Provider-body/prompt-debug capture exists downstream of executor dispatch in
   `LlmClient`, `OllamaChatClient`, and `CompatChatClient`; T813 should not
