@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "c8e53006556045f4af18c2a407741f36da093305"
+last_verified_commit: "06f47bae3bcb6699b572d82f3c4061be773cbd47"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -26,6 +26,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T814-done-high] assistant-turn-executor-tool-loop-outcome-characterization.md"
     selector: "Tool-loop outcome characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T815-open-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
+    selector: "Tool-loop outcome resolver extraction"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -187,3 +190,13 @@ mechanically.
 - Recorded that T814 made no production source changes.
 - Set the next Wave 5 move to T815, the package-private
   `AssistantToolLoopOutcomeResolver` extraction guarded by T814 coverage.
+
+## [2026-06-15] extraction | Open T815 tool-loop outcome
+
+- Added T815 as the first production extraction of the post-tool-loop outcome
+  boundary after T814 characterization.
+- Extracted retry/evidence-recovery/summary ordering into package-private
+  `AssistantToolLoopOutcomeResolver`.
+- Kept no-tool outcome handling, trace begin/set/clear, branch selection,
+  `ToolCallLoop.LoopResult`, `ToolOutcome`, and `TurnOutput` assembly in
+  `AssistantTurnExecutor`.

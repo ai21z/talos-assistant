@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "c8e53006556045f4af18c2a407741f36da093305"
+last_verified_commit: "06f47bae3bcb6699b572d82f3c4061be773cbd47"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -32,6 +32,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T814-done-high] assistant-turn-executor-tool-loop-outcome-characterization.md"
     selector: "Tool-loop outcome characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T815-open-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
+    selector: "Tool-loop outcome resolver extraction"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -74,8 +77,8 @@ or generated reports.
 
 ## Active Tickets
 
-- None. The next planned Wave 5 ticket is `T815`, the
-  `AssistantToolLoopOutcomeResolver` extraction.
+- `T815` - tool-loop outcome resolver extraction from
+  `AssistantTurnExecutor.resolveToolLoopAnswer(...)`.
 
 ## Update Rule
 
