@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "bde6081bcf57880812ab089a037624473440e0f4"
+last_verified_commit: "6e7a39655eaa1c18dbefad35894b7f530c69d024"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -20,6 +20,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T812-done-high] assistant-turn-executor-model-dispatch-characterization.md"
     selector: "Model dispatch characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T813-open-high] assistant-turn-executor-model-dispatch-extraction.md"
+    selector: "Model dispatch extraction plan"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -27,7 +30,7 @@ min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 5
+  DETERMINISTIC_STATIC: 6
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -138,3 +141,13 @@ mechanically.
   `TurnModelDispatcher` for T813.
 - Set the next Wave 5 move to T813, the first production model-dispatch
   extraction guarded by the T812 tests.
+
+## [2026-06-14] plan | Open T813 model dispatch extraction
+
+- Added T813 as the first production model-dispatch extraction ticket after
+  T812 characterization.
+- Locked the move/stay boundary: raw provider dispatch and request controls can
+  move to `TurnModelDispatcher`; retry decisions, trace begin/set/clear,
+  tool-loop/no-tool outcome resolution, answer shaping, and truthfulness repair
+  stay in `AssistantTurnExecutor`.
+- Recorded the T812 characterization tests as the guard set for the extraction.

@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "bde6081bcf57880812ab089a037624473440e0f4"
+last_verified_commit: "6e7a39655eaa1c18dbefad35894b7f530c69d024"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -26,10 +26,13 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T812-done-high] assistant-turn-executor-model-dispatch-characterization.md"
     selector: "Model dispatch characterization"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T813-open-high] assistant-turn-executor-model-dispatch-extraction.md"
+    selector: "Model dispatch extraction"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 1
+  INFERRED_REVIEW: 2
   DETERMINISTIC_STATIC: 5
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
@@ -68,8 +71,7 @@ or generated reports.
 
 ## Active Tickets
 
-- No active Wave 5 ticket is open between the T812 closeout and the T813
-  production extraction ticket creation.
+- [T813 AssistantTurnExecutor model dispatch extraction](../tickets/open/%5BT813-open-high%5D%20assistant-turn-executor-model-dispatch-extraction.md)
 
 ## Update Rule
 
