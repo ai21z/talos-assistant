@@ -7,17 +7,70 @@
       name="description"
       content="Talos is a local-first CLI workspace operator. Inspects before acting, asks before mutation, verifies before claiming success, and records local trace evidence for interactive turns."
     />
+    <meta name="theme-color" content="#090c0c" />
     <link rel="icon" type="image/png" href="./design/talos-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Talos — Local-first CLI workspace operator" />
+    <meta
+      property="og:description"
+      content="Inspects before acting. Asks before mutation. Verifies before claiming success. Local engine, approved writes, local trace evidence."
+    />
+    <meta property="og:image" content="./design/talos-icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Talos — Local-first CLI workspace operator" />
+    <meta
+      name="twitter:description"
+      content="A local-first CLI operator that inspects, asks before mutation, and verifies before claiming success."
+    />
     <title>Talos | Local-first CLI workspace operator</title>
+    <style>
+      html.awakening,
+      html.awakening body { overflow: hidden; }
+      .awaken { display: none; }
+      html.awakening .awaken { display: grid; }
+    </style>
+    <script>
+      (function () {
+        try {
+          var force = false; try { force = !!window.__forceAwaken; } catch (e) {}
+          var auto = false; try { auto = navigator.webdriver; } catch (e) {}
+          var rm = false; try { rm = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+          var done = false; try { done = sessionStorage.getItem("talosAwoke") === "1"; } catch (e) {}
+          if (force || (!auto && !rm && !done)) {
+            document.documentElement.classList.add("awakening");
+            // Failsafe: content can never stay hidden, even if the module fails.
+            setTimeout(function () { document.documentElement.classList.remove("awakening"); }, 4500);
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+    <canvas class="forge" aria-hidden="true"></canvas>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="vein" aria-hidden="true">
+      <span class="vein-fill"></span>
+      <span class="vein-node"></span>
+    </div>
+    <span class="vein-nail" aria-hidden="true"></span>
+    <div class="awaken" aria-hidden="true">
+      <div class="awaken-core">
+        <img class="awaken-shield" src="./design/talos-icon.png" alt="" decoding="async" />
+        <p class="awaken-name">TALOS</p>
+        <div class="awaken-log">
+          <p style="--i: 0"><span class="awaken-tick">✓</span> forge kindled</p>
+          <p style="--i: 1"><span class="awaken-tick">✓</span> ichor flowing</p>
+          <p style="--i: 2"><span class="awaken-tick">✓</span> guardian online</p>
+        </div>
+      </div>
+    </div>
     <div class="page-shell">
       <header class="site-header">
         <div class="container header-inner">
           <a class="wordmark" href="#overview" aria-label="Talos home">
-            <span class="brand-mark wordmark-mark" aria-hidden="true">
-              <img src="./design/talos-icon.png" alt="" width="44" height="44" decoding="async" />
+            <span class="brand-mark" aria-hidden="true">
+              <img class="brand-icon" src="./design/talos-icon.png" alt="" width="30" height="30" decoding="async" />
             </span>
             <span class="wordmark-name">Talos</span>
           </a>
@@ -29,15 +82,20 @@
             <a href="#good-fits" data-section-nav>Good Fits</a>
             <a href="#docs" data-section-nav>Docs</a>
           </nav>
-          <a class="button button--ghost header-cta" href="#docs">Read docs</a>
+          <a class="button button--ghost header-cta" href="https://github.com/ai21z/talos-cli" rel="noopener">
+            GitHub
+          </a>
         </div>
       </header>
 
       <main id="main">
-        <section id="overview" class="section story-section hero-section">
+        <section id="overview" class="section hero-section">
+          <div class="guardian-parallax" aria-hidden="true">
+            <img src="./design/talos-icon.png" alt="" decoding="async" />
+          </div>
           <div class="container hero-grid">
             <div class="hero-copy reveal">
-              <p class="eyebrow">TALOS / Local CLI workspace operator</p>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>TALOS / Local CLI workspace operator</p>
               <h1>Local-first CLI operator for your workspace.</h1>
               <p class="hero-subtitle">
                 Inspects before acting. Asks before mutation. Verifies before claiming success.
@@ -59,7 +117,7 @@
                 <li class="evidence-tag">local_trace</li>
               </ul>
               <div class="setup-strip" aria-label="Talos setup status">
-                <p class="setup-kicker">planned public beta</p>
+                <p class="setup-kicker"><span class="setup-pulse" aria-hidden="true"></span>planned public beta</p>
                 <pre><code>winget install --id TalosProject.TalosCLI -e
 talos setup models
 talos status --verbose
@@ -84,57 +142,50 @@ talos</code></pre>
             </div>
 
             <div class="hero-visual reveal">
-              <div class="greek-hero-inscription hero-inscription" aria-hidden="true">
-                <span class="hero-inscription-layer hero-inscription-layer--english" lang="en">
-                  TALOS
-                </span>
-                <span class="hero-inscription-layer hero-inscription-layer--greek" lang="el">
-                  ΤΑΛΩΣ
-                </span>
-                <span class="hero-inscription-layer hero-inscription-layer--terminal" lang="en">
-                  <span class="hero-terminal-line hero-terminal-line--one">
-                    <span class="hero-terminal-prompt">&gt;</span>
-                    <span class="hero-terminal-text">local operator</span>
-                  </span>
-                  <span class="hero-terminal-line hero-terminal-line--two">
-                    <span class="hero-terminal-prompt">&gt;</span>
-                    <span class="hero-terminal-text">local model harness</span>
-                  </span>
-                  <span class="hero-terminal-line hero-terminal-line--three">
-                    <span class="hero-terminal-prompt">&gt;</span>
-                    <span class="hero-terminal-text">guard your workspace</span>
-                  </span>
-                </span>
-              </div>
-              <figure class="startup-terminal-frame">
-                <img
-                  class="startup-terminal-image"
-                  src="./design/img.png"
-                  alt="Talos startup terminal screen."
-                  width="723"
-                  height="211"
-                  decoding="async"
-                />
-                <figcaption class="banner-caption">
-                  Startup surface captured from the local Talos CLI. Values mirror
-                  a managed llama.cpp run.
+              <p class="hero-inscription" aria-hidden="true">
+                <span class="hero-inscription-greek" lang="el">ΤΑΛΩΣ</span>
+                <span class="hero-inscription-rule"></span>
+                <span class="hero-inscription-tag">bronze guardian · local operator</span>
+              </p>
+              <figure class="live-terminal" aria-labelledby="live-terminal-caption">
+                <div class="terminal" data-live-terminal>
+                  <div class="terminal-bar">
+                    <span class="terminal-dots" aria-hidden="true">
+                      <i></i><i></i><i></i>
+                    </span>
+                    <span class="terminal-title">talos session</span>
+                    <span class="terminal-state" data-live-state>live</span>
+                  </div>
+                  <pre class="terminal-screen" data-live-output></pre>
+                  <div class="terminal-foot">
+                    <button type="button" class="terminal-replay" data-live-replay>
+                      <span class="terminal-replay-glyph" aria-hidden="true">↻</span> Replay turn
+                    </button>
+                    <span class="terminal-foot-meta">v0.10.5 · llama_cpp/gpt-oss-20b</span>
+                  </div>
+                </div>
+                <figcaption id="live-terminal-caption" class="banner-caption">
+                  Rendered from the real Talos turn grammar. Values mirror a managed
+                  <code>llama.cpp</code> run on <code>llama_cpp/gpt-oss-20b</code>.
                 </figcaption>
               </figure>
               <p class="sr-only">
-                Talos startup terminal screen: TALOS v0.10.1; Workspace
-                ~/Desktop/testtalos; Mode auto; Model llama_cpp/gpt-oss-20b;
-                Engine llama.cpp (managed); Index ready (5 chunks); Policy ask
-                before mutation; Debug off; ready prompt says type /help,
-                /status, /tools, or ask a question.
+                Talos terminal turn: prompt "what does this workspace do?"; route
+                ask, read-only, workspace bounded; inspect README.md, src/, docs/;
+                read 4 files in 38 ms; answer: Local-first CLI workspace operator,
+                Java 21 sources under src/, architecture notes under docs/; turn 1,
+                1.2 s, /last trace available. Running TALOS v0.10.5 with engine
+                llama.cpp (managed), model llama_cpp/gpt-oss-20b, index ready
+                (5 chunks), policy ask before mutation.
               </p>
             </div>
           </div>
         </section>
 
-        <section id="execution" class="section story-section execution-section" aria-labelledby="execution-heading">
+        <section id="execution" class="section execution-section" aria-labelledby="execution-heading">
           <div class="container">
             <div class="section-header reveal">
-              <p class="eyebrow">Execution contract</p>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Execution contract</p>
               <h2 id="execution-heading">One ordered flow. No skipped steps.</h2>
               <p class="section-lede">
                 Talos narrows the request, inspects evidence, gates mutation,
@@ -142,38 +193,33 @@ talos</code></pre>
               </p>
             </div>
 
-            <ol class="contract-flow" aria-label="Talos execution contract">
-              <li class="contract-step contract-step--classify reveal">
+            <ol class="contract-flow" data-reveal-stagger aria-label="Talos execution contract">
+              <li class="contract-step contract-step--classify">
                 <span class="contract-index">01</span>
                 <h3>Classify</h3>
                 <p>Resolve the request into a bounded task contract and expected target.</p>
               </li>
-              <li class="contract-arrow" aria-hidden="true">→</li>
-              <li class="contract-step contract-step--inspect reveal">
+              <li class="contract-step contract-step--inspect">
                 <span class="contract-index">02</span>
                 <h3>Inspect</h3>
                 <p>Gather read-only workspace evidence before proposing action.</p>
               </li>
-              <li class="contract-arrow" aria-hidden="true">→</li>
-              <li class="contract-step contract-step--approve reveal">
+              <li class="contract-step contract-step--approve">
                 <span class="contract-index">03</span>
                 <h3>Approve</h3>
                 <p>Show mutation intent, target path, and risk before local writes.</p>
               </li>
-              <li class="contract-arrow" aria-hidden="true">→</li>
-              <li class="contract-step contract-step--mutate reveal">
+              <li class="contract-step contract-step--mutate">
                 <span class="contract-index">04</span>
                 <h3>Mutate</h3>
                 <p>Run only the approved file, workspace, or command operation.</p>
               </li>
-              <li class="contract-arrow" aria-hidden="true">→</li>
-              <li class="contract-step contract-step--verify reveal">
+              <li class="contract-step contract-step--verify">
                 <span class="contract-index">05</span>
                 <h3>Verify</h3>
                 <p>Read back files or inspect command output before reporting success.</p>
               </li>
-              <li class="contract-arrow" aria-hidden="true">→</li>
-              <li class="contract-step contract-step--trace reveal">
+              <li class="contract-step contract-step--trace">
                 <span class="contract-index">06</span>
                 <h3>Trace</h3>
                 <p>Keep prompts, tool calls, approvals, and outcomes inspectable.</p>
@@ -190,10 +236,10 @@ talos</code></pre>
           </div>
         </section>
 
-        <section id="turn-ui" class="section story-section turn-ui-section" aria-labelledby="turn-ui-heading">
+        <section id="turn-ui" class="section turn-ui-section" aria-labelledby="turn-ui-heading">
           <div class="container two-column">
             <div class="section-copy reveal">
-              <p class="eyebrow">Turn UI</p>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Turn UI</p>
               <h2 id="turn-ui-heading">A consistent turn grammar.</h2>
               <p>
                 Normal assistant turns render through the same semantic lanes
@@ -225,21 +271,21 @@ talos</code></pre>
               </div>
               <div class="terminal">
                 <div class="terminal-bar">
-                  <span class="terminal-dot" aria-hidden="true"></span>
+                  <span class="terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span>
                   <span class="terminal-title">talos session</span>
                   <span class="terminal-state">local</span>
                 </div>
-                <pre id="terminal-output" role="tabpanel" aria-labelledby="tab-inspect"></pre>
+                <pre id="terminal-output" class="terminal-screen" role="tabpanel" aria-labelledby="tab-inspect"></pre>
                 <p id="terminal-status" class="sr-only" aria-live="polite" aria-atomic="true">Inspect turn selected.</p>
               </div>
             </div>
           </div>
         </section>
 
-        <section id="local-boundaries" class="section story-section boundaries-section" aria-labelledby="boundaries-heading">
+        <section id="local-boundaries" class="section boundaries-section" aria-labelledby="boundaries-heading">
           <div class="container">
             <div class="section-header reveal">
-              <p class="eyebrow">Local boundaries</p>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Local boundaries</p>
               <h2 id="boundaries-heading">Policy is visible at the edge.</h2>
               <p class="section-lede">
                 Runtime policy owns approval, tool exposure, result checks,
@@ -248,20 +294,20 @@ talos</code></pre>
               </p>
             </div>
 
-            <div class="boundary-grid reveal" aria-label="Talos default boundary posture">
-              <article class="boundary-band">
+            <div class="boundary-grid" data-reveal-stagger aria-label="Talos default boundary posture">
+              <article class="boundary-band boundary-band--reads">
                 <h3>Reads</h3>
                 <p><span class="state state--allow">allow</span> Workspace files inside the selected workspace.</p>
                 <p><span class="state state--ask">ask</span> Protected paths require explicit approval.</p>
                 <p><span class="state state--deny">refuse</span> Unsupported documents are reported honestly.</p>
               </article>
-              <article class="boundary-band">
+              <article class="boundary-band boundary-band--mutations">
                 <h3>Mutations</h3>
                 <p><span class="state state--ask">ask</span> File writes and workspace operations need approval.</p>
                 <p><span class="state state--ask">ask</span> Command execution is bounded by configured profiles.</p>
                 <p><span class="state state--deny">deny</span> Workspace escape and protected mutation fail closed.</p>
               </article>
-              <article class="boundary-band">
+              <article class="boundary-band boundary-band--evidence">
                 <h3>Evidence</h3>
                 <p><span class="state state--allow">local</span> Interactive turns leave trace records.</p>
                 <p><span class="state state--allow">show</span> Use <code>/last trace</code> to inspect the previous turn.</p>
@@ -275,19 +321,19 @@ talos</code></pre>
           </div>
         </section>
 
-        <section id="good-fits" class="section story-section good-fits-section" aria-labelledby="good-fits-heading">
+        <section id="good-fits" class="section good-fits-section" aria-labelledby="good-fits-heading">
           <div class="container">
             <div class="section-header reveal">
-              <p class="eyebrow">Good Fits</p>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Good Fits</p>
               <h2 id="good-fits-heading">Bounded developer work. Narrow claims.</h2>
             </div>
-            <ul class="use-case-grid" role="list">
-              <li class="use-case reveal"><span class="use-case-tag">01</span><h3>Understand a codebase</h3><p>Inspect structure and read files before touching anything.</p></li>
-              <li class="use-case reveal"><span class="use-case-tag">02</span><h3>Make bounded edits</h3><p>Propose, preview, and apply edits behind explicit approval.</p></li>
-              <li class="use-case reveal"><span class="use-case-tag">03</span><h3>Verify static web fixes</h3><p>Diagnose selector bugs and confirm the fix on the right file, not a similar one.</p></li>
-              <li class="use-case reveal"><span class="use-case-tag">04</span><h3>Inspect changed files</h3><p>Review diffs and changed-file summaries grounded in the trace.</p></li>
-              <li class="use-case reveal"><span class="use-case-tag">05</span><h3>Summarize supported files</h3><p>Markdown, JSON/YAML/TOML, CSV, source, and other text-oriented project files.</p></li>
-              <li class="use-case reveal"><span class="use-case-tag">06</span><h3>Run approved commands</h3><p>Test, build, and verification commands routed through configured profiles.</p></li>
+            <ul class="use-case-grid" data-reveal-stagger role="list">
+              <li class="use-case"><span class="use-case-tag">01</span><h3>Understand a codebase</h3><p>Inspect structure and read files before touching anything.</p></li>
+              <li class="use-case"><span class="use-case-tag">02</span><h3>Make bounded edits</h3><p>Propose, preview, and apply edits behind explicit approval.</p></li>
+              <li class="use-case"><span class="use-case-tag">03</span><h3>Verify static web fixes</h3><p>Diagnose selector bugs and confirm the fix on the right file, not a similar one.</p></li>
+              <li class="use-case"><span class="use-case-tag">04</span><h3>Inspect changed files</h3><p>Review diffs and changed-file summaries grounded in the trace.</p></li>
+              <li class="use-case"><span class="use-case-tag">05</span><h3>Summarize supported files</h3><p>Markdown, JSON/YAML/TOML, CSV, source, and other text-oriented project files.</p></li>
+              <li class="use-case"><span class="use-case-tag">06</span><h3>Run approved commands</h3><p>Test, build, and verification commands routed through configured profiles.</p></li>
             </ul>
             <p class="use-case-caveat">
               Scanned PDFs, image-only files, PowerPoint, corrupt or encrypted
@@ -297,10 +343,10 @@ talos</code></pre>
           </div>
         </section>
 
-        <section id="docs" class="section story-section docs-section" aria-labelledby="docs-heading">
+        <section id="docs" class="section docs-section" aria-labelledby="docs-heading">
           <div class="container">
             <div class="section-header reveal">
-              <p class="eyebrow">Docs</p>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Docs</p>
               <h2 id="docs-heading">Source-backed docs, curated for the first run.</h2>
               <p class="section-lede">
                 The landing page stays narrow. Setup, permissions, local models,
@@ -311,26 +357,26 @@ talos</code></pre>
               <a class="button button--primary" href="./docs.html">Open documentation</a>
               <a class="button button--ghost" href="./docs.html#/quickstart">Jump to Quickstart</a>
             </p>
-            <div class="docs-grid">
-              <a class="doc-card reveal" href="./docs.html#/quickstart">
+            <div class="docs-grid" data-reveal-stagger>
+              <a class="doc-card" href="./docs.html#/quickstart">
                 <span class="doc-tag">01</span>
                 <h3>Quickstart</h3>
                 <p>Source/developer setup to a working local Talos session.</p>
                 <code>docs/user/quickstart.md</code>
               </a>
-              <a class="doc-card reveal" href="./docs.html#/model-setup">
+              <a class="doc-card" href="./docs.html#/model-setup">
                 <span class="doc-tag">02</span>
                 <h3>Model Setup</h3>
                 <p>Configure a managed <code>llama.cpp</code> model profile.</p>
                 <code>docs/user/model-setup.md</code>
               </a>
-              <a class="doc-card reveal" href="./docs.html#/approvals-and-permissions">
+              <a class="doc-card" href="./docs.html#/approvals-and-permissions">
                 <span class="doc-tag">03</span>
                 <h3>Permissions</h3>
                 <p>When Talos asks before reads, writes, and commands.</p>
                 <code>docs/user/approvals-and-permissions.md</code>
               </a>
-              <a class="doc-card reveal" href="./docs.html#/how-talos-works">
+              <a class="doc-card" href="./docs.html#/how-talos-works">
                 <span class="doc-tag">04</span>
                 <h3>Trace / Audit</h3>
                 <p>Execution discipline, <code>/last trace</code>, and local evidence.</p>
@@ -345,8 +391,8 @@ talos</code></pre>
         <div class="container footer-inner">
           <div class="footer-brand">
             <a class="wordmark wordmark--footer" href="#overview" aria-label="Talos home">
-              <span class="brand-mark wordmark-mark" aria-hidden="true">
-                <img src="./design/talos-icon.png" alt="" width="36" height="36" decoding="async" />
+              <span class="brand-mark" aria-hidden="true">
+                <img class="brand-icon" src="./design/talos-icon.png" alt="" width="26" height="26" decoding="async" />
               </span>
               <span>Talos</span>
             </a>

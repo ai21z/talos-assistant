@@ -1,15 +1,130 @@
 import "@fontsource/gfs-neohellenic/greek-700.css";
 import "./styles.css";
+import { setupForge } from "./forge.js";
 
 document.documentElement.classList.add("js");
 
-// Terminal turn examples — semantic lane grammar.
-// Glyphs match src/main/java/dev/talos/cli/ui/SemanticGlyphSet.java safe Unicode:
-//   bullet •  arrow →  success ✓  warning !  error x  rail │  dot ·
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+// ---------------------------------------------------------------------------
+// Semantic lane grammar. Glyphs match
+// src/main/java/dev/talos/cli/ui/SemanticGlyphSet.java safe Unicode:
+//   bullet •  arrow →  success ✓  warning !  error x  rail │ ┌ └  dot ·
 // Prompt matches src/main/java/dev/talos/cli/ui/PromptRenderer.java: "talos [auto] >".
+// ---------------------------------------------------------------------------
+const PROMPT_PREFIX =
+  '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; ';
+
+// ---- Live hero terminal: streams one real Inspect turn, then replays --------
+const heroTurn = {
+  question: "what does this workspace do?",
+  lines: [
+    "",
+    '<span class="t-cyan">•</span> route   <span class="t-muted">ask · read-only · workspace bounded</span>',
+    '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, src/, docs/</span>',
+    '<span class="t-green">✓</span> read    <span class="t-muted">4 files · 38 ms</span>',
+    "",
+    '<span class="t-rail">┌─ answer ───────────────────────────────────────────</span>',
+    '<span class="t-rail">│</span> Local-first CLI workspace operator. Java 21 sources',
+    '<span class="t-rail">│</span> under <span class="t-cyan">src/</span>; architecture notes under <span class="t-cyan">docs/</span>.',
+    '<span class="t-rail">└─ turn 1 · 1.2 s · <span class="t-muted">/last trace</span></span>',
+  ],
+};
+
+function setupLiveTerminal() {
+  const root = document.querySelector("[data-live-terminal]");
+  if (!root) return;
+  const output = root.querySelector("[data-live-output]");
+  const state = root.querySelector("[data-live-state]");
+  const replay = root.querySelector("[data-live-replay]");
+  if (!output) return;
+
+  let timers = [];
+  const clearTimers = () => {
+    timers.forEach((id) => window.clearTimeout(id));
+    timers = [];
+  };
+  const after = (ms, fn) => timers.push(window.setTimeout(fn, ms));
+  const setState = (label) => {
+    if (state) state.textContent = label;
+  };
+
+  const fullHtml = () =>
+    `${PROMPT_PREFIX}${heroTurn.question}\n${heroTurn.lines.join("\n")}`;
+
+  function renderStatic() {
+    output.innerHTML = fullHtml();
+    setState("ready");
+  }
+
+  function play() {
+    clearTimers();
+    if (reduceMotion.matches) {
+      renderStatic();
+      return;
+    }
+    setState("run");
+    let typed = "";
+    const caret = '<span class="terminal-caret" aria-hidden="true"></span>';
+    const drawPrompt = () => {
+      output.innerHTML = `${PROMPT_PREFIX}${typed}${caret}`;
+    };
+    drawPrompt();
+
+    // Phase 1 — type the question.
+    for (let i = 0; i < heroTurn.question.length; i += 1) {
+      after(160 + i * 34, () => {
+        typed += heroTurn.question[i];
+        drawPrompt();
+      });
+    }
+
+    // Phase 2 — reveal the lanes one at a time.
+    const typeEnd = 160 + heroTurn.question.length * 34 + 240;
+    let acc = typeEnd;
+    const base = `${PROMPT_PREFIX}${heroTurn.question}`;
+    const shown = [];
+    heroTurn.lines.forEach((line, index) => {
+      const blank = line === "";
+      acc += blank ? 90 : 230;
+      after(acc, () => {
+        shown.push(line);
+        const isLast = index === heroTurn.lines.length - 1;
+        const tail = isLast ? "" : `\n${caret}`;
+        output.innerHTML = `${base}\n${shown.join("\n")}${tail}`;
+        if (isLast) setState("ready");
+      });
+    });
+  }
+
+  if (replay) replay.addEventListener("click", play);
+  reduceMotion.addEventListener("change", renderStatic);
+
+  // Start when the terminal scrolls into view (it is above the fold on load).
+  if ("IntersectionObserver" in window && !reduceMotion.matches) {
+    let played = false;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !played) {
+            played = true;
+            play();
+            io.disconnect();
+          }
+        });
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(root);
+  } else {
+    renderStatic();
+  }
+}
+
+// ---- Interactive turn examples (tabbed) -------------------------------------
 const terminalStates = {
   inspect: [
-    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; what does this workspace do?',
+    `${PROMPT_PREFIX}what does this workspace do?`,
     "",
     '<span class="t-cyan">•</span> route   <span class="t-muted">ask · read-only · workspace bounded</span>',
     '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, src/, docs/</span>',
@@ -22,7 +137,7 @@ const terminalStates = {
   ].join("\n"),
 
   approve: [
-    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; create docs/summary.md from this repo',
+    `${PROMPT_PREFIX}create docs/summary.md from this repo`,
     "",
     '<span class="t-cyan">•</span> route   <span class="t-muted">edit · workspace bounded</span>',
     '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, build.gradle.kts</span>',
@@ -37,7 +152,7 @@ const terminalStates = {
   ].join("\n"),
 
   verify: [
-    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; run the approved gradle test command',
+    `${PROMPT_PREFIX}run the approved gradle test command`,
     "",
     '<span class="t-cyan">•</span> route   <span class="t-muted">command · profile gradle_test</span>',
     '<span class="t-cyan">→</span> exec    <span class="t-muted">talos.run_command · bounded</span>',
@@ -51,7 +166,7 @@ const terminalStates = {
   ].join("\n"),
 
   trace: [
-    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; /last trace',
+    `${PROMPT_PREFIX}/last trace`,
     "",
     '<span class="t-bronze">trace</span>',
     '<span class="t-muted">  prompt frame      auto · workspace bounded</span>',
@@ -73,9 +188,7 @@ function setTerminalState(nextState) {
   // innerHTML is safe here: all source strings are hard-coded constants above.
   panel.innerHTML = terminalStates[nextState];
   panel.setAttribute("aria-labelledby", activeTab.id);
-  if (status) {
-    status.textContent = `${activeTab.textContent.trim()} turn selected.`;
-  }
+  if (status) status.textContent = `${activeTab.textContent.trim()} turn selected.`;
 
   tabs.forEach((tab) => {
     const selected = tab === activeTab;
@@ -101,217 +214,190 @@ function handleTabKey(event, tabs) {
   setTerminalState(nextTab.dataset.terminalState);
 }
 
-const tabs = Array.from(document.querySelectorAll("[data-terminal-state]"));
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => setTerminalState(tab.dataset.terminalState));
-  tab.addEventListener("keydown", (event) => handleTabKey(event, tabs));
-});
-
-// Render the initial Inspect turn so the static markup does not have to embed colored HTML.
-if (tabs.length) {
+function setupTurnTabs() {
+  const tabs = Array.from(document.querySelectorAll("[data-terminal-state]"));
+  if (!tabs.length) return;
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => setTerminalState(tab.dataset.terminalState));
+    tab.addEventListener("keydown", (event) => handleTabKey(event, tabs));
+  });
   setTerminalState("inspect");
 }
 
-const sectionNavLinks = Array.from(document.querySelectorAll("[data-section-nav]"));
-const storySections = Array.from(document.querySelectorAll(".story-section[id]"));
-const sectionIds = new Set(storySections.map((section) => section.id));
-const storyMotionQuery = window.matchMedia("(min-width: 761px) and (prefers-reduced-motion: no-preference)");
-const storyFlowTops = new Map();
-let activeSectionFrame = 0;
-let requestStorySectionSync = () => {};
+// ---- Scroll-spy nav + reveal-on-scroll (native scroll, no hijacking) --------
+function setupSectionNav() {
+  const navLinks = Array.from(document.querySelectorAll("[data-section-nav]"));
+  const sections = Array.from(document.querySelectorAll("main section[id]"));
+  if (!navLinks.length || !sections.length) return;
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+  const linkFor = (id) => navLinks.find((link) => link.getAttribute("href") === `#${id}`);
+  const setActive = (id) => {
+    navLinks.forEach((link) => {
+      if (link === linkFor(id)) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+  };
+
+  const io = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (visible[0]) setActive(visible[0].target.id);
+    },
+    { rootMargin: "-45% 0px -45% 0px", threshold: [0, 0.25, 0.5, 1] },
+  );
+  sections.forEach((section) => io.observe(section));
 }
 
-function smoothStep(value) {
-  const t = clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
-}
-
-function smootherStep(value) {
-  const t = clamp(value, 0, 1);
-  return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-function storyTopOffset() {
-  const value = window.getComputedStyle(document.documentElement).getPropertyValue("--story-top");
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 72;
-}
-
-function storyScrollTop(section) {
-  const flowTop = storyFlowTops.get(section.id) ?? section.offsetTop;
-  const maxScrollTop = document.documentElement.scrollHeight - window.innerHeight;
-  return clamp(flowTop - storyTopOffset(), 0, Math.max(0, maxScrollTop));
-}
-
-function storyScrollBehavior() {
-  return storyMotionQuery.matches ? "smooth" : "auto";
-}
-
-function resetStorySectionBlend() {
-  storySections.forEach((section) => {
-    section.style.removeProperty("--story-opacity");
-    section.style.removeProperty("--story-shift");
-    section.style.removeProperty("--story-scale");
-    section.style.removeProperty("--story-saturation");
-  });
-}
-
-function measureStoryFlowTops() {
-  storyFlowTops.clear();
-  storySections.forEach((section) => {
-    storyFlowTops.set(section.id, section.offsetTop);
-  });
-}
-
-function syncStorySectionBlend() {
-  if (!storyMotionQuery.matches) {
-    resetStorySectionBlend();
+function setupReveal() {
+  const targets = Array.from(document.querySelectorAll(".reveal"));
+  if (!targets.length) return;
+  if (reduceMotion.matches || !("IntersectionObserver" in window)) {
+    targets.forEach((target) => target.classList.add("reveal--visible"));
     return;
   }
-
-  const viewportHeight = window.innerHeight || 1;
-  const fadeInStart = viewportHeight * 1.04;
-  const fadeInEnd = viewportHeight * 0.66;
-  const outgoingStart = viewportHeight * 0.94;
-  const outgoingEnd = viewportHeight * 0.7;
-  const sectionRects = storySections.map((section) => {
-    const primaryContent = section.querySelector(".container > *");
-    return {
-      contentTop: primaryContent?.getBoundingClientRect().top ?? section.getBoundingClientRect().top,
-    };
-  });
-
-  storySections.forEach((section, index) => {
-    const rect = sectionRects[index];
-    const nextRect = sectionRects[index + 1];
-    const incoming = smootherStep((fadeInStart - rect.contentTop) / (fadeInStart - fadeInEnd));
-    const outgoing = nextRect
-      ? smootherStep((outgoingStart - nextRect.contentTop) / (outgoingStart - outgoingEnd))
-      : 0;
-    const opacity = incoming * (1 - outgoing);
-    const shift = (1 - incoming) * 24 - outgoing * 18;
-    const scale = 0.995 + incoming * 0.005 - outgoing * 0.003;
-    const saturation = 0.88 + incoming * 0.12 - outgoing * 0.07;
-
-    section.style.setProperty("--story-opacity", opacity.toFixed(3));
-    section.style.setProperty("--story-shift", `${shift.toFixed(1)}px`);
-    section.style.setProperty("--story-scale", scale.toFixed(3));
-    section.style.setProperty("--story-saturation", saturation.toFixed(3));
-  });
-}
-
-function scrollToStorySection(sectionId, behavior = storyScrollBehavior(), updateHash = true) {
-  if (!sectionIds.has(sectionId)) return;
-
-  const section = document.getElementById(sectionId);
-  if (!section) return;
-
-  setActiveSection(sectionId);
-  window.scrollTo({ top: storyScrollTop(section), behavior });
-
-  if (updateHash && window.location.hash !== `#${sectionId}`) {
-    window.history.pushState(null, "", `#${sectionId}`);
-  }
-
-  requestStorySectionSync();
-}
-
-function setActiveSection(sectionId) {
-  if (!sectionIds.has(sectionId)) return;
-
-  document.body.dataset.activeSection = sectionId;
-  sectionNavLinks.forEach((link) => {
-    const isActive = link.getAttribute("href") === `#${sectionId}`;
-    if (isActive) {
-      link.setAttribute("aria-current", "page");
-    } else {
-      link.removeAttribute("aria-current");
-    }
-  });
-  storySections.forEach((section) => {
-    section.classList.toggle("story-section--active", section.id === sectionId);
-  });
-}
-
-if (storySections.length) {
-  const initialSection = sectionIds.has(window.location.hash.slice(1))
-    ? window.location.hash.slice(1)
-    : storySections[0].id;
-  if (window.location.hash && window.scrollY > 0) {
-    window.scrollTo({ top: 0, behavior: "auto" });
-  }
-  measureStoryFlowTops();
-  setActiveSection(initialSection);
-
-  sectionNavLinks.forEach((link) => {
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      const targetId = link.getAttribute("href")?.slice(1);
-      scrollToStorySection(targetId);
-    });
-  });
-
-  const syncActiveSectionFromScroll = () => {
-    activeSectionFrame = 0;
-    syncStorySectionBlend();
-    const readingLine = window.scrollY + window.innerHeight * 0.55;
-    const activeSection = storySections.reduce((current, section) => {
-      return section.offsetTop <= readingLine ? section : current;
-    }, storySections[0]);
-    setActiveSection(activeSection.id);
-  };
-
-  const scheduleActiveSectionSync = () => {
-    if (activeSectionFrame) return;
-    activeSectionFrame = window.requestAnimationFrame(syncActiveSectionFromScroll);
-  };
-  requestStorySectionSync = scheduleActiveSectionSync;
-
-  window.addEventListener("scroll", scheduleActiveSectionSync, { passive: true });
-  window.addEventListener("resize", scheduleActiveSectionSync);
-  storyMotionQuery.addEventListener("change", scheduleActiveSectionSync);
-  window.addEventListener("hashchange", () => {
-    const targetId = window.location.hash.slice(1);
-    if (sectionIds.has(targetId)) {
-      scrollToStorySection(targetId, storyScrollBehavior(), false);
-    } else {
-      scheduleActiveSectionSync();
-    }
-  });
-
-  const syncInitialStorySection = () => {
-    const targetId = window.location.hash.slice(1);
-    if (sectionIds.has(targetId)) {
-      scrollToStorySection(targetId, "auto", false);
-    } else {
-      syncActiveSectionFromScroll();
-    }
-  };
-
-  if (document.readyState === "complete") {
-    syncInitialStorySection();
-  } else {
-    window.addEventListener("load", syncInitialStorySection, { once: true });
-  }
-}
-
-const revealTargets = document.querySelectorAll(".reveal");
-if ("IntersectionObserver" in window) {
-  const observer = new IntersectionObserver(
+  const reveal = (target) => target.classList.add("reveal--visible");
+  const io = new IntersectionObserver(
     (entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
-        entry.target.classList.add("reveal--visible");
-        observer.unobserve(entry.target);
+        reveal(entry.target);
+        io.unobserve(entry.target);
       });
     },
-    { threshold: 0.14 },
+    { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
   );
+  targets.forEach((target) => io.observe(target));
 
-  revealTargets.forEach((target) => observer.observe(target));
-} else {
-  revealTargets.forEach((target) => target.classList.add("reveal--visible"));
+  // Safety net: never leave content hidden if the observer never fires for an
+  // element (e.g. printing, deep-link jumps, or assistive scroll modes).
+  window.setTimeout(() => targets.forEach(reveal), 2200);
 }
+
+// ---- Staggered reveal — child cascades on the card grids -------------------
+function setupStagger() {
+  const groups = Array.from(document.querySelectorAll("[data-reveal-stagger]"));
+  if (!groups.length) return;
+
+  const revealGroup = (group) => {
+    Array.from(group.children).forEach((child, index) => {
+      child.style.setProperty("--reveal-delay", `${index * 70}ms`);
+    });
+    group.classList.add("is-in");
+  };
+
+  if (reduceMotion.matches || !("IntersectionObserver" in window)) {
+    groups.forEach((group) => group.classList.add("is-in"));
+    return;
+  }
+
+  const io = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        revealGroup(entry.target);
+        io.unobserve(entry.target);
+      });
+    },
+    { threshold: 0.1, rootMargin: "0px 0px -6% 0px" },
+  );
+  groups.forEach((group) => io.observe(group));
+
+  // Safety net: never strand a group hidden if the observer never fires.
+  window.setTimeout(() => groups.forEach(revealGroup), 2600);
+}
+
+// ---- Cursor-tracking sheen on cards (fine pointers only) -------------------
+function setupPointerSheen() {
+  if (reduceMotion.matches) return;
+  if (window.matchMedia("(pointer: coarse)").matches) return;
+  const cards = Array.from(
+    document.querySelectorAll(".contract-step, .boundary-band, .use-case, .doc-card, .terminal-card"),
+  );
+  cards.forEach((card) => {
+    card.classList.add("has-sheen");
+    const sheen = document.createElement("span");
+    sheen.className = "sheen";
+    sheen.setAttribute("aria-hidden", "true");
+    card.appendChild(sheen);
+    card.addEventListener("pointermove", (event) => {
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+      card.style.setProperty("--my", `${event.clientY - rect.top}px`);
+    });
+  });
+}
+
+// ---- The ichor vein — scroll fills the guardian's single vein ---------------
+function setupVein() {
+  const vein = document.querySelector(".vein");
+  if (!vein) return;
+  let raf = 0;
+  const update = () => {
+    raf = 0;
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    vein.style.setProperty("--ichor", p.toFixed(4));
+  };
+  const schedule = () => {
+    if (!raf) raf = requestAnimationFrame(update);
+  };
+  update();
+  window.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", schedule);
+}
+
+// ---- Guardian parallax — the emblem drifts slower than the scroll ----------
+function setupParallax() {
+  const el = document.querySelector(".guardian-parallax");
+  if (!el || reduceMotion.matches) return;
+  let raf = 0;
+  const update = () => {
+    raf = 0;
+    el.style.setProperty("--par", `${window.scrollY * 0.18}px`);
+  };
+  const schedule = () => {
+    if (!raf) raf = requestAnimationFrame(update);
+  };
+  update();
+  window.addEventListener("scroll", schedule, { passive: true });
+}
+
+// ---- The awakening — guardian cold-boot, then reveal ------------------------
+function setupAwakening() {
+  const root = document.documentElement;
+  const overlay = document.querySelector(".awaken");
+  if (!overlay || !root.classList.contains("awakening")) return;
+
+  let finished = false;
+  const events = ["click", "keydown", "wheel", "touchstart"];
+  function finish() {
+    if (finished) return;
+    finished = true;
+    overlay.classList.add("awaken--out");
+    try {
+      sessionStorage.setItem("talosAwoke", "1");
+    } catch (e) {
+      /* private mode — fine, it just replays next load */
+    }
+    window.setTimeout(() => {
+      root.classList.remove("awakening");
+      overlay.remove();
+    }, 480);
+    events.forEach((e) => window.removeEventListener(e, finish));
+  }
+  events.forEach((e) => window.addEventListener(e, finish, { passive: true }));
+  window.setTimeout(finish, 1550);
+}
+
+setupForge();
+setupAwakening();
+setupVein();
+setupParallax();
+setupLiveTerminal();
+setupTurnTabs();
+setupSectionNav();
+setupReveal();
+setupStagger();
+setupPointerSheen();

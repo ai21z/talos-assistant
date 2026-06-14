@@ -104,7 +104,7 @@ function renderMarkdown(md) {
       }
       i++; // consume closing fence
       out.push(
-        `<pre class="docs-code" data-lang="${escapeHtml(lang)}"><code>${escapeHtml(
+        `<pre class="docs-code" data-lang="${escapeHtml(lang)}"><button type="button" class="docs-copy" aria-label="Copy code">Copy</button><code>${escapeHtml(
           buf.join("\n"),
         )}</code></pre>`,
       );
@@ -357,6 +357,24 @@ ${cardHtml}`;
 
 window.addEventListener("hashchange", renderRoute);
 renderRoute();
+
+// Copy-to-clipboard for rendered code blocks (delegated; survives re-render).
+if (article && navigator.clipboard) {
+  article.addEventListener("click", (event) => {
+    const button = event.target.closest(".docs-copy");
+    if (!button) return;
+    const code = button.parentElement?.querySelector("code");
+    if (!code) return;
+    navigator.clipboard.writeText(code.textContent).then(() => {
+      button.textContent = "Copied";
+      button.dataset.copied = "true";
+      window.setTimeout(() => {
+        button.textContent = "Copy";
+        delete button.dataset.copied;
+      }, 1600);
+    });
+  });
+}
 
 // Mobile sidebar toggle
 const sidebarToggle = document.querySelector(".docs-sidebar-toggle");
