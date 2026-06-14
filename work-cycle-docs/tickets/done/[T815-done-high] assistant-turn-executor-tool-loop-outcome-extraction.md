@@ -1,6 +1,6 @@
 # T815 AssistantTurnExecutor Tool-Loop Outcome Extraction
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime behavior preservation
@@ -120,12 +120,26 @@ Existing guards named by review:
 - `ReadEvidenceHandoffTest.pathExistenceRecoveryRunsAfterIrrelevantReadEvidence`
   covers helper-level read evidence recovery.
 
-## Current Implementation State
+## Completion State
 
-The initial T815 extraction has been implemented locally and remains open for
-review/closeout. Closeout should verify focused guards, `dev.talos.cli.modes.*`,
-full `check`, and `wikiEvidenceCloseGate --rerun-tasks` before moving this
-ticket to `done`.
+T815 is done. It extracted post-tool-loop outcome orchestration into
+package-private `AssistantToolLoopOutcomeResolver` while preserving behavior.
+
+`AssistantTurnExecutor.resolveToolLoopAnswer(...)` is now a thin adapter that
+binds executor-owned callbacks. The extraction preserved:
+
+- no-tool outcome handling in `AssistantTurnExecutor`;
+- trace begin/set/clear ownership in `AssistantTurnExecutor`;
+- streaming/buffered branch selection in `AssistantTurnExecutor`;
+- `ToolCallLoop.LoopResult` and `ToolOutcome` compatibility surfaces;
+- `TurnOutput` assembly in `AssistantTurnExecutor`.
+
+T815 did not complete Wave 5. The next Wave 5 move is T816, a
+characterization-only ticket for the no-tool outcome boundary before any
+future `AssistantNoToolOutcomeResolver` extraction.
+
+Closeout verification recorded green focused guards, `dev.talos.cli.modes.*`,
+full `check`, and `wikiEvidenceCloseGate --rerun-tasks`.
 
 ## Verification
 
