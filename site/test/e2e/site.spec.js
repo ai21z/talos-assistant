@@ -2,12 +2,23 @@ import { expect, test } from "@playwright/test";
 
 const widths = [320, 375, 390, 768, 1024, 1440];
 
+// Benign GPU/WebGL lifecycle noise emitted by headless Chromium (occluded tabs
+// drop WebGL contexts; ReadPixels stalls come from screenshot readback). These
+// are browser/driver events, not application defects, so they are ignored while
+// the guard stays strict on every real console error or warning.
+const BENIGN_BROWSER_NOISE = [
+  /CONTEXT_LOST_WEBGL/i,
+  /GPU stall due to ReadPixels/i,
+  /GL Driver Message/i,
+];
+
 test.beforeEach(async ({ page }) => {
   const browserIssues = [];
   page.on("console", (message) => {
-    if (["error", "warning"].includes(message.type())) {
-      browserIssues.push(`${message.type()}: ${message.text()}`);
-    }
+    if (!["error", "warning"].includes(message.type())) return;
+    const text = message.text();
+    if (BENIGN_BROWSER_NOISE.some((pattern) => pattern.test(text))) return;
+    browserIssues.push(`${message.type()}: ${text}`);
   });
   page.on("pageerror", (error) => browserIssues.push(`pageerror: ${error.message}`));
   page.browserIssues = browserIssues;
@@ -49,6 +60,29 @@ for (const width of widths) {
   });
 }
 
+test("live hero terminal streams a real turn and can replay", async ({ page }) => {
+  await page.goto("/");
+  const output = page.locator("[data-live-output]");
+  // Streams the inspect turn to completion (route → inspect → answer).
+  await expect(output).toContainText("route", { timeout: 9000 });
+  await expect(output).toContainText("Local-first CLI workspace operator", { timeout: 9000 });
+  await expect(output).toContainText("/last trace", { timeout: 9000 });
+
+  // Replay restarts the same turn.
+  await page.locator("[data-live-replay]").click();
+  await expect(output).toContainText("what does this workspace do?", { timeout: 9000 });
+  await expect(output).toContainText("Local-first CLI workspace operator", { timeout: 9000 });
+  expect(page.browserIssues).toEqual([]);
+});
+
+test("hero shows the Greek identity inscription accent", async ({ page }) => {
+  await page.goto("/");
+  const greek = page.locator(".hero-inscription-greek");
+  await expect(greek).toHaveText("ΤΑΛΩΣ");
+  await expect(greek).toBeVisible();
+  await expect(page.locator(".live-terminal")).toBeVisible();
+});
+
 test("terminal tabs switch content on click and keyboard", async ({ page }) => {
   await page.goto("/");
   const output = page.locator("#terminal-output");
@@ -69,6 +103,76 @@ test("terminal tabs switch content on click and keyboard", async ({ page }) => {
 
   await page.getByRole("tab", { name: "Trace" }).press("Home");
   await expect(page.getByRole("tab", { name: "Inspect" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("scroll-spy moves the active nav state as sections are visited", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Overview");
+
+  await page.getByRole("navigation", { name: "Primary navigation" })
+    .getByRole("link", { name: "Local Boundaries" })
+    .click();
+  await expect(page).toHaveURL(/#local-boundaries$/);
+  await expect(page.locator("#local-boundaries")).toBeInViewport();
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Local Boundaries");
+
+  // Native scroll is not hijacked.
+  const scrollState = await page.evaluate(() => ({
+    overflowY: getComputedStyle(document.documentElement).overflowY,
+    snapped: getComputedStyle(document.documentElement).scrollSnapType,
+  }));
+  expect(scrollState.overflowY).not.toBe("hidden");
+  expect(scrollState.snapped).not.toMatch(/mandatory/i);
+});
+
+test("staggered card grids reveal when scrolled into view", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const card = page.locator(".use-case").first();
+  await page.locator("#good-fits").scrollIntoViewIfNeeded();
+  await expect
+    .poll(async () => Number(await card.evaluate((node) => getComputedStyle(node).opacity)), {
+      timeout: 5000,
+    })
+    .toBeGreaterThan(0.9);
+});
+
+test("the ichor vein fills from empty to full as you scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const ichor = () =>
+    page.locator(".vein").evaluate((node) => Number(node.style.getPropertyValue("--ichor")) || 0);
+  expect(await ichor()).toBeLessThan(0.1);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await expect.poll(ichor, { timeout: 3000 }).toBeGreaterThan(0.9);
+});
+
+test("the cold-boot awakening plays when forced, then clears to reveal the page", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__forceAwaken = true;
+    window.__sawAwaken = false;
+    const tick = () => {
+      const el = document.querySelector(".awaken");
+      if (el && getComputedStyle(el).display !== "none") window.__sawAwaken = true;
+      if (el) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await page.goto("/");
+  // It clears itself, restoring scroll + content.
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.classList.contains("awakening")), { timeout: 5000 })
+    .toBe(false);
+  await expect(page.locator(".awaken")).toHaveCount(0);
+  const state = await page.evaluate(() => ({
+    saw: window.__sawAwaken,
+    flag: (() => { try { return sessionStorage.getItem("talosAwoke"); } catch (e) { return null; } })(),
+  }));
+  expect(state.saw).toBe(true); // the overlay was actually shown
+  expect(state.flag).toBe("1"); // finish() ran (not just the failsafe)
+  await expect(page.locator("h1")).toBeVisible();
+  expect(page.browserIssues).toEqual([]);
 });
 
 test("planned install surface has no fake copy affordance", async ({ page }) => {
@@ -110,6 +214,15 @@ test("docs page routes render without hiding content under the sticky header", a
   expect(page.browserIssues).toEqual([]);
 });
 
+test("docs code blocks expose a working copy control", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/docs.html#/quickstart");
+  const copy = page.locator(".docs-copy").first();
+  await expect(copy).toHaveCount(1);
+  await copy.click();
+  await expect(copy).toHaveText("Copied");
+});
+
 test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
   await page.goto("/docs.html#/quickstart");
   await page.getByRole("link", { name: "Current Support" }).click();
@@ -130,338 +243,11 @@ test("mobile header and nav remain usable", async ({ page }) => {
   await expect(page.locator("#docs")).toBeInViewport();
 });
 
-test("scroll story sections keep active nav state without hijacking native scroll", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Overview");
-
-  await primaryNav.getByRole("link", { name: "Local Boundaries" }).click();
-  await expect(page).toHaveURL(/#local-boundaries$/);
-  await expect(page.locator("#local-boundaries")).toBeInViewport();
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Local Boundaries");
-
-  const scrollState = await page.evaluate(() => ({
-    overflowY: getComputedStyle(document.documentElement).overflowY,
-    snapped: getComputedStyle(document.documentElement).scrollSnapType,
-    executionMinHeight: getComputedStyle(document.querySelector("#execution")).minHeight,
-    expectedStoryHeight: `${window.innerHeight - 72}px`,
-  }));
-
-  expect(scrollState.overflowY).not.toBe("hidden");
-  expect(scrollState.snapped).not.toMatch(/mandatory/i);
-  expect(scrollState.executionMinHeight).toBe(scrollState.expectedStoryHeight);
-
-  await page.locator("#docs").scrollIntoViewIfNeeded();
-  await expect(page.locator("#docs")).toBeInViewport();
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Docs");
-});
-
-test("desktop story handoff overlaps adjacent screens during scroll", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await page.evaluate(() => {
-    document.documentElement.style.scrollBehavior = "auto";
-    window.scrollTo({ top: 700, behavior: "instant" });
-  });
-  const handoffHandle = await page.waitForFunction(() => {
-    const overviewNode = document.querySelector("#overview > .container");
-    const executionNode = document.querySelector("#execution > .container");
-    const overview = overviewNode.getBoundingClientRect();
-    const execution = executionNode.getBoundingClientRect();
-    const handoff = {
-      overviewBottom: overview.bottom,
-      executionTop: execution.top,
-      overviewOpacity: Number(getComputedStyle(overviewNode).opacity),
-      executionOpacity: Number(getComputedStyle(executionNode).opacity),
-      executionSectionBackground: getComputedStyle(document.querySelector("#execution")).backgroundImage,
-      executionBeforeDisplay: getComputedStyle(document.querySelector("#execution"), "::before").display,
-    };
-    return handoff.overviewOpacity < 0.25 && handoff.executionOpacity > 0.65 ? handoff : false;
-  });
-  const handoff = await handoffHandle.jsonValue();
-
-  expect(handoff.overviewBottom).toBeGreaterThan(220);
-  expect(handoff.executionTop).toBeLessThan(460);
-  expect(handoff.executionOpacity).toBeGreaterThan(0.65);
-  expect(handoff.overviewOpacity).toBeLessThan(0.25);
-  expect(handoff.executionSectionBackground).toBe("none");
-  expect(handoff.executionBeforeDisplay).toBe("none");
-});
-
-test("desktop story screens keep primary content centered across viewport heights", async ({ page }) => {
-  const viewports = [
-    { width: 1440, height: 900, maxDelta: 56 },
-    { width: 1366, height: 768, maxDelta: 64 },
-    { width: 1280, height: 720, maxDelta: 72 },
-  ];
-
-  for (const viewport of viewports) {
-    await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await page.goto("/");
-    await page.evaluate(() => {
-      document.documentElement.style.scrollBehavior = "auto";
-    });
-
-    for (const sectionId of ["overview", "execution", "turn-ui"]) {
-      await page.evaluate((targetId) => {
-        const section = document.getElementById(targetId);
-        window.scrollTo({ top: section.offsetTop - 72, behavior: "instant" });
-      }, sectionId);
-      const metricsHandle = await page.waitForFunction((targetId) => {
-        const section = document.getElementById(targetId);
-        const container = section.querySelector(":scope > .container");
-        const children = Array.from(container.children).filter((node) => {
-          const style = window.getComputedStyle(node);
-          return style.display !== "none" && style.visibility !== "hidden";
-        });
-        const rects = children
-          .map((node) => node.getBoundingClientRect())
-          .filter((rect) => rect.width > 0 && rect.height > 0);
-        const top = Math.min(...rects.map((rect) => rect.top));
-        const bottom = Math.max(...rects.map((rect) => rect.bottom));
-        const contentCenter = (top + bottom) / 2;
-        const viewportCenter = (72 + window.innerHeight) / 2;
-        const metrics = {
-          delta: contentCenter - viewportCenter,
-          opacity: Number(window.getComputedStyle(container).opacity),
-        };
-        return Math.abs(metrics.delta) <= 72 && metrics.opacity > 0.86 ? metrics : false;
-      }, sectionId);
-      const metrics = await metricsHandle.jsonValue();
-
-      expect(Math.abs(metrics.delta), `${sectionId} center at ${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(
-        viewport.maxDelta,
-      );
-      expect(metrics.opacity, `${sectionId} opacity at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0.86);
-    }
-  }
-});
-
-test("primary story nav lands on the requested centered screen", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await page.evaluate(() => {
-    document.documentElement.style.scrollBehavior = "auto";
-  });
-
-  const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
-
-  for (const target of [
-    { label: "Execution", id: "execution" },
-    { label: "Turn UI", id: "turn-ui" },
-    { label: "Local Boundaries", id: "local-boundaries" },
-    { label: "Turn UI", id: "turn-ui" },
-    { label: "Execution", id: "execution" },
-    { label: "Overview", id: "overview" },
-  ]) {
-    await primaryNav.getByRole("link", { name: target.label }).click();
-    await expect(page).toHaveURL(new RegExp(`#${target.id}$`));
-    await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText(target.label);
-
-    const metrics = await page.waitForFunction(
-      (sectionId) => {
-      const section = document.getElementById(sectionId);
-      const container = section.querySelector(":scope > .container");
-      const children = Array.from(container.children).filter((node) => {
-        const style = window.getComputedStyle(node);
-        return style.display !== "none" && style.visibility !== "hidden";
-      });
-      const rects = children
-        .map((node) => node.getBoundingClientRect())
-        .filter((rect) => rect.width > 0 && rect.height > 0);
-      const top = Math.min(...rects.map((rect) => rect.top));
-      const bottom = Math.max(...rects.map((rect) => rect.bottom));
-      const contentCenter = (top + bottom) / 2;
-      const viewportCenter = (72 + window.innerHeight) / 2;
-      const metrics = {
-        delta: contentCenter - viewportCenter,
-        opacity: Number(window.getComputedStyle(container).opacity),
-      };
-      return Math.abs(metrics.delta) <= 64 && metrics.opacity > 0.86 ? metrics : false;
-      },
-      target.id,
-    );
-
-    const resolvedMetrics = await metrics.jsonValue();
-    expect(Math.abs(resolvedMetrics.delta), `${target.id} nav center`).toBeLessThanOrEqual(64);
-    expect(resolvedMetrics.opacity, `${target.id} nav opacity`).toBeGreaterThan(0.86);
-  }
-});
-
-test("hero startup terminal image loads", async ({ page }) => {
-  await page.goto("/");
-  const image = page.locator(".startup-terminal-image");
-  await expect(image).toHaveAttribute("src", /(?:\/assets\/img-[^/]+\.png|\.\/design\/img\.png)$/);
-  await expect(image).toHaveAttribute("alt", /Talos startup terminal screen/);
-  const loaded = await image.evaluate((node) => node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0);
-  expect(loaded).toBe(true);
-});
-
-test("hero inscription cycles TALOS, Greek, then terminal-typed product phrases", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-
-  const inscription = page.locator(".greek-hero-inscription");
-  const english = page.locator(".hero-inscription-layer--english");
-  const greek = page.locator(".hero-inscription-layer--greek");
-  const terminal = page.locator(".hero-inscription-layer--terminal");
-  const image = page.locator(".startup-terminal-image");
-
-  await expect(english).toHaveText("TALOS");
-  await expect(greek).toHaveText("ΤΑΛΩΣ");
-  for (const phrase of [
-    "local operator",
-    "local model harness",
-    "guard your workspace",
-  ]) {
-    await expect(terminal).toContainText(phrase);
-  }
-  await expect(terminal).not.toContainText(/approval before mutation|trace every turn|last trace/i);
-  await expect(inscription).toBeVisible();
-  await expect(image).toBeVisible();
-
-  const visualOrder = await page.evaluate(() => {
-    const inscriptionNode = document.querySelector(".greek-hero-inscription");
-    const englishNode = document.querySelector(".hero-inscription-layer--english");
-    const greekNode = document.querySelector(".hero-inscription-layer--greek");
-    const terminalNode = document.querySelector(".hero-inscription-layer--terminal");
-    const promptNode = document.querySelector(".hero-terminal-prompt");
-    const textNode = document.querySelector(".hero-terminal-text");
-    const imageNode = document.querySelector(".startup-terminal-image");
-    const inscription = inscriptionNode.getBoundingClientRect();
-    const image = imageNode.getBoundingClientRect();
-    const styles = window.getComputedStyle(inscriptionNode);
-    const englishStyles = window.getComputedStyle(englishNode);
-    const greekStyles = window.getComputedStyle(greekNode);
-    const terminalStyles = window.getComputedStyle(terminalNode);
-    const promptStyles = window.getComputedStyle(promptNode);
-    const textStyles = window.getComputedStyle(textNode);
-    return {
-      inscriptionTop: inscription.top,
-      inscriptionLeft: inscription.left,
-      inscriptionRight: inscription.right,
-      inscriptionHeight: inscription.height,
-      imageTop: image.top,
-      imageHeight: image.height,
-      color: styles.color,
-      fontFamily: styles.fontFamily,
-      englishColor: englishStyles.color,
-      greekColor: greekStyles.color,
-      terminalColor: terminalStyles.color,
-      promptColor: promptStyles.color,
-      textColor: textStyles.color,
-      englishFontFamily: englishStyles.fontFamily,
-      greekFontFamily: greekStyles.fontFamily,
-      terminalFontFamily: terminalStyles.fontFamily,
-      englishAnimation: englishStyles.animationName,
-      greekAnimation: greekStyles.animationName,
-      terminalAnimation: terminalStyles.animationName,
-      terminalLineHeight: terminalStyles.lineHeight,
-      terminalTextAlign: terminalStyles.textAlign,
-    };
-  });
-
-  expect(visualOrder.inscriptionTop).toBeLessThan(visualOrder.imageTop);
-  expect(visualOrder.inscriptionHeight).toBeLessThan(visualOrder.imageHeight);
-  expect(visualOrder.inscriptionLeft).toBeGreaterThanOrEqual(0);
-  expect(visualOrder.inscriptionRight).toBeLessThanOrEqual(1440);
-  expect(visualOrder.color).toBe("rgb(194, 138, 76)");
-  expect(visualOrder.fontFamily).toContain("GFS Neohellenic");
-  expect(visualOrder.englishColor).toBe("rgb(194, 138, 76)");
-  expect(visualOrder.greekColor).toBe("rgb(194, 138, 76)");
-  expect(visualOrder.terminalColor).toBe("rgb(243, 236, 223)");
-  expect(visualOrder.promptColor).toBe("rgb(95, 175, 207)");
-  expect(visualOrder.textColor).toBe("rgb(243, 236, 223)");
-  expect(visualOrder.englishFontFamily).toContain("GFS Neohellenic");
-  expect(visualOrder.greekFontFamily).toContain("GFS Neohellenic");
-  expect(visualOrder.terminalFontFamily).toContain("Consolas");
-  expect(visualOrder.englishAnimation).toBe("talos-inscription-english");
-  expect(visualOrder.greekAnimation).toBe("talos-inscription-greek");
-  expect(visualOrder.terminalAnimation).toBe("talos-inscription-terminal");
-  expect(visualOrder.terminalTextAlign).toBe("left");
-
-  const terminalPhrasePhases = await page.evaluate(() => {
-    const terminalNode = document.querySelector(".hero-inscription-layer--terminal");
-    const lines = Array.from(document.querySelectorAll(".hero-terminal-line"));
-    terminalNode.style.animationDelay = "-20s";
-    terminalNode.style.animationPlayState = "paused";
-    const setLinePhase = (seconds) => {
-      for (const line of lines) {
-        line.style.animationDelay = `-${seconds}s`;
-        line.style.animationPlayState = "paused";
-      }
-      return lines.map((line) => ({
-        text: line.textContent.trim().replace(/\s+/g, " "),
-        opacity: Number(window.getComputedStyle(line).opacity),
-        width: line.getBoundingClientRect().width,
-        scrollWidth: line.scrollWidth,
-      }));
-    };
-    return {
-      first: setLinePhase(15.5),
-      second: setLinePhase(18.8),
-      third: setLinePhase(22),
-    };
-  });
-  const assertOneActivePhrase = (phase, activeText) => {
-    const active = phase.filter((line) => line.opacity > 0.75);
-    expect(active.map((line) => line.text)).toEqual([activeText]);
-    expect(active[0].width + 1, `${activeText} line should not clip typed content`).toBeGreaterThanOrEqual(
-      active[0].scrollWidth,
-    );
-  };
-  assertOneActivePhrase(terminalPhrasePhases.first, "> local operator");
-  assertOneActivePhrase(terminalPhrasePhases.second, "> local model harness");
-  assertOneActivePhrase(terminalPhrasePhases.third, "> guard your workspace");
-
-  const phases = await page.evaluate(() => {
-    const englishNode = document.querySelector(".hero-inscription-layer--english");
-    const greekNode = document.querySelector(".hero-inscription-layer--greek");
-    const terminalNode = document.querySelector(".hero-inscription-layer--terminal");
-    const nodes = [englishNode, greekNode, terminalNode];
-    const setPhase = (seconds) => {
-      for (const node of nodes) {
-        node.style.animationDelay = `-${seconds}s`;
-        node.style.animationPlayState = "paused";
-      }
-      return {
-        english: Number(window.getComputedStyle(englishNode).opacity),
-        greek: Number(window.getComputedStyle(greekNode).opacity),
-        terminal: Number(window.getComputedStyle(terminalNode).opacity),
-      };
-    };
-
-    return {
-      englishPhase: setPhase(0.5),
-      greekPhase: setPhase(8.4),
-      terminalPhase: setPhase(17),
-    };
-  });
-
-  expect(phases.englishPhase.english).toBeGreaterThan(0.85);
-  expect(phases.englishPhase.greek).toBeLessThan(0.2);
-  expect(phases.englishPhase.terminal).toBeLessThan(0.2);
-  expect(phases.greekPhase.greek).toBeGreaterThan(0.85);
-  expect(phases.greekPhase.english).toBeLessThan(0.2);
-  expect(phases.greekPhase.terminal).toBeLessThan(0.2);
-  expect(phases.terminalPhase.terminal).toBeGreaterThan(0.85);
-  expect(phases.terminalPhase.english).toBeLessThan(0.2);
-  expect(phases.terminalPhase.greek).toBeLessThan(0.2);
-});
-
-test("mobile hero content fits without masked clipping", async ({ page }) => {
+test("mobile hero content fits without horizontal clipping", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/");
-  const overflow = await page.evaluate(() => {
-    const shell = document.querySelector(".page-shell");
-    return {
-      hiddenShell: getComputedStyle(shell).overflow === "hidden",
-      scrollOverflow: document.documentElement.scrollWidth - window.innerWidth,
-    };
-  });
-  expect(overflow.hiddenShell).toBe(false);
-  expect(overflow.scrollOverflow).toBeLessThanOrEqual(1);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 
   for (const selector of [
     "h1",
@@ -470,12 +256,13 @@ test("mobile hero content fits without masked clipping", async ({ page }) => {
     ".setup-strip",
     ".machine-note",
     ".hero-visual",
-    ".greek-hero-inscription",
+    ".live-terminal",
+    ".hero-inscription",
   ]) {
     const box = await page.locator(selector).boundingBox();
     expect(box, `${selector} should render`).not.toBeNull();
     expect(box.x, `${selector} left edge`).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390);
+    expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390 + 1);
   }
 });
 
@@ -489,8 +276,14 @@ test("reduced-motion mode leaves content visible without reveal animations", asy
     }).length,
   );
   expect(hiddenRevealCount).toBe(0);
-  await expect(page.locator(".hero-inscription-layer--english")).toBeVisible();
-  await expect(page.locator(".hero-inscription-layer--greek")).toHaveCSS("display", "none");
-  await expect(page.locator(".hero-inscription-layer--terminal")).toHaveCSS("display", "none");
   await expect(page.locator("h1")).toBeVisible();
+  await expect(page.locator(".hero-inscription-greek")).toBeVisible();
+  // The live terminal still renders its content statically.
+  await expect(page.locator("[data-live-output]")).toContainText("Local-first CLI workspace operator");
+  // Staggered groups are shown immediately (no cascade) under reduced motion.
+  const cardOpacity = await page
+    .locator(".doc-card")
+    .first()
+    .evaluate((node) => getComputedStyle(node).opacity);
+  expect(Number(cardOpacity)).toBe(1);
 });

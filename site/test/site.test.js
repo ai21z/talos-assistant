@@ -69,15 +69,16 @@ describe("Talos landing page static contract", () => {
     assert.notEqual(h1Text.toUpperCase(), "TALOS");
   });
 
-  it("uses the six-screen story map with reduced navigation labels", () => {
+  it("uses the six-section map with reduced navigation labels", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const navMatch = html.match(/<nav\b[^>]*id="primary-navigation"[\s\S]*?<\/nav>/);
     assert.ok(navMatch, "missing #primary-navigation nav");
     const nav = navMatch[0];
-    const storySections = Array.from(html.matchAll(/<section\b(?=[^>]*\bstory-section\b)(?=[^>]*\bid="([^"]+)")[^>]*>/g), (m) => m[1]);
+    const main = html.slice(html.indexOf('id="main"'));
+    const sections = Array.from(main.matchAll(/<section\b[^>]*\bid="([^"]+)"/g), (m) => m[1]);
 
-    assert.deepEqual(storySections, [
+    assert.deepEqual(sections, [
       "overview",
       "execution",
       "turn-ui",
@@ -125,32 +126,37 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(hero, /data-copy="[^"]*winget/i);
   });
 
-  it("shows the real Talos icon without cropped background or boxed mark", () => {
+  it("renders the real Talos shield icon as the brand mark", () => {
     const html = read("index.html");
-    const css = read("src/styles.css");
     assert.ok(existsSync(join(root, "design", "talos-icon.png")), "talos-icon.png missing");
-    assert.match(html, /design\/talos-icon\.png/);
-    assert.doesNotMatch(html, /data:image\/svg\+xml/i);
-    assert.doesNotMatch(html, /<svg\b/i);
-    assert.doesNotMatch(css, /url\(["']?\.\.\/design\/talos-icon\.png/);
-    const brandImageBlock = css.match(/\.brand-mark img\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
-    assert.doesNotMatch(brandImageBlock, /opacity:\s*0/);
-    const wordmarkBlock = css.match(/\.wordmark-mark\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
-    assert.doesNotMatch(wordmarkBlock, /border:/);
-    assert.match(css, /\.wordmark-mark[\s\S]*?object-fit:\s*contain|\.wordmark-mark img[\s\S]*?object-fit:\s*contain/);
+    // The real shield emblem badges the header and footer wordmarks.
+    assert.equal(
+      (html.match(/<img class="brand-icon"[^>]*src="\.\/design\/talos-icon\.png"/g) ?? []).length,
+      2,
+    );
+    // Favicon uses the same real icon.
+    assert.match(html, /rel="icon"\s+type="image\/png"\s+href="\.\/design\/talos-icon\.png"/);
+    // Brand marks are decorative (empty alt) inside aria-hidden wrappers.
+    assert.match(html, /<img class="brand-icon"[^>]*alt=""/);
   });
 
-  it("uses the locked startup terminal screenshot as the dominant hero proof", () => {
+  it("leads the hero with a live, replayable terminal carrying the current version", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
+    const js = read("src/main.js");
     const hero = sectionSlice(html, "overview", "execution");
     const heroText = hero.replace(/\s+/g, " ");
 
-    assert.ok(existsSync(join(root, "design", "img.png")), "img.png missing");
-    assert.match(hero, /<img\b[^>]*class="startup-terminal-image"[^>]*src="\.\/design\/img\.png"/);
-    assert.match(hero, /alt="[^"]*Talos startup terminal screen/i);
-    assert.doesNotMatch(hero, /<pre\b[^>]*class="banner"/i);
-    assert.match(css, /grid-template-columns:\s*minmax\(0,\s*0\.7[0-9]fr\)\s+minmax\(0,\s*1\.2[0-9]fr\)/);
+    // Live terminal scaffold and replay control.
+    assert.match(hero, /data-live-terminal/);
+    assert.match(hero, /<pre[^>]*class="terminal-screen"[^>]*data-live-output/);
+    assert.match(hero, /data-live-replay/);
+    assert.match(js, /function setupLiveTerminal/);
+    assert.match(js, /IntersectionObserver/);
+
+    // The hero proof is rendered DOM, not a baked, version-locked screenshot.
+    assert.doesNotMatch(hero, /<img\b[^>]*class="startup-terminal-image"/);
+    assert.doesNotMatch(hero, /design\/img\.png/);
 
     for (const copy of [
       "TALOS",
@@ -163,62 +169,31 @@ describe("Talos landing page static contract", () => {
       assert.match(heroText, new RegExp(escapeRegExp(copy)));
     }
 
+    // No stale baked version strings.
     assert.doesNotMatch(heroText, /TALOS v0\.9\.9\b/);
+    assert.doesNotMatch(heroText, /v0\.10\.1\b/);
+
+    assert.match(css, /\.terminal\b/);
+    assert.match(css, /\.terminal-screen\b/);
+    assert.match(css, /\.terminal-replay\b/);
   });
 
-  it("renders TALOS, Greek, and terminal-typed hero phrases as a restrained reveal cycle", () => {
+  it("keeps the Greek identity as a single restrained inscription accent", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const js = read("src/main.js");
     const pkg = JSON.parse(read("package.json"));
     const hero = sectionSlice(html, "overview", "execution");
     const publicSurface = publicText();
-    const greekBlock = css.match(/\.greek-hero-inscription\s*\{(?<block>[\s\S]*?)\}/)?.groups?.block ?? "";
 
     assert.ok(pkg.devDependencies["@fontsource/gfs-neohellenic"], "missing self-hosted GFS Neohellenic package");
     assert.match(js, /@fontsource\/gfs-neohellenic\/greek-700\.css/);
-    assert.match(
-      hero,
-      /<div\s+class="greek-hero-inscription hero-inscription"\s+aria-hidden="true">/,
-    );
-    const inscriptionHtml =
-      hero.match(/<div\s+class="greek-hero-inscription hero-inscription"[\s\S]*?<\/div>/)?.[0] ?? "";
-    assert.match(hero, /<span\s+class="hero-inscription-layer hero-inscription-layer--english"\s+lang="en">\s*TALOS\s*<\/span>/);
-    assert.match(hero, /<span\s+class="hero-inscription-layer hero-inscription-layer--greek"\s+lang="el">\s*ΤΑΛΩΣ\s*<\/span>/);
-    assert.match(
-      hero,
-      /<span\s+class="hero-inscription-layer hero-inscription-layer--terminal"\s+lang="en">/,
-    );
-    for (const phrase of [
-      "local operator",
-      "local model harness",
-      "guard your workspace",
-    ]) {
-      assert.match(hero, new RegExp(escapeRegExp(phrase)));
-    }
-    assert.doesNotMatch(hero, /approval before mutation|trace every turn|last trace/i);
+    assert.match(hero, /<span\s+class="hero-inscription-greek"\s+lang="el">\s*ΤΑΛΩΣ\s*<\/span>/);
     assert.equal((publicSurface.match(/ΤΑΛΩΣ/g) ?? []).length, 1);
     assert.doesNotMatch(publicSurface, /TAΛOS|TALΩS|TAΛΩS/);
-    assert.doesNotMatch(hero, /TALOS-CLI is a local-first operator for your workspace\. A local harness for local models\./);
     assert.doesNotMatch(publicSurface, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
-    assert.match(css, /\.greek-hero-inscription\s*\{[\s\S]*font-family:\s*"GFS Neohellenic"/);
-    assert.match(css, /\.greek-hero-inscription\s*\{[\s\S]*color:\s*var\(--bronze\)/);
-    assert.match(css, /\.hero-inscription-layer--terminal\s*\{[\s\S]*font-family:\s*ui-monospace/);
-    assert.match(css, /\.hero-inscription-layer--terminal\s*\{[\s\S]*position:\s*absolute/);
-    assert.match(css, /\.hero-terminal-line\s*\{[\s\S]*position:\s*absolute/);
-    assert.match(css, /\.hero-terminal-prompt\s*\{[\s\S]*color:\s*var\(--cyan\)/);
-    assert.match(css, /\.hero-terminal-text\s*\{[\s\S]*color:\s*var\(--text\)/);
-    assert.match(css, /@keyframes\s+talos-inscription-english/);
-    assert.match(css, /@keyframes\s+talos-inscription-greek/);
-    assert.match(css, /@keyframes\s+talos-inscription-terminal/);
-    assert.match(css, /@keyframes\s+talos-terminal-type-one/);
-    assert.match(css, /@keyframes\s+talos-terminal-type-two/);
-    assert.match(css, /@keyframes\s+talos-terminal-type-three/);
-    assert.match(css, /animation-duration:\s*28s/);
-    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*hero-inscription-layer--english[\s\S]*display:\s*none/);
-    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*hero-inscription-layer--terminal[\s\S]*display:\s*none/);
-    assert.doesNotMatch(greekBlock, /--cyan|var\(--cyan\)|color:\s*transparent|background-clip/);
-    assert.match(hero, /<img\b[^>]*class="startup-terminal-image"[^>]*src="\.\/design\/img\.png"/);
+    assert.match(css, /\.hero-inscription-greek\s*\{[\s\S]*?font-family:\s*"GFS Neohellenic"/);
+    assert.match(css, /\.hero-inscription-greek\s*\{[\s\S]*?text-shadow/);
   });
 
   it("ships a linear execution flow with one compact tool evidence strip", () => {
@@ -373,6 +348,15 @@ describe("Talos landing page static contract", () => {
     }
   });
 
+  it("ships social share metadata and a png favicon", () => {
+    const html = read("index.html");
+    assert.match(html, /<meta\s+name="theme-color"/i);
+    assert.match(html, /<meta\s+property="og:title"/i);
+    assert.match(html, /<meta\s+property="og:description"/i);
+    assert.match(html, /<meta\s+name="twitter:card"\s+content="summary_large_image"/i);
+    assert.match(html, /rel="icon"\s+type="image\/png"\s+href="\.\/design\/talos-icon\.png"/);
+  });
+
   it("keeps anchor navigation targetable", () => {
     const html = read("index.html");
     const definedIds = ids(html);
@@ -385,55 +369,145 @@ describe("Talos landing page static contract", () => {
     const html = read("index.html");
     assert.doesNotMatch(html, /<pre[^>]*aria-live=/i);
     assert.match(html, /id="terminal-status"[\s\S]*aria-live="polite"/i);
-    assert.doesNotMatch(html, /aria-hidden="true"[\s\S]{0,500}<svg[^>]*(?:role="img"|aria-label=)/i);
   });
 
-  it("supports anchor offset and reduced motion", () => {
+  it("uses native scroll with reveal-on-scroll and no scroll hijacking", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const js = read("src/main.js");
+
+    // The old sticky full-viewport story-blend mechanic is gone.
+    assert.doesNotMatch(html, /\bstory-section\b/);
+    assert.doesNotMatch(css, /\bstory-section\b/);
+    assert.doesNotMatch(css, /--story-opacity|--story-shift|--story-scale/);
+    assert.doesNotMatch(js, /smootherStep|scrollToStorySection|--story-opacity/);
+
+    // No scroll hijacking of any kind.
+    assert.doesNotMatch(js, /addEventListener\(["'](?:wheel|touchmove)["']/);
+    assert.doesNotMatch(css, /scroll-snap-type:\s*y\s+mandatory/);
+
+    // Native scroll-spy + reveal driven by IntersectionObserver.
+    assert.match(js, /function setupSectionNav/);
+    assert.match(js, /function setupReveal/);
+    assert.match(js, /IntersectionObserver/);
+    assert.match(js, /aria-current/);
+    assert.match(js, /data-section-nav/);
+    assert.match(css, /\.js\s+\.reveal\s*\{[\s\S]*?opacity:\s*0/);
+    assert.match(css, /\.reveal--visible\s*\{[\s\S]*?opacity:\s*1/);
+  });
+
+  it("keeps motion accessible under reduced-motion preferences", () => {
     const css = read("src/styles.css");
     assert.match(css, /scroll-margin-top/);
     assert.match(css, /prefers-reduced-motion:\s*reduce/);
-    assert.match(css, /scroll-behavior:\s*auto\s*!important/);
-    assert.match(css, /transition(?:-duration)?:\s*none\s*!important|transition-duration:\s*0\.01ms\s*!important/);
-    assert.match(css, /animation(?:-duration)?:\s*none\s*!important|animation-duration:\s*0\.01ms\s*!important/);
-    assert.match(css, /\.js\s+\.reveal[\s\S]*opacity:\s*1/);
-    const jsRevealBlock = css.match(/\.js\s+\.reveal\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
-    assert.doesNotMatch(jsRevealBlock, /opacity:\s*0/);
+    // Reduced motion forces revealed content visible and tames animation.
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*\.js\s+\.reveal\s*\{[\s\S]*?opacity:\s*1/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*animation-duration:\s*0\.01ms\s*!important/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*transition-duration:\s*0\.01ms\s*!important/);
+    // Staggered groups and the cursor sheen also stand down under reduced motion.
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*\[data-reveal-stagger\]\s*>\s*\*\s*\{[\s\S]*?opacity:\s*1/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*\.sheen\s*\{[\s\S]*?display:\s*none/);
   });
 
-  it("uses native scroll with content-only story blending without scrolljacking", () => {
+  it("renders a film-grain texture overlay for tactile depth", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    assert.match(html, /<div class="grain" aria-hidden="true">/);
+    assert.match(css, /\.grain\s*\{[\s\S]*?pointer-events:\s*none/);
+    assert.match(css, /\.grain\s*\{[\s\S]*?mix-blend-mode/);
+  });
+
+  it("renders a single persistent scroll-reactive forge background", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const main = read("src/main.js");
+    const forge = read("src/forge.js");
+    // One fixed full-page canvas, not a hero-only element.
+    assert.match(html, /<canvas class="forge" aria-hidden="true">/);
+    assert.doesNotMatch(html, /hero-canvas|hero-glow/);
+    assert.match(css, /\.forge\s*\{[\s\S]*?position:\s*fixed/);
+    // The divider lines between sections are gone — continuity, not chops.
+    assert.doesNotMatch(css, /\.section\s*\+\s*\.section/);
+    // Wired in, WebGL2, scroll-position + scroll-velocity reactive.
+    assert.match(main, /setupForge\(\)/);
+    assert.match(forge, /function setupForge/);
+    assert.match(forge, /webgl2/);
+    assert.match(forge, /uScroll/);
+    assert.match(forge, /uVel/);
+    // Frozen to a single frame under reduced motion; silent fallback otherwise.
+    assert.match(forge, /reduce\.matches/);
+    assert.match(forge, /canvas\.remove\(\)/);
+  });
+
+  it("renders the ichor vein and its vigil nail", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const main = read("src/main.js");
+    assert.match(html, /<div class="vein" aria-hidden="true">/);
+    assert.match(html, /class="vein-fill"/);
+    assert.match(html, /class="vein-node"/);
+    assert.match(html, /class="vein-nail"/);
+    assert.match(css, /\.vein\s*\{[\s\S]*?position:\s*fixed/);
+    assert.match(css, /\.vein\s*\{[\s\S]*?--ichor:\s*0/);
+    assert.match(css, /\.vein-fill\s*\{[\s\S]*?calc\(var\(--ichor\)/);
+    // Scroll -> fill is a pure deterministic mapping, not an animation.
+    assert.match(main, /function setupVein/);
+    assert.match(main, /setProperty\("--ichor"/);
+  });
+
+  it("stages a skippable, fail-safe cold-boot awakening", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const main = read("src/main.js");
+    // Overlay + the real Talos shield icon it forges in.
+    assert.match(html, /<div class="awaken" aria-hidden="true">/);
+    assert.match(html, /<img class="awaken-shield"[^>]*src="\.\/design\/talos-icon\.png"/);
+    // Inline head gate skips automation, reduced-motion, and already-seen.
+    assert.match(html, /navigator\.webdriver/);
+    assert.match(html, /talosAwoke/);
+    assert.match(html, /prefers-reduced-motion/);
+    // Failsafe: content can NEVER stay hidden even if the module fails.
+    assert.match(html, /classList\.remove\("awakening"\)/);
+    // Default-hidden; only shown under html.awakening — never traps content.
+    assert.match(html, /\.awaken\s*\{\s*display:\s*none/);
+    assert.match(html, /html\.awakening\s+\.awaken\s*\{\s*display:\s*grid/);
+    assert.match(css, /\.awaken\s*\{[\s\S]*?position:\s*fixed/);
+    assert.match(css, /\.awaken\s*\{[\s\S]*?z-index:\s*9999/);
+    // Plays, sets the once-per-session flag, and is skippable.
+    assert.match(main, /function setupAwakening/);
+    assert.match(main, /sessionStorage\.setItem\("talosAwoke"/);
+    assert.match(main, /"click",\s*"keydown",\s*"wheel",\s*"touchstart"/);
+  });
+
+  it("renders a restrained guardian parallax accent and a classical key frieze", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const main = read("src/main.js");
+    // One fully-composed guardian accent in the hero (not an edge-cut watermark).
+    assert.match(html, /<div class="guardian-parallax"[^>]*>\s*<img[^>]*talos-icon\.png/);
+    // The half-cut boundary watermark and the footer emblem were removed.
+    assert.doesNotMatch(html, /class="guardian-watermark"|class="footer-guardian"/);
+    // Screen blend drops the dark tile; stays faint; drifts on scroll.
+    assert.match(css, /\.guardian-parallax\s*\{[\s\S]*?mix-blend-mode:\s*screen/);
+    assert.match(css, /\.guardian-parallax\s*\{[\s\S]*?opacity:\s*0\.[01][0-9]/);
+    assert.match(css, /\.guardian-parallax\s*\{[\s\S]*?var\(--par/);
+    assert.match(main, /function setupParallax/);
+    // Classical key frieze still closes the footer.
+    assert.match(css, /\.site-footer::before\s*\{[\s\S]*?data:image\/svg\+xml/);
+  });
+
+  it("uses a choreographed staggered reveal with a cursor sheen", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const js = read("src/main.js");
-    const storySections = Array.from(html.matchAll(/<section\b[^>]*class="[^"]*\bstory-section\b[^"]*"/g));
-
-    assert.equal(storySections.length, 6);
-    assert.match(css, /\.story-section\b/);
-    assert.match(css, /--story-top:\s*72px/);
-    assert.match(css, /\.story-section\s*\{[\s\S]*?position:\s*sticky/);
-    assert.match(css, /\.story-section\s*\{[\s\S]*?top:\s*var\(--story-top\)/);
-    assert.match(css, /min-height:\s*calc\(100svh\s*-\s*var\(--story-top\)\)/);
-    assert.match(css, /opacity:\s*var\(--story-opacity,\s*1\)/);
-    assert.match(css, /transform:\s*translateY\(var\(--story-shift,\s*0px\)\)\s*scale\(var\(--story-scale,\s*1\)\)/);
-    assert.match(js, /function\s+smootherStep/);
-    assert.match(js, /style\.setProperty\("--story-opacity"/);
-    assert.match(js, /scrollToStorySection/);
-    assert.doesNotMatch(js, /addEventListener\(["'](?:wheel|touchmove)["']/);
-    assert.doesNotMatch(css, /scroll-snap-type:\s*y\s+mandatory/);
-  });
-
-  it("keeps section navigation state synchronized by section id", () => {
-    const html = read("index.html");
-    const js = read("src/main.js");
-
-    for (const sectionId of ["overview", "execution", "turn-ui", "local-boundaries", "good-fits", "docs"]) {
-      assert.match(html, new RegExp(`<section[^>]+id="${escapeRegExp(sectionId)}"[^>]+story-section`));
-      assert.match(html, new RegExp(`<a[^>]+href="#${escapeRegExp(sectionId)}"[^>]+data-section-nav`));
-    }
-
-    assert.match(js, /setActiveSection/);
-    assert.match(js, /aria-current/);
-    assert.match(js, /data-section-nav/);
-    assert.match(js, /IntersectionObserver/);
+    assert.equal((html.match(/data-reveal-stagger/g) ?? []).length, 4);
+    assert.match(js, /function setupStagger/);
+    assert.match(js, /function setupPointerSheen/);
+    assert.match(js, /--reveal-delay/);
+    assert.match(js, /has-sheen/);
+    assert.match(js, /pointer:\s*coarse/); // sheen skipped on touch
+    assert.match(css, /\[data-reveal-stagger\]\s*>\s*\*\s*\{[\s\S]*?transition-delay:\s*var\(--reveal-delay/);
+    assert.match(css, /\.sheen\s*\{[\s\S]*?pointer-events:\s*none/);
   });
 
   it("uses semantic lane glyphs that match SemanticGlyphSet.java safe Unicode", () => {
@@ -445,12 +519,14 @@ describe("Talos landing page static contract", () => {
     assert.ok(!js.includes("╭"), "main.js uses rounded answer pane glyphs not shipped by SemanticGlyphSet");
     assert.ok(!js.includes("╰"), "main.js uses rounded answer pane glyphs not shipped by SemanticGlyphSet");
     assert.match(js, /approval required/);
-    assert.match(js, /talos.*\[auto\]\s*&gt;|talos.*\[auto\]\s*>/);
+    assert.ok(js.includes("[auto]") && js.includes("&gt;"), "prompt should render talos [auto] > grammar");
   });
 
-  it("keeps vanilla JavaScript behavior for tabs and scroll state", () => {
+  it("keeps vanilla JavaScript behavior for tabs and the live terminal", () => {
     const js = read("src/main.js");
     assert.match(js, /terminalStates/);
+    assert.match(js, /function setupTurnTabs/);
+    assert.match(js, /function setupLiveTerminal/);
     assert.match(js, /ArrowRight/);
     assert.match(js, /ArrowLeft/);
     assert.match(js, /Home/);
@@ -522,6 +598,7 @@ describe("Talos in-site documentation contract", () => {
     assert.match(js, /function escapeHtml/);
     assert.match(js, /docs-table/);
     assert.match(js, /docs-code/);
+    assert.match(js, /docs-copy/);
     assert.match(js, /hashchange/);
     assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);
   });

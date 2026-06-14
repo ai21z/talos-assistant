@@ -2,3 +2,4 @@ node_modules/
 dist/
 playwright-screens/
 *.log
+test-results/
