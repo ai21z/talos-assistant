@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
+last_verified_commit: "1e499b2bcab4b43f8ecbc7d060ded9ac98a26628"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -15,14 +15,17 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Operating loop and close gate"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T811-open-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    ref: "work-cycle-docs/tickets/open/[T811-in-progress-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
     selector: "Wave 5 first ticket"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
+    selector: "Lifecycle Ownership Map"
 min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 3
-  DETERMINISTIC_GENERATED: 0
+  DETERMINISTIC_STATIC: 4
+  DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
 ---
@@ -83,3 +86,24 @@ mechanically.
   `cli.modes.AssistantTurnExecutor` lifecycle ownership characterization.
 - Updated the current-state page so the active ticket is T811 and the next
   move is characterization before extraction.
+
+## [2026-06-13] characterization | T811 lifecycle baseline
+
+- Marked T811 in progress and added the committed lifecycle characterization
+  report for `cli.modes.AssistantTurnExecutor`.
+- Updated wiki links from the open ticket filename to the in-progress ticket
+  filename.
+- Kept runtime refactoring out of this pass; the report is a baseline for the
+  next behavior-preserving extraction.
+
+## [2026-06-14] extraction | T811 turn preparation
+
+- Moved ordered turn-preparation and prompt-audit setup from
+  `AssistantTurnExecutor` into package-private `AssistantTurnPreparation`.
+- Preserved `AssistantTurnExecutor.execute(...)` as the public entrypoint and
+  kept model dispatch, tool-loop outcome, no-tool outcome, retry, and answer
+  shaping in the executor.
+- Regenerated architecture intelligence: `AssistantTurnExecutor` remains the
+  first Wave 5 candidate on this commit with priority index `401`, and
+  `AssistantTurnPreparation` appears as point-in-time evidence with priority
+  index `136`.
