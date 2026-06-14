@@ -1,6 +1,6 @@
 # T812 - AssistantTurnExecutor Model Dispatch Characterization
 
-Status: open
+Status: done
 Severity: high
 Release gate: no - Wave 5 characterization ticket
 Branch: v0.9.0-beta-dev
@@ -94,3 +94,16 @@ index is review-order evidence, not a success metric or extraction mandate.
 - Provider-body/prompt-debug capture exists downstream of executor dispatch in
   `LlmClient`, `OllamaChatClient`, and `CompatChatClient`; T812 and T813 should
   not relocate it.
+
+## Completion State
+
+- T812 characterization was committed at
+  `bde6081bcf57880812ab089a037624473440e0f4`.
+- `AssistantTurnExecutorModelDispatchCharacterizationTest` now pins:
+  - normal non-streaming mutation dispatch provider controls;
+  - zero-temperature sampling for escalated missing-mutation retry dispatch;
+  - streaming and buffered no-tool final-answer shape;
+  - tool-only streaming completion ordering before tool-loop execution.
+- T812 made no production code moves and did not implement `TurnModelDispatcher`.
+- The next Wave 5 ticket should be T813, the first production model-dispatch
+  extraction, guarded by the T812 tests.

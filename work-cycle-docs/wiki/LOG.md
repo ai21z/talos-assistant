@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "b3ed424b4c17567b64842ffa38c14f2ed4103d82"
+last_verified_commit: "bde6081bcf57880812ab089a037624473440e0f4"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -18,8 +18,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T811-done-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
     selector: "Wave 5 first ticket closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T812-open-high] assistant-turn-executor-model-dispatch-characterization.md"
-    selector: "Model dispatch characterization"
+    ref: "work-cycle-docs/tickets/done/[T812-done-high] assistant-turn-executor-model-dispatch-characterization.md"
+    selector: "Model dispatch characterization closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -129,3 +129,12 @@ mechanically.
   tool-only streaming completion ordering are pinned by tests.
 - Recorded that provider-body and prompt-debug capture remain downstream in
   `LlmClient`, `OllamaChatClient`, and `CompatChatClient`.
+
+## [2026-06-14] ledger | Close T812
+
+- Moved T812 to the done ticket ledger after the model-dispatch
+  characterization tests and green gates.
+- Recorded that T812 made no production extraction and left
+  `TurnModelDispatcher` for T813.
+- Set the next Wave 5 move to T813, the first production model-dispatch
+  extraction guarded by the T812 tests.
