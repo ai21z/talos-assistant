@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "6e7a39655eaa1c18dbefad35894b7f530c69d024"
+last_verified_commit: "79403f5f5ccb9bfc7e6f0a6e6cfc3903a1417f23"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -21,8 +21,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T812-done-high] assistant-turn-executor-model-dispatch-characterization.md"
     selector: "Model dispatch characterization closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T813-open-high] assistant-turn-executor-model-dispatch-extraction.md"
-    selector: "Model dispatch extraction plan"
+    ref: "work-cycle-docs/tickets/done/[T813-done-high] assistant-turn-executor-model-dispatch-extraction.md"
+    selector: "Model dispatch extraction closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -151,3 +151,18 @@ mechanically.
   tool-loop/no-tool outcome resolution, answer shaping, and truthfulness repair
   stay in `AssistantTurnExecutor`.
 - Recorded the T812 characterization tests as the guard set for the extraction.
+
+## [2026-06-14] extraction | Close T813 model dispatch
+
+- Extracted model-dispatch mechanics from `AssistantTurnExecutor` into
+  package-private `TurnModelDispatcher`.
+- Preserved executor ownership for retry decisions, trace begin/set/clear,
+  tool-loop/no-tool outcome resolution, answer shaping, and `TurnOutput`
+  assembly.
+- Rebound the four ordinary retry dispatch callbacks through synchronous
+  no-timeout dispatcher calls with retry-message plan resolution kept
+  executor-side.
+- Rebound missing-mutation escalated retry through dispatcher-owned
+  zero-temperature dispatch.
+- Regenerated architecture intelligence: `AssistantTurnExecutor` remains the
+  first Wave 5 candidate on this commit with priority index `384`.

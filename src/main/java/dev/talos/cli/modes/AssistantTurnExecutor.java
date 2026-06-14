@@ -26,7 +26,6 @@ import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
-import dev.talos.runtime.policy.ProviderRequestControlPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
@@ -45,9 +44,7 @@ import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
-import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
-import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,8 +57,6 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
@@ -219,7 +214,7 @@ public final class AssistantTurnExecutor {
             if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
                 LlmClient.StreamResult streamResult =
-                        chatStreamFullWithInitialContextFallback(ctx, messages, currentTurnPlan);
+                        TurnModelDispatcher.dispatchStreaming(ctx, messages, currentTurnPlan);
                 String answer = streamResult.text();
 
                 // Flush the stream filter so any pending non-tool text is emitted
@@ -276,28 +271,11 @@ public final class AssistantTurnExecutor {
                 // Use chatFull() so native tool calls are captured too
                 // (chat() returns only String, losing native tool calls).
                 final List<ChatMessage> llmMessages = messages;
-                CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
-                        () -> chatFull(turnContext, llmMessages, currentTurnPlan));
-                LlmClient.StreamResult streamResult;
-                try {
-                    streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
-                } catch (java.util.concurrent.ExecutionException ex) {
-                    Throwable cause = ex.getCause();
-                    if (!(cause instanceof EngineException.ContextBudgetExceeded budget)) {
-                        throw ex;
-                    }
-                    Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
-                            turnContext,
-                            currentTurnPlan,
-                            AssistantTurnExecutor::chatControlsForTurn);
-                    if (fallback.isEmpty()) {
-                        throw ex;
-                    }
-                    ExactWriteContextFallback.record(currentTurnPlan, budget);
-                    CompletableFuture<LlmClient.StreamResult> fallbackFuture = CompletableFuture.supplyAsync(
-                            () -> chatFullExactWriteContextFallback(turnContext, fallback.get()));
-                    streamResult = fallbackFuture.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
-                }
+                LlmClient.StreamResult streamResult = TurnModelDispatcher.dispatchBufferedWithTimeout(
+                        turnContext,
+                        llmMessages,
+                        currentTurnPlan,
+                        opts.llmTimeoutMs);
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
                     try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
                 }
@@ -708,7 +686,10 @@ public final class AssistantTurnExecutor {
                 safePlan,
                 workspace,
                 ctx,
-                retryMessages -> chatFull(ctx, retryMessages));
+                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                        ctx,
+                        retryMessages,
+                        compatibilityPlanFromMessages(retryMessages, ctx)));
     }
 
     private static ToolCallLoop.LoopResult emptyNoToolLoopResult(
@@ -843,113 +824,6 @@ public final class AssistantTurnExecutor {
                 || lower.contains("css")
                 || lower.contains("javascript")
                 || lower.contains("script");
-    }
-
-    private static LlmClient.StreamResult chatStreamFull(Context ctx, List<ChatMessage> messages) {
-        return chatStreamFull(ctx, messages, compatibilityPlanFromMessages(messages, ctx));
-    }
-
-    private static LlmClient.StreamResult chatStreamFull(
-            Context ctx,
-            List<ChatMessage> messages,
-            CurrentTurnPlan plan
-    ) {
-        return ctx.llm().chatStreamFull(
-                messages,
-                ctx.streamSink(),
-                ctx.nativeToolSpecs(),
-                chatControlsForTurn(ctx, plan));
-    }
-
-    private static LlmClient.StreamResult chatStreamFullWithInitialContextFallback(
-            Context ctx,
-            List<ChatMessage> messages,
-            CurrentTurnPlan plan
-    ) {
-        try {
-            return chatStreamFull(ctx, messages, plan);
-        } catch (EngineException.ContextBudgetExceeded budget) {
-            Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
-                    ctx,
-                    plan,
-                    AssistantTurnExecutor::chatControlsForTurn);
-            if (fallback.isEmpty()) {
-                throw budget;
-            }
-            ExactWriteContextFallback.record(plan, budget);
-            ExactWriteContextFallback.Request request = fallback.get();
-            return ctx.llm().chatStreamFull(
-                    request.messages(),
-                    ctx.streamSink(),
-                    request.toolSpecs(),
-                    request.controls());
-        }
-    }
-
-    private static LlmClient.StreamResult chatFull(Context ctx, List<ChatMessage> messages) {
-        return chatFull(ctx, messages, compatibilityPlanFromMessages(messages, ctx));
-    }
-
-    private static LlmClient.StreamResult chatFull(
-            Context ctx,
-            List<ChatMessage> messages,
-            CurrentTurnPlan plan
-    ) {
-        return chatFull(ctx, messages, plan, ctx.nativeToolSpecs());
-    }
-
-    private static LlmClient.StreamResult chatFull(
-            Context ctx,
-            List<ChatMessage> messages,
-            CurrentTurnPlan plan,
-            List<ToolSpec> requestToolSpecs
-    ) {
-        return ctx.llm().chatFull(
-                messages,
-                requestToolSpecs,
-                chatControlsForTurn(ctx, plan, requestToolSpecsForControls(ctx, requestToolSpecs)));
-    }
-
-    private static ChatRequestControls chatControlsForTurn(Context ctx, CurrentTurnPlan plan) {
-        return chatControlsForTurn(
-                ctx,
-                plan,
-                ctx == null ? List.of() : ctx.nativeToolSpecs());
-    }
-
-    private static ChatRequestControls chatControlsForTurn(
-            Context ctx,
-            CurrentTurnPlan plan,
-            List<ToolSpec> requestToolSpecs
-    ) {
-        boolean supportsRequired = ctx != null
-                && ctx.llm() != null
-                && ctx.llm().supportsRequiredToolChoice();
-        boolean supportsNamed = ctx != null
-                && ctx.llm() != null
-                && ctx.llm().supportsNamedToolChoice();
-        return ProviderRequestControlPolicy.forTurn(
-                plan,
-                requestToolSpecs == null ? List.of() : requestToolSpecs,
-                supportsRequired,
-                supportsNamed);
-    }
-
-    private static LlmClient.StreamResult chatFullExactWriteContextFallback(
-            Context ctx,
-            ExactWriteContextFallback.Request fallback
-    ) {
-        return ctx.llm().chatFull(
-                fallback.messages(),
-                fallback.toolSpecs(),
-                fallback.controls());
-    }
-
-    private static List<ToolSpec> requestToolSpecsForControls(Context ctx, List<ToolSpec> requestToolSpecs) {
-        if (requestToolSpecs != null) return requestToolSpecs;
-        if (ctx != null && ctx.nativeToolSpecs() != null) return ctx.nativeToolSpecs();
-        if (ctx != null && ctx.llm() != null) return ctx.llm().getToolSpecs();
-        return List.of();
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
@@ -2287,7 +2161,10 @@ public final class AssistantTurnExecutor {
                 answer,
                 toolsInvoked,
                 messages,
-                retryMessages -> chatFull(ctx, retryMessages));
+                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                        ctx,
+                        retryMessages,
+                        compatibilityPlanFromMessages(retryMessages, ctx)));
     }
 
     // ── Claim-vs-action truth layer ──────────────────────────────────────
@@ -2449,25 +2326,11 @@ public final class AssistantTurnExecutor {
                 workspace,
                 ctx,
                 (retryMessages, retryPlan, retryToolSpecs) ->
-                        chatFullEscalatedRetry(ctx, retryMessages, retryPlan, retryToolSpecs));
-    }
-
-    /**
-     * T743: retries escalate instead of re-rolling - the obligation constraint
-     * envelope (tool choice) stays, and temperature is pinned to zero so an
-     * identical re-ask cannot diverge by sampling alone.
-     */
-    private static LlmClient.StreamResult chatFullEscalatedRetry(
-            Context ctx,
-            List<ChatMessage> messages,
-            CurrentTurnPlan plan,
-            List<ToolSpec> requestToolSpecs
-    ) {
-        ChatRequestControls controls = chatControlsForTurn(
-                ctx, plan, requestToolSpecsForControls(ctx, requestToolSpecs));
-        SamplingControls escalated = new SamplingControls(0.0, null, null, null)
-                .mergedWithFallback(controls.sampling());
-        return ctx.llm().chatFull(messages, requestToolSpecs, controls.withSampling(escalated));
+                        TurnModelDispatcher.dispatchEscalatedRetry(
+                                ctx,
+                                retryMessages,
+                                retryPlan,
+                                retryToolSpecs));
     }
 
     static ChatMessage compactStaticVerificationRepairInstructionForRetry(ChatMessage message) {
@@ -2541,7 +2404,10 @@ public final class AssistantTurnExecutor {
                 loopResult,
                 workspace,
                 ctx,
-                retryMessages -> chatFull(ctx, retryMessages));
+                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                        ctx,
+                        retryMessages,
+                        compatibilityPlanFromMessages(retryMessages, ctx)));
     }
 
     static String overrideSelectorMismatchAnalysisIfNeeded(
@@ -3002,7 +2868,10 @@ public final class AssistantTurnExecutor {
                 safePlan,
                 messages,
                 ctx,
-                retryMessages -> chatFull(ctx, retryMessages));
+                retryMessages -> TurnModelDispatcher.dispatchBuffered(
+                        ctx,
+                        retryMessages,
+                        compatibilityPlanFromMessages(retryMessages, ctx)));
     }
 }
 
