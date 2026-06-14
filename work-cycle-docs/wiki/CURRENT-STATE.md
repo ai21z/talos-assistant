@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "1e499b2bcab4b43f8ecbc7d060ded9ac98a26628"
+last_verified_commit: "0ae6f3084fc3274a7682c73a454b35c952d86639"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -24,8 +24,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T811-in-progress-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
-    selector: "Required Behavior"
+    ref: "work-cycle-docs/tickets/done/[T811-done-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    selector: "Completion State"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -47,21 +47,22 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `1e499b2bcab4b43f8ecbc7d060ded9ac98a26628`
+- Commit: `0ae6f3084fc3274a7682c73a454b35c952d86639`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: `T811-in-progress`
-- Active wave context: first Wave 5 lifecycle-ownership ticket with
-  turn-preparation extraction implemented.
+- Active tickets: none between T811 closure and T812 creation.
+- Active wave context: first Wave 5 lifecycle-ownership ticket completed the
+  turn-preparation extraction; the next ticket will characterize model
+  dispatch before any extraction.
 - Known caveats: T807 generated reports are ignored build evidence; Qodana
   remains read-only input for architecture reporting; wiki evidence-liveness
-  lint is limited to generated JSON report claims; T811 has implemented the
-  first behavior-preserving turn-preparation extraction but remains in progress
-  until the evidence reconciliation is committed and reviewed.
-- Next move: commit only T811 code/docs after green gates, then plan T812 as
-  the model-dispatch boundary rather than package-cycle cleanup.
+  lint is limited to generated JSON report claims; T811 completed the first
+  behavior-preserving turn-preparation extraction but did not complete Wave 5
+  and did not extract model dispatch.
+- Next move: create T812 as a characterization-only model-dispatch boundary
+  ticket rather than starting extraction or package-cycle cleanup.
 
 ```talos-wiki-claims
 {
@@ -133,7 +134,7 @@ T810 is done. Its purpose was to make the wiki evidence-liveness loop
 load-bearing through a close/candidate gate, evidence registry, and explicit
 Ingest/Query/Lint/Log/Reject operating rules.
 
-T811 is in progress. Its purpose is to begin Wave 5 at
+T811 is done. Its purpose was to begin Wave 5 at
 `cli.modes.AssistantTurnExecutor` through characterization, lifecycle ownership
 mapping, and the first behavior-preserving turn-preparation extraction.
 
@@ -146,10 +147,11 @@ current, wiki claim liveness is gated through `wikiEvidenceCloseGate`, and the
 normal local `check` gate does not depend on stale generated architecture report
 output.
 
-The first Wave 5 ticket started with `cli.modes.AssistantTurnExecutor`.
+The first Wave 5 ticket started with `cli.modes.AssistantTurnExecutor` and
+completed the turn-preparation extraction into `AssistantTurnPreparation`.
 The invariant remains lifecycle ownership first, class movement second. The next
-refactor candidate should be the model-dispatch boundary, not package-cycle
-cleanup.
+refactor candidate should be the model-dispatch boundary, and it should be
+characterized before any production extraction.
 
 ## Operating Boundaries
 

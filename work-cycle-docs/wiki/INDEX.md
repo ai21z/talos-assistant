@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "1e499b2bcab4b43f8ecbc7d060ded9ac98a26628"
+last_verified_commit: "0ae6f3084fc3274a7682c73a454b35c952d86639"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -21,7 +21,7 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Living wiki operating loop and close gate"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T811-in-progress-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    ref: "work-cycle-docs/tickets/done/[T811-done-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
     selector: "First Wave 5 lifecycle ownership ticket and turn-preparation extraction"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
@@ -65,7 +65,8 @@ or generated reports.
 
 ## Active Tickets
 
-- [T811 AssistantTurnExecutor lifecycle ownership characterization](../tickets/open/%5BT811-in-progress-high%5D%20assistant-turn-executor-lifecycle-ownership-characterization.md)
+- No active Wave 5 ticket is open between the T811 closeout and the T812
+  characterization ticket creation.
 
 ## Update Rule
 

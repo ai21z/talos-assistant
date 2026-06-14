@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "1e499b2bcab4b43f8ecbc7d060ded9ac98a26628"
+last_verified_commit: "0ae6f3084fc3274a7682c73a454b35c952d86639"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -15,8 +15,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
     selector: "Operating loop and close gate"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T811-in-progress-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
-    selector: "Wave 5 first ticket"
+    ref: "work-cycle-docs/tickets/done/[T811-done-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    selector: "Wave 5 first ticket closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -107,3 +107,12 @@ mechanically.
   first Wave 5 candidate on this commit with priority index `401`, and
   `AssistantTurnPreparation` appears as point-in-time evidence with priority
   index `136`.
+
+## [2026-06-14] ledger | Close T811
+
+- Moved T811 to the done ticket ledger after the turn-preparation extraction
+  commit and green characterization evidence.
+- Recorded that T811 did not complete Wave 5 and did not extract model
+  dispatch.
+- Set the next Wave 5 move to a separate characterization-only T812 model
+  dispatch boundary ticket.
