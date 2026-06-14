@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "79403f5f5ccb9bfc7e6f0a6e6cfc3903a1417f23"
+last_verified_commit: "c8e53006556045f4af18c2a407741f36da093305"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -23,6 +23,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T813-done-high] assistant-turn-executor-model-dispatch-extraction.md"
     selector: "Model dispatch extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T814-done-high] assistant-turn-executor-tool-loop-outcome-characterization.md"
+    selector: "Tool-loop outcome characterization closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -30,7 +33,7 @@ min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 6
+  DETERMINISTIC_STATIC: 7
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -166,3 +169,21 @@ mechanically.
   zero-temperature dispatch.
 - Regenerated architecture intelligence: `AssistantTurnExecutor` remains the
   first Wave 5 candidate on this commit with priority index `384`.
+
+## [2026-06-14] characterization | Open T814 tool-loop outcome
+
+- Added T814 as a characterization-only Wave 5 ticket for the
+  `AssistantTurnExecutor` post-tool-loop outcome boundary.
+- Pinned the proposed T815 owner as package-private
+  `AssistantToolLoopOutcomeResolver` while keeping production extraction out of
+  T814.
+- Recorded that `ToolCallLoop.LoopResult` and `ToolOutcome` compatibility
+  surfaces remain outside this extraction boundary.
+
+## [2026-06-15] ledger | Close T814 tool-loop outcome
+
+- Moved T814 to the done ticket ledger after the tool-loop outcome
+  characterization tests and green gates.
+- Recorded that T814 made no production source changes.
+- Set the next Wave 5 move to T815, the package-private
+  `AssistantToolLoopOutcomeResolver` extraction guarded by T814 coverage.

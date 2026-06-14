@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "79403f5f5ccb9bfc7e6f0a6e6cfc3903a1417f23"
+last_verified_commit: "c8e53006556045f4af18c2a407741f36da093305"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -32,9 +32,15 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T813-done-high] assistant-turn-executor-model-dispatch-extraction.md"
     selector: "Completion State"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T814-done-high] assistant-turn-executor-tool-loop-outcome-characterization.md"
+    selector: "Completion State"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t814-assistant-turn-executor-tool-loop-outcome-characterization.md"
+    selector: "T815 Candidate Owner"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
     selector: "/schema, /branch, /commit, /talosVersion, /reportPaths, /jsonPaths"
@@ -42,7 +48,7 @@ min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 6
-  DETERMINISTIC_STATIC: 7
+  DETERMINISTIC_STATIC: 9
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
   GATED: 0
@@ -53,12 +59,13 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `79403f5f5ccb9bfc7e6f0a6e6cfc3903a1417f23`
+- Commit: `c8e53006556045f4af18c2a407741f36da093305`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none between T813 closure and T814 planning.
+- Active tickets: none. The next planned Wave 5 ticket is T815 tool-loop
+  outcome resolver extraction.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -67,9 +74,10 @@ confidence_histogram:
   lint is limited to generated JSON report claims; T811 completed the first
   behavior-preserving turn-preparation extraction but did not complete Wave 5
   and T813 completed model-dispatch extraction while leaving outcome ownership
-  in `AssistantTurnExecutor`.
-- Next move: plan T814 as the tool-loop outcome boundary, still
-  characterization-first and ownership-first.
+  in `AssistantTurnExecutor`; T814 completed post-tool-loop outcome
+  characterization without production extraction.
+- Next move: open T815 and extract the post-tool-loop outcome resolver only
+  within the move/stay boundary pinned by T814.
 
 ```talos-wiki-claims
 {
@@ -155,6 +163,10 @@ package-private `TurnModelDispatcher` without moving retry decisions, trace
 begin/set/clear, tool-loop/no-tool outcome resolution, answer shaping, or
 truthfulness repair out of `AssistantTurnExecutor`.
 
+T814 is done. Its purpose was to characterize post-tool-loop outcome behavior
+around `resolveToolLoopAnswer(...)` before any extraction into a future
+`AssistantToolLoopOutcomeResolver`.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -166,10 +178,11 @@ output.
 
 The first Wave 5 ticket started with `cli.modes.AssistantTurnExecutor` and
 completed the turn-preparation extraction into `AssistantTurnPreparation`.
-The invariant remains lifecycle ownership first, class movement second. The next
-refactor candidate was the model-dispatch boundary, now characterized by T812
-and extracted by T813. The next Wave 5 move should be T814, focused on the
-tool-loop outcome boundary rather than package-cycle cleanup.
+The invariant remains lifecycle ownership first, class movement second. The
+model-dispatch boundary was characterized by T812 and extracted by T813. T814
+completed the tool-loop outcome characterization. The next Wave 5 move is the
+T815 post-tool-loop outcome resolver extraction rather than package-cycle
+cleanup.
 
 ## Operating Boundaries
 
