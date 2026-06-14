@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "06f47bae3bcb6699b572d82f3c4061be773cbd47"
+last_verified_commit: "f3ae8818f277d1bbf7e7f20b2a58ec49013c54f3"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -27,8 +27,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T814-done-high] assistant-turn-executor-tool-loop-outcome-characterization.md"
     selector: "Tool-loop outcome characterization closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T815-open-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
-    selector: "Tool-loop outcome resolver extraction"
+    ref: "work-cycle-docs/tickets/done/[T815-done-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
+    selector: "Tool-loop outcome resolver extraction closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -200,3 +200,14 @@ mechanically.
 - Kept no-tool outcome handling, trace begin/set/clear, branch selection,
   `ToolCallLoop.LoopResult`, `ToolOutcome`, and `TurnOutput` assembly in
   `AssistantTurnExecutor`.
+
+## [2026-06-15] ledger | Close T815 tool-loop outcome
+
+- Moved T815 to the done ticket ledger after green focused, broad, `check`,
+  and wiki evidence gates.
+- Recorded that T815 extracted `AssistantToolLoopOutcomeResolver` while
+  keeping no-tool outcome handling, trace lifecycle, branch selection,
+  `ToolCallLoop.LoopResult`, `ToolOutcome`, and `TurnOutput` assembly in
+  `AssistantTurnExecutor`.
+- Set the next Wave 5 move to T816, a characterization-only no-tool outcome
+  boundary ticket.
