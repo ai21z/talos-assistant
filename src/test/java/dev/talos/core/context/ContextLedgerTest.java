@@ -1,6 +1,5 @@
 package dev.talos.core.context;
 
-import dev.talos.tools.ToolContentMetadata;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -12,14 +11,14 @@ class ContextLedgerTest {
         ContextItem item = ContextItem.fromText(
                 ContextItemSource.TOOL_RESULT,
                 ExecutionBoundary.LOCAL_WORKSPACE,
-                ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
                 "docs/private-tax.pdf",
                 "Patient Name: Eleni Nikolaou\nTALOS_FAKE_SECRET=sk-test-DO-NOT-LEAK",
                 128);
 
         assertEquals(ContextItemSource.TOOL_RESULT, item.source());
         assertEquals(ExecutionBoundary.LOCAL_WORKSPACE, item.executionBoundary());
-        assertEquals(ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+        assertEquals(ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
                 item.privacyClass());
         assertEquals("docs/private-tax.pdf", item.pathHint());
         assertTrue(item.textHash().startsWith("sha256:"), item.textHash());
@@ -37,7 +36,7 @@ class ContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.TOOL_RESULT,
                         ExecutionBoundary.LOCAL_WORKSPACE,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "README.md",
                         "safe project text",
                         10),
@@ -46,7 +45,7 @@ class ContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.RAG_SNIPPET,
                         ExecutionBoundary.RAG_INDEX,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "src/App.java#0",
                         "class App {}",
                         8),
@@ -72,7 +71,7 @@ class ContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.SESSION_MEMORY,
                         ExecutionBoundary.SESSION_MEMORY,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "",
                         "last verified turn summary",
                         12),
@@ -81,7 +80,7 @@ class ContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.COMMAND_OUTPUT,
                         ExecutionBoundary.COMMAND_PROFILE_OUTPUT,
-                        ToolContentMetadata.ContentPrivacyClass.COMMAND_OUTPUT,
+                        ContextPrivacyClass.COMMAND_OUTPUT,
                         "",
                         "BUILD SUCCESSFUL",
                         9),
@@ -90,7 +89,7 @@ class ContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.AUDIT_ARTIFACT,
                         ExecutionBoundary.AUDIT_WORKSPACE,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "local/manual-testing/audit/FINDINGS.md",
                         "finding summary",
                         7),
@@ -99,7 +98,7 @@ class ContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.EXTERNAL_REQUEST,
                         ExecutionBoundary.EXTERNAL_OR_CLOUD,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "",
                         "use a cloud agent",
                         5),

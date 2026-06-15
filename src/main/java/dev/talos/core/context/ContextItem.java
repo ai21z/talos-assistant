@@ -1,7 +1,5 @@
 package dev.talos.core.context;
 
-import dev.talos.tools.ToolContentMetadata;
-import dev.talos.tools.ToolResult;
 import dev.talos.safety.ProtectedPathTokens;
 
 import java.nio.charset.StandardCharsets;
@@ -13,7 +11,7 @@ import java.util.Objects;
 public record ContextItem(
         ContextItemSource source,
         ExecutionBoundary executionBoundary,
-        ToolContentMetadata.ContentPrivacyClass privacyClass,
+        ContextPrivacyClass privacyClass,
         String pathHint,
         String textHash,
         int chars,
@@ -24,7 +22,7 @@ public record ContextItem(
     public ContextItem {
         source = source == null ? ContextItemSource.TOOL_RESULT : source;
         executionBoundary = executionBoundary == null ? ExecutionBoundary.LOCAL_WORKSPACE : executionBoundary;
-        privacyClass = privacyClass == null ? ToolContentMetadata.ContentPrivacyClass.NORMAL : privacyClass;
+        privacyClass = privacyClass == null ? ContextPrivacyClass.NORMAL : privacyClass;
         pathHint = pathHint(pathHint);
         textHash = textHash == null || textHash.isBlank() ? hash("") : textHash;
         chars = Math.max(0, chars);
@@ -36,7 +34,7 @@ public record ContextItem(
     public static ContextItem fromText(
             ContextItemSource source,
             ExecutionBoundary boundary,
-            ToolContentMetadata.ContentPrivacyClass privacyClass,
+            ContextPrivacyClass privacyClass,
             String path,
             String text,
             int estimatedTokens) {
@@ -51,54 +49,6 @@ public record ContextItem(
                 safeText.getBytes(StandardCharsets.UTF_8).length,
                 lineCount(safeText),
                 estimatedTokens);
-    }
-
-    public static ContextItem fromToolResult(String toolName, String path, ToolResult result) {
-        ToolContentMetadata metadata = result == null ? ToolContentMetadata.normal() : result.contentMetadata();
-        ToolContentMetadata.ContentPrivacyClass privacy = metadata == null
-                ? ToolContentMetadata.ContentPrivacyClass.NORMAL
-                : metadata.privacyClass();
-        String output = result == null ? "" : result.output();
-        // T752: explicit null-flow - the old correlated ternary
-        // (!blank(metadata == null ? "" : metadata.sourcePath()) ? metadata.sourcePath() : path)
-        // was null-safe only via the blank("") correlation, which both static
-        // analysis and human readers mis-read as an NPE.
-        String metadataSourcePath = metadata == null ? "" : metadata.sourcePath();
-        return fromText(
-                sourceForTool(toolName, metadata),
-                boundaryForTool(toolName, metadata),
-                privacy,
-                blank(metadataSourcePath) ? path : metadataSourcePath,
-                output,
-                0);
-    }
-
-    private static ContextItemSource sourceForTool(String toolName, ToolContentMetadata metadata) {
-        if (metadata != null) {
-            if (metadata.source() == ToolContentMetadata.ContentSource.RAG_RETRIEVE
-                    || metadata.source() == ToolContentMetadata.ContentSource.RAG_INDEX) {
-                return ContextItemSource.RAG_SNIPPET;
-            }
-            if (metadata.source() == ToolContentMetadata.ContentSource.COMMAND) {
-                return ContextItemSource.COMMAND_OUTPUT;
-            }
-        }
-        return "talos.run_command".equals(toolName) ? ContextItemSource.COMMAND_OUTPUT : ContextItemSource.TOOL_RESULT;
-    }
-
-    private static ExecutionBoundary boundaryForTool(String toolName, ToolContentMetadata metadata) {
-        if (metadata != null) {
-            if (metadata.source() == ToolContentMetadata.ContentSource.RAG_RETRIEVE
-                    || metadata.source() == ToolContentMetadata.ContentSource.RAG_INDEX) {
-                return ExecutionBoundary.RAG_INDEX;
-            }
-            if (metadata.source() == ToolContentMetadata.ContentSource.COMMAND) {
-                return ExecutionBoundary.COMMAND_PROFILE_OUTPUT;
-            }
-        }
-        return "talos.run_command".equals(toolName)
-                ? ExecutionBoundary.COMMAND_PROFILE_OUTPUT
-                : ExecutionBoundary.LOCAL_WORKSPACE;
     }
 
     private static int lineCount(String text) {
@@ -126,7 +76,4 @@ public record ContextItem(
         return normalized;
     }
 
-    private static boolean blank(String value) {
-        return value == null || value.isBlank();
-    }
 }

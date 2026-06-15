@@ -4,8 +4,8 @@ import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextItemSource;
 import dev.talos.core.context.ContextLedgerCapture;
+import dev.talos.core.context.ContextPrivacyClass;
 import dev.talos.core.context.ExecutionBoundary;
-import dev.talos.tools.ToolContentMetadata;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +36,7 @@ class LocalTurnTraceContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.TOOL_RESULT,
                         ExecutionBoundary.LOCAL_WORKSPACE,
-                        ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                        ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
                         "report.pdf",
                         "Patient Name: Eleni Nikolaou",
                         32),
@@ -45,7 +45,7 @@ class LocalTurnTraceContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.RAG_SNIPPET,
                         ExecutionBoundary.RAG_INDEX,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "src/App.java#0",
                         "class App {}",
                         9),
@@ -54,7 +54,7 @@ class LocalTurnTraceContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.SESSION_MEMORY,
                         ExecutionBoundary.SESSION_MEMORY,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "",
                         "previous verified change summary",
                         11),
@@ -63,7 +63,7 @@ class LocalTurnTraceContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.COMMAND_OUTPUT,
                         ExecutionBoundary.COMMAND_PROFILE_OUTPUT,
-                        ToolContentMetadata.ContentPrivacyClass.COMMAND_OUTPUT,
+                        ContextPrivacyClass.COMMAND_OUTPUT,
                         "",
                         "BUILD SUCCESSFUL",
                         6),
@@ -72,7 +72,7 @@ class LocalTurnTraceContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.AUDIT_ARTIFACT,
                         ExecutionBoundary.AUDIT_WORKSPACE,
-                        ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                        ContextPrivacyClass.NORMAL,
                         "local/manual-testing/audit/FINDINGS.md",
                         "audit finding summary",
                         7),

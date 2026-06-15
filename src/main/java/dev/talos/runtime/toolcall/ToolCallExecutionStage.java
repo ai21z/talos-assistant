@@ -3,7 +3,6 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.core.context.ContextDecision;
-import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.safety.SafeLogFormatter;
@@ -557,7 +556,8 @@ public final class ToolCallExecutionStage {
             ContextDecision decision
     ) {
         if (candidateResult == null) return;
-        ContextLedgerCapture.record(ContextItem.fromToolResult(toolName, pathHint, candidateResult), decision);
+        ContextLedgerCapture.record(ToolResultContextItemAdapter.fromToolResult(toolName, pathHint, candidateResult),
+                decision);
     }
 
     private static Set<String> staleRereadRequiredPaths(LoopState state) {

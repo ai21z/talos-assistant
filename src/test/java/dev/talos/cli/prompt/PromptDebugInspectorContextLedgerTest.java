@@ -4,10 +4,10 @@ import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextItemSource;
 import dev.talos.core.context.ContextLedgerCapture;
+import dev.talos.core.context.ContextPrivacyClass;
 import dev.talos.core.context.ExecutionBoundary;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugSnapshot;
-import dev.talos.tools.ToolContentMetadata;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +31,7 @@ class PromptDebugInspectorContextLedgerTest {
                 ContextItem.fromText(
                         ContextItemSource.TOOL_RESULT,
                         ExecutionBoundary.LOCAL_WORKSPACE,
-                        ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                        ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
                         "docs/private-report.pdf",
                         "Patient Name: Eleni Nikolaou",
                         64),

@@ -24,12 +24,12 @@ import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextItemSource;
 import dev.talos.core.context.ContextLedgerCapture;
+import dev.talos.core.context.ContextPrivacyClass;
 import dev.talos.core.context.ExecutionBoundary;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
-import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolProtocolText;
 import dev.talos.spi.types.ChunkMetadata;
 import org.slf4j.Logger;
@@ -160,7 +160,7 @@ public class RagService {
                     ContextItem.fromText(
                             ContextItemSource.RAG_SNIPPET,
                             ExecutionBoundary.RAG_INDEX,
-                            ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                            ContextPrivacyClass.NORMAL,
                             "",
                             "",
                             0),
@@ -239,7 +239,7 @@ public class RagService {
                             ContextItem.fromText(
                                     ContextItemSource.SYMBOL_HIT,
                                     ExecutionBoundary.RAG_INDEX,
-                                    ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                                    ContextPrivacyClass.NORMAL,
                                     hit.path(),
                                     hit.signature(),
                                     0),
@@ -262,7 +262,7 @@ public class RagService {
                         ContextItem.fromText(
                                 ContextItemSource.RAG_SNIPPET,
                                 ExecutionBoundary.RAG_INDEX,
-                                ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                                ContextPrivacyClass.NORMAL,
                                 c.path(),
                                 sanitized,
                                 0),
