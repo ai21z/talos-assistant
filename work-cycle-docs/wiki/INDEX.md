@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "884893d5dd044a44f856855c4bd3758fe8a90ac7"
+last_verified_commit: "6014c24af4d01825d5b50fbc1dbe3b4b4ffe0c47"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -39,8 +39,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T816-done-high] assistant-turn-executor-no-tool-outcome-characterization.md"
     selector: "No-tool outcome characterization closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T817-open-high] assistant-turn-executor-no-tool-outcome-extraction.md"
-    selector: "No-tool outcome resolver extraction"
+    ref: "work-cycle-docs/tickets/done/[T817-done-high] assistant-turn-executor-no-tool-outcome-extraction.md"
+    selector: "No-tool outcome resolver extraction closeout"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -83,8 +83,10 @@ or generated reports.
 
 ## Active Tickets
 
-- `T817` - no-tool outcome resolver extraction into package-private
-  `AssistantNoToolOutcomeResolver`.
+- None.
+
+Next planned ticket: adapter thinning for remaining
+`AssistantTurnExecutor.inject*` compatibility delegates.
 
 ## Update Rule
 

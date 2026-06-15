@@ -1,6 +1,6 @@
 # T817 AssistantTurnExecutor No-Tool Outcome Extraction
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime behavior preservation
@@ -92,12 +92,28 @@ Existing guards:
 - `UnsupportedFinalAnswerTruthfulnessTest`;
 - `AssistantTurnExecutorTest`.
 
-## Current Implementation State
+## Completion State
 
-The initial T817 extraction has been implemented locally and remains open for
-review/closeout. Closeout should verify focused guards, `dev.talos.cli.modes.*`,
-full `check`, and `wikiEvidenceCloseGate --rerun-tasks` before moving this
-ticket to `done`.
+T817 is done. It extracted no-tool outcome orchestration into package-private
+`AssistantNoToolOutcomeResolver` while preserving behavior.
+
+`AssistantTurnExecutor.resolveNoToolAnswer(...)` is now a thin adapter that
+binds executor-owned callbacks. The extraction preserved:
+
+- public `AssistantTurnExecutor.execute(...)`;
+- streaming/buffered branch selection;
+- trace begin/set/clear ownership in `AssistantTurnExecutor`;
+- the tool-loop outcome path;
+- `shapeAnswerWithoutTools(...)` and `shapeAnswerAfterToolLoop(...)`;
+- `ToolLoopAnswerResolution`;
+- `TurnOutput` assembly in `AssistantTurnExecutor`.
+
+Closeout verification recorded green focused guards, `dev.talos.cli.modes.*`,
+full `check`, and `wikiEvidenceCloseGate --rerun-tasks`.
+
+The next Wave 5 move is adapter thinning for the remaining
+`AssistantTurnExecutor.inject*` compatibility delegates before structural
+SCC/cycle work.
 
 ## Verification
 
