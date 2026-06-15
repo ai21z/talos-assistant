@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "668adb467cf83ed5bc77ad23bba34ed227ae7a89"
+last_verified_commit: "e9ae1a41ff591f0b165dd5e83fdb352a1fb74f75"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -59,6 +59,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md"
     selector: "ToolCallLoop orchestration characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T824-open-high] tool-call-loop-engine-extraction.md"
+    selector: "ToolCallLoopEngine extraction"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -68,8 +71,8 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 9
-  DETERMINISTIC_STATIC: 14
+  INFERRED_REVIEW: 10
+  DETERMINISTIC_STATIC: 15
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -107,10 +110,10 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T824 `tool-call-loop-engine-extraction`
 
-Next planned move: open T824 as behavior-preserving `ToolCallLoopEngine`
-extraction.
+Next planned move: review and close T824 after green focused, architecture,
+`check`, and wiki evidence gates.
 
 ## Update Rule
 

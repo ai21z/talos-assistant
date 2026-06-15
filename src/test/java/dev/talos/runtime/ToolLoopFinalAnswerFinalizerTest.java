@@ -158,14 +158,18 @@ class ToolLoopFinalAnswerFinalizerTest {
     }
 
     @Test
-    void toolCallLoopDelegatesFinalAnswerFinalizationToOwner() throws Exception {
-        String source = Files.readString(Path.of("src/main/java/dev/talos/runtime/ToolCallLoop.java"));
+    void toolCallLoopEngineDelegatesFinalAnswerFinalizationToOwner() throws Exception {
+        String facadeSource = Files.readString(Path.of("src/main/java/dev/talos/runtime/ToolCallLoop.java"));
+        String engineSource = Files.readString(Path.of("src/main/java/dev/talos/runtime/ToolCallLoopEngine.java"));
 
-        assertTrue(source.contains("ToolLoopFinalAnswerFinalizer.withIterationLimitNotice"), source);
-        assertTrue(source.contains("ToolLoopFinalAnswerFinalizer.finalizeAnswer"), source);
-        assertFalse(source.contains("private static String finalizeAnswer"), source);
-        assertFalse(source.contains("ProtectedContentPolicy.sanitizeText"), source);
-        assertFalse(source.contains("Sanitize.stripSuspiciousHtml"), source);
+        assertTrue(engineSource.contains("ToolLoopFinalAnswerFinalizer.withIterationLimitNotice"), engineSource);
+        assertTrue(engineSource.contains("ToolLoopFinalAnswerFinalizer.finalizeAnswer"), engineSource);
+        assertFalse(facadeSource.contains("private static String finalizeAnswer"), facadeSource);
+        assertFalse(engineSource.contains("private static String finalizeAnswer"), engineSource);
+        assertFalse(facadeSource.contains("ProtectedContentPolicy.sanitizeText"), facadeSource);
+        assertFalse(engineSource.contains("ProtectedContentPolicy.sanitizeText"), engineSource);
+        assertFalse(facadeSource.contains("Sanitize.stripSuspiciousHtml"), facadeSource);
+        assertFalse(engineSource.contains("Sanitize.stripSuspiciousHtml"), engineSource);
     }
 
     private static String privateDocumentCanary() {

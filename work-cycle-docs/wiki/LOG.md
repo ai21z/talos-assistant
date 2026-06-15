@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "668adb467cf83ed5bc77ad23bba34ed227ae7a89"
+last_verified_commit: "e9ae1a41ff591f0b165dd5e83fdb352a1fb74f75"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -53,6 +53,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md"
     selector: "ToolCallLoop orchestration characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T824-open-high] tool-call-loop-engine-extraction.md"
+    selector: "ToolCallLoopEngine extraction"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -65,8 +68,8 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 4
-  DETERMINISTIC_STATIC: 15
+  INFERRED_REVIEW: 5
+  DETERMINISTIC_STATIC: 16
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -391,3 +394,12 @@ mechanically.
   valid without broadening `ToolLoopFinalAnswerFinalizer`.
 - Set the next Wave 5 move to T824, a behavior-preserving
   `ToolCallLoopEngine` extraction.
+
+## [2026-06-15] extraction | Open T824 ToolCallLoopEngine
+
+- Added T824 as the behavior-preserving extraction ticket after T823
+  characterization.
+- Extracted `ToolCallLoop` orchestration into package-private
+  `dev.talos.runtime.ToolCallLoopEngine`.
+- Kept the public `ToolCallLoop` facade, `LoopResult`, `ToolOutcome`,
+  constructors, `run(...)` overloads, and static helper delegates stable.
