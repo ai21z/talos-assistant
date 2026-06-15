@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "85d53c372f2c6a76aea1be9b04aa212489cfe5c7"
+last_verified_commit: "482fccc7b624fd0be77a439d3b61f375f070d24c"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -66,8 +66,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T824-done-high] tool-call-loop-engine-extraction.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T825-open-high] tool-loop-internals-boundary-scoping.md"
-    selector: "Scope"
+    ref: "work-cycle-docs/tickets/done/[T825-done-high] tool-loop-internals-boundary-scoping.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -104,12 +104,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `85d53c372f2c6a76aea1be9b04aa212489cfe5c7`
+- Commit: `482fccc7b624fd0be77a439d3b61f375f070d24c`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T825 `tool-loop-internals-boundary-scoping`.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -134,9 +134,9 @@ confidence_histogram:
   top-level `{core, tools}` SCC; T823 completed characterization-only
   `ToolCallLoop` orchestration evidence and did not authorize extraction by
   itself; T824 completed the behavior-preserving `ToolCallLoopEngine`
-  extraction while keeping `ToolCallLoop` as the public facade.
-- Next move: review T825's remaining `runtime.toolcall` internals scoping
-  evidence and choose one T826 production seam.
+  extraction while keeping `ToolCallLoop` as the public facade; T825 completed
+  scoping of the remaining `runtime.toolcall` internals.
+- Next move: open T826 `tool-call-execution-stage-characterization`.
 
 ```talos-wiki-claims
 {
@@ -283,11 +283,12 @@ the package-private final-answer finalizer boundary and left `LoopState`,
 `ToolCallRepromptStage`, `ExecutionOutcome`, and tool model types in place for
 later scoping.
 
-T825 is open. Its purpose is to scope the remaining `runtime.toolcall`
-internals after T824. It records the current `INFERRED_REVIEW` hotspot evidence
-for `ToolCallLoop`, `LoopState`, `ToolCallSupport`, and
-`ToolCallExecutionStage`; names deferred higher-ranked non-toolcall hotspots;
-and does not authorize production extraction.
+T825 is done. Its purpose was to scope the remaining `runtime.toolcall`
+internals after T824. It recorded the current `INFERRED_REVIEW` hotspot
+evidence for `ToolCallLoop`, `LoopState`, `ToolCallSupport`, and
+`ToolCallExecutionStage`; named deferred higher-ranked non-toolcall hotspots;
+selected T826 `ToolCallExecutionStage` characterization as the next step; and
+did not authorize production extraction.
 
 ## Wave 5 Readiness Status
 
@@ -313,9 +314,9 @@ completed the final `RagService` / `ToolProtocolText` seam; local regenerated
 architecture evidence after implementation shows `core -> tools = 0` and no
 non-trivial top-level package SCCs. T823 completed `ToolCallLoop`
 orchestration characterization. T824 completed behavior-preserving extraction
-into package-private `dev.talos.runtime.ToolCallLoopEngine`. T825 is open for
-remaining `runtime.toolcall` internals scoping before any T826 production
-extraction.
+into package-private `dev.talos.runtime.ToolCallLoopEngine`. T825 completed
+remaining `runtime.toolcall` internals scoping and selected T826
+`ToolCallExecutionStage` characterization before any production decomposition.
 
 ## Operating Boundaries
 
