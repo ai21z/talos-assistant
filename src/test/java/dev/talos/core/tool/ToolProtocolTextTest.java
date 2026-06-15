@@ -1,4 +1,4 @@
-package dev.talos.tools;
+package dev.talos.core.tool;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,9 +35,6 @@ class ToolProtocolTextTest {
         assertFalse(stripped.contains("'before'"), stripped);
     }
 
-    // T754: stripToolCalls runs on every displayed answer; a long unclosed
-    // bare-JSON candidate must fail in linear time (possessive quantifiers),
-    // not hang the renderer via exponential backtracking.
     @Test
     void stripToolCallsSurvivesAdversarialUnclosedBareJson() {
         String adversarial = "Prose first.\n{\"name\": \"talos." + "x".repeat(200_000);
@@ -59,12 +56,20 @@ class ToolProtocolTextTest {
 
     @Test
     void stripToolCallsStillRemovesBareJsonWithOneLevelNestedBraces() {
-        // Equivalence pin for the possessive conversion: the one-level nested
-        // arguments object remains within the pattern's language.
         String stripped = ToolProtocolText.stripToolCalls(
                 "Before.\n{\"name\": \"talos.read_file\", \"arguments\": {\"path\": \"x.txt\"}}\nAfter.");
         assertTrue(stripped.contains("Before."), stripped);
         assertTrue(stripped.contains("After."), stripped);
         assertFalse(stripped.contains("talos."), stripped);
+    }
+
+    @Test
+    void standaloneToolJsonRecognizerAcceptsAcceptedAliases() {
+        assertTrue(ToolProtocolText.looksLikeStandaloneToolJson(
+                "{\"name\": \"write_file\", \"arguments\": {\"path\": \"index.html\"}}"));
+        assertTrue(ToolProtocolText.looksLikeStandaloneToolJson(
+                "{\"tool_name\": \"file_utils:edit_file\", \"params\": {\"path\": \"index.html\"}}"));
+        assertFalse(ToolProtocolText.looksLikeStandaloneToolJson(
+                "{\"name\": \"ordinary\", \"arguments\": {\"path\": \"index.html\"}}"));
     }
 }

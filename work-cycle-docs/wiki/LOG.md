@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "d3d548a02a5fffa11b973000b960eee98808b18c"
+last_verified_commit: "ed5fd4f081ad45c21bd00bd60e6781872b6efde6"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -47,6 +47,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
     selector: "SystemPromptBuilder tool-catalog cycle seam closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T822-open-high] rag-tool-protocol-text-cycle-break.md"
+    selector: "RagService tool-protocol text cycle seam"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -56,7 +59,7 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 2
+  INFERRED_REVIEW: 3
   DETERMINISTIC_STATIC: 13
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
@@ -346,3 +349,12 @@ mechanically.
   registry types.
 - Set the next Wave 5 move to T822, the final `RagService` /
   `ToolProtocolText` cycle seam.
+
+## [2026-06-15] extraction | Open T822 final core-tools cycle seam
+
+- Added T822 for the final production `core -> tools` dependency:
+  `RagService` tool-protocol text cleanup.
+- Introduced neutral core owners for tool-name policy and non-executing
+  protocol-text cleanup while keeping `tools` compatibility wrappers.
+- Local regenerated architecture evidence after implementation shows
+  `core -> tools = 0` and no non-trivial top-level package SCCs.

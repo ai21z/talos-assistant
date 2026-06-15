@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "d3d548a02a5fffa11b973000b960eee98808b18c"
+last_verified_commit: "ed5fd4f081ad45c21bd00bd60e6781872b6efde6"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -53,13 +53,16 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
     selector: "SystemPromptBuilder tool-catalog cycle seam closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T822-open-high] rag-tool-protocol-text-cycle-break.md"
+    selector: "RagService tool-protocol text cycle seam"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 7
+  INFERRED_REVIEW: 8
   DETERMINISTIC_STATIC: 12
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
@@ -98,9 +101,9 @@ or generated reports.
 
 ## Active Tickets
 
-- None in the Wave 5 T81x/T82x arc.
+- T822: final `RagService` / `ToolProtocolText` cycle seam.
 
-Next planned move: T822 final `RagService` / `ToolProtocolText` cycle seam.
+Next planned move: review and close T822 if gates stay green.
 
 ## Update Rule
 
