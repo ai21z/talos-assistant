@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "a8853667d69f8d46abf28e9b4bd1e72f597f99d5"
+last_verified_commit: "40fc721d84bda76c404b7f884178d2e336d0e04c"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -48,8 +48,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
     selector: "Core-tools cycle edge scoping closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T820-open-high] context-item-tool-result-adapter-cycle-break.md"
-    selector: "ContextItem tool-result adapter cycle break"
+    ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
+    selector: "ContextItem tool-result adapter cycle break closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -95,10 +95,10 @@ or generated reports.
 
 ## Active Tickets
 
-- `T820` context item tool-result adapter cycle break.
+- None.
 
-Next planned move: complete T820 before the remaining `SystemPromptBuilder` and
-`RagService` cycle seams.
+Next planned move: T821 `SystemPromptBuilder` tool-catalog cycle seam before
+the remaining `RagService` seam.
 
 ## Update Rule
 
