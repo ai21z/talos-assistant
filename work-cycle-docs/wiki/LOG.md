@@ -412,3 +412,12 @@ mechanically.
   and the package-private `dev.talos.runtime.ToolCallLoopEngine` boundary.
 - Set the next Wave 5 move to T825, a scoping/characterization ticket for the
   remaining `runtime.toolcall` internals before any T826 extraction.
+
+## [2026-06-15] scoping | Open T825 tool-loop internals boundary
+
+- Added T825 as scoping/characterization for remaining `runtime.toolcall`
+  internals after the T824 engine extraction.
+- Recorded current `INFERRED_REVIEW` hotspot evidence for `ToolCallLoop`,
+  `LoopState`, `ToolCallSupport`, and `ToolCallExecutionStage`.
+- Deferred `TurnProcessor`, `TaskContract`, and `ExecutionOutcome` while T825
+  chooses a single T826 production seam.
