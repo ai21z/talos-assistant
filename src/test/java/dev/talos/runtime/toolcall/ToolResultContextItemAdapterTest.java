@@ -8,10 +8,23 @@ import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolResultContextItemAdapterTest {
+
+    @Test
+    void contextPrivacyClassesMatchToolContentMetadataPrivacyClassesByNameAndOrder() {
+        assertEquals(
+                Arrays.stream(ToolContentMetadata.ContentPrivacyClass.values())
+                        .map(Enum::name)
+                        .toList(),
+                Arrays.stream(ContextPrivacyClass.values())
+                        .map(Enum::name)
+                        .toList());
+    }
 
     @Test
     void nullResultFallsBackToCallPathAndNormalMetadata() {
