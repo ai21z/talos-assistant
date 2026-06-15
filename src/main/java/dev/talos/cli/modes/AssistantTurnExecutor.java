@@ -517,84 +517,36 @@ public final class AssistantTurnExecutor {
             Context ctx,
             Options opts
     ) {
-        if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
-                || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
-            // T743: on mutation/workspace-obligation turns, malformed protocol
-            // debris gets one bounded MissingMutationRetry pass (escalated
-            // constraints) before the no-action notice. The r1 bank failure
-            // showed the model that ATTEMPTED a tool call got zero retries.
-            // If the retry does not produce a successful mutation, the
-            // original fail-fast shaping (no-action notice) is preserved.
-            CurrentTurnPlan debrisPlan = safePlanFromMessages(plan, messages, ctx);
-            boolean retryableObligation = debrisPlan != null
-                    && debrisPlan.taskContract() != null
-                    && debrisPlan.taskContract().mutationAllowed()
-                    && ResponseObligationVerifier.unsatisfiedNoToolResponse(
-                            debrisPlan.actionObligation(), answer);
-            if (retryableObligation) {
-                ToolCallLoop.LoopResult debrisLoop = emptyNoToolLoopResult(answer, messages);
-                MissingMutationRetry.Result debrisRetry = mutationRequestRetryIfNeeded(
-                        answer, messages, plan, debrisLoop, workspace, ctx);
-                boolean retryMutated = debrisRetry.mutationsInRetry() > 0
-                        || (debrisRetry.retryLoopResult() != null
-                                && debrisRetry.retryLoopResult().mutatingToolSuccesses() > 0);
-                if (retryMutated) {
-                    ToolCallLoop.LoopResult verificationLoop = debrisRetry.retryLoopResult() == null
-                            ? debrisLoop
-                            : debrisRetry.retryLoopResult();
-                    int extraMutationSuccesses = debrisRetry.retryLoopResult() == null
-                            ? debrisRetry.mutationsInRetry()
-                            : 0;
-                    moveToVerifyAfterSuccessfulMutation(ctx, verificationLoop, extraMutationSuccesses);
-                    return new ToolLoopAnswerResolution(
-                            shapeAnswerAfterToolLoop(
-                                    debrisRetry.answer(), messages, plan, verificationLoop, workspace,
-                                    extraMutationSuccesses, debrisRetry.actionObligationFailed(), opts),
-                            debrisRetry.extraSummary());
-                }
-            }
-            return new ToolLoopAnswerResolution(
-                    shapeAnswerWithoutTools(answer, messages, plan, ctx, false, opts),
-                    null);
-        }
-        ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
-        MissingMutationRetry.Result mrr = mutationRequestRetryIfNeeded(
-                answer, messages, plan, noToolLoopResult, workspace, ctx);
-        if (mrr.extraSummary() != null || mrr.mutationsInRetry() > 0) {
-            ToolCallLoop.LoopResult verificationLoop =
-                    mrr.retryLoopResult() == null ? noToolLoopResult : mrr.retryLoopResult();
-            int extraMutationSuccesses =
-                    mrr.retryLoopResult() == null ? mrr.mutationsInRetry() : 0;
-            moveToVerifyAfterSuccessfulMutation(ctx, verificationLoop, extraMutationSuccesses);
-            return new ToolLoopAnswerResolution(
-                    shapeAnswerAfterToolLoop(
-                            mrr.answer(), messages, plan, verificationLoop, workspace,
-                            extraMutationSuccesses, mrr.actionObligationFailed(), opts),
-                    mrr.extraSummary());
-        }
-        ReadEvidenceHandoff.Result readEvidenceHandoff = readEvidenceHandoffIfNeeded(
-                mrr.answer(), messages, plan, workspace, ctx);
-        if (readEvidenceHandoff.loopResult() != null) {
-            return new ToolLoopAnswerResolution(
-                    shapeAnswerAfterToolLoop(
-                            readEvidenceHandoff.answer(), messages, plan,
-                            readEvidenceHandoff.loopResult(), workspace, 0, opts),
-                    readEvidenceHandoff.extraSummary());
-        }
-        ReadOnlyInspectionRetry.Result inspectionRetry = readOnlyInspectionRetryIfNeeded(
-                mrr.answer(), messages, plan, workspace, ctx);
-        if (inspectionRetry.loopResult() != null) {
-            return new ToolLoopAnswerResolution(
-                    shapeAnswerAfterToolLoop(
-                            inspectionRetry.answer(), messages, plan, inspectionRetry.loopResult(),
-                            workspace, 0, opts),
-                    inspectionRetry.extraSummary());
-        }
-        return new ToolLoopAnswerResolution(
-                shapeAnswerWithoutTools(
-                        inspectionRetry.answer(), messages, plan, ctx, false,
-                        mrr.actionObligationFailed(), opts),
-                null);
+        AssistantNoToolOutcomeResolver.Resolution resolution = AssistantNoToolOutcomeResolver.resolve(
+                answer,
+                messages,
+                plan,
+                workspace,
+                ctx,
+                retryMessages -> compatibilityPlanFromMessages(retryMessages, ctx),
+                (loopResult, extraMutationSuccesses) ->
+                        moveToVerifyAfterSuccessfulMutation(ctx, loopResult, extraMutationSuccesses),
+                (resolvedAnswer, loopResult, extraMutationSuccesses, actionObligationFailed) ->
+                        shapeAnswerAfterToolLoop(
+                                resolvedAnswer,
+                                messages,
+                                plan,
+                                loopResult,
+                                workspace,
+                                extraMutationSuccesses,
+                                actionObligationFailed,
+                                opts),
+                (resolvedAnswer, actionObligationFailed) ->
+                        shapeAnswerWithoutTools(
+                                resolvedAnswer,
+                                messages,
+                                plan,
+                                ctx,
+                                false,
+                                actionObligationFailed,
+                                opts)
+        );
+        return new ToolLoopAnswerResolution(resolution.answer(), resolution.extraSummary());
     }
 
     static ReadEvidenceHandoff.Result unsupportedCapabilityPreflightIfNeeded(
@@ -665,27 +617,6 @@ public final class AssistantTurnExecutor {
                         ctx,
                         retryMessages,
                         compatibilityPlanFromMessages(retryMessages, ctx)));
-    }
-
-    private static ToolCallLoop.LoopResult emptyNoToolLoopResult(
-            String answer,
-            List<ChatMessage> messages
-    ) {
-        return new ToolCallLoop.LoopResult(
-                answer == null ? "" : answer,
-                0,
-                0,
-                List.of(),
-                messages,
-                0,
-                0,
-                false,
-                0,
-                List.of(),
-                0,
-                0,
-                0,
-                0);
     }
 
     private static void appendExtraSummary(StringBuilder out, String extraSummary) {
