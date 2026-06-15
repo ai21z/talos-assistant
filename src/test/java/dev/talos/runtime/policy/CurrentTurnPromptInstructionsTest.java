@@ -92,6 +92,121 @@ class CurrentTurnPromptInstructionsTest {
     }
 
     @Test
+    void nullPlanInstructionFallbackKeepsDefaultMutationTools() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Create README.md."));
+
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(messages, (CurrentTurnPlan) null);
+
+        String frame = messages.stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(ChatMessage::content)
+                .filter(content -> content.startsWith("[CurrentTurnCapability]"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(frame.contains("type: FILE_CREATE"));
+        assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
+        assertTrue(frame.contains("visibleTools: talos.apply_workspace_batch"));
+        assertTrue(frame.contains("talos.copy_path"));
+        assertTrue(frame.contains("talos.mkdir"));
+        assertTrue(frame.contains("talos.move_path"));
+        assertTrue(frame.contains("talos.rename_path"));
+        assertTrue(frame.contains("talos.write_file"));
+        assertTrue(frame.contains("talos.edit_file"));
+    }
+
+    @Test
+    void readOnlyTurnGetsNoMutationInstruction() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Check the workspace for selector mismatches. Do not change anything yet."));
+
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
+
+        assertEquals(3, messages.size());
+        assertEquals("system", messages.get(1).role());
+        String instruction = messages.get(1).content();
+        assertTrue(instruction.contains("[TaskContract]"));
+        assertTrue(instruction.contains("mutationAllowed: false"));
+        assertTrue(instruction.contains("Do not call talos.write_file or talos.edit_file"));
+        assertTrue(instruction.contains("wait for an explicit change request"));
+    }
+
+    @Test
+    void mutationTurnGetsCurrentTurnCapabilityFrame() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Who are you?"));
+        messages.add(ChatMessage.assistant("I am Talos."));
+        messages.add(ChatMessage.user(
+                "I want to create a modern BMI calculator website to use! Can you make it?"));
+
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
+
+        int currentUserIndex = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if ("user".equals(messages.get(i).role())) {
+                currentUserIndex = i;
+                break;
+            }
+        }
+        assertTrue(currentUserIndex > 0);
+        ChatMessage frame = messages.get(currentUserIndex - 1);
+        assertEquals("system", frame.role());
+        assertTrue(frame.content().contains("[CurrentTurnCapability]"), frame.content());
+        assertTrue(frame.content().contains("type: FILE_CREATE"), frame.content());
+        assertTrue(frame.content().contains("mutationAllowed: true"), frame.content());
+        assertTrue(frame.content().contains("obligation: MUTATING_TOOL_REQUIRED"), frame.content());
+        assertTrue(frame.content().contains("talos.write_file"), frame.content());
+        assertTrue(frame.content().contains("talos.edit_file"), frame.content());
+        assertTrue(frame.content().contains("Do not say you lack filesystem"), frame.content());
+    }
+
+    @Test
+    void directReviewAndFixTurnGetsConditionalCurrentTurnCapabilityFrame() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser."));
+
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
+
+        assertEquals(3, messages.size());
+        ChatMessage frame = messages.get(1);
+        assertEquals("system", frame.role());
+        assertTrue(frame.content().contains("[CurrentTurnCapability]"), frame.content());
+        assertTrue(frame.content().contains("type: FILE_EDIT"), frame.content());
+        assertTrue(frame.content().contains("mutationAllowed: true"), frame.content());
+        assertTrue(frame.content().contains("obligation: CONDITIONAL_REVIEW_FIX"), frame.content());
+        assertFalse(frame.content().contains("obligation: MUTATING_TOOL_REQUIRED"), frame.content());
+        assertTrue(frame.content().contains("Inspect the relevant files first"), frame.content());
+        assertTrue(frame.content().contains("Only call talos.write_file or talos.edit_file"), frame.content());
+        assertTrue(frame.content().contains("No file change is required"), frame.content());
+        assertTrue(frame.content().contains("talos.write_file"), frame.content());
+        assertTrue(frame.content().contains("talos.edit_file"), frame.content());
+    }
+
+    @Test
+    void smallTalkTurnGetsDirectAnswerInstruction() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("hello"));
+
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
+
+        assertEquals(3, messages.size());
+        String instruction = messages.get(1).content();
+        assertTrue(instruction.contains("type: SMALL_TALK"));
+        assertTrue(instruction.contains("Answer directly"));
+        assertTrue(instruction.contains("Do not call tools"));
+        assertFalse(instruction.contains("Use talos.list_dir"));
+    }
+
+    @Test
     void taskContractInstructionUsesExplicitPlanAfterMessagesDrift() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
@@ -189,6 +304,103 @@ class CurrentTurnPromptInstructionsTest {
         } finally {
             LocalTurnTraceCapture.clear();
         }
+    }
+
+    @Test
+    void staticRepairContextIsSkippedWhenLaterStaticPassSupersedesEarlierFailure() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, "
+                        + "styles.css, and scripts.js."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - HTML does not link JavaScript file: `scripts.js`
+                - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+        messages.add(ChatMessage.assistant("""
+                [Static verification: passed - Static web coherence checks passed for 3 mutated target(s).]
+
+                Updated 3 files: index.html, styles.css, scripts.js.
+                """));
+        messages.add(ChatMessage.user(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser."));
+        var contract = TaskContractResolver.fromMessages(messages);
+
+        CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(messages, contract);
+
+        assertTrue(messages.stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(message -> message.content() == null ? "" : message.content())
+                .noneMatch(content -> content.startsWith("[Static verification repair context]")));
+    }
+
+    @Test
+    void staticVerificationRepairPromptIncludesCurrentSelectorFactsForCssOnlyRepair(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <button type="button">Calculate BMI</button>
+                  <p id="result"></p>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                .button {
+                  color: white;
+                }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.querySelector('#result').textContent = 'Ready';
+                """);
+
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - CSS references missing class selectors: `.button`]
+
+                The requested task is not verified complete.
+                Unresolved static verification problems:
+                - CSS references missing class selectors: `.button`
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - styles.css: Updated styles.css
+                - scripts.js: Updated scripts.js
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+        CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(
+                messages,
+                TaskContractResolver.fromMessages(messages),
+                workspace);
+
+        String repairInstruction = messages.stream()
+                .map(message -> message.content() == null ? "" : message.content())
+                .filter(content -> content.contains("[Static verification repair context]"))
+                .findFirst()
+                .orElse("");
+
+        assertTrue(repairInstruction.contains("CSS selector repair constraint"), repairInstruction);
+        assertTrue(repairInstruction.contains("[Current static selector facts]"), repairInstruction);
+        assertTrue(repairInstruction.contains("Observed in HTML:"), repairInstruction);
+        assertTrue(repairInstruction.contains("- Classes: none"), repairInstruction);
+        assertTrue(repairInstruction.contains("- IDs: `result`"), repairInstruction);
+        assertTrue(repairInstruction.contains("CSS references missing class selectors: `.button`"),
+                repairInstruction);
     }
 
     @Test
