@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "6fc7d5b17169f736098d8cd7602cd957aca35a05"
+last_verified_commit: "a8853667d69f8d46abf28e9b4bd1e72f597f99d5"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -50,6 +50,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T820-open-high] context-item-tool-result-adapter-cycle-break.md"
+    selector: "Scope"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -68,8 +71,8 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 9
-  DETERMINISTIC_STATIC: 12
+  INFERRED_REVIEW: 10
+  DETERMINISTIC_STATIC: 13
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
   GATED: 0
@@ -80,12 +83,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `6fc7d5b17169f736098d8cd7602cd957aca35a05`
+- Commit: `a8853667d69f8d46abf28e9b4bd1e72f597f99d5`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T820 `context-item-tool-result-adapter-cycle-break`.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -102,10 +105,10 @@ confidence_histogram:
   outcome extraction while leaving shaping, trace lifecycle, branch selection,
   the tool-loop outcome path, and `TurnOutput` assembly in
   `AssistantTurnExecutor`; T818 completed prompt-instruction adapter thinning;
-  T819 completed report-only `core-tools-cycle-edge-scoping`.
-- Next move: open T820 for the `ContextItem` tool-result adapter and neutral
-  privacy seam before touching the remaining `SystemPromptBuilder` or
-  `RagService` seams.
+  T819 completed report-only `core-tools-cycle-edge-scoping`; T820 is open for
+  the `ContextItem` tool-result adapter and neutral privacy seam.
+- Next move: complete T820 before touching the remaining `SystemPromptBuilder`
+  or `RagService` seams.
 
 ```talos-wiki-claims
 {
@@ -218,6 +221,12 @@ moving direct helper tests to the runtime-policy owner.
 T819 is done. Its purpose was to scope the remaining top-level `core <-> tools`
 package cycle from current generated evidence before any production cycle-break
 work begins.
+
+T820 is open. Its purpose is to remove `core.context.ContextItem` dependencies
+on concrete `tools` types by introducing a neutral context privacy enum and a
+runtime-owned tool-result-to-context adapter. The implementation is present and
+awaiting review/closeout; generated evidence shows `core -> tools` reduced from
+8 to 4 while the `{core, tools}` SCC remains.
 
 ## Wave 5 Readiness Status
 

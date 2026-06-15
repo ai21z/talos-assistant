@@ -1,6 +1,5 @@
 package dev.talos.core.context;
 
-import dev.talos.tools.ToolContentMetadata;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,7 +22,7 @@ class ContextItemProtectedPathParityTest {
         return ContextItem.fromText(
                 ContextItemSource.TOOL_RESULT,
                 ExecutionBoundary.LOCAL_WORKSPACE,
-                ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                ContextPrivacyClass.NORMAL,
                 path,
                 "summary only",
                 0);

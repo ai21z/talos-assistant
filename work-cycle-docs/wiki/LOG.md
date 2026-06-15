@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "6fc7d5b17169f736098d8cd7602cd957aca35a05"
+last_verified_commit: "a8853667d69f8d46abf28e9b4bd1e72f597f99d5"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -41,6 +41,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
     selector: "Core-tools cycle edge scoping closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T820-open-high] context-item-tool-result-adapter-cycle-break.md"
+    selector: "ContextItem tool-result adapter cycle break"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -50,8 +53,8 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 1
-  DETERMINISTIC_STATIC: 11
+  INFERRED_REVIEW: 2
+  DETERMINISTIC_STATIC: 12
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -295,3 +298,21 @@ mechanically.
 - Recorded that T820 should start at the `ContextItem` tool-result adapter /
   neutral privacy seam.
 - Kept `SystemPromptBuilder` and `RagService` cycle seams deferred.
+
+## [2026-06-15] extraction | Open T820 ContextItem adapter seam
+
+- Added T820 as the first production step in the `core -> tools` cycle-break
+  arc.
+- Introduced the planned direction: keep `ContextItem` as a core model, move
+  tool-result conversion into `runtime.toolcall`, and make context privacy
+  classification core-owned.
+- Kept `SystemPromptBuilder` and `RagService` cycle seams deferred.
+
+## [2026-06-15] extraction | Implement T820 ContextItem adapter seam
+
+- Added `ContextPrivacyClass` as the core-owned context privacy enum.
+- Moved tool-result-to-context conversion into package-private
+  `ToolResultContextItemAdapter`.
+- Regenerated architecture intelligence: `core -> tools` dropped from 8 to 4,
+  and the `{core, tools}` SCC remains for the deferred `SystemPromptBuilder`
+  and `RagService` seams.

@@ -4,11 +4,11 @@ import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextItemSource;
 import dev.talos.core.context.ContextLedgerCapture;
+import dev.talos.core.context.ContextPrivacyClass;
 import dev.talos.core.context.ExecutionBoundary;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.tools.ToolContentMetadata;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -331,7 +331,7 @@ public final class ProjectMemoryLoader {
         ContextItem item = ContextItem.fromText(
                 ContextItemSource.PROJECT_MEMORY,
                 ExecutionBoundary.LOCAL_WORKSPACE,
-                ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                ContextPrivacyClass.NORMAL,
                 "project-memory",
                 "",
                 0);
@@ -342,7 +342,7 @@ public final class ProjectMemoryLoader {
         ContextItem item = ContextItem.fromText(
                 ContextItemSource.PROJECT_MEMORY,
                 boundary(candidate.trust()),
-                ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                ContextPrivacyClass.NORMAL,
                 candidate.pathHint(),
                 "",
                 0);
@@ -353,7 +353,7 @@ public final class ProjectMemoryLoader {
         ContextItem item = ContextItem.fromText(
                 ContextItemSource.PROJECT_MEMORY,
                 boundary(source.trust()),
-                ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                ContextPrivacyClass.NORMAL,
                 source.pathHint(),
                 source.content(),
                 source.estimatedTokens());

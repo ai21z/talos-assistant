@@ -1,7 +1,6 @@
 package dev.talos.core.context;
 
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
-import dev.talos.tools.ToolContentMetadata;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,7 +20,7 @@ class ContextLedgerArtifactScanTest {
                 ContextItem.fromText(
                         ContextItemSource.TOOL_RESULT,
                         ExecutionBoundary.LOCAL_WORKSPACE,
-                        ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                        ContextPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
                         "private-report.pdf",
                         "Patient Name: Eleni Nikolaou",
                         20),
