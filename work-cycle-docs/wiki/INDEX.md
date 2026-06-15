@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "e9ae1a41ff591f0b165dd5e83fdb352a1fb74f75"
+last_verified_commit: "2d4a9611ad7357cb50f080d5b9c468a5a824f06e"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -60,8 +60,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md"
     selector: "ToolCallLoop orchestration characterization closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T824-open-high] tool-call-loop-engine-extraction.md"
-    selector: "ToolCallLoopEngine extraction"
+    ref: "work-cycle-docs/tickets/done/[T824-done-high] tool-call-loop-engine-extraction.md"
+    selector: "ToolCallLoopEngine extraction closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -110,10 +110,10 @@ or generated reports.
 
 ## Active Tickets
 
-- T824 `tool-call-loop-engine-extraction`
+- None.
 
-Next planned move: review and close T824 after green focused, architecture,
-`check`, and wiki evidence gates.
+Next planned move: open T825 as scoping/characterization for remaining
+`runtime.toolcall` internals before choosing a T826 production seam.
 
 ## Update Rule
 

@@ -403,3 +403,12 @@ mechanically.
   `dev.talos.runtime.ToolCallLoopEngine`.
 - Kept the public `ToolCallLoop` facade, `LoopResult`, `ToolOutcome`,
   constructors, `run(...)` overloads, and static helper delegates stable.
+
+## [2026-06-15] ledger | Close T824 ToolCallLoopEngine
+
+- Moved T824 to the done ticket ledger after focused `ToolCallLoop` guards,
+  full `check`, and wiki evidence gates passed.
+- Recorded implementation commit `2d4a9611ad7357cb50f080d5b9c468a5a824f06e`
+  and the package-private `dev.talos.runtime.ToolCallLoopEngine` boundary.
+- Set the next Wave 5 move to T825, a scoping/characterization ticket for the
+  remaining `runtime.toolcall` internals before any T826 extraction.

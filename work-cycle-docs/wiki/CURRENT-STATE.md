@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "e9ae1a41ff591f0b165dd5e83fdb352a1fb74f75"
+last_verified_commit: "2d4a9611ad7357cb50f080d5b9c468a5a824f06e"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -63,8 +63,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T824-open-high] tool-call-loop-engine-extraction.md"
-    selector: "Scope"
+    ref: "work-cycle-docs/tickets/done/[T824-done-high] tool-call-loop-engine-extraction.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -98,12 +98,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `e9ae1a41ff591f0b165dd5e83fdb352a1fb74f75`
+- Commit: `2d4a9611ad7357cb50f080d5b9c468a5a824f06e`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T824 `ToolCallLoopEngine` extraction.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -127,10 +127,10 @@ confidence_histogram:
   completed the final planned `core -> tools` cycle-break seam and cleared the
   top-level `{core, tools}` SCC; T823 completed characterization-only
   `ToolCallLoop` orchestration evidence and did not authorize extraction by
-  itself; T824 is open for behavior-preserving `ToolCallLoopEngine`
-  extraction.
-- Next move: review and close T824 after green focused, architecture, `check`,
-  and wiki evidence gates.
+  itself; T824 completed the behavior-preserving `ToolCallLoopEngine`
+  extraction while keeping `ToolCallLoop` as the public facade.
+- Next move: open T825 as scoping/characterization for the remaining
+  `runtime.toolcall` internals before choosing a T826 production seam.
 
 ```talos-wiki-claims
 {
@@ -268,10 +268,14 @@ orchestration before extraction into package-private
 `dev.talos.runtime.ToolCallLoopEngine`. It was test/report/ticket work only and
 did not move production code.
 
-T824 is open. Its purpose is to extract `ToolCallLoop` orchestration into
+T824 is done. Its purpose was to extract `ToolCallLoop` orchestration into
 package-private `dev.talos.runtime.ToolCallLoopEngine` while keeping
 `ToolCallLoop` as the public facade with stable `LoopResult`, `ToolOutcome`,
-constructors, `run(...)` overloads, and static helper delegates.
+constructors, `run(...)` overloads, and static helper delegates. It preserved
+the package-private final-answer finalizer boundary and left `LoopState`,
+`ToolCallSupport`, `ToolCallExecutionStage`, `ToolCallParseStage`,
+`ToolCallRepromptStage`, `ExecutionOutcome`, and tool model types in place for
+later scoping.
 
 ## Wave 5 Readiness Status
 
@@ -296,8 +300,10 @@ SCC. T821 completed the `SystemPromptBuilder` tool-catalog seam. T822
 completed the final `RagService` / `ToolProtocolText` seam; local regenerated
 architecture evidence after implementation shows `core -> tools = 0` and no
 non-trivial top-level package SCCs. T823 completed `ToolCallLoop`
-orchestration characterization. T824 is open for behavior-preserving
-extraction into package-private `dev.talos.runtime.ToolCallLoopEngine`.
+orchestration characterization. T824 completed behavior-preserving extraction
+into package-private `dev.talos.runtime.ToolCallLoopEngine`. The next Wave 5
+move is T825 scoping for remaining `runtime.toolcall` internals before any
+T826 production extraction.
 
 ## Operating Boundaries
 

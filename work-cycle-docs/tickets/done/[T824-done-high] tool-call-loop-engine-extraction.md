@@ -1,6 +1,6 @@
 # T824 ToolCallLoopEngine Extraction
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime tool-call loop
@@ -57,6 +57,24 @@ surface of `ToolCallLoop`.
 - The facade owns public compatibility; the engine owns orchestration order.
 - If characterization tests fail, preserve current behavior by adjusting the
   extraction rather than changing runtime semantics.
+
+## Completion Evidence
+
+- Implementation commit:
+  `2d4a9611ad7357cb50f080d5b9c468a5a824f06e`
+- Added package-private `dev.talos.runtime.ToolCallLoopEngine`.
+- Preserved `ToolCallLoop` as the public facade with stable constructors,
+  `run(...)` overloads, `DEFAULT_MAX_ITERATIONS`, `LoopResult`,
+  `ToolOutcome`, and static helper delegates.
+- Preserved package-private `ToolLoopFinalAnswerFinalizer`; the engine lives
+  in `dev.talos.runtime` to keep package-private access valid.
+- Updated finalizer ownership coverage so finalization calls are expected in
+  `ToolCallLoopEngine`, while finalizer implementation remains isolated.
+- Focused `ToolCallLoop` characterization and runtime tool-call suites passed.
+- Full `check` passed.
+- `wikiEvidenceCloseGate --rerun-tasks` passed.
+- Source hygiene found no public `ToolCallLoopEngine`.
+- `site/` remained unrelated owner work and was not staged.
 
 ## Acceptance Criteria
 
