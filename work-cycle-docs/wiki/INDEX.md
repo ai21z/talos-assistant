@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "916d0780bcb49da747e9894b34f3f5412a4b2f87"
+last_verified_commit: "33e3998bdb2dcea74a0bbdde7dcf8c3b59626f23"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -56,14 +56,20 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T822-done-high] rag-tool-protocol-text-cycle-break.md"
     selector: "RagService tool-protocol text cycle seam closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T823-open-high] tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration characterization"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t823-tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration boundary"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 8
-  DETERMINISTIC_STATIC: 12
+  INFERRED_REVIEW: 9
+  DETERMINISTIC_STATIC: 14
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -101,10 +107,10 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T823 `tool-call-loop-orchestration-characterization`
 
-Next planned move: open T823 as characterization-only `ToolCallLoop`
-orchestration evidence before any T824 extraction.
+Next planned move: complete T823 characterization before any T824
+`ToolCallLoopEngine` extraction.
 
 ## Update Rule
 

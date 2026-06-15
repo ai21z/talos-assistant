@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "916d0780bcb49da747e9894b34f3f5412a4b2f87"
+last_verified_commit: "33e3998bdb2dcea74a0bbdde7dcf8c3b59626f23"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -50,17 +50,23 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T822-done-high] rag-tool-protocol-text-cycle-break.md"
     selector: "RagService tool-protocol text cycle seam closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T823-open-high] tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration characterization"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t823-tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration boundary"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 3
-  DETERMINISTIC_STATIC: 13
+  INFERRED_REVIEW: 4
+  DETERMINISTIC_STATIC: 15
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -367,3 +373,11 @@ mechanically.
   remain in regenerated architecture evidence.
 - Set the next Wave 5 move to T823, a characterization-only `ToolCallLoop`
   orchestration boundary ticket before any T824 extraction.
+
+## [2026-06-15] characterization | Open T823 ToolCallLoop orchestration
+
+- Added T823 as a characterization-only ticket for `runtime.ToolCallLoop`
+  orchestration after the core/tools cycle arc was closed.
+- Pinned no-tool, text tool-call, native tool-call, iteration-limit, and
+  report-boundary behavior before any `ToolCallLoopEngine` extraction.
+- Kept production extraction deferred to T824.
