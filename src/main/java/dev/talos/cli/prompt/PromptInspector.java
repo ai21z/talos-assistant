@@ -1,11 +1,11 @@
 package dev.talos.cli.prompt;
 
-import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -76,7 +76,7 @@ public final class PromptInspector {
         messages.addAll(history);
         messages.add(ChatMessage.user(input));
         if ("unified".equals(resolvedMode)) {
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
         }
 
         List<String> registryTools = registryToolNames(ctx);
