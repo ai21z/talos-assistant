@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "a1b261b62aaca7b619d6fb18ad032c3e37c9ceec"
+last_verified_commit: "189e9c45b84a54d8d3f1c58f4606570d5a610a85"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -30,8 +30,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T815-done-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
     selector: "Tool-loop outcome resolver extraction closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T816-open-high] assistant-turn-executor-no-tool-outcome-characterization.md"
-    selector: "No-tool outcome characterization"
+    ref: "work-cycle-docs/tickets/done/[T816-done-high] assistant-turn-executor-no-tool-outcome-characterization.md"
+    selector: "No-tool outcome characterization closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -39,7 +39,7 @@ min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 8
+  DETERMINISTIC_STATIC: 9
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -222,3 +222,13 @@ mechanically.
 - Pinned the future T817 owner as package-private
   `AssistantNoToolOutcomeResolver`.
 - Kept production extraction out of T816.
+
+## [2026-06-15] ledger | Close T816 no-tool outcome
+
+- Moved T816 to the done ticket ledger after green focused, broad, `check`,
+  and wiki evidence gates.
+- Recorded that T816 added characterization-only coverage for malformed
+  protocol/debris retry, no-tool missing-mutation retry, read-evidence
+  handoff, read-only inspection retry, and stream-sink buffering.
+- Set the next Wave 5 move to T817, the package-private
+  `AssistantNoToolOutcomeResolver` extraction.
