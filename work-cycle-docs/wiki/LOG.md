@@ -325,3 +325,12 @@ mechanically.
   `ContextItem.fromToolResult(...)` is gone.
 - Set the next Wave 5 move to T821, the `SystemPromptBuilder` tool-catalog
   cycle seam.
+
+## [2026-06-15] extraction | Open T821 SystemPromptBuilder tool catalog seam
+
+- Added T821 as the second production step in the `core -> tools` cycle-break
+  arc after T820.
+- Introduced the planned direction: keep prompt tool rendering in `core.llm`
+  but feed it neutral prompt-facing descriptors instead of executable tool
+  registry types.
+- Kept the remaining `RagService` / `ToolProtocolText` seam deferred.

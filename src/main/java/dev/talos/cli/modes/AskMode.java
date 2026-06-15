@@ -6,6 +6,7 @@ import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,7 +64,7 @@ public final class AskMode implements Mode {
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         String system = SystemPromptBuilder.forAsk()
-                .withTools(ctx.toolRegistry())
+                .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                 .withWorkspace(workspace)
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)

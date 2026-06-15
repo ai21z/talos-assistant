@@ -18,6 +18,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnTraceCapture;
+import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -98,7 +99,7 @@ public final class RagMode implements Mode {
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         String system = SystemPromptBuilder.forRag()
-                .withTools(ctx.toolRegistry())
+                .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                 .withWorkspace(workspace)
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)

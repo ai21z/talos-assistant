@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.util.Sanitize;
+import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.spi.types.TokenChunk;
@@ -196,7 +197,7 @@ class NativeToolPipelineTest {
             registry.register(stubTool("talos.read_file", "Read a file"));
 
             String prompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry)
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry))
                     .withNativeTools(false)
                     .build();
 
@@ -217,7 +218,7 @@ class NativeToolPipelineTest {
             registry.register(stubTool("talos.read_file", "Read a file"));
 
             String prompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry)
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry))
                     .withNativeTools(true)
                     .build();
 
@@ -257,12 +258,12 @@ class NativeToolPipelineTest {
 
             // Native prompt
             String nativePrompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry).withNativeTools(true).build();
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry)).withNativeTools(true).build();
             assertFalse(nativePrompt.contains("<tool_call>"));
 
             // Fallback prompt
             String fallbackPrompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry).withNativeTools(false).build();
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry)).withNativeTools(false).build();
             assertFalse(fallbackPrompt.contains("<tool_call>"),
                     "Even the fallback prompt should use JSON, not XML");
         }
@@ -302,7 +303,7 @@ class NativeToolPipelineTest {
 
             // Native prompt: no format instructions at all
             String nativePrompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry).withNativeTools(true).build();
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry)).withNativeTools(true).build();
             assertFalse(nativePrompt.contains("<tool_call>"),
                     "Native prompt must not contain XML tags");
             assertFalse(nativePrompt.contains("</tool_call>"),
@@ -310,7 +311,7 @@ class NativeToolPipelineTest {
 
             // Fallback prompt: JSON code-fenced format only
             String fallbackPrompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry).withNativeTools(false).build();
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry)).withNativeTools(false).build();
             assertFalse(fallbackPrompt.contains("<tool_call>"),
                     "Fallback prompt must NOT instruct XML format");
             assertTrue(fallbackPrompt.contains("```json"),
@@ -616,12 +617,14 @@ class NativeToolPipelineTest {
                     SystemPromptBuilder.forUnified())) {
 
                 // Native mode
-                String nativePrompt = builder.withTools(registry).withNativeTools(true).build();
+                String nativePrompt = builder.withPromptTools(PromptToolDescriptors.fromRegistry(registry))
+                        .withNativeTools(true).build();
                 assertFalse(nativePrompt.contains("<tool_call>"),
                         "No prompt mode should contain XML <tool_call> tags");
 
                 // Fallback mode
-                String fallbackPrompt = builder.withTools(registry).withNativeTools(false).build();
+                String fallbackPrompt = builder.withPromptTools(PromptToolDescriptors.fromRegistry(registry))
+                        .withNativeTools(false).build();
                 assertFalse(fallbackPrompt.contains("<tool_call>"),
                         "No prompt mode should contain XML <tool_call> tags in fallback either");
             }
@@ -634,9 +637,9 @@ class NativeToolPipelineTest {
             registry.register(stubTool("talos.read_file", "Read a file"));
 
             String nativePrompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry).withNativeTools(true).build();
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry)).withNativeTools(true).build();
             String fallbackPrompt = SystemPromptBuilder.forAsk()
-                    .withTools(registry).withNativeTools(false).build();
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(registry)).withNativeTools(false).build();
 
             // Native has no JSON format instructions
             assertFalse(nativePrompt.contains("```json"),

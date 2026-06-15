@@ -1,10 +1,9 @@
 package dev.talos.core.llm;
 
-import dev.talos.tools.*;
-import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -60,7 +59,7 @@ class SystemPromptBuilderTest {
     @Test
     void noToolsSectionWhenRegistryIsEmpty() {
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(new ToolRegistry())
+                .withPromptTools(new PromptToolSet())
                 .build();
         assertFalse(prompt.contains("Available Tools"),
                 "Should not include tools section when registry is empty");
@@ -69,7 +68,7 @@ class SystemPromptBuilderTest {
     @Test
     void noToolsSectionWhenRegistryIsNull() {
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(null)
+                .withPromptTools(null)
                 .build();
         assertFalse(prompt.contains("Available Tools"),
                 "Should not include tools section when registry is null");
@@ -77,11 +76,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void toolsSectionIncludedWhenToolsRegistered() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a workspace file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         assertTrue(prompt.contains("Available Tools"),
@@ -94,13 +93,13 @@ class SystemPromptBuilderTest {
 
     @Test
     void toolsSectionIncludesMultipleTools() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a workspace file"));
         registry.register(stubTool("talos.grep", "Search workspace files"));
         registry.register(stubTool("talos.retrieve", "Retrieve context"));
 
         String prompt = SystemPromptBuilder.forRag()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         assertTrue(prompt.contains("talos.read_file"));
@@ -110,25 +109,41 @@ class SystemPromptBuilderTest {
 
     @Test
     void toolsSectionIncludesParameterSchema() {
-        var registry = new ToolRegistry();
-        registry.register(new TalosTool() {
-            @Override public String name() { return "talos.read_file"; }
-            @Override public String description() { return "Read a file"; }
-            @Override public ToolDescriptor descriptor() {
-                return new ToolDescriptor("talos.read_file", "Read a file",
-                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}");
-            }
-            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok(""); }
-        });
+        var registry = new PromptToolSet();
+        registry.register(new PromptToolDescriptor(
+                "talos.read_file",
+                "Read a file",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}",
+                false));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         assertTrue(prompt.contains("Parameters:"),
                 "Should include parameters label when schema is present");
         assertTrue(prompt.contains("\"path\""),
                 "Should include parameter schema content");
+    }
+
+    @Test
+    void toolDescriptorBlockRenderingIsStable() {
+        var registry = new PromptToolSet();
+        registry.register(new PromptToolDescriptor(
+                "talos.read_file",
+                "Read a file",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}",
+                false));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withPromptTools(registry)
+                .build();
+
+        String descriptorBlock = prompt.substring(prompt.indexOf("- **talos.read_file**"));
+        assertEquals("""
+                - **talos.read_file**: Read a file
+                  Parameters: `{"type":"object","properties":{"path":{"type":"string"}}}`
+                """, descriptorBlock);
     }
 
     // ── Conversation history ────────────────────────────────────────
@@ -164,11 +179,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void fullCompositionWithToolsAndHistory() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.grep", "Search workspace"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withHistory(true)
                 .build();
 
@@ -180,11 +195,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void composedSectionsAreInCorrectOrder() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.grep", "Search workspace"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withHistory(true)
                 .build();
 
@@ -213,12 +228,12 @@ class SystemPromptBuilderTest {
     void estimateTokensIncreasesWithTools() {
         int baseTokens = SystemPromptBuilder.forAsk().estimateTokens();
 
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a workspace file"));
         registry.register(stubTool("talos.grep", "Search workspace files"));
 
         int toolTokens = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .estimateTokens();
 
         assertTrue(toolTokens > baseTokens,
@@ -229,11 +244,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void toStringReflectsState() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("test", "test tool"));
 
         String str = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withHistory(true)
                 .toString();
 
@@ -321,13 +336,13 @@ class SystemPromptBuilderTest {
 
     @Test
     void withWorkspaceWorksWithToolsAndHistory() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.grep", "Search workspace"));
 
         Path ws = Path.of("/tmp/full-ws");
         String prompt = SystemPromptBuilder.forAsk()
                 .withWorkspace(ws)
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withHistory(true)
                 .build();
 
@@ -346,11 +361,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void nativeToolsOmitsXmlFormatInstructions() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(true)
                 .build();
 
@@ -366,11 +381,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void fallbackToolsIncludesJsonFormatInstructions() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(false)
                 .build();
 
@@ -387,11 +402,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void nativeToolsStillIncludesFileCreationRules() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(true)
                 .build();
 
@@ -406,13 +421,13 @@ class SystemPromptBuilderTest {
 
     @Test
     void readOnlyToolModeOmitsMutatingToolDescriptors() {
-        var registry = new ToolRegistry();
-        registry.register(stubTool("talos.read_file", "Read a workspace file", ToolRiskLevel.READ_ONLY));
-        registry.register(stubTool("talos.write_file", "Create or overwrite a file", ToolRiskLevel.WRITE));
-        registry.register(stubTool("talos.edit_file", "Replace a unique string", ToolRiskLevel.WRITE));
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", false));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", true));
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", true));
 
         String prompt = SystemPromptBuilder.forUnified()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withReadOnlyToolMode(true)
                 .build();
 
@@ -432,12 +447,12 @@ class SystemPromptBuilderTest {
 
     @Test
     void nativeReadOnlyToolModeOmitsMutatingToolDescriptors() {
-        var registry = new ToolRegistry();
-        registry.register(stubTool("talos.grep", "Search workspace files", ToolRiskLevel.READ_ONLY));
-        registry.register(stubTool("talos.edit_file", "Replace a unique string", ToolRiskLevel.WRITE));
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.grep", "Search workspace files", false));
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", true));
 
         String prompt = SystemPromptBuilder.forUnified()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(true)
                 .withReadOnlyToolMode(true)
                 .build();
@@ -454,13 +469,13 @@ class SystemPromptBuilderTest {
 
     @Test
     void verificationCommandModeKeepsRunCommandAndOmitsMutationTools() {
-        var registry = new ToolRegistry();
-        registry.register(stubTool("talos.read_file", "Read a workspace file", ToolRiskLevel.READ_ONLY));
-        registry.register(stubTool("talos.write_file", "Create or overwrite a file", ToolRiskLevel.WRITE));
-        registry.register(new RunCommandTool());
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", false));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", true));
+        registry.register(runCommandTool());
 
         String prompt = SystemPromptBuilder.forUnified()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withReadOnlyToolMode(true)
                 .withCommandToolMode(true)
                 .build();
@@ -481,13 +496,13 @@ class SystemPromptBuilderTest {
 
     @Test
     void nativeVerificationCommandModeKeepsRunCommandAndOmitsMutationTools() {
-        var registry = new ToolRegistry();
-        registry.register(stubTool("talos.grep", "Search workspace files", ToolRiskLevel.READ_ONLY));
-        registry.register(stubTool("talos.edit_file", "Replace a unique string", ToolRiskLevel.WRITE));
-        registry.register(new RunCommandTool());
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.grep", "Search workspace files", false));
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", true));
+        registry.register(runCommandTool());
 
         String prompt = SystemPromptBuilder.forUnified()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(true)
                 .withReadOnlyToolMode(true)
                 .withCommandToolMode(true)
@@ -509,12 +524,12 @@ class SystemPromptBuilderTest {
 
     @Test
     void normalToolModeStillIncludesMutatingToolDescriptors() {
-        var registry = new ToolRegistry();
-        registry.register(stubTool("talos.read_file", "Read a workspace file", ToolRiskLevel.READ_ONLY));
-        registry.register(stubTool("talos.write_file", "Create or overwrite a file", ToolRiskLevel.WRITE));
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", false));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", true));
 
         String prompt = SystemPromptBuilder.forUnified()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         assertTrue(prompt.contains("- **talos.read_file**"));
@@ -525,17 +540,17 @@ class SystemPromptBuilderTest {
 
     @Test
     void nativeToolsReducesTokenEstimate() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a file"));
         registry.register(stubTool("talos.grep", "Search workspace files"));
 
         int fallbackTokens = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(false)
                 .estimateTokens();
 
         int nativeTokens = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(true)
                 .estimateTokens();
 
@@ -546,18 +561,18 @@ class SystemPromptBuilderTest {
 
     @Test
     void toStringReflectsNativeToolsFlag() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("test", "test"));
 
         String strTrue = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(true)
                 .toString();
         assertTrue(strTrue.contains("nativeTools=true"),
                 "toString should reflect nativeTools=true");
 
         String strFalse = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(false)
                 .toString();
         assertTrue(strFalse.contains("nativeTools=false"),
@@ -576,16 +591,16 @@ class SystemPromptBuilderTest {
 
     @Test
     void defaultNativeToolsFalseMatchesFallbackBehavior() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
         // Default (nativeTools not set → false) should include JSON format instructions
         String defaultPrompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         String explicitFallback = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .withNativeTools(false)
                 .build();
 
@@ -595,12 +610,12 @@ class SystemPromptBuilderTest {
 
     @Test
     void nativeToolsWorksWithAllModes() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
         for (var builder : new SystemPromptBuilder[]{
                 SystemPromptBuilder.forAsk(), SystemPromptBuilder.forRag(), SystemPromptBuilder.forUnified()}) {
-            String prompt = builder.withTools(registry).withNativeTools(true).build();
+            String prompt = builder.withPromptTools(registry).withNativeTools(true).build();
             assertFalse(prompt.contains("<tool_call>"),
                     "Native mode should omit XML tags in all modes");
             assertTrue(prompt.contains("Available Tools"),
@@ -610,28 +625,37 @@ class SystemPromptBuilderTest {
 
     // ── Helper ──────────────────────────────────────────────────────
 
-    private static TalosTool stubTool(String name, String description) {
-        return stubTool(name, description, ToolRiskLevel.READ_ONLY);
+    private static PromptToolDescriptor stubTool(String name, String description) {
+        return stubTool(name, description, false);
     }
 
-    private static TalosTool stubTool(String name, String description, ToolRiskLevel riskLevel) {
-        return new TalosTool() {
-            @Override public String name() { return name; }
-            @Override public String description() { return description; }
-            @Override public ToolDescriptor descriptor() { return new ToolDescriptor(name, description, null, riskLevel); }
-            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("stub"); }
-        };
+    private static PromptToolDescriptor stubTool(String name, String description, boolean requiresApproval) {
+        return new PromptToolDescriptor(name, description, null, requiresApproval);
+    }
+
+    private static PromptToolDescriptor runCommandTool() {
+        return new PromptToolDescriptor(
+                "talos.run_command",
+                "Run an approved bounded command profile",
+                null,
+                true);
+    }
+
+    private static final class PromptToolSet extends ArrayList<PromptToolDescriptor> {
+        void register(PromptToolDescriptor descriptor) {
+            add(descriptor);
+        }
     }
 
     // ── File operation prompt reinforcement ──────────────────────────
 
     @Test
     void toolsPreambleContainsWriteFileExample() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         assertTrue(prompt.contains("talos.write_file"),
@@ -642,11 +666,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void toolsPreambleContainsCriticalFileModificationSection() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         assertTrue(prompt.contains("FILE CREATION AND MODIFICATION"),
@@ -684,12 +708,12 @@ class SystemPromptBuilderTest {
 
     @Test
     void fileModificationProtocolAppearsBeforeToolList() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
         registry.register(stubTool("talos.read_file", "Read a workspace file"));
 
         String prompt = SystemPromptBuilder.forAsk()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         int criticalPos = prompt.indexOf("FILE CREATION AND MODIFICATION");
@@ -703,11 +727,11 @@ class SystemPromptBuilderTest {
 
     @Test
     void writeFileExampleAppearsInWritableToolPrompt() {
-        var registry = new ToolRegistry();
+        var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
         String prompt = SystemPromptBuilder.forRag()
-                .withTools(registry)
+                .withPromptTools(registry)
                 .build();
 
         // Verify the concrete write_file example is in the prompt

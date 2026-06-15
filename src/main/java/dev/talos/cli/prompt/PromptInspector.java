@@ -11,6 +11,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 
@@ -58,7 +59,7 @@ public final class PromptInspector {
         if ("unified".equals(resolvedMode)) {
             if (!smallTalk) {
                 builder
-                        .withTools(ctx == null ? null : ctx.toolRegistry())
+                        .withPromptTools(PromptToolDescriptors.fromRegistry(ctx == null ? null : ctx.toolRegistry()))
                         .withVisibleToolNames(effectiveTools)
                         .withWorkspace(workspace)
                         .withReadOnlyToolMode(!contract.mutationAllowed())
@@ -66,7 +67,7 @@ public final class PromptInspector {
             }
         } else {
             builder
-                    .withTools(ctx == null ? null : ctx.toolRegistry())
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(ctx == null ? null : ctx.toolRegistry()))
                     .withWorkspace(workspace);
         }
         String system = builder.build();

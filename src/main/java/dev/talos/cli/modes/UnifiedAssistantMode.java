@@ -14,6 +14,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
@@ -110,7 +111,7 @@ public final class UnifiedAssistantMode implements Mode {
                 .withDirectoryListingToolMode(directoryListing);
         if (!smallTalk) {
             promptBuilder
-                    .withTools(ctx.toolRegistry())
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                     .withVisibleToolNames(plannedNativeToolNames)
                     .withWorkspace(workspace)
                     .withReadOnlyToolMode(!taskContract.mutationAllowed())
