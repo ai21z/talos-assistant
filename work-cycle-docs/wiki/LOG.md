@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "8fa6a631a65952dce8d063c088895e332d06b2b7"
+last_verified_commit: "d1371693cdf25873a5fa477dd8bce17f5e5c500f"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -38,14 +38,20 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
     selector: "Prompt-instruction adapter thinning closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T819-open-high] core-tools-cycle-edge-scoping.md"
+    selector: "Core-tools cycle edge scoping"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
+    selector: "Generated Package Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
-min_confidence: DETERMINISTIC_STATIC
+min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 10
+  INFERRED_REVIEW: 1
+  DETERMINISTIC_STATIC: 11
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -273,3 +279,11 @@ mechanically.
 - Recorded production thinning at `ef97bda0` and test ownership hardening at
   `8fa6a631`.
 - Set the next Wave 5 move to T819 report-only `core-tools-cycle-edge-scoping`.
+
+## [2026-06-15] scoping | Open T819 core-tools cycle edge
+
+- Added T819 as a report-only scoping ticket for the remaining top-level
+  `core <-> tools` package cycle.
+- Recorded current generated evidence: one SCC `{core, tools}`,
+  `core -> tools = 8`, and `tools -> core = 40`.
+- Kept production cycle surgery deferred to a later T820 decision.

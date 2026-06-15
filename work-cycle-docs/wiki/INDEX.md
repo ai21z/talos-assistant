@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "8fa6a631a65952dce8d063c088895e332d06b2b7"
+last_verified_commit: "d1371693cdf25873a5fa477dd8bce17f5e5c500f"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -44,11 +44,17 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
     selector: "Prompt-instruction adapter thinning closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T819-open-high] core-tools-cycle-edge-scoping.md"
+    selector: "Core-tools cycle edge scoping"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
+    selector: "Generated Package Evidence"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 4
-  DETERMINISTIC_STATIC: 8
+  INFERRED_REVIEW: 5
+  DETERMINISTIC_STATIC: 9
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -86,9 +92,9 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- `T819` core-tools cycle edge scoping.
 
-Next planned ticket: `T819` report-only `core-tools-cycle-edge-scoping`.
+Next planned move: finish T819 scoping before T820 production cycle-break work.
 
 ## Update Rule
 
