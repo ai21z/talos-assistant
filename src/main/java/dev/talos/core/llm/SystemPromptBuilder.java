@@ -1,8 +1,6 @@
 package dev.talos.core.llm;
 
 import dev.talos.core.util.WorkspaceManifest;
-import dev.talos.tools.ToolDescriptor;
-import dev.talos.tools.ToolRegistry;
 
 import java.io.InputStream;
 import java.util.List;
@@ -26,7 +24,7 @@ import java.util.Set;
  * <p>Usage:
  * <pre>{@code
  * String prompt = SystemPromptBuilder.forAsk()
- *         .withTools(toolRegistry)
+ *         .withPromptTools(promptTools)
  *         .withHistory(true)
  *         .build();
  * }</pre>
@@ -44,7 +42,7 @@ public final class SystemPromptBuilder {
 
 
     private final Mode mode;
-    private ToolRegistry toolRegistry;
+    private List<PromptToolDescriptor> promptTools;
     private boolean hasHistory;
     private boolean nativeTools;
     private boolean readOnlyToolMode;
@@ -75,9 +73,9 @@ public final class SystemPromptBuilder {
         return new SystemPromptBuilder(Mode.UNIFIED);
     }
 
-    /** Include tool descriptions from the given registry. */
-    public SystemPromptBuilder withTools(ToolRegistry registry) {
-        this.toolRegistry = registry;
+    /** Include prompt-facing tool descriptions. */
+    public SystemPromptBuilder withPromptTools(List<PromptToolDescriptor> promptTools) {
+        this.promptTools = promptTools == null ? null : List.copyOf(promptTools);
         return this;
     }
 
@@ -276,13 +274,13 @@ public final class SystemPromptBuilder {
         return sb.toString();
     }
 
-    /** Build tool descriptions from registry. */
+    /** Build tool descriptions from prompt-facing descriptors. */
     private String buildToolSection() {
-        if (toolRegistry == null || toolRegistry.isEmpty()) {
+        if (promptTools == null || promptTools.isEmpty()) {
             return null;
         }
 
-        List<ToolDescriptor> descriptors = toolRegistry.descriptors();
+        List<PromptToolDescriptor> descriptors = promptTools;
         if (visibleToolNames != null) {
             descriptors = descriptors.stream()
                     .filter(td -> visibleToolNames.contains(td.name()))
@@ -294,7 +292,7 @@ public final class SystemPromptBuilder {
                     .toList();
         } else if (readOnlyToolMode) {
             descriptors = descriptors.stream()
-                    .filter(td -> !td.riskLevel().requiresApproval()
+                    .filter(td -> !td.requiresApproval()
                             || (commandToolMode && "talos.run_command".equals(td.name())))
                     .toList();
         }
@@ -339,7 +337,7 @@ public final class SystemPromptBuilder {
         sb.append("\n\n");
 
         // Tool descriptions
-        for (ToolDescriptor td : descriptors) {
+        for (PromptToolDescriptor td : descriptors) {
             sb.append("- **").append(td.name()).append("**: ").append(td.description());
             if (td.parametersSchema() != null) {
                 sb.append("\n  Parameters: `").append(td.parametersSchema().strip()).append("`");
@@ -582,7 +580,7 @@ public final class SystemPromptBuilder {
     @Override
     public String toString() {
         return "SystemPromptBuilder[mode=" + mode
-                + ", tools=" + (toolRegistry != null && !toolRegistry.isEmpty())
+                + ", tools=" + (promptTools != null && !promptTools.isEmpty())
                 + ", nativeTools=" + nativeTools
                 + ", readOnlyToolMode=" + readOnlyToolMode
                 + ", commandToolMode=" + commandToolMode

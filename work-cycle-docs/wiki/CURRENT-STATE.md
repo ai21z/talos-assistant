@@ -53,6 +53,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T821-open-high] system-prompt-builder-tool-catalog-cycle-break.md"
+    selector: "Scope"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -71,8 +74,8 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 10
-  DETERMINISTIC_STATIC: 13
+  INFERRED_REVIEW: 11
+  DETERMINISTIC_STATIC: 14
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
   GATED: 0
@@ -88,7 +91,7 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T821 `SystemPromptBuilder` tool-catalog cycle seam.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -106,9 +109,9 @@ confidence_histogram:
   the tool-loop outcome path, and `TurnOutput` assembly in
   `AssistantTurnExecutor`; T818 completed prompt-instruction adapter thinning;
   T819 completed report-only `core-tools-cycle-edge-scoping`; T820 completed
-  the `ContextItem` tool-result adapter and neutral privacy seam.
-- Next move: T821 `SystemPromptBuilder` tool-catalog seam before the remaining
-  `RagService` seam.
+  the `ContextItem` tool-result adapter and neutral privacy seam; T821 is the
+  active `SystemPromptBuilder` prompt-facing tool-catalog seam.
+- Next move: complete and review T821 before the remaining `RagService` seam.
 
 ```talos-wiki-claims
 {

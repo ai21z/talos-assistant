@@ -50,14 +50,17 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
     selector: "ContextItem tool-result adapter cycle break closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T821-open-high] system-prompt-builder-tool-catalog-cycle-break.md"
+    selector: "SystemPromptBuilder tool-catalog cycle seam"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 6
-  DETERMINISTIC_STATIC: 10
+  INFERRED_REVIEW: 7
+  DETERMINISTIC_STATIC: 11
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -95,10 +98,10 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T821: `SystemPromptBuilder` tool-catalog cycle seam.
 
-Next planned move: T821 `SystemPromptBuilder` tool-catalog cycle seam before
-the remaining `RagService` seam.
+Next planned move: complete and review T821 before the remaining `RagService`
+seam.
 
 ## Update Rule
 
