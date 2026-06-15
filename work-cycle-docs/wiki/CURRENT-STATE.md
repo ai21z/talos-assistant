@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "ed5fd4f081ad45c21bd00bd60e6781872b6efde6"
+last_verified_commit: "916d0780bcb49da747e9894b34f3f5412a4b2f87"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -57,8 +57,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T822-open-high] rag-tool-protocol-text-cycle-break.md"
-    selector: "Implementation Evidence"
+    ref: "work-cycle-docs/tickets/done/[T822-done-high] rag-tool-protocol-text-cycle-break.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -89,12 +89,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `ed5fd4f081ad45c21bd00bd60e6781872b6efde6`
+- Commit: `916d0780bcb49da747e9894b34f3f5412a4b2f87`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T822 `RagService` / `ToolProtocolText` cycle seam.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -114,10 +114,11 @@ confidence_histogram:
   T819 completed report-only `core-tools-cycle-edge-scoping`; T820 completed
   the `ContextItem` tool-result adapter and neutral privacy seam; T821
   completed the `SystemPromptBuilder` prompt-facing tool-catalog seam while
-  leaving the final `RagService` / `ToolProtocolText` production edge; T822 is
-  the active final `core -> tools` cycle-break seam.
-- Next move: review and close T822 if the focused, broad, architecture, and
-  wiki evidence gates stay green.
+  leaving the final `RagService` / `ToolProtocolText` production edge; T822
+  completed the final planned `core -> tools` cycle-break seam and cleared the
+  top-level `{core, tools}` SCC.
+- Next move: open T823 as characterization-only `ToolCallLoop` orchestration
+  evidence before any T824 extraction.
 
 ```talos-wiki-claims
 {
@@ -243,10 +244,12 @@ prompt-facing descriptors and a runtime-owned registry adapter. Generated
 evidence shows `core -> tools` reduced to 1 while the `{core, tools}` SCC
 remains because `core.rag.RagService` still imports tool-protocol cleanup.
 
-T822 is open. Its purpose is to remove the final production `core -> tools`
+T822 is done. Its purpose was to remove the final production `core -> tools`
 dependency by moving non-executing tool-protocol text cleanup and tool-name
 alias recognition behind neutral core owners while keeping compatibility
-wrappers in `tools`.
+wrappers in `tools`. Regenerated architecture evidence at implementation
+commit `916d0780bcb49da747e9894b34f3f5412a4b2f87` reports `core -> tools = 0`
+and no non-trivial top-level package SCCs.
 
 ## Wave 5 Readiness Status
 
@@ -267,10 +270,11 @@ characterization, and T817 extracted the no-tool outcome resolver. T818
 completed adapter thinning. T819 completed report-only
 `core-tools-cycle-edge-scoping`. T820 completed the first production
 cycle-seam step for `ContextItem`; it did not clear the full `{core, tools}`
-SCC. T821 completed the `SystemPromptBuilder` tool-catalog seam. T822 is the
-active final `RagService` / `ToolProtocolText` seam; local regenerated
+SCC. T821 completed the `SystemPromptBuilder` tool-catalog seam. T822
+completed the final `RagService` / `ToolProtocolText` seam; local regenerated
 architecture evidence after implementation shows `core -> tools = 0` and no
-non-trivial top-level package SCCs.
+non-trivial top-level package SCCs. The next Wave 5 move is T823
+`ToolCallLoop` orchestration characterization.
 
 ## Operating Boundaries
 

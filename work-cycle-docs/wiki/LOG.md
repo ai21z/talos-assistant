@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "ed5fd4f081ad45c21bd00bd60e6781872b6efde6"
+last_verified_commit: "916d0780bcb49da747e9894b34f3f5412a4b2f87"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -48,8 +48,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
     selector: "SystemPromptBuilder tool-catalog cycle seam closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T822-open-high] rag-tool-protocol-text-cycle-break.md"
-    selector: "RagService tool-protocol text cycle seam"
+    ref: "work-cycle-docs/tickets/done/[T822-done-high] rag-tool-protocol-text-cycle-break.md"
+    selector: "RagService tool-protocol text cycle seam closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -358,3 +358,12 @@ mechanically.
   protocol-text cleanup while keeping `tools` compatibility wrappers.
 - Local regenerated architecture evidence after implementation shows
   `core -> tools = 0` and no non-trivial top-level package SCCs.
+
+## [2026-06-15] ledger | Close T822 final core-tools cycle seam
+
+- Moved T822 to the done ticket ledger after green focused, broad, `check`,
+  architecture, and wiki evidence gates.
+- Recorded that `core -> tools = 0` and no non-trivial top-level package SCCs
+  remain in regenerated architecture evidence.
+- Set the next Wave 5 move to T823, a characterization-only `ToolCallLoop`
+  orchestration boundary ticket before any T824 extraction.
