@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "33e3998bdb2dcea74a0bbdde7dcf8c3b59626f23"
+last_verified_commit: "668adb467cf83ed5bc77ad23bba34ed227ae7a89"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -51,8 +51,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T822-done-high] rag-tool-protocol-text-cycle-break.md"
     selector: "RagService tool-protocol text cycle seam closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T823-open-high] tool-call-loop-orchestration-characterization.md"
-    selector: "ToolCallLoop orchestration characterization"
+    ref: "work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration characterization closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -381,3 +381,13 @@ mechanically.
 - Pinned no-tool, text tool-call, native tool-call, iteration-limit, and
   report-boundary behavior before any `ToolCallLoopEngine` extraction.
 - Kept production extraction deferred to T824.
+
+## [2026-06-15] ledger | Close T823 ToolCallLoop orchestration
+
+- Moved T823 to the done ticket ledger after green focused, broad, `check`,
+  and wiki evidence gates.
+- Corrected the future engine owner to package-private
+  `dev.talos.runtime.ToolCallLoopEngine` so Java package-private access remains
+  valid without broadening `ToolLoopFinalAnswerFinalizer`.
+- Set the next Wave 5 move to T824, a behavior-preserving
+  `ToolCallLoopEngine` extraction.

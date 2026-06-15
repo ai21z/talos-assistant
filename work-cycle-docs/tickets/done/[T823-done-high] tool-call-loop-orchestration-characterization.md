@@ -1,6 +1,6 @@
 # T823 ToolCallLoop Orchestration Characterization
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime tool-call loop
@@ -62,7 +62,7 @@ T823 characterization targets:
 ## T824 Candidate Boundary
 
 Candidate owner: package-private `ToolCallLoopEngine` in
-`dev.talos.runtime.toolcall`.
+`dev.talos.runtime`.
 
 Move later in T824:
 
@@ -97,6 +97,27 @@ Keep in `ToolCallLoop` until separately scoped:
   `ToolCallLoopCompactionTest`, `dev.talos.runtime.toolcall.*`, full `check`,
   and `wikiEvidenceCloseGate --rerun-tasks` remain green.
 - No production source files are changed by T823.
+
+## Completion Evidence
+
+T823 is done. It added characterization-only coverage for
+`runtime.ToolCallLoop` orchestration and did not change production source.
+
+Completion evidence:
+
+- `ToolCallLoopOrchestrationCharacterizationTest` covers no-tool, text
+  tool-call, native tool-call, iteration-limit, and report-boundary behavior.
+- The T823 report records the future T824 owner as package-private
+  `dev.talos.runtime.ToolCallLoopEngine`.
+- T823 made no production source changes and did not authorize extraction.
+- Focused `ToolCallLoop` suites, `dev.talos.runtime.toolcall.*`, full `check`,
+  and `wikiEvidenceCloseGate --rerun-tasks` were green before closeout.
+- The T824 package correction is deliberate: Java package-private access does
+  not cross subpackages, and placing the engine in `dev.talos.runtime` avoids
+  broadening `ToolLoopFinalAnswerFinalizer` visibility.
+
+The next Wave 5 move is T824, a behavior-preserving extraction into
+package-private `ToolCallLoopEngine`.
 
 ## Verification
 
