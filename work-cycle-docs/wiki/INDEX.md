@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "d1d7eedde5cbef029f28e8d8be52a1a31e1ee11c"
+last_verified_commit: "8fa6a631a65952dce8d063c088895e332d06b2b7"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -42,8 +42,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T817-done-high] assistant-turn-executor-no-tool-outcome-extraction.md"
     selector: "No-tool outcome resolver extraction closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T818-open-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
-    selector: "Prompt-instruction adapter thinning"
+    ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
+    selector: "Prompt-instruction adapter thinning closeout"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -86,8 +86,9 @@ or generated reports.
 
 ## Active Tickets
 
-- `T818` - prompt-instruction adapter thinning for remaining
-  `AssistantTurnExecutor.inject*` compatibility delegates.
+- None.
+
+Next planned ticket: `T819` report-only `core-tools-cycle-edge-scoping`.
 
 ## Update Rule
 
