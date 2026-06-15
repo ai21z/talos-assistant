@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "a1b261b62aaca7b619d6fb18ad032c3e37c9ceec"
+last_verified_commit: "189e9c45b84a54d8d3f1c58f4606570d5a610a85"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -39,8 +39,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T815-done-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
     selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T816-open-high] assistant-turn-executor-no-tool-outcome-characterization.md"
-    selector: "T817 Candidate Boundary"
+    ref: "work-cycle-docs/tickets/done/[T816-done-high] assistant-turn-executor-no-tool-outcome-characterization.md"
+    selector: "Completion State"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -68,12 +68,13 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `a1b261b62aaca7b619d6fb18ad032c3e37c9ceec`
+- Commit: `189e9c45b84a54d8d3f1c58f4606570d5a610a85`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T816 no-tool outcome characterization.
+- Active tickets: none. Next planned ticket is T817 no-tool outcome resolver
+  extraction.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -85,11 +86,10 @@ confidence_histogram:
   `AssistantTurnExecutor`; T814 completed post-tool-loop outcome
   characterization without production extraction; T815 completed the
   post-tool-loop outcome extraction while leaving no-tool outcome ownership in
-  `AssistantTurnExecutor`; T816 is now open to characterize that no-tool
-  outcome boundary.
-- Next move: review and close T816 only after focused characterization,
-  `dev.talos.cli.modes.*`, `check`, and the wiki evidence close gate remain
-  green. Do not extract the no-tool outcome boundary until T817.
+  `AssistantTurnExecutor`; T816 completed characterization of that no-tool
+  outcome boundary without production extraction.
+- Next move: open T817 to extract the no-tool outcome resolver into
+  package-private `AssistantNoToolOutcomeResolver`.
 
 ```talos-wiki-claims
 {
@@ -185,7 +185,7 @@ into package-private `AssistantToolLoopOutcomeResolver` while keeping
 begin/set/clear, branch selection, and `TurnOutput` assembly in
 `AssistantTurnExecutor`.
 
-T816 is open. Its purpose is to characterize the no-tool outcome boundary
+T816 is done. Its purpose was to characterize the no-tool outcome boundary
 around `resolveNoToolAnswer(...)` before any future extraction into
 package-private `AssistantNoToolOutcomeResolver`.
 
@@ -203,8 +203,9 @@ completed the turn-preparation extraction into `AssistantTurnPreparation`.
 The invariant remains lifecycle ownership first, class movement second. The
 model-dispatch boundary was characterized by T812 and extracted by T813. T814
 completed the tool-loop outcome characterization, and T815 extracted the
-post-tool-loop outcome resolver. T816 is the active no-tool outcome
-characterization ticket, not package-cycle cleanup.
+post-tool-loop outcome resolver. T816 completed no-tool outcome
+characterization. The next Wave 5 move is T817 no-tool outcome resolver
+extraction, not package-cycle cleanup.
 
 ## Operating Boundaries
 

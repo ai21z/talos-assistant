@@ -1,6 +1,6 @@
 # T816 AssistantTurnExecutor No-Tool Outcome Characterization
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime behavior preservation
@@ -96,6 +96,25 @@ Keep in `AssistantTurnExecutor` until separately characterized:
 - `dev.talos.cli.modes.*`, full `check`, and
   `wikiEvidenceCloseGate --rerun-tasks` remain green.
 - No production source files are changed by T816.
+
+## Completion State
+
+T816 is done. It added characterization-only coverage for the no-tool outcome
+boundary around `AssistantTurnExecutor.resolveNoToolAnswer(...)`.
+
+Completion evidence:
+
+- `AssistantTurnExecutorNoToolOutcomeCharacterizationTest` covers malformed
+  protocol/debris retry, no-tool missing-mutation retry, read-evidence handoff,
+  read-only inspection retry, and stream-sink buffering.
+- The T816 report records the future T817 owner as package-private
+  `AssistantNoToolOutcomeResolver`.
+- T816 made no production source changes and did not authorize extraction.
+- Focused characterization, `dev.talos.cli.modes.*`, full `check`, and
+  `wikiEvidenceCloseGate --rerun-tasks` were green before closeout.
+
+The next Wave 5 move is T817, a behavior-preserving extraction into
+`AssistantNoToolOutcomeResolver`.
 
 ## Verification
 
