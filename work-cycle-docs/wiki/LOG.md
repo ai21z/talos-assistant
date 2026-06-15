@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "d1371693cdf25873a5fa477dd8bce17f5e5c500f"
+last_verified_commit: "6fc7d5b17169f736098d8cd7602cd957aca35a05"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -39,8 +39,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
     selector: "Prompt-instruction adapter thinning closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T819-open-high] core-tools-cycle-edge-scoping.md"
-    selector: "Core-tools cycle edge scoping"
+    ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
+    selector: "Core-tools cycle edge scoping closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -287,3 +287,11 @@ mechanically.
 - Recorded current generated evidence: one SCC `{core, tools}`,
   `core -> tools = 8`, and `tools -> core = 40`.
 - Kept production cycle surgery deferred to a later T820 decision.
+
+## [2026-06-15] ledger | Close T819 core-tools cycle edge
+
+- Moved T819 to the done ticket ledger after report-only scoping and green
+  wiki evidence gates.
+- Recorded that T820 should start at the `ContextItem` tool-result adapter /
+  neutral privacy seam.
+- Kept `SystemPromptBuilder` and `RagService` cycle seams deferred.
