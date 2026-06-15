@@ -7,7 +7,7 @@
   `33e3998bdb2dcea74a0bbdde7dcf8c3b59626f23`
 - Talos version: `0.10.5`
 - Ticket:
-  `work-cycle-docs/tickets/open/[T823-open-high] tool-call-loop-orchestration-characterization.md`
+  `work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md`
 - Source:
   `src/main/java/dev/talos/runtime/ToolCallLoop.java`
 
@@ -53,7 +53,13 @@ T823 is characterization-only. T823 does not authorize production extraction.
 ## T824 Candidate Owner
 
 T824 may introduce package-private `ToolCallLoopEngine` in
-`dev.talos.runtime.toolcall`.
+`dev.talos.runtime`.
+
+This owner package is required by Java visibility: `ToolCallLoop` is in
+`dev.talos.runtime`, and package-private classes in `dev.talos.runtime.toolcall`
+are not visible to it. Keeping the engine in `dev.talos.runtime` also preserves
+package-private access to `ToolLoopFinalAnswerFinalizer` without broadening that
+helper's visibility.
 
 Move later in T824:
 
