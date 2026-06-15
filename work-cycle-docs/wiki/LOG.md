@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "a8853667d69f8d46abf28e9b4bd1e72f597f99d5"
+last_verified_commit: "40fc721d84bda76c404b7f884178d2e336d0e04c"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -42,8 +42,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
     selector: "Core-tools cycle edge scoping closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T820-open-high] context-item-tool-result-adapter-cycle-break.md"
-    selector: "ContextItem tool-result adapter cycle break"
+    ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
+    selector: "ContextItem tool-result adapter cycle break closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -316,3 +316,12 @@ mechanically.
 - Regenerated architecture intelligence: `core -> tools` dropped from 8 to 4,
   and the `{core, tools}` SCC remains for the deferred `SystemPromptBuilder`
   and `RagService` seams.
+
+## [2026-06-15] ledger | Close T820 ContextItem adapter seam
+
+- Moved T820 to the done ticket ledger after adding enum parity coverage for
+  the adapter's privacy mapping.
+- Recorded that `core.context` no longer imports `tools` and
+  `ContextItem.fromToolResult(...)` is gone.
+- Set the next Wave 5 move to T821, the `SystemPromptBuilder` tool-catalog
+  cycle seam.

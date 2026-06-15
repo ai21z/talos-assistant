@@ -1,6 +1,6 @@
 # T820 ContextItem Tool-Result Adapter Cycle Break
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/core-tools package boundary
@@ -57,9 +57,14 @@ T820 is behavior-preserving architecture work. It should reduce the generated
 - Preserve metadata source-path fallback and protected path token redaction.
 - Preserve output hash, character, byte, line, and token count behavior.
 
-## Implementation State
+## Completion Evidence
 
-Implemented and awaiting review/closeout.
+Completed in two commits:
+
+- Production cycle-seam extraction:
+  `0fea1ef0f5d037727b20f4f686936afda560b804`
+- Privacy enum mapping guard:
+  `40fc721d84bda76c404b7f884178d2e336d0e04c`
 
 - Added neutral `core.context.ContextPrivacyClass`.
 - Removed `dev.talos.tools.*` imports from `core.context`.
@@ -67,10 +72,15 @@ Implemented and awaiting review/closeout.
 - Added package-private `runtime.toolcall.ToolResultContextItemAdapter`.
 - Repointed context-ledger recording in `ToolCallExecutionStage`.
 - Replaced the old core fallback test with runtime adapter coverage.
+- Added explicit parity coverage proving `ContextPrivacyClass` and
+  `ToolContentMetadata.ContentPrivacyClass` stay name-compatible for the
+  adapter's privacy mapping.
 - Generated architecture evidence after implementation:
   - `core -> tools` reduced from 8 to 4;
   - `{core, tools}` SCC remains, as expected, because `RagService` and
     `SystemPromptBuilder` still import `tools`.
+- No `ContextItem.fromToolResult(...)` call sites remain.
+- No `dev.talos.tools.*` imports remain in `core.context`.
 
 ## Verification
 
