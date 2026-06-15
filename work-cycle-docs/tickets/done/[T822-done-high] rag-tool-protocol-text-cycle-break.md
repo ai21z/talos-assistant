@@ -1,6 +1,6 @@
 # T822 Rag Tool-Protocol Text Cycle Break
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/core-tools package boundary
@@ -92,3 +92,18 @@ Local regenerated architecture evidence after implementation:
 - `core -> tools = 0`.
 - `tools -> core = 42`.
 - No non-trivial top-level package SCCs detected.
+
+## Completion Evidence
+
+- Implementation commit: `916d0780bcb49da747e9894b34f3f5412a4b2f87`.
+- `check` passed after the implementation batch.
+- `wikiEvidenceCloseGate --rerun-tasks` passed after regenerating architecture
+  intelligence for `916d0780bcb49da747e9894b34f3f5412a4b2f87`.
+- Source hygiene confirmed production `core` has no `dev.talos.tools.*`
+  imports.
+- Source hygiene confirmed no remaining `dev.talos.tools.ToolProtocolText`
+  imports or fully-qualified references in `src/main` or `src/test`.
+- Generated architecture evidence reports `core -> tools = 0` and no
+  non-trivial top-level package SCCs.
+- Next Wave 5 move: T823 characterization-only `ToolCallLoop` orchestration
+  boundary.
