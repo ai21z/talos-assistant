@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "482fccc7b624fd0be77a439d3b61f375f070d24c"
+last_verified_commit: "866c9388b32c631c92160ae3c85f771cfe287251"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -65,6 +65,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T825-done-high] tool-loop-internals-boundary-scoping.md"
     selector: "Tool-loop internals boundary scoping closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T826-open-high] tool-call-execution-stage-characterization.md"
+    selector: "ToolCallExecutionStage characterization"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -74,11 +77,14 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t825-tool-loop-internals-boundary-scoping.md"
     selector: "Tool-loop internals boundary scoping"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t826-tool-call-execution-stage-characterization.md"
+    selector: "ToolCallExecutionStage characterization"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 10
-  DETERMINISTIC_STATIC: 15
+  INFERRED_REVIEW: 11
+  DETERMINISTIC_STATIC: 17
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -116,9 +122,9 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T826 `tool-call-execution-stage-characterization`.
 
-Next planned move: open T826 `tool-call-execution-stage-characterization`.
+Next planned move: review and close T826 before any T827 production decomposition.
 
 ## Update Rule
 

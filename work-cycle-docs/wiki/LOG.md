@@ -430,3 +430,12 @@ mechanically.
   `482fccc7b624fd0be77a439d3b61f375f070d24c`.
 - Selected T826 `ToolCallExecutionStage` characterization as the next step
   before any production decomposition.
+
+## [2026-06-16] characterization | Open T826 ToolCallExecutionStage
+
+- Added T826 as characterization-only for direct
+  `ToolCallExecutionStage.execute(...)` behavior.
+- Pinned text/native result-message shape, approval denial, private-document
+  pre-execution blocking, context-ledger decisions, successful execution, and
+  failed edit accounting.
+- Kept production decomposition deferred to T827.
