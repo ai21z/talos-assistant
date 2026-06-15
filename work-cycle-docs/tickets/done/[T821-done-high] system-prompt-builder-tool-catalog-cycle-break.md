@@ -1,6 +1,6 @@
 # T821 SystemPromptBuilder Tool-Catalog Cycle Break
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/core-tools package boundary
@@ -86,6 +86,23 @@ Source hygiene note:
 - Two pre-existing `src/test/java/dev/talos/core/llm` executor/native-surface
   tests still import concrete tools as test fixtures. They are not production
   cycle edges and are outside T821's production seam.
+
+## Completion Evidence
+
+- Implementation commit:
+  `d3d548a02a5fffa11b973000b960eee98808b18c`.
+- Production `core.llm` no longer imports `dev.talos.tools.*`.
+- `SystemPromptBuilder` consumes neutral `PromptToolDescriptor` values via
+  `withPromptTools(...)`.
+- `PromptToolDescriptors` adapts executable `ToolRegistry` descriptors from
+  `runtime.toolcall`.
+- Exact prompt tool-rendering golden coverage exists in
+  `SystemPromptBuilderTest`.
+- Regenerated architecture evidence shows `core -> tools = 1`; the remaining
+  production edge is `core.rag.RagService -> tools.ToolProtocolText`.
+- The `{core, tools}` SCC remains until T822 removes the final
+  `RagService` seam.
+- T822 is the next planned cycle-break ticket.
 
 ## Verification
 

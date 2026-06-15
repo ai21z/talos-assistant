@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "40fc721d84bda76c404b7f884178d2e336d0e04c"
+last_verified_commit: "d3d548a02a5fffa11b973000b960eee98808b18c"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -44,6 +44,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
     selector: "ContextItem tool-result adapter cycle break closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
+    selector: "SystemPromptBuilder tool-catalog cycle seam closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -54,7 +57,7 @@ min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 2
-  DETERMINISTIC_STATIC: 12
+  DETERMINISTIC_STATIC: 13
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -334,3 +337,12 @@ mechanically.
   but feed it neutral prompt-facing descriptors instead of executable tool
   registry types.
 - Kept the remaining `RagService` / `ToolProtocolText` seam deferred.
+
+## [2026-06-15] ledger | Close T821 SystemPromptBuilder tool catalog seam
+
+- Moved T821 to the done ticket ledger after the neutral prompt descriptor
+  seam and golden rendering guard were committed.
+- Recorded that production `core.llm` no longer imports executable tool
+  registry types.
+- Set the next Wave 5 move to T822, the final `RagService` /
+  `ToolProtocolText` cycle seam.

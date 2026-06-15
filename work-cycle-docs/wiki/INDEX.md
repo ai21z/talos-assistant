@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "40fc721d84bda76c404b7f884178d2e336d0e04c"
+last_verified_commit: "d3d548a02a5fffa11b973000b960eee98808b18c"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -51,8 +51,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
     selector: "ContextItem tool-result adapter cycle break closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T821-open-high] system-prompt-builder-tool-catalog-cycle-break.md"
-    selector: "SystemPromptBuilder tool-catalog cycle seam"
+    ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
+    selector: "SystemPromptBuilder tool-catalog cycle seam closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -60,7 +60,7 @@ min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 7
-  DETERMINISTIC_STATIC: 11
+  DETERMINISTIC_STATIC: 12
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -98,10 +98,9 @@ or generated reports.
 
 ## Active Tickets
 
-- T821: `SystemPromptBuilder` tool-catalog cycle seam.
+- None in the Wave 5 T81x/T82x arc.
 
-Next planned move: complete and review T821 before the remaining `RagService`
-seam.
+Next planned move: T822 final `RagService` / `ToolProtocolText` cycle seam.
 
 ## Update Rule
 
