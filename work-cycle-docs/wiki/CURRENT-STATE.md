@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "482fccc7b624fd0be77a439d3b61f375f070d24c"
+last_verified_commit: "866c9388b32c631c92160ae3c85f771cfe287251"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -68,6 +68,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T825-done-high] tool-loop-internals-boundary-scoping.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T826-open-high] tool-call-execution-stage-characterization.md"
+    selector: "Characterization Targets"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -86,14 +89,17 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t825-tool-loop-internals-boundary-scoping.md"
     selector: "Candidate T826 Owners"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t826-tool-call-execution-stage-characterization.md"
+    selector: "Characterized Behavior"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
     selector: "/schema, /branch, /commit, /talosVersion, /reportPaths, /jsonPaths"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 14
-  DETERMINISTIC_STATIC: 18
+  INFERRED_REVIEW: 15
+  DETERMINISTIC_STATIC: 20
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
   GATED: 0
@@ -104,12 +110,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `482fccc7b624fd0be77a439d3b61f375f070d24c`
+- Commit: `866c9388b32c631c92160ae3c85f771cfe287251`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T826 `tool-call-execution-stage-characterization`.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -135,8 +141,9 @@ confidence_histogram:
   `ToolCallLoop` orchestration evidence and did not authorize extraction by
   itself; T824 completed the behavior-preserving `ToolCallLoopEngine`
   extraction while keeping `ToolCallLoop` as the public facade; T825 completed
-  scoping of the remaining `runtime.toolcall` internals.
-- Next move: open T826 `tool-call-execution-stage-characterization`.
+  scoping of the remaining `runtime.toolcall` internals; T826 is
+  characterization-only for `ToolCallExecutionStage.execute(...)`.
+- Next move: review and close T826 before any T827 production decomposition.
 
 ```talos-wiki-claims
 {
@@ -290,6 +297,13 @@ evidence for `ToolCallLoop`, `LoopState`, `ToolCallSupport`, and
 selected T826 `ToolCallExecutionStage` characterization as the next step; and
 did not authorize production extraction.
 
+T826 is open. Its purpose is to characterize
+`runtime.toolcall.ToolCallExecutionStage.execute(...)` directly before any
+T827 production decomposition. It pins text/native result-message shape,
+approval denial flags, private-document path-policy blocking, context-ledger
+decisions, successful execution accounting, failed edit accounting, and the
+public `IterationOutcome` surface.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -317,6 +331,8 @@ orchestration characterization. T824 completed behavior-preserving extraction
 into package-private `dev.talos.runtime.ToolCallLoopEngine`. T825 completed
 remaining `runtime.toolcall` internals scoping and selected T826
 `ToolCallExecutionStage` characterization before any production decomposition.
+T826 is now open as characterization-only; production decomposition remains
+deferred to T827.
 
 ## Operating Boundaries
 
