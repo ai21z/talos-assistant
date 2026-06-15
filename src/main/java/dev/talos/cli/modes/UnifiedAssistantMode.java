@@ -8,6 +8,7 @@ import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -123,12 +124,12 @@ public final class UnifiedAssistantMode implements Mode {
         List<ChatMessage> messages = buildMessages(system, rawLine, history,
                 renderPinnedFilesBlock(ctx.pinnedFiles()));
         Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);
-        AssistantTurnExecutor.injectTaskContractInstruction(
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(
                 messages,
                 taskContract,
                 initialPhase,
                 NativeToolSpecPolicy.names(turnCtx.nativeToolSpecs()));
-        AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, taskContract, workspace);
+        CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(messages, taskContract, workspace);
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
                 "unified",

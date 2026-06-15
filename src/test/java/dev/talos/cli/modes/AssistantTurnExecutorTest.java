@@ -12,6 +12,7 @@ import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -1699,7 +1700,7 @@ class AssistantTurnExecutorTest {
                     """));
             messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
 
-            AssistantTurnExecutor.injectStaticVerificationRepairInstruction(
+            CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(
                     messages,
                     TaskContractResolver.fromMessages(messages),
                     workspace);
@@ -1770,7 +1771,7 @@ class AssistantTurnExecutorTest {
                     """));
             messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
 
-            AssistantTurnExecutor.injectStaticVerificationRepairInstruction(
+            CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(
                     messages,
                     TaskContractResolver.fromMessages(messages),
                     workspace);
@@ -4781,7 +4782,7 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.user(
                     "Check the workspace for selector mismatches. Do not change anything yet."));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
 
             assertEquals(3, messages.size());
             assertEquals("system", messages.get(1).role());
@@ -4801,7 +4802,7 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.user(
                     "I want to create a modern BMI calculator website to use! Can you make it?"));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
 
             int currentUserIndex = -1;
             for (int i = messages.size() - 1; i >= 0; i--) {
@@ -4830,7 +4831,7 @@ class AssistantTurnExecutorTest {
                     "Review the BMI calculator you just created and fix any obvious issue "
                             + "that would stop it from working in a browser."));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
 
             assertEquals(3, messages.size());
             ChatMessage frame = messages.get(1);
@@ -4853,7 +4854,7 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("Create README.md."));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages, (CurrentTurnPlan) null);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages, (CurrentTurnPlan) null);
 
             String frame = messages.stream()
                     .filter(message -> "system".equals(message.role()))
@@ -4893,7 +4894,7 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.user(
                     "The current-turn obligation was not satisfied. Call the write tool now."));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages, plan);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages, plan);
 
             String frame = messages.stream()
                     .filter(message -> "system".equals(message.role()))
@@ -4919,7 +4920,7 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("hello"));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
 
             assertEquals(3, messages.size());
             String instruction = messages.get(1).content();
@@ -4935,8 +4936,8 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("Check the workspace. Do not change anything."));
 
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
-            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
 
             long count = messages.stream()
                     .filter(message -> "system".equals(message.role()))
@@ -4974,7 +4975,7 @@ class AssistantTurnExecutorTest {
                     "model",
                     messages.get(messages.size() - 1).content());
             try {
-                AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, contract);
+                CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(messages, contract);
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertTrue(messages.stream()
@@ -5015,7 +5016,7 @@ class AssistantTurnExecutorTest {
                             + "that would stop it from working in a browser."));
             var contract = TaskContractResolver.fromMessages(messages);
 
-            AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, contract);
+            CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(messages, contract);
 
             assertTrue(messages.stream()
                     .filter(message -> "system".equals(message.role()))

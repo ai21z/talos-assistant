@@ -11,7 +11,6 @@ import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.context.ChangeSummaryContext;
-import dev.talos.runtime.context.ProjectMemoryContext;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
@@ -627,7 +626,7 @@ public final class AssistantTurnExecutor {
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         ExecutionPhase phase = currentExecutionPhase(ctx, contract);
         List<String> nativeTools = ctx == null
-                ? defaultVisibleToolNames(contract, phase)
+                ? ToolSurfacePlanner.defaultVisibleToolNames(contract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
         return CurrentTurnPlan.compatibility(contract, phase, nativeTools, nativeTools, List.of());
     }
@@ -723,46 +722,6 @@ public final class AssistantTurnExecutor {
                 || lower.contains("css")
                 || lower.contains("javascript")
                 || lower.contains("script");
-    }
-
-    public static void injectTaskContractInstruction(List<ChatMessage> messages) {
-        AssistantTurnPreparation.injectTaskContractInstruction(messages);
-    }
-
-    public static void injectTaskContractInstruction(List<ChatMessage> messages, CurrentTurnPlan plan) {
-        AssistantTurnPreparation.injectTaskContractInstruction(messages, plan);
-    }
-
-    static void injectProjectMemoryInstruction(List<ChatMessage> messages, ProjectMemoryContext projectMemory) {
-        AssistantTurnPreparation.injectProjectMemoryInstruction(messages, projectMemory);
-    }
-
-    public static void injectTaskContractInstruction(
-            List<ChatMessage> messages,
-            TaskContract contract,
-            ExecutionPhase phase,
-            List<String> visibleTools
-    ) {
-        AssistantTurnPreparation.injectTaskContractInstruction(messages, contract, phase, visibleTools);
-    }
-
-    private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
-        return ToolSurfacePlanner.defaultVisibleToolNames(contract, phase);
-    }
-
-    static void injectStaticVerificationRepairInstruction(
-            List<ChatMessage> messages,
-            TaskContract taskContract
-    ) {
-        AssistantTurnPreparation.injectStaticVerificationRepairInstruction(messages, taskContract);
-    }
-
-    static void injectStaticVerificationRepairInstruction(
-            List<ChatMessage> messages,
-            TaskContract taskContract,
-            Path workspace
-    ) {
-        AssistantTurnPreparation.injectStaticVerificationRepairInstruction(messages, taskContract, workspace);
     }
 
     private record WorkspaceBoundaryPreflight(String directAnswer, String effectiveUserRequest) {

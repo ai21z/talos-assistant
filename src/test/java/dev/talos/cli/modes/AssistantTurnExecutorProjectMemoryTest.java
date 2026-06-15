@@ -10,6 +10,7 @@ import dev.talos.runtime.context.ProjectMemoryStatus;
 import dev.talos.runtime.context.ProjectMemoryTier;
 import dev.talos.runtime.context.ProjectMemoryTrust;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -60,8 +61,8 @@ class AssistantTurnExecutorProjectMemoryTest {
                 List.of("talos.list_dir", "talos.read_file"),
                 List.of());
 
-        AssistantTurnExecutor.injectProjectMemoryInstruction(messages, memory);
-        AssistantTurnExecutor.injectTaskContractInstruction(messages, plan);
+        CurrentTurnPromptInstructions.injectProjectMemoryInstruction(messages, memory);
+        CurrentTurnPromptInstructions.injectTaskContractInstruction(messages, plan);
 
         assertEquals("base system", messages.get(0).content());
         assertTrue(messages.get(1).content().contains("[ProjectMemory]"), messages.toString());
