@@ -1,6 +1,6 @@
 # T819 Core-Tools Cycle Edge Scoping
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/package boundary evidence
@@ -71,6 +71,20 @@ They are not the same thing as explicit source import counts.
 - The report recommends candidate seams for T820 without performing the
   production refactor.
 - The wiki records T819 as the active report-only scoping ticket.
+
+## Completion Evidence
+
+- T819 remained report-only; no production source changed.
+- The scoping report recorded the current top-level SCC `{core, tools}`.
+- The report distinguished generated package-edge counts from source import
+  counts:
+  - generated `core -> tools = 8`;
+  - generated `tools -> core = 40`;
+  - explicit smaller source direction is 3 core files / 6 imports.
+- T819 selected the `ContextItem` tool-result adapter / neutral privacy seam as
+  the first T820 candidate, with the explicit caveat that T820 may reduce but
+  not clear the full SCC.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed before closeout.
 
 ## Verification
 

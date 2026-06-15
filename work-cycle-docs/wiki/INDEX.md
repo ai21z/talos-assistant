@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "d1371693cdf25873a5fa477dd8bce17f5e5c500f"
+last_verified_commit: "6fc7d5b17169f736098d8cd7602cd957aca35a05"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -45,8 +45,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
     selector: "Prompt-instruction adapter thinning closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T819-open-high] core-tools-cycle-edge-scoping.md"
-    selector: "Core-tools cycle edge scoping"
+    ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
+    selector: "Core-tools cycle edge scoping closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -92,9 +92,10 @@ or generated reports.
 
 ## Active Tickets
 
-- `T819` core-tools cycle edge scoping.
+- None.
 
-Next planned move: finish T819 scoping before T820 production cycle-break work.
+Next planned move: open T820 for the `ContextItem` tool-result adapter and
+neutral privacy seam.
 
 ## Update Rule
 
