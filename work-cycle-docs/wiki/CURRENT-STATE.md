@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "d1d7eedde5cbef029f28e8d8be52a1a31e1ee11c"
+last_verified_commit: "8fa6a631a65952dce8d063c088895e332d06b2b7"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -45,8 +45,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T817-done-high] assistant-turn-executor-no-tool-outcome-extraction.md"
     selector: "Completion State"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T818-open-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
-    selector: "Scope"
+    ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -74,12 +74,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `d1d7eedde5cbef029f28e8d8be52a1a31e1ee11c`
+- Commit: `8fa6a631a65952dce8d063c088895e332d06b2b7`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T818 prompt-instruction adapter thinning.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -95,11 +95,9 @@ confidence_histogram:
   outcome boundary without production extraction; T817 completed the no-tool
   outcome extraction while leaving shaping, trace lifecycle, branch selection,
   the tool-loop outcome path, and `TurnOutput` assembly in
-  `AssistantTurnExecutor`.
-- Next move: complete T818 by moving prompt-instruction injection to
-  `runtime.policy.CurrentTurnPromptInstructions`, repointing callers, and
-  deleting the remaining `AssistantTurnExecutor.inject*` delegates before
-  structural SCC/cycle work.
+  `AssistantTurnExecutor`; T818 completed prompt-instruction adapter thinning.
+- Next move: open T819 as report-only `core-tools-cycle-edge-scoping` before
+  any production SCC/cycle work.
 
 ```talos-wiki-claims
 {
@@ -204,9 +202,10 @@ package-private `AssistantNoToolOutcomeResolver` while keeping shaping, trace
 begin/set/clear, branch selection, the tool-loop outcome path, and `TurnOutput`
 assembly in `AssistantTurnExecutor`.
 
-T818 is open. Its purpose is to remove the remaining
+T818 is done. Its purpose was to remove the remaining
 `AssistantTurnExecutor.inject*` prompt-instruction adapter surface by moving the
-owner to `runtime.policy.CurrentTurnPromptInstructions`.
+owner to `runtime.policy.CurrentTurnPromptInstructions`, repointing callers, and
+moving direct helper tests to the runtime-policy owner.
 
 ## Wave 5 Readiness Status
 
@@ -223,8 +222,9 @@ The invariant remains lifecycle ownership first, class movement second. The
 model-dispatch boundary was characterized by T812 and extracted by T813. T814
 completed the tool-loop outcome characterization, and T815 extracted the
 post-tool-loop outcome resolver. T816 completed no-tool outcome
-characterization, and T817 extracted the no-tool outcome resolver. T818 is the
-active adapter-thinning ticket, not package-cycle cleanup.
+characterization, and T817 extracted the no-tool outcome resolver. T818
+completed adapter thinning. The next planned ticket is T819 report-only
+`core-tools-cycle-edge-scoping`, not production package-cycle surgery.
 
 ## Operating Boundaries
 

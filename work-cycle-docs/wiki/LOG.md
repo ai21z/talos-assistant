@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "d1d7eedde5cbef029f28e8d8be52a1a31e1ee11c"
+last_verified_commit: "8fa6a631a65952dce8d063c088895e332d06b2b7"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -36,8 +36,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T817-done-high] assistant-turn-executor-no-tool-outcome-extraction.md"
     selector: "No-tool outcome resolver extraction closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T818-open-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
-    selector: "Prompt-instruction adapter thinning"
+    ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
+    selector: "Prompt-instruction adapter thinning closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -265,3 +265,11 @@ mechanically.
 - Moved prompt-instruction ownership toward
   `runtime.policy.CurrentTurnPromptInstructions`.
 - Kept structural SCC/cycle work out of T818.
+
+## [2026-06-15] ledger | Close T818 prompt-instruction adapter thinning
+
+- Moved T818 to the done ticket ledger after green focused, broad, `check`,
+  architecture boundary, and wiki evidence gates.
+- Recorded production thinning at `ef97bda0` and test ownership hardening at
+  `8fa6a631`.
+- Set the next Wave 5 move to T819 report-only `core-tools-cycle-edge-scoping`.

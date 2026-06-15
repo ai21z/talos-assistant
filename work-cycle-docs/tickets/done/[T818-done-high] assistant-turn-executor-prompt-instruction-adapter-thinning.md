@@ -1,6 +1,6 @@
 # T818 AssistantTurnExecutor Prompt-Instruction Adapter Thinning
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime policy ownership
@@ -20,6 +20,10 @@ dependency without changing public CLI/product behavior.
 - Branch: `v0.9.0-beta-dev`
 - Pre-T818 HEAD:
   `d1d7eedde5cbef029f28e8d8be52a1a31e1ee11c`
+- Production thinning commit:
+  `ef97bda0a61ec661af4d551f4998f0a26c669882`
+- Test ownership hardening commit:
+  `8fa6a631a65952dce8d063c088895e332d06b2b7`
 - Talos version: `0.10.5`
 - Prior guard ticket:
   `work-cycle-docs/tickets/done/[T817-done-high] assistant-turn-executor-no-tool-outcome-extraction.md`
@@ -60,6 +64,22 @@ behavior and architecture boundaries.
 - Preserve `LocalTurnTraceCapture.recordRepair(...)` status and summary
   behavior.
 - Keep `AssistantTurnPreparation` package-private.
+
+## Completion Evidence
+
+- Added public runtime owner
+  `dev.talos.runtime.policy.CurrentTurnPromptInstructions`.
+- Repointed `AssistantTurnPreparation`, `UnifiedAssistantMode`,
+  `PromptInspector`, and direct helper tests to the runtime owner.
+- Deleted the `AssistantTurnExecutor.inject*` prompt-instruction compatibility
+  delegates and did not leave deprecated wrappers.
+- Removed direct prompt-instruction helper tests from
+  `AssistantTurnExecutorTest`; runtime-owner behavior now lives in
+  `CurrentTurnPromptInstructionsTest`.
+- Verified no `AssistantTurnExecutor.inject*` or
+  `AssistantTurnPreparation.inject*` references remain.
+- Verified architecture boundary gates after the runtime-policy move.
+- Preserved unrelated `site/` working-tree changes outside all T818 commits.
 
 ## Verification
 
