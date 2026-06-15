@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "2d4a9611ad7357cb50f080d5b9c468a5a824f06e"
+last_verified_commit: "85d53c372f2c6a76aea1be9b04aa212489cfe5c7"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -62,12 +62,18 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T824-done-high] tool-call-loop-engine-extraction.md"
     selector: "ToolCallLoopEngine extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T825-open-high] tool-loop-internals-boundary-scoping.md"
+    selector: "Tool-loop internals boundary scoping"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t823-tool-call-loop-orchestration-characterization.md"
     selector: "ToolCallLoop orchestration boundary"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t825-tool-loop-internals-boundary-scoping.md"
+    selector: "Tool-loop internals boundary scoping"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -110,10 +116,10 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T825 `tool-loop-internals-boundary-scoping`
 
-Next planned move: open T825 as scoping/characterization for remaining
-`runtime.toolcall` internals before choosing a T826 production seam.
+Next planned move: review T825's remaining `runtime.toolcall` internals
+scoping evidence and choose one T826 production seam.
 
 ## Update Rule
 
