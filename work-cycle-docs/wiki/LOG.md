@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "189e9c45b84a54d8d3f1c58f4606570d5a610a85"
+last_verified_commit: "884893d5dd044a44f856855c4bd3758fe8a90ac7"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -32,6 +32,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T816-done-high] assistant-turn-executor-no-tool-outcome-characterization.md"
     selector: "No-tool outcome characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T817-open-high] assistant-turn-executor-no-tool-outcome-extraction.md"
+    selector: "No-tool outcome resolver extraction"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -39,7 +42,7 @@ min_confidence: DETERMINISTIC_STATIC
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 0
-  DETERMINISTIC_STATIC: 9
+  DETERMINISTIC_STATIC: 10
   DETERMINISTIC_GENERATED: 1
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -232,3 +235,12 @@ mechanically.
   handoff, read-only inspection retry, and stream-sink buffering.
 - Set the next Wave 5 move to T817, the package-private
   `AssistantNoToolOutcomeResolver` extraction.
+
+## [2026-06-15] extraction | Open T817 no-tool outcome
+
+- Added T817 as the production extraction ticket for the no-tool outcome
+  boundary after T816 characterization.
+- Extracted no-tool retry/handoff/inspection ordering into package-private
+  `AssistantNoToolOutcomeResolver`.
+- Kept answer shaping, trace begin/set/clear, branch selection, the tool-loop
+  outcome path, and `TurnOutput` assembly in `AssistantTurnExecutor`.

@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "189e9c45b84a54d8d3f1c58f4606570d5a610a85"
+last_verified_commit: "884893d5dd044a44f856855c4bd3758fe8a90ac7"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -38,11 +38,14 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T816-done-high] assistant-turn-executor-no-tool-outcome-characterization.md"
     selector: "No-tool outcome characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T817-open-high] assistant-turn-executor-no-tool-outcome-extraction.md"
+    selector: "No-tool outcome resolver extraction"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 3
-  DETERMINISTIC_STATIC: 7
+  INFERRED_REVIEW: 4
+  DETERMINISTIC_STATIC: 8
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -80,10 +83,8 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
-
-Next planned ticket: `T817` no-tool outcome resolver extraction into
-package-private `AssistantNoToolOutcomeResolver`.
+- `T817` - no-tool outcome resolver extraction into package-private
+  `AssistantNoToolOutcomeResolver`.
 
 ## Update Rule
 
