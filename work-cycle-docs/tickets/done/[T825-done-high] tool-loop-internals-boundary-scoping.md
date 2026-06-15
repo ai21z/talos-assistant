@@ -1,21 +1,21 @@
 # T825 Tool-Loop Internals Boundary Scoping
 
-Status: open
+Status: done
 Priority: high
 Wave: 5
 Owner: architecture/runtime tool-call loop
 
 ## Summary
 
-Scope the remaining `runtime.toolcall` internals before choosing a T826
+Scoped the remaining `runtime.toolcall` internals before choosing a T826
 production seam.
 
-T825 is characterization/scoping only. It follows T824, which extracted
+T825 was characterization/scoping only. It followed T824, which extracted
 `ToolCallLoop` orchestration into package-private
 `dev.talos.runtime.ToolCallLoopEngine` while keeping `ToolCallLoop` as the
 public facade.
 
-T825 does not authorize production extraction.
+T825 did not authorize production extraction.
 
 ## Evidence Identity
 
@@ -24,13 +24,15 @@ T825 does not authorize production extraction.
   `2d4a9611ad7357cb50f080d5b9c468a5a824f06e`
 - T824 closeout commit:
   `85d53c372f2c6a76aea1be9b04aa212489cfe5c7`
+- T825 scoping commit:
+  `482fccc7b624fd0be77a439d3b61f375f070d24c`
 - Talos version: `0.10.5`
 - Generated architecture evidence:
   `build/reports/talos/architecture-intelligence/current/data/wave5-sequence-recommendations.json`
 - Scoping report:
   `work-cycle-docs/reports/t825-tool-loop-internals-boundary-scoping.md`
 
-## Scope
+## Completed Scope
 
 - Record current Wave 5 ordering for the remaining tool-loop internals.
 - Identify candidate T826 owners without moving production code.
@@ -50,9 +52,9 @@ T825 does not authorize production extraction.
 - No candidate recut.
 - No `SetupCmd.java` edits.
 
-## Candidate T826 Owners
+## Candidate T826 Owners Reviewed
 
-T825 should decide which of these is safe to implement first:
+T825 reviewed these possible next seams:
 
 - `LoopState` ownership hardening.
 - `ToolCallExecutionStage` decomposition.
@@ -60,7 +62,13 @@ T825 should decide which of these is safe to implement first:
   split.
 - `ToolCallRepromptStage` boundary cleanup.
 
-## Acceptance Criteria
+The selected next move is T826 `ToolCallExecutionStage` characterization. The
+selection is based on direct source review: `ToolCallExecutionStage.execute(...)`
+is public, behavior-heavy, directly used by `ToolCallLoopEngine`, and currently
+lacks direct stage-level `execute(...)` characterization tests. T826 must be
+characterization-only before any T827 production decomposition.
+
+## Acceptance Criteria Evidence
 
 - `ToolCallLoopInternalsBoundaryCharacterizationTest` passes.
 - T825 report records evidence provenance and `INFERRED_REVIEW` confidence.
@@ -71,6 +79,15 @@ T825 should decide which of these is safe to implement first:
 - `dev.talos.runtime.toolcall.*`, `dev.talos.runtime.ToolCallLoop*`, full
   `check`, and `wikiEvidenceCloseGate --rerun-tasks` pass.
 - `site/` remains untouched and unstaged.
+
+Verified during closeout planning and implementation:
+
+- `ToolCallLoopInternalsBoundaryCharacterizationTest`: pass.
+- `check`: pass.
+- `wikiEvidenceCloseGate --rerun-tasks`: pass.
+- Generated architecture manifest anchored to
+  `482fccc7b624fd0be77a439d3b61f375f070d24c`.
+- Non-`site/` tree clean before closeout edits.
 
 ## Verification
 

@@ -421,3 +421,12 @@ mechanically.
   `LoopState`, `ToolCallSupport`, and `ToolCallExecutionStage`.
 - Deferred `TurnProcessor`, `TaskContract`, and `ExecutionOutcome` while T825
   chooses a single T826 production seam.
+
+## [2026-06-16] ledger | Close T825 tool-loop internals boundary
+
+- Moved T825 to the done ticket ledger after scoping the remaining
+  `runtime.toolcall` internals.
+- Recorded regenerated architecture evidence at
+  `482fccc7b624fd0be77a439d3b61f375f070d24c`.
+- Selected T826 `ToolCallExecutionStage` characterization as the next step
+  before any production decomposition.
