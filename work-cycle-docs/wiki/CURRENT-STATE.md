@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "d3d548a02a5fffa11b973000b960eee98808b18c"
+last_verified_commit: "ed5fd4f081ad45c21bd00bd60e6781872b6efde6"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -56,6 +56,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T822-open-high] rag-tool-protocol-text-cycle-break.md"
+    selector: "Implementation Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -74,7 +77,7 @@ evidence_inputs:
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 11
+  INFERRED_REVIEW: 12
   DETERMINISTIC_STATIC: 15
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
@@ -86,12 +89,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `d3d548a02a5fffa11b973000b960eee98808b18c`
+- Commit: `ed5fd4f081ad45c21bd00bd60e6781872b6efde6`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none in the Wave 5 T81x/T82x arc.
+- Active tickets: T822 `RagService` / `ToolProtocolText` cycle seam.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -111,8 +114,10 @@ confidence_histogram:
   T819 completed report-only `core-tools-cycle-edge-scoping`; T820 completed
   the `ContextItem` tool-result adapter and neutral privacy seam; T821
   completed the `SystemPromptBuilder` prompt-facing tool-catalog seam while
-  leaving the final `RagService` / `ToolProtocolText` production edge.
-- Next move: T822 final `RagService` / `ToolProtocolText` cycle seam.
+  leaving the final `RagService` / `ToolProtocolText` production edge; T822 is
+  the active final `core -> tools` cycle-break seam.
+- Next move: review and close T822 if the focused, broad, architecture, and
+  wiki evidence gates stay green.
 
 ```talos-wiki-claims
 {
@@ -238,6 +243,11 @@ prompt-facing descriptors and a runtime-owned registry adapter. Generated
 evidence shows `core -> tools` reduced to 1 while the `{core, tools}` SCC
 remains because `core.rag.RagService` still imports tool-protocol cleanup.
 
+T822 is open. Its purpose is to remove the final production `core -> tools`
+dependency by moving non-executing tool-protocol text cleanup and tool-name
+alias recognition behind neutral core owners while keeping compatibility
+wrappers in `tools`.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -257,8 +267,10 @@ characterization, and T817 extracted the no-tool outcome resolver. T818
 completed adapter thinning. T819 completed report-only
 `core-tools-cycle-edge-scoping`. T820 completed the first production
 cycle-seam step for `ContextItem`; it did not clear the full `{core, tools}`
-SCC. T821 completed the `SystemPromptBuilder` tool-catalog seam. The next
-planned ticket is T822 for the final `RagService` / `ToolProtocolText` seam.
+SCC. T821 completed the `SystemPromptBuilder` tool-catalog seam. T822 is the
+active final `RagService` / `ToolProtocolText` seam; local regenerated
+architecture evidence after implementation shows `core -> tools = 0` and no
+non-trivial top-level package SCCs.
 
 ## Operating Boundaries
 

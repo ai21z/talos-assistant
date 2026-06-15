@@ -84,11 +84,12 @@ class RagServiceContextLedgerTest {
     }
 
     @Test
-    void ragServiceUsesNeutralToolProtocolTextCleanupOwnership() throws Exception {
+    void ragServiceUsesCoreToolProtocolTextCleanupOwnership() throws Exception {
         String source = Files.readString(Path.of("src/main/java/dev/talos/core/rag/RagService.java"));
         String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
 
-        assertTrue(source.contains("import dev.talos.tools.ToolProtocolText;"), source);
+        assertTrue(source.contains("import dev.talos.core.tool.ToolProtocolText;"), source);
+        assertFalse(source.contains("import dev.talos.tools."), source);
         assertFalse(source.contains("import dev.talos.runtime.ToolCallParser;"), source);
         assertFalse(baseline.contains(
                         "core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java"
