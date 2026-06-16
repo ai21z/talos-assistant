@@ -463,3 +463,13 @@ mechanically.
 - Recorded implementation commit `584f46973654032cd9569171012eaa97c4a4cbad`.
 - Set the next move to T828, the first production
   `ToolCallExecutionStage` decomposition.
+
+## [2026-06-16] extraction | Open T828 ToolCallExecutionStage guard chain
+
+- Added T828 as the first production decomposition of
+  `ToolCallExecutionStage` after T826 characterization and T827 evidence-order
+  hardening.
+- Extracted the pre-execution guard chain into package-private
+  `ToolCallPreExecutionGuardChain`.
+- Kept the public `ToolCallExecutionStage.execute(...)` and
+  `IterationOutcome` surface stable.

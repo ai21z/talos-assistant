@@ -129,7 +129,7 @@ class AppendLinePreApprovalGuardTest {
     @Test
     void executionStageDelegatesAppendLineDiagnosticSelectionToGuard() throws Exception {
         String source = Files.readString(Path.of(
-                "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallPreExecutionGuardChain.java"));
 
         assertTrue(source.contains("AppendLinePreApprovalGuard.diagnostic"), source);
         assertFalse(source.contains("private static String appendLinePreApprovalDiagnostic"), source);

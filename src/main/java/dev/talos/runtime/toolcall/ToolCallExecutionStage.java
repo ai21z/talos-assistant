@@ -12,8 +12,6 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
-import dev.talos.tools.ToolError;
-import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
@@ -78,11 +76,16 @@ public final class ToolCallExecutionStage {
     private final TurnProcessor turnProcessor;
     private final ToolProgressSink progressSink;
     private final boolean strict;
+    private final ToolCallPreExecutionGuardChain preExecutionGuards;
 
     public ToolCallExecutionStage(TurnProcessor turnProcessor, ToolProgressSink progressSink, boolean strict) {
         this.turnProcessor = turnProcessor;
         this.progressSink = progressSink;
         this.strict = strict;
+        this.preExecutionGuards = new ToolCallPreExecutionGuardChain(
+                strict,
+                this::appendResultMessage,
+                this::emitToolResult);
     }
 
     public IterationOutcome execute(LoopState state, ToolCallParseStage.ParsedCalls parsed) {
@@ -136,299 +139,26 @@ public final class ToolCallExecutionStage {
                     SafeLogFormatter.parameters(effective.parameters()));
 
             boolean isEditFile = "talos.edit_file".equals(effective.toolName());
-            EditFilePreApprovalGuard.Decision editPreApprovalDecision =
-                    EditFilePreApprovalGuard.decision(
-                            effective,
-                            state,
-                            pathHint,
-                            strict,
-                            staleRereadRequiredAtStart,
-                            fullRewriteRepairTargets);
-            if (editPreApprovalDecision != null) {
-                if (editPreApprovalDecision.kind() == EditFilePreApprovalGuard.Kind.DUPLICATE_FAILED_EDIT) {
-                    state.retriedCalls++;
-                    state.cushionFiresB3EditShortCircuit++;
-                }
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                EditFailureRepairStateAccounting.recordPreApprovalDecision(
-                        state, editPreApprovalDecision, pathHint);
-                String diagnosticError = editPreApprovalDecision.diagnostic();
-                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                        + "[error] " + diagnosticError
-                        + "\n[/tool_result]";
-                state.toolOutcomes.add(ToolOutcomeFactory.failedEditPreApproval(
-                        effective, pathHint, diagnosticError, editPreApprovalDecision));
-                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                logEditPreApprovalBlock(editPreApprovalDecision, pathHint);
-                continue;
-            }
-
-            RedundantReadSuppressionGuard.Decision redundantReadDecision =
-                    RedundantReadSuppressionGuard.decision(effective, state, strict);
-            if (redundantReadDecision != null) {
-                state.cushionFiresRedundantRead++;
-                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                        + redundantReadDecision.diagnostic()
-                        + "\n[/tool_result]";
-                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                LOG.debug("  Suppressed redundant {} call (sig: {})",
-                        effective.toolName(), SafeLogFormatter.value(redundantReadDecision.readSignature()));
-                continue;
-            }
-
-            state.totalToolsInvoked++;
-            state.toolNames.add(effective.toolName());
-
-            String privateDocumentNamedTargetDiagnostic =
-                    PrivateDocumentNamedTargetGuard.diagnostic(
-                            effective,
-                            state.ctx,
-                            state.workspace,
-                            currentTaskContract,
-                            pathHint);
-            if (privateDocumentNamedTargetDiagnostic != null) {
-                pathPolicyBlockedThisIter = true;
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                ToolResult result = ToolResult.fail(ToolError.invalidParams(privateDocumentNamedTargetDiagnostic));
-                emitToolResult(effective.toolName(), result);
-                LocalTurnTraceCapture.recordActionObligation(
-                        "PRIVATE_DOCUMENT_NAMED_TARGET_SCOPE",
-                        "FAILED",
-                        privateDocumentNamedTargetDiagnostic,
-                        "PRIVATE_DOCUMENT_READ_OUTSIDE_REQUESTED_TARGET_SET");
-                LocalTurnTraceCapture.recordToolCallBlocked(
-                        "tool_loop",
-                        effective,
-                        privateDocumentNamedTargetDiagnostic);
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionRead(
-                        effective,
-                        pathHint,
-                        privateDocumentNamedTargetDiagnostic));
-                appendResultMessage(state, parsed.useNativePath(), i,
-                        ToolCallSupport.formatToolResult(effective, result));
-                LOG.debug("Blocked private document read {} for {} before extraction: {}",
-                        effective.toolName(),
-                        SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.text(privateDocumentNamedTargetDiagnostic));
-                continue;
-            }
-
-            SourceDerivedEvidenceGuard.RequiredSourceEvidenceDiagnostic requiredSourceEvidence =
-                    SourceDerivedEvidenceGuard.requiredSourceEvidenceDiagnostic(
-                            state,
-                            currentTaskContract,
-                            effective,
-                            pathHint);
-            if (requiredSourceEvidence != null) {
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                String diagnosticError = requiredSourceEvidence.message();
-                ToolResult result = ToolResult.fail(ToolError.invalidParams(diagnosticError));
-                emitToolResult(effective.toolName(), result);
-                LocalTurnTraceCapture.recordActionObligation(
-                        "SOURCE_EVIDENCE_BEFORE_DERIVED_WRITE",
-                        "FAILED",
-                        diagnosticError,
-                        "SOURCE_EVIDENCE_WRITE_BEFORE_READ");
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
-                        effective,
-                        pathHint,
-                        diagnosticError,
-                        workspaceOperationPlan,
-                        ToolFailureReason.NONE));
-                appendResultMessage(state, parsed.useNativePath(), i,
-                        ToolCallSupport.formatToolResult(effective, result));
-                LOG.debug("Blocked source-derived {} for {} until source target(s) are read: {}",
-                        effective.toolName(),
-                        SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.value(requiredSourceEvidence.missingSourceTargets()));
-                continue;
-            }
-
-            String sourceEvidenceCoverageDiagnostic =
-                    SourceDerivedEvidenceGuard.exactEvidenceCoverageDiagnostic(
-                            state,
-                            currentTaskContract,
-                            effective,
-                            pathHint);
-            if (sourceEvidenceCoverageDiagnostic != null) {
-                ToolCall repairedSourceEvidenceWrite =
-                        SourceDerivedEvidenceGuard.repairedExactEvidenceWrite(
-                                state,
-                                currentTaskContract,
-                                effective,
-                                pathHint);
-                if (repairedSourceEvidenceWrite != null) {
-                    effective = repairedSourceEvidenceWrite;
-                    pathContext = ToolExecutionPathContext.from(effective);
-                    workspaceOperationPlan = pathContext.workspaceOperationPlan();
-                    pathHint = pathContext.pathHint();
-                    LocalTurnTraceCapture.recordActionObligation(
-                            "SOURCE_EVIDENCE_EXACT_COVERAGE",
-                            "REPAIRED",
-                            sourceEvidenceCoverageDiagnostic,
-                            "SOURCE_EVIDENCE_WRITE_REPAIRED_BEFORE_APPROVAL");
-                } else {
-                    if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                        failuresThisIter++;
-                    }
-                    ToolResult result = ToolResult.fail(ToolError.invalidParams(sourceEvidenceCoverageDiagnostic));
-                    emitToolResult(effective.toolName(), result);
-                    LocalTurnTraceCapture.recordActionObligation(
-                            "SOURCE_EVIDENCE_EXACT_COVERAGE",
-                            "FAILED",
-                            sourceEvidenceCoverageDiagnostic,
-                            "SOURCE_EVIDENCE_WRITE_MISSING_EXACT_EVIDENCE");
-                    state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
-                            effective,
-                            pathHint,
-                            sourceEvidenceCoverageDiagnostic,
-                            workspaceOperationPlan,
-                            ToolFailureReason.NONE));
-                    appendResultMessage(state, parsed.useNativePath(), i,
-                            ToolCallSupport.formatToolResult(effective, result));
-                    LOG.debug("Blocked source-derived {} for {} before approval: {}",
-                            effective.toolName(),
-                            SafeLogFormatter.value(pathHint),
-                            SafeLogFormatter.text(sourceEvidenceCoverageDiagnostic));
-                    continue;
-                }
-            }
-
-            String appendLineDiagnostic = AppendLinePreApprovalGuard.diagnostic(
-                    effective,
+            ToolCallPreExecutionGuardChain.Result guardResult = preExecutionGuards.evaluate(
                     state,
+                    effective,
+                    pathContext,
                     currentTaskContract,
-                    pathHint);
-            if (appendLineDiagnostic != null) {
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                ToolResult result = ToolResult.fail(ToolError.invalidParams(appendLineDiagnostic));
-                emitToolResult(effective.toolName(), result);
-                LocalTurnTraceCapture.recordActionObligation(
-                        "APPEND_LINE_WRITE_PRESERVATION",
-                        "FAILED",
-                        appendLineDiagnostic,
-                        "APPEND_LINE_WRITE_BEFORE_VALID_PRESERVATION");
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
-                        effective,
-                        pathHint,
-                        appendLineDiagnostic,
-                        workspaceOperationPlan,
-                        ToolFailureReason.WRITE_APPEND_LINE_PRESERVATION));
-                appendResultMessage(state, parsed.useNativePath(), i,
-                        ToolCallSupport.formatToolResult(effective, result));
-                LOG.debug("Blocked append-line {} for {} before approval: {}",
-                        effective.toolName(),
-                        SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.text(appendLineDiagnostic));
-                continue;
-            }
-
-            String staticWebRewriteGroundingDiagnostic =
-                    StaticWebRewriteGroundingGuard.diagnostic(
-                            effective,
-                            state,
-                            currentTaskContract,
-                            pathHint);
-            if (staticWebRewriteGroundingDiagnostic != null) {
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                ToolResult result = ToolResult.fail(ToolError.invalidParams(staticWebRewriteGroundingDiagnostic));
-                emitToolResult(effective.toolName(), result);
-                LocalTurnTraceCapture.recordActionObligation(
-                        "STATIC_WEB_REWRITE_GROUNDING",
-                        "FAILED",
-                        staticWebRewriteGroundingDiagnostic,
-                        "STATIC_WEB_WRITE_BEFORE_READ");
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
-                        effective,
-                        pathHint,
-                        staticWebRewriteGroundingDiagnostic,
-                        workspaceOperationPlan,
-                        ToolFailureReason.NONE));
-                appendResultMessage(state, parsed.useNativePath(), i,
-                        ToolCallSupport.formatToolResult(effective, result));
-                LOG.debug("Blocked static-web rewrite {} for {} before approval: {}",
-                        effective.toolName(),
-                        SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.text(staticWebRewriteGroundingDiagnostic));
-                continue;
-            }
-
-            String staticWebRepairPathDiagnostic =
-                    StaticWebRepairPathGuard.diagnostic(effective, currentTaskContract, pathHint);
-            if (staticWebRepairPathDiagnostic != null) {
+                    parsed.useNativePath(),
+                    i,
+                    staleRereadRequiredAtStart,
+                    fullRewriteRepairTargets);
+            failuresThisIter += guardResult.failuresThisIteration();
+            if (guardResult.pathPolicyBlockedThisIteration()) {
                 pathPolicyBlockedThisIter = true;
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                ToolResult result = ToolResult.fail(ToolError.invalidParams(staticWebRepairPathDiagnostic));
-                emitToolResult(effective.toolName(), result);
-                LocalTurnTraceCapture.recordActionObligation(
-                        "STATIC_WEB_REPAIR_TARGET_PATH",
-                        "FAILED",
-                        staticWebRepairPathDiagnostic,
-                        "STATIC_WEB_REPAIR_DIRECTORY_TARGET_BEFORE_APPROVAL");
-                LocalTurnTraceCapture.recordToolCallBlocked(
-                        "tool_loop",
-                        effective,
-                        staticWebRepairPathDiagnostic);
-                // StaticWebRepairPathGuard's diagnostic is the expected-target
-                // scope family ("Target outside expected targets...").
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
-                        effective,
-                        pathHint,
-                        staticWebRepairPathDiagnostic,
-                        workspaceOperationPlan,
-                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED));
-                appendResultMessage(state, parsed.useNativePath(), i,
-                        ToolCallSupport.formatToolResult(effective, result));
-                LOG.debug("Blocked static-web repair {} for invalid target {} before approval: {}",
-                        effective.toolName(),
-                        SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.text(staticWebRepairPathDiagnostic));
+            }
+            if (guardResult.blocked()) {
                 continue;
             }
-
-            String staticWebBlankRequiredAssetDiagnostic =
-                    StaticWebRequiredAssetWriteGuard.diagnostic(
-                            effective,
-                            state,
-                            currentTaskContract,
-                            pathHint);
-            if (staticWebBlankRequiredAssetDiagnostic != null) {
-                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
-                    failuresThisIter++;
-                }
-                ToolResult result = ToolResult.fail(ToolError.invalidParams(staticWebBlankRequiredAssetDiagnostic));
-                emitToolResult(effective.toolName(), result);
-                LocalTurnTraceCapture.recordActionObligation(
-                        "STATIC_WEB_REQUIRED_ASSET_WRITE",
-                        "FAILED",
-                        staticWebBlankRequiredAssetDiagnostic,
-                        "STATIC_WEB_REQUIRED_ASSET_BLANK_WRITE_BEFORE_APPROVAL");
-                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
-                        effective,
-                        pathHint,
-                        staticWebBlankRequiredAssetDiagnostic,
-                        workspaceOperationPlan,
-                        ToolFailureReason.NONE));
-                appendResultMessage(state, parsed.useNativePath(), i,
-                        ToolCallSupport.formatToolResult(effective, result));
-                LOG.debug("Blocked static-web blank required asset write {} for {} before approval: {}",
-                        effective.toolName(),
-                        SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.text(staticWebBlankRequiredAssetDiagnostic));
-                continue;
-            }
+            effective = guardResult.effective();
+            pathContext = guardResult.pathContext();
+            workspaceOperationPlan = pathContext.workspaceOperationPlan();
+            pathHint = pathContext.pathHint();
 
             String readBeforeWriteNudge = null;
             if (!strict && "talos.edit_file".equals(effective.toolName()) && pathHint != null) {
@@ -579,27 +309,6 @@ public final class ToolCallExecutionStage {
         Set<String> targets = new HashSet<>(RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages));
         targets.addAll(state.staticWebFullRewriteRequiredTargets);
         return Set.copyOf(targets);
-    }
-
-    private static void logEditPreApprovalBlock(
-            EditFilePreApprovalGuard.Decision decision,
-            String pathHint
-    ) {
-        if (decision == null) return;
-        switch (decision.kind()) {
-            case FULL_REWRITE_REPAIR_REQUIRED ->
-                    LOG.debug("Blocked edit_file for full-rewrite repair target {}",
-                            SafeLogFormatter.value(pathHint));
-            case STALE_REREAD_REQUIRED ->
-                    LOG.debug("Blocked stale edit retry for path {} until read_file runs in a later iteration",
-                            SafeLogFormatter.value(pathHint));
-            case DUPLICATE_FAILED_EDIT ->
-                    LOG.debug("  Skipped duplicate failing edit_file call for path: {}",
-                            SafeLogFormatter.value(pathHint));
-            case NONE -> {
-                // No pre-approval block.
-            }
-        }
     }
 
     private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {

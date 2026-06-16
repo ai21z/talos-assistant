@@ -279,7 +279,7 @@ class ToolCallExecutionStageCharacterizationTest {
     }
 
     @Test
-    void reportPinsT827MoveStayBoundary() throws Exception {
+    void reportPinsT828MoveStayBoundary() throws Exception {
         String report = Files.readString(Path.of(
                 "work-cycle-docs/reports/t826-tool-call-execution-stage-characterization.md"));
 
@@ -288,7 +288,7 @@ class ToolCallExecutionStageCharacterizationTest {
                 () -> assertTrue(report.contains("public IterationOutcome execute"), report),
                 () -> assertTrue(report.contains("public record IterationOutcome"), report),
                 () -> assertTrue(report.contains("T826 does not authorize production extraction"), report),
-                () -> assertTrue(report.contains("T827 Move/Stay Boundary"), report),
+                () -> assertTrue(report.contains("T828 Move/Stay Boundary"), report),
                 () -> assertTrue(report.contains("Do not move yet"), report));
     }
 

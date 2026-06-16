@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "584f46973654032cd9569171012eaa97c4a4cbad"
+last_verified_commit: "ed8acb4e658d3c399c9e8633bdbebe8f9618c74c"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -71,6 +71,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T827-done-high] architecture-intelligence-qodana-summary-ordering.md"
     selector: "Qodana summary ordering closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T828-open-high] tool-call-execution-stage-guard-chain-extraction.md"
+    selector: "Guard chain extraction scope"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -125,10 +128,10 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T828: `tool-call-execution-stage-guard-chain-extraction`
 
-Next planned move: T828 first production `ToolCallExecutionStage`
-decomposition.
+Next planned move: review and close T828 after the first production
+`ToolCallExecutionStage` guard-chain decomposition is verified.
 
 ## Update Rule
 
