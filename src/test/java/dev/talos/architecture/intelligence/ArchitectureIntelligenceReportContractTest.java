@@ -178,8 +178,10 @@ class ArchitectureIntelligenceReportContractTest {
                 .orElseThrow(() -> new AssertionError("missing qodana-summary evidence row"));
         assertTrue(qodana.has("rawArtifactStatus"),
                 "Qodana evidence row must validate raw artifact paths, not only summary JSON");
-        assertEquals("RAW_ARTIFACT_MISSING", qodana.path("rawArtifactStatus").asText(),
-                "local qodana summary currently references absent raw SARIF and must say so");
+        assertTrue(
+                Set.of("RAW_ARTIFACT_MISSING", "PRESENT")
+                        .contains(qodana.path("rawArtifactStatus").asText()),
+                "Qodana raw artifact status must come from a generated summary and be either present or explicitly missing");
     }
 
     @Test

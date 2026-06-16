@@ -448,3 +448,10 @@ mechanically.
 - Recorded implementation commit `7e3bb9c0e59e726e7a4b809df94b02249c859dc3`.
 - Reserved T827 for architecture-intelligence Qodana-summary evidence-order
   hardening before any T828 production decomposition.
+
+## [2026-06-16] tooling | Open T827 Qodana summary ordering
+
+- Added T827 to make architecture-intelligence and wiki evidence gates generate
+  `qodana-summary.json` before report validation reads it.
+- Kept Qodana execution and Qodana configuration out of scope.
+- Deferred the first production `ToolCallExecutionStage` decomposition to T828.
