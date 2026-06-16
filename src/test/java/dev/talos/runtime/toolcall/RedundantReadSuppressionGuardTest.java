@@ -64,7 +64,7 @@ class RedundantReadSuppressionGuardTest {
     @Test
     void executionStageDelegatesRedundantReadSuppressionToGuard() throws Exception {
         String source = Files.readString(Path.of(
-                "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallPreExecutionGuardChain.java"));
 
         assertTrue(source.contains("RedundantReadSuppressionGuard.decision"), source);
         assertFalse(source.contains("You already gathered this information and the workspace has not changed since then"),

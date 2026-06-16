@@ -183,11 +183,14 @@ class EditFailureRepairStateAccountingTest {
 
     @Test
     void executionStageDelegatesEditFailureRepairStateAccounting() throws Exception {
-        String source = Files.readString(Path.of(
+        String stageSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
+        String guardSource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallPreExecutionGuardChain.java"));
+        String source = stageSource + "\n" + guardSource;
 
-        assertTrue(source.contains("EditFailureRepairStateAccounting.recordPreApprovalDecision"), source);
-        assertTrue(source.contains("EditFailureRepairStateAccounting.recordFailedEditResult"), source);
+        assertTrue(guardSource.contains("EditFailureRepairStateAccounting.recordPreApprovalDecision"), guardSource);
+        assertTrue(stageSource.contains("EditFailureRepairStateAccounting.recordFailedEditResult"), stageSource);
         assertFalse(source.contains("private static void recordEmptyEditArgumentFailure"), source);
         assertFalse(source.contains("private static void recordStaleEditFailure"), source);
         assertFalse(source.contains("private static boolean shouldRecoverStaticWebEditFailureWithFullRewrite"), source);

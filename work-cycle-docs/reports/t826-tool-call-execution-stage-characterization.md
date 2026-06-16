@@ -66,12 +66,12 @@ Pinned behavior:
 - Failed edit execution records failure and edit-repair accounting and does
   not report success.
 
-## T827 Move/Stay Boundary
+## T828 Move/Stay Boundary
 
-T827 may decompose the implementation behind the stable public surface, but
+T828 may decompose the implementation behind the stable public surface, but
 must not move behavior without preserving T826 observations.
 
-Move candidates for T827:
+Move candidates for T828:
 
 - pre-execution guard handling;
 - result-message append coordination;
@@ -92,7 +92,7 @@ Do not move yet:
 
 ## Guard Suites
 
-T827 must keep these green:
+T828 must keep these green:
 
 - `ToolCallExecutionStageCharacterizationTest`
 - `ToolCallLoopOrchestrationCharacterizationTest`
@@ -102,4 +102,3 @@ T827 must keep these green:
 - `ToolCallLoopCompactionTest`
 - `dev.talos.runtime.toolcall.*`
 - full `check`
-

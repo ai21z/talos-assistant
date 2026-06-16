@@ -150,7 +150,7 @@ class EditFilePreApprovalGuardTest {
     @Test
     void executionStageDelegatesEditPreApprovalDecisionsToGuard() throws Exception {
         String source = Files.readString(Path.of(
-                "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallPreExecutionGuardChain.java"));
 
         assertTrue(source.contains("EditFilePreApprovalGuard.decision"), source);
         assertFalse(source.contains("private static String emptyEditArgumentDiagnostic"), source);
