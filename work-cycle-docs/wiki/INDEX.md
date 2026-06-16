@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "0426a67c27138b1d16797259ff6bdc6ed051b26d"
+last_verified_commit: "584f46973654032cd9569171012eaa97c4a4cbad"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -69,8 +69,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T826-done-high] tool-call-execution-stage-characterization.md"
     selector: "ToolCallExecutionStage characterization closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T827-open-high] architecture-intelligence-qodana-summary-ordering.md"
-    selector: "Qodana summary ordering"
+    ref: "work-cycle-docs/tickets/done/[T827-done-high] architecture-intelligence-qodana-summary-ordering.md"
+    selector: "Qodana summary ordering closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -125,9 +125,9 @@ or generated reports.
 
 ## Active Tickets
 
-- T827 `architecture-intelligence-qodana-summary-ordering`.
+- None.
 
-Next planned move: verify and close T827 before any T828 production
+Next planned move: T828 first production `ToolCallExecutionStage`
 decomposition.
 
 ## Update Rule

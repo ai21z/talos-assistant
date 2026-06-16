@@ -1,6 +1,6 @@
-# [T827-open-high] Architecture Intelligence Qodana Summary Ordering
+# [T827-done-high] Architecture Intelligence Qodana Summary Ordering
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-06-16
 Branch: `v0.9.0-beta-dev`
@@ -51,6 +51,18 @@ Out of scope:
   evidence.
 - Full `check` passes.
 - `site/` remains untouched and unstaged.
+
+## Completion Evidence
+
+- Implementation commit: `584f46973654032cd9569171012eaa97c4a4cbad`.
+- `architectureIntelligenceReport` now depends on `writeQodanaSummary` and
+  declares `build/reports/talos/qodana-summary.json` as an input.
+- The architecture contract accepts only healthy Qodana raw artifact states:
+  `RAW_ARTIFACT_MISSING` or `PRESENT`.
+- Clean-summary proof passed: deleting `qodana-summary.json` and running
+  `wikiEvidenceCloseGate --rerun-tasks` recreated the summary and generated
+  overlay status `RAW_ARTIFACT_MISSING`.
+- Full `check` passed before closeout.
 
 ## T828 Preview
 
