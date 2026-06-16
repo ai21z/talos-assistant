@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "7e3bb9c0e59e726e7a4b809df94b02249c859dc3"
+last_verified_commit: "0426a67c27138b1d16797259ff6bdc6ed051b26d"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -71,6 +71,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T826-done-high] tool-call-execution-stage-characterization.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T827-open-high] architecture-intelligence-qodana-summary-ordering.md"
+    selector: "Acceptance Criteria"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -110,12 +113,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `7e3bb9c0e59e726e7a4b809df94b02249c859dc3`
+- Commit: `0426a67c27138b1d16797259ff6bdc6ed051b26d`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T827 `architecture-intelligence-qodana-summary-ordering`.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -143,8 +146,7 @@ confidence_histogram:
   extraction while keeping `ToolCallLoop` as the public facade; T825 completed
   scoping of the remaining `runtime.toolcall` internals; T826 completed direct
   characterization of `ToolCallExecutionStage.execute(...)`.
-- Next move: open T827 for architecture-intelligence Qodana-summary
-  evidence-order hardening before any T828 production decomposition.
+- Next move: verify and close T827 before any T828 production decomposition.
 
 ```talos-wiki-claims
 {
@@ -305,10 +307,9 @@ denial flags, private-document path-policy blocking, context-ledger decisions,
 successful execution accounting, failed edit accounting, and the public
 `IterationOutcome` surface.
 
-T827 is the next planned tooling ticket. It must harden architecture
-intelligence / wiki-evidence ordering so `qodana-summary.json` is generated
-before report validation reads it. Production `ToolCallExecutionStage`
-decomposition is deferred to T828.
+T827 is open. It hardens architecture intelligence / wiki-evidence ordering so
+`qodana-summary.json` is generated before report validation reads it. Production
+`ToolCallExecutionStage` decomposition is deferred to T828.
 
 ## Wave 5 Readiness Status
 
@@ -337,7 +338,7 @@ orchestration characterization. T824 completed behavior-preserving extraction
 into package-private `dev.talos.runtime.ToolCallLoopEngine`. T825 completed
 remaining `runtime.toolcall` internals scoping and selected T826
 `ToolCallExecutionStage` characterization before any production decomposition.
-T826 is now done. T827 is reserved for Qodana-summary evidence-order hardening;
+T826 is now done. T827 is open for Qodana-summary evidence-order hardening;
 production decomposition remains deferred to T828.
 
 ## Operating Boundaries

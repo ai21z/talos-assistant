@@ -699,9 +699,11 @@ val cleanArchitectureIntelligenceReport by tasks.registering(Delete::class) {
 val architectureIntelligenceReport by tasks.registering(Test::class) {
     description = "Generates the report-only architecture intelligence Markdown and JSON suite for Wave 5 planning."
     group = "reporting"
+    dependsOn("writeQodanaSummary")
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     inputs.file(layout.projectDirectory.file("gradle.properties"))
+    inputs.file(layout.buildDirectory.file("reports/talos/qodana-summary.json"))
     inputs.property("gitHead", providers.provider { gitOutput("rev-parse", "HEAD") ?: "unknown" })
     inputs.property("gitBranch", providers.provider { gitOutput("rev-parse", "--abbrev-ref", "HEAD") ?: "unknown" })
     filter {
