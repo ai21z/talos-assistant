@@ -1,6 +1,6 @@
-# [T826-open-high] ToolCallExecutionStage Characterization
+# [T826-done-high] ToolCallExecutionStage Characterization
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-06-16
 Branch: `v0.9.0-beta-dev`
@@ -99,7 +99,7 @@ Keep stable until separately scoped:
 
 ## Verification
 
-Planned:
+Completed:
 
 ```powershell
 .\gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolCallExecutionStageCharacterizationTest" --no-daemon
@@ -110,3 +110,16 @@ Planned:
 git diff --check
 git status --short -- . ':!site'
 ```
+
+## Completion Evidence
+
+- Implementation commit: `7e3bb9c0e59e726e7a4b809df94b02249c859dc3`.
+- Added seven direct `ToolCallExecutionStage.execute(...)` characterization
+  tests with no `src/main` production changes.
+- Characterization drives parsing through `ToolCallParseStage.parse(...)` and
+  preserves the public `execute(...)` / `IterationOutcome` surface for later
+  decomposition.
+- Focused `runtime.toolcall`, `ToolCallLoop`, clean `check`, and
+  `wikiEvidenceCloseGate --rerun-tasks` verification passed before closeout.
+- T827 is intentionally reserved for architecture-intelligence Qodana-summary
+  evidence-order hardening before the T828 production decomposition.

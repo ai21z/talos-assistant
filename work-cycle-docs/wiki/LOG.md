@@ -439,3 +439,12 @@ mechanically.
   pre-execution blocking, context-ledger decisions, successful execution, and
   failed edit accounting.
 - Kept production decomposition deferred to T827.
+
+## [2026-06-16] ledger | Close T826 ToolCallExecutionStage
+
+- Moved T826 to the done ticket ledger after direct stage-level
+  characterization, focused runtime guards, clean `check`, and wiki evidence
+  gates passed.
+- Recorded implementation commit `7e3bb9c0e59e726e7a4b809df94b02249c859dc3`.
+- Reserved T827 for architecture-intelligence Qodana-summary evidence-order
+  hardening before any T828 production decomposition.
