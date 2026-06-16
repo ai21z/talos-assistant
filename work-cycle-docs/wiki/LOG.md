@@ -455,3 +455,11 @@ mechanically.
   `qodana-summary.json` before report validation reads it.
 - Kept Qodana execution and Qodana configuration out of scope.
 - Deferred the first production `ToolCallExecutionStage` decomposition to T828.
+
+## [2026-06-16] ledger | Close T827 Qodana summary ordering
+
+- Moved T827 to the done ticket ledger after clean-summary gate proof,
+  architecture evidence liveness, and full `check` passed.
+- Recorded implementation commit `584f46973654032cd9569171012eaa97c4a4cbad`.
+- Set the next move to T828, the first production
+  `ToolCallExecutionStage` decomposition.
