@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "866c9388b32c631c92160ae3c85f771cfe287251"
+last_verified_commit: "7e3bb9c0e59e726e7a4b809df94b02249c859dc3"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -66,8 +66,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T825-done-high] tool-loop-internals-boundary-scoping.md"
     selector: "Tool-loop internals boundary scoping closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T826-open-high] tool-call-execution-stage-characterization.md"
-    selector: "ToolCallExecutionStage characterization"
+    ref: "work-cycle-docs/tickets/done/[T826-done-high] tool-call-execution-stage-characterization.md"
+    selector: "ToolCallExecutionStage characterization closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -122,9 +122,10 @@ or generated reports.
 
 ## Active Tickets
 
-- T826 `tool-call-execution-stage-characterization`.
+- None.
 
-Next planned move: review and close T826 before any T827 production decomposition.
+Next planned move: T827 architecture-intelligence Qodana-summary
+evidence-order hardening before any T828 production decomposition.
 
 ## Update Rule
 
