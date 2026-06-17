@@ -94,7 +94,15 @@ V1_IMPLEMENTATION_BRIDGE.md
 # ---- Local-only directories and files
 /playground/
 /.github/
-.external assistant/
+# ---- local coding assistant: track durable project config, ignore personal + bulk reference
+.external assistant/*
+!.external assistant/skills/
+!.external assistant/rules/
+!.external assistant/agents/
+!.external assistant/hooks/
+!.external assistant/settings.json
+!.external assistant/external assistant.md
+.external assistant/settings.local.json
 
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
