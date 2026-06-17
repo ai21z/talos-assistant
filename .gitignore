@@ -94,7 +94,15 @@ V1_IMPLEMENTATION_BRIDGE.md
 # ---- Local-only directories and files
 /playground/
 /.github/
-.claude/
+# ---- Claude Code: track durable project config, ignore personal + bulk reference
+.claude/*
+!.claude/skills/
+!.claude/rules/
+!.claude/agents/
+!.claude/hooks/
+!.claude/settings.json
+!.claude/CLAUDE.md
+.claude/settings.local.json
 
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
