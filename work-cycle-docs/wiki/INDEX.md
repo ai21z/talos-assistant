@@ -74,6 +74,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
     selector: "Guard chain extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T829-open-high] tool-call-support-boundary-scoping.md"
+    selector: "ToolCallSupport boundary scoping"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -86,6 +89,9 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t826-tool-call-execution-stage-characterization.md"
     selector: "ToolCallExecutionStage characterization"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t829-tool-call-support-boundary-scoping.md"
+    selector: "ToolCallSupport boundary scoping"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -128,10 +134,10 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T829: `tool-call-support-boundary-scoping`
 
-Next planned move: open T829 `tool-call-support-boundary-scoping` before any
-T830 production extraction from the broad `ToolCallSupport` helper surface.
+Next planned move: review T829 and choose a single T830 production extraction
+seam from the characterized `ToolCallSupport` helper surface.
 
 ## Update Rule
 
