@@ -1,6 +1,6 @@
-# [T830-open-high] ToolCallSupport Native-Call Conversion Extraction
+# [T830-done-high] ToolCallSupport Native-Call Conversion Extraction
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-06-17
 Branch: `v0.9.0-beta-dev`
@@ -60,4 +60,17 @@ Out of scope:
 
 ## Completion Evidence
 
-Open until T830 is implemented, reviewed, and closed in a later ledger commit.
+- Implementation commit:
+  `496799a46ca131a0d8164e49e2a6be130efe6e69`.
+- Added package-private `NativeToolCallConverter` and kept
+  `ToolCallSupport.convertNativeToolCalls(...)` plus the `ToolCallLoop`
+  delegate stable.
+- Preserved container-argument JSON rendering, legacy scalar
+  `String.valueOf(...)`, null-argument empty parameters, and serialization
+  fallback behavior.
+- Verified with focused native/tool-loop guard suites, full `check`,
+  `wikiEvidenceCloseGate --rerun-tasks`, source hygiene, and architecture
+  evidence anchored to the implementation commit.
+- Result formatting, retry/request extraction, path/call repair, compaction,
+  stages, and trust-surface redaction remain deferred. T831 is the next
+  result-formatting extraction ticket.
