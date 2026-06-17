@@ -1,6 +1,6 @@
-# [T831-open-high] ToolCallSupport Result Formatting Extraction
+# [T831-done-high] ToolCallSupport Result Formatting Extraction
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-06-17
 Branch: `v0.9.0-beta-dev`
@@ -61,4 +61,30 @@ Out of scope:
 
 ## Completion Evidence
 
-Open until T831 is implemented, reviewed, and closed in a later ledger commit.
+Implementation commit: `93313de56b22a93a02af9515828e00a3a77947f8`.
+
+T831 extracted prompt-visible tool-result formatting into package-private
+`ToolResultFormatter` while keeping `ToolCallSupport` and `ToolCallLoop`
+delegates stable. It preserved success and error envelopes, default
+protected-content sanitization, raw output preservation for successful results
+when explicitly requested, blank-output fallback, 32K truncation, verification
+status rendering, verification warning extraction, and first-sentence summary
+behavior.
+
+Verified gates:
+
+- `ToolResultFormatterTest`: `5` tests, `0` failures, `0` errors.
+- `ToolCallSupportBoundaryCharacterizationTest`: green.
+- `ToolCallSupportTest`: green.
+- `ToolCallLoopTest`, `ToolCallLoopP0Test`, `ToolProgressUXTest`: green.
+- `ProtectedReadScopeIntegrationTest`: `18` tests, `0` failures, `0` errors.
+- `ToolResultModelContextHandoffTest`: `6` tests, `0` failures, `0` errors.
+- `runtime.toolcall.*`: green.
+- `ToolCallLoop*`: green.
+- `check --no-daemon`: `15/15` tasks executed, build successful.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon`: build successful,
+  including architecture intelligence contract `8/8`.
+
+No `site/`, Qodana, candidate recut, `SetupCmd.java`, `.external assistant/`, release
+metadata, compaction, retry/request extraction, path/call repair, stage, or
+`ExecutionOutcome` changes were made by T831.

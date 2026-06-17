@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "f35b8bc88533152c4c307a70a7b5814eba04c489"
+last_verified_commit: "93313de56b22a93a02af9515828e00a3a77947f8"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -81,8 +81,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T830-done-high] tool-call-support-native-call-conversion-extraction.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T831-open-high] tool-call-support-result-formatting-extraction.md"
-    selector: "Scope"
+    ref: "work-cycle-docs/tickets/done/[T831-done-high] tool-call-support-result-formatting-extraction.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -140,10 +140,11 @@ or generated reports.
 
 ## Active Tickets
 
-- T831: `tool-call-support-result-formatting-extraction`
+- None.
 
-Next planned move: implement and review T831 result-formatting extraction with
-`ToolCallSupport` and `ToolCallLoop` delegates preserved.
+Next planned move: open T832 for in-turn compaction evidence and
+characterization, Phase 1 only. Production compaction behavior remains
+unchanged until a later ticket is authorized.
 
 ## Update Rule
 

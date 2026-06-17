@@ -540,3 +540,13 @@ mechanically.
   summaries in package-private `ToolResultFormatter`.
 - Kept compaction, retry/request extraction, path/call repair, stages, and
   `ExecutionOutcome` deferred.
+
+## [2026-06-17] ledger | Close T831 result formatting
+
+- Moved T831 to the done ticket ledger after focused formatter tests,
+  privacy/context handoff suites, full `check`, architecture contract, and
+  wiki evidence gates passed.
+- Recorded implementation commit
+  `93313de56b22a93a02af9515828e00a3a77947f8`.
+- Set the next move to T832, Phase 1 evidence and characterization for
+  in-turn compaction with no production `src/main` behavior change.
