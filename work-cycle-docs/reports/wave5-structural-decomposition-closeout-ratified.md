@@ -1,21 +1,19 @@
-# Wave 5 structural decomposition closeout, proposed
+# Wave 5 structural decomposition closeout, ratified
 
-Status: proposed for owner ratification
+Status: ratified
 Branch: v0.9.0-beta-dev
 Talos version: 0.10.5
 Prepared: 2026-06-17
 
 ## Decision
 
-Proposed decision: close the Wave 5 structural-decomposition arc as complete as
+Ratified decision: close the Wave 5 structural-decomposition arc as complete as
 of T831 result-formatting extraction.
 
 This is not a claim that every hotspot vanished or that every candidate is at
 its theoretical floor. It is a deliberate stopping decision based on completed
 high-value structural cuts, current ranking evidence, diminishing returns, and
 the risk of over-fragmenting already-characterized helper surfaces.
-
-Owner ratification is still required.
 
 ## Ranking Basis
 
@@ -143,9 +141,13 @@ gist-in-stub remains optional and owner-deferred.
 - This does not claim `ExecutionOutcome` relocation is unnecessary.
 - This does not authorize Phase 2 compaction behavior changes.
 
-## Ratification Criteria
+## Ratification Record
 
-The owner can ratify this proposed decision if they accept:
+Owner ratification was accepted on 2026-06-17 after review of the proposed
+closeout record, T832 evidence report, wiki evidence gate, and clean full
+`check`.
+
+The ratification accepts:
 
 - the high-value structural cuts are complete,
 - remaining cuts are lower leverage or higher fragmentation risk,

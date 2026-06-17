@@ -105,7 +105,7 @@ evidence_inputs:
     ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Answer Quality Finding"
   - type: repo_file
-    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-proposed.md"
+    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-ratified.md"
     selector: "Decision"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
@@ -151,9 +151,9 @@ or generated reports.
 
 - None.
 
-Next planned move: owner ratification of the proposed Wave 5
-structural-decomposition closeout record. Production compaction behavior remains
-unchanged until a later ticket is authorized.
+Wave 5 structural-decomposition closeout is owner-ratified. Production
+compaction behavior remains unchanged until a later ticket is authorized, and
+future Wave 5 follow-up work requires a new scoped ticket.
 
 ## Update Rule
 

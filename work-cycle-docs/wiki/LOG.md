@@ -579,3 +579,12 @@ mechanically.
   structural seams as completed arcs.
 - Recorded `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
   retry extraction, and compaction quality work as deferred, not abandoned.
+
+## [2026-06-17] decision | Ratify Wave 5 structural closeout
+
+- Ratified the Wave 5 structural-decomposition closeout record after owner
+  acceptance and fresh wiki/full-check evidence.
+- Kept the explicit non-claims: `LoopState`, `ExecutionOutcome`, remaining
+  `ToolCallSupport` seams, retry extraction, and compaction Phase 2 are
+  deferred, not abandoned.
+- Recorded that future Wave 5 follow-up work requires a new scoped ticket.

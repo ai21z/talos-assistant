@@ -117,7 +117,7 @@ evidence_inputs:
     ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Answer Quality Finding"
   - type: repo_file
-    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-proposed.md"
+    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-ratified.md"
     selector: "Decision"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
@@ -176,8 +176,8 @@ confidence_histogram:
   result-formatting extraction. T832 completed Phase 1 evidence and
   characterization for in-turn compaction with no production `src/main`
   behavior change.
-- Next move: owner ratification of the proposed Wave 5 structural-decomposition
-  closeout record.
+- Next move: Wave 5 structural-decomposition closeout is owner-ratified;
+  future Wave 5 follow-up work requires new scoped tickets.
 
 ```talos-wiki-claims
 {
@@ -378,8 +378,8 @@ same-turn re-read proxy signals. Report hygiene recorded the exact artifact
 scan script, original counts of 738 and 700, current hygiene rescan counts of
 740 and 702, and the live-corpus reason for the slight drift.
 
-The Wave 5 structural-decomposition closeout record is proposed, not yet owner
-ratified. It closes the executor, core/tools cycle, `ToolCallLoop` engine,
+The Wave 5 structural-decomposition closeout record is owner-ratified. It
+closes the executor, core/tools cycle, `ToolCallLoop` engine,
 `ToolCallExecutionStage` guard-chain, and highest-value `ToolCallSupport`
 structural seams as a deliberate diminishing-returns decision. It explicitly
 defers `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
@@ -419,8 +419,9 @@ guard chain behind the stable public stage surface. T829 completed
 T830 extraction seam. T830 completed that behavior-preserving extraction.
 T831 completed the next narrow `ToolCallSupport` seam: result formatting.
 T832 completed Phase 1 evidence and characterization for in-turn compaction.
-The Wave 5 structural-decomposition closeout is now proposed for owner
-ratification.
+The Wave 5 structural-decomposition closeout is now owner-ratified. Future
+`LoopState`, `ExecutionOutcome`, retry, remaining `ToolCallSupport`, or
+compaction Phase 2 work must start from a new scoped ticket.
 
 ## Operating Boundaries
 
