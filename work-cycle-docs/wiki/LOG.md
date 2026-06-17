@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "7ad42580e35acf053d106a1e86b011cbfd67f1f1"
+last_verified_commit: "496799a46ca131a0d8164e49e2a6be130efe6e69"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -63,8 +63,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T829-done-high] tool-call-support-boundary-scoping.md"
     selector: "ToolCallSupport boundary scoping closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T830-open-high] tool-call-support-native-call-conversion-extraction.md"
-    selector: "Native-call conversion extraction"
+    ref: "work-cycle-docs/tickets/done/[T830-done-high] tool-call-support-native-call-conversion-extraction.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -518,3 +518,13 @@ mechanically.
   package-private `NativeToolCallConverter`.
 - Kept result formatting, retry/request extraction, path/call repair,
   compaction, stages, and trust-surface redaction deferred.
+
+## [2026-06-17] ledger | Close T830 native-call conversion
+
+- Moved T830 to the done ticket ledger after focused native/tool-loop suites,
+  full `check`, source hygiene, architecture evidence liveness, and wiki
+  evidence gates passed.
+- Recorded implementation commit
+  `496799a46ca131a0d8164e49e2a6be130efe6e69`.
+- Set the next move to T831 result-formatting extraction while keeping
+  `ToolCallSupport` and `ToolCallLoop` delegates stable.
