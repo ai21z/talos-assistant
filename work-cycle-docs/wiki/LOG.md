@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "496799a46ca131a0d8164e49e2a6be130efe6e69"
+last_verified_commit: "f35b8bc88533152c4c307a70a7b5814eba04c489"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -65,6 +65,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T830-done-high] tool-call-support-native-call-conversion-extraction.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T831-open-high] tool-call-support-result-formatting-extraction.md"
+    selector: "Scope"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -528,3 +531,12 @@ mechanically.
   `496799a46ca131a0d8164e49e2a6be130efe6e69`.
 - Set the next move to T831 result-formatting extraction while keeping
   `ToolCallSupport` and `ToolCallLoop` delegates stable.
+
+## [2026-06-17] extraction | Open T831 result formatting
+
+- Added T831 as the next narrow `ToolCallSupport` extraction after T830.
+- Scoped the move to prompt-visible result formatting, protected-content
+  sanitization, truncation, verification-summary extraction, and first-sentence
+  summaries in package-private `ToolResultFormatter`.
+- Kept compaction, retry/request extraction, path/call repair, stages, and
+  `ExecutionOutcome` deferred.

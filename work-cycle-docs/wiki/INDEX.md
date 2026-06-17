@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "496799a46ca131a0d8164e49e2a6be130efe6e69"
+last_verified_commit: "f35b8bc88533152c4c307a70a7b5814eba04c489"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -80,6 +80,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T830-done-high] tool-call-support-native-call-conversion-extraction.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T831-open-high] tool-call-support-result-formatting-extraction.md"
+    selector: "Scope"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -137,9 +140,9 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- T831: `tool-call-support-result-formatting-extraction`
 
-Next planned move: open T831 result-formatting extraction with
+Next planned move: implement and review T831 result-formatting extraction with
 `ToolCallSupport` and `ToolCallLoop` delegates preserved.
 
 ## Update Rule
