@@ -569,3 +569,13 @@ mechanically.
   with same-turn re-read evidence treated as a proxy only.
 - Deferred gist-in-stub, token-pressure triggering, and prompt rehydration to
   later owner-ratified work.
+
+## [2026-06-17] decision | Propose Wave 5 structural closeout
+
+- Added a proposed Wave 5 structural-decomposition closeout record for owner
+  ratification.
+- Closed the executor, core/tools cycle, `ToolCallLoop` engine,
+  `ToolCallExecutionStage` guard-chain, and highest-value `ToolCallSupport`
+  structural seams as completed arcs.
+- Recorded `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
+  retry extraction, and compaction quality work as deferred, not abandoned.
