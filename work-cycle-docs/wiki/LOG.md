@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "e9ae1a41ff591f0b165dd5e83fdb352a1fb74f75"
+last_verified_commit: "4d45b3ed54b50bdf75ceb457b298a572a0783d7a"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -56,6 +56,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/open/[T824-open-high] tool-call-loop-engine-extraction.md"
     selector: "ToolCallLoopEngine extraction"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
+    selector: "ToolCallExecutionStage guard-chain extraction closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -473,3 +476,12 @@ mechanically.
   `ToolCallPreExecutionGuardChain`.
 - Kept the public `ToolCallExecutionStage.execute(...)` and
   `IterationOutcome` surface stable.
+
+## [2026-06-17] ledger | Close T828 ToolCallExecutionStage guard chain
+
+- Moved T828 to the done ticket ledger after green focused/security suites,
+  full `check`, architecture evidence liveness, and wiki evidence gates.
+- Recorded implementation commit
+  `4d45b3ed54b50bdf75ceb457b298a572a0783d7a`.
+- Set the next Wave 5 move to T829, a scoping/characterization ticket for the
+  broad `ToolCallSupport` helper surface before any T830 extraction.
