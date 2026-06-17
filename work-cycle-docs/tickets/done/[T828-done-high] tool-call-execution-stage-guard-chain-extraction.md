@@ -1,6 +1,6 @@
-# [T828-open-high] ToolCallExecutionStage Guard Chain Extraction
+# [T828-done-high] ToolCallExecutionStage Guard Chain Extraction
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-06-16
 Branch: `v0.9.0-beta-dev`
@@ -64,5 +64,28 @@ Out of scope:
 
 ## Completion Evidence
 
-Open until the implementation diff is reviewed and the T828 closeout ticket
-move records the final commit and gate evidence.
+- Implementation commit: `4d45b3ed54b50bdf75ceb457b298a572a0783d7a`.
+- Added package-private `ToolCallPreExecutionGuardChain` in
+  `dev.talos.runtime.toolcall`.
+- Preserved public `ToolCallExecutionStage.execute(...)` and
+  `IterationOutcome`.
+- Preserved text/native result-message shape, approval denial behavior,
+  private-document blocking evidence, context-ledger decisions, mutation
+  accounting, failure accounting, and edit-repair accounting.
+- Fresh focused/security suites passed:
+  `ToolCallExecutionStageCharacterizationTest`, `runtime.toolcall.*`,
+  `ToolCallLoop*`, `ProtectedReadScopeIntegrationTest`,
+  `ToolResultModelContextHandoffTest`, and `LocalTurnTraceCommandTest`.
+- Full `check --no-daemon` passed.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- `ArchitectureIntelligenceReportContractTest` passed 8/8 through the evidence
+  gate.
+- `git diff --check -- . ':!site'` passed.
+- `site/` remained unrelated owner work and was not staged.
+
+## T829 Preview
+
+After T828, the next planned move is T829
+`tool-call-support-boundary-scoping`. It should characterize and scope the
+broad `ToolCallSupport` helper surface before choosing a T830 production
+extraction seam.

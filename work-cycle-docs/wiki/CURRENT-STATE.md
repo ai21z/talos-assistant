@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "ed8acb4e658d3c399c9e8633bdbebe8f9618c74c"
+last_verified_commit: "4d45b3ed54b50bdf75ceb457b298a572a0783d7a"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -75,8 +75,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T827-done-high] architecture-intelligence-qodana-summary-ordering.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T828-open-high] tool-call-execution-stage-guard-chain-extraction.md"
-    selector: "Scope"
+    ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -116,12 +116,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `ed8acb4e658d3c399c9e8633bdbebe8f9618c74c`
+- Commit: `4d45b3ed54b50bdf75ceb457b298a572a0783d7a`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T828 `tool-call-execution-stage-guard-chain-extraction`.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -148,10 +148,10 @@ confidence_histogram:
   itself; T824 completed the behavior-preserving `ToolCallLoopEngine`
   extraction while keeping `ToolCallLoop` as the public facade; T825 completed
   scoping of the remaining `runtime.toolcall` internals; T826 completed direct
-  characterization of `ToolCallExecutionStage.execute(...)`; T828 is open for
+  characterization of `ToolCallExecutionStage.execute(...)`; T828 completed
   the first production `ToolCallExecutionStage` decomposition.
-- Next move: review the T828 guard-chain extraction, keep the security-heavy
-  gates green, then close T828 if accepted.
+- Next move: open T829 as characterization/scoping for the broad
+  `ToolCallSupport` helper surface before any T830 production extraction.
 
 ```talos-wiki-claims
 {
@@ -313,10 +313,9 @@ successful execution accounting, failed edit accounting, and the public
 `IterationOutcome` surface.
 
 T827 is done. It hardened architecture intelligence / wiki-evidence ordering so
-`qodana-summary.json` is generated before report validation reads it. Production
-`ToolCallExecutionStage` decomposition is now deferred to T828.
+`qodana-summary.json` is generated before report validation reads it.
 
-T828 is open. Its purpose is to extract the pre-execution guard chain from
+T828 is done. Its purpose was to extract the pre-execution guard chain from
 `ToolCallExecutionStage.execute(...)` into package-private
 `ToolCallPreExecutionGuardChain` while preserving the public stage API,
 result-message shape, approval/trace/ledger behavior, mutation/failure
@@ -349,9 +348,10 @@ orchestration characterization. T824 completed behavior-preserving extraction
 into package-private `dev.talos.runtime.ToolCallLoopEngine`. T825 completed
 remaining `runtime.toolcall` internals scoping and selected T826
 `ToolCallExecutionStage` characterization before any production decomposition.
-T826 is now done. T827 completed Qodana-summary evidence-order hardening;
-T828 is open as the first production decomposition, focused on the
-pre-execution guard chain behind the stable public stage surface.
+T826 is done. T827 completed Qodana-summary evidence-order hardening. T828
+completed the first production decomposition, focused on the pre-execution
+guard chain behind the stable public stage surface. The next move is T829
+`ToolCallSupport` boundary scoping before any T830 extraction.
 
 ## Operating Boundaries
 
