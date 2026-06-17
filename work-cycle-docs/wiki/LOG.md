@@ -560,3 +560,12 @@ mechanically.
   separation from session-level `core.context` compaction.
 - Added local artifact measurements and a behavioral characterization test
   without authorizing production compaction changes.
+
+## [2026-06-17] ledger | Close T832 in-turn compaction Phase 1
+
+- Moved T832 to the done ticket ledger after report-hygiene reconciliation
+  recorded the exact artifact scan script.
+- Preserved the Phase 1 finding: no proof of measurable answer-quality harm,
+  with same-turn re-read evidence treated as a proxy only.
+- Deferred gist-in-stub, token-pressure triggering, and prompt rehydration to
+  later owner-ratified work.

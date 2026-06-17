@@ -61,8 +61,74 @@ Measurement summary:
 | Metric | Value |
 | --- | ---: |
 | Provider-body JSON files scanned | 12,571 |
-| Files containing `[compacted:]` | 738 |
-| Parseable compacted provider bodies | 700 |
+| Original Phase 1 files containing `[compacted:]` | 738 |
+| Original Phase 1 parseable compacted provider bodies | 700 |
+| Current hygiene rescan files containing `[compacted:]` | 740 |
+| Current hygiene rescan parseable compacted provider bodies | 702 |
+
+The file count uses the literal glob `local/**/*provider-body*.json`. The
+`local/` artifact corpus is live. Audit and test runs may add provider-body
+files, so the `[compacted:]` count can drift slightly between scans. The
+original Phase 1 scan found 738 and 700. The current hygiene rescan found 740
+and 702.
+
+Reproduction script:
+
+```powershell
+@'
+import json
+from pathlib import Path
+
+files = list(Path("local").rglob("*provider-body*.json"))
+raw_compacted = 0
+parseable = 0
+parse_failures = 0
+with_messages = 0
+parseable_compacted = 0
+
+for path in files:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        continue
+
+    if "[compacted:" in text:
+        raw_compacted += 1
+
+    try:
+        data = json.loads(text)
+        parseable += 1
+    except Exception:
+        parse_failures += 1
+        continue
+
+    messages = data.get("messages") if isinstance(data, dict) else None
+    if not isinstance(messages, list):
+        continue
+    with_messages += 1
+
+    if any(
+        isinstance(message, dict)
+        and isinstance(message.get("content"), str)
+        and "[compacted:" in message.get("content")
+        for message in messages
+    ):
+        parseable_compacted += 1
+
+print(
+    f"files={len(files)} rawCompacted={raw_compacted} "
+    f"parseable={parseable} parseFailures={parse_failures} "
+    f"withMessages={with_messages} "
+    f"parseableCompacted={parseable_compacted}"
+)
+'@ | python -
+```
+
+Current hygiene rescan output:
+
+```text
+files=12571 rawCompacted=740 parseable=10957 parseFailures=1529 withMessages=10769 parseableCompacted=702
+```
 
 Representative artifact paths included:
 
@@ -114,8 +180,8 @@ boundary of this Phase 1 conclusion.
 
 ## Recommendation
 
-Keep T832 open for review after Phase 1. Do not treat current compaction as a
-release blocker based on this evidence.
+Close T832 Phase 1 after review. Do not treat current compaction as a release
+blocker based on this evidence.
 
 A later Phase 2 is reasonable if the owner accepts the tradeoff. The smallest
 candidate is a deterministic gist-in-stub improvement that derives its gist only

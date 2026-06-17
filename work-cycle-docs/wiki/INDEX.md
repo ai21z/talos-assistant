@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "4edb69cfcc7474f409b786f3d40ee4ddc8e965f2"
+last_verified_commit: "4de4bba6ecdd512ec487543501ac4e1c69d6fbdf"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -84,8 +84,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T831-done-high] tool-call-support-result-formatting-extraction.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T832-open-high] in-turn-compaction-evidence-and-conditional-gist.md"
-    selector: "Phase 1 Evidence Summary"
+    ref: "work-cycle-docs/tickets/done/[T832-done-high] in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -146,11 +146,11 @@ or generated reports.
 
 ## Active Tickets
 
-- [T832-open-high] in-turn compaction evidence and conditional gist.
+- None.
 
-Next planned move: review T832 Phase 1 evidence and decide whether a later
-gist-in-stub production change is justified. Production compaction behavior
-remains unchanged until a later ticket is authorized.
+Next planned move: add a proposed Wave 5 structural-decomposition closeout
+record for owner ratification. Production compaction behavior remains unchanged
+until a later ticket is authorized.
 
 ## Update Rule
 

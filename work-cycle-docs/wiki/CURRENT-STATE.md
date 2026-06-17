@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "4edb69cfcc7474f409b786f3d40ee4ddc8e965f2"
+last_verified_commit: "4de4bba6ecdd512ec487543501ac4e1c69d6fbdf"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -87,8 +87,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T831-done-high] tool-call-support-result-formatting-extraction.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T832-open-high] in-turn-compaction-evidence-and-conditional-gist.md"
-    selector: "Phase 1 Evidence Summary"
+    ref: "work-cycle-docs/tickets/done/[T832-done-high] in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -134,12 +134,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `4edb69cfcc7474f409b786f3d40ee4ddc8e965f2`
+- Commit: `4de4bba6ecdd512ec487543501ac4e1c69d6fbdf`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T832 in-turn compaction evidence and conditional gist.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -170,11 +170,11 @@ confidence_histogram:
   the first production `ToolCallExecutionStage` decomposition; T829 completed
   `ToolCallSupport` boundary scoping and selected native-call conversion as
   the first production seam; T830 completed that extraction; T831 completed
-  result-formatting extraction. T832 is open as Phase 1 evidence and
-  characterization for in-turn compaction, with no production `src/main`
-  behavior change authorized.
-- Next move: review T832 Phase 1 evidence and decide whether a later Phase 2
-  gist-in-stub change is justified.
+  result-formatting extraction. T832 completed Phase 1 evidence and
+  characterization for in-turn compaction with no production `src/main`
+  behavior change.
+- Next move: add a proposed Wave 5 structural-decomposition closeout record for
+  owner ratification.
 
 ```talos-wiki-claims
 {
@@ -364,14 +364,16 @@ T831 is done. Its purpose was to extract prompt-visible result formatting from
 public/static delegates and leaving compaction, retry/request extraction,
 path/call repair, stages, and `ExecutionOutcome` deferred.
 
-T832 is open. Its Phase 1 purpose is to characterize in-turn tool-loop
+T832 is done. Its Phase 1 purpose was to characterize in-turn tool-loop
 compaction and measure existing local prompt-debug/provider-body evidence
 before any behavior change. It records that compaction is gated by
 `state.iterations >= 3`, keeps the last two tool results verbatim, replaces
 older tool results with char-count-only `[compacted:]` stubs, and does not
 rehydrate elided content back into later prompts. Phase 1 does not prove a
 measurable answer-quality regression, but it does show real artifact usage and
-same-turn re-read proxy signals.
+same-turn re-read proxy signals. Report hygiene recorded the exact artifact
+scan script, original counts of 738 and 700, current hygiene rescan counts of
+740 and 702, and the live-corpus reason for the slight drift.
 
 ## Wave 5 Readiness Status
 
@@ -406,7 +408,7 @@ guard chain behind the stable public stage surface. T829 completed
 `ToolCallSupport` boundary scoping and selected native-call conversion as the
 T830 extraction seam. T830 completed that behavior-preserving extraction.
 T831 completed the next narrow `ToolCallSupport` seam: result formatting.
-T832 is open as Phase 1 evidence and characterization for in-turn compaction.
+T832 completed Phase 1 evidence and characterization for in-turn compaction.
 
 ## Operating Boundaries
 
