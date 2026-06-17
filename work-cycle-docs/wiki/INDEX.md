@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "93313de56b22a93a02af9515828e00a3a77947f8"
+last_verified_commit: "4edb69cfcc7474f409b786f3d40ee4ddc8e965f2"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -83,6 +83,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T831-done-high] tool-call-support-result-formatting-extraction.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T832-open-high] in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Phase 1 Evidence Summary"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -98,6 +101,9 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t829-tool-call-support-boundary-scoping.md"
     selector: "ToolCallSupport boundary scoping"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Answer Quality Finding"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -140,11 +146,11 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- [T832-open-high] in-turn compaction evidence and conditional gist.
 
-Next planned move: open T832 for in-turn compaction evidence and
-characterization, Phase 1 only. Production compaction behavior remains
-unchanged until a later ticket is authorized.
+Next planned move: review T832 Phase 1 evidence and decide whether a later
+gist-in-stub production change is justified. Production compaction behavior
+remains unchanged until a later ticket is authorized.
 
 ## Update Rule
 

@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "93313de56b22a93a02af9515828e00a3a77947f8"
+last_verified_commit: "4edb69cfcc7474f409b786f3d40ee4ddc8e965f2"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -86,6 +86,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T831-done-high] tool-call-support-result-formatting-extraction.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T832-open-high] in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Phase 1 Evidence Summary"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -110,13 +113,16 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t829-tool-call-support-boundary-scoping.md"
     selector: "Candidate T830 Seam Hypotheses"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Answer Quality Finding"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
     selector: "/schema, /branch, /commit, /talosVersion, /reportPaths, /jsonPaths"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 15
+  INFERRED_REVIEW: 16
   DETERMINISTIC_STATIC: 20
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
@@ -128,12 +134,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `93313de56b22a93a02af9515828e00a3a77947f8`
+- Commit: `4edb69cfcc7474f409b786f3d40ee4ddc8e965f2`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T832 in-turn compaction evidence and conditional gist.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -164,9 +170,11 @@ confidence_histogram:
   the first production `ToolCallExecutionStage` decomposition; T829 completed
   `ToolCallSupport` boundary scoping and selected native-call conversion as
   the first production seam; T830 completed that extraction; T831 completed
-  result-formatting extraction.
-- Next move: open T832 for in-turn compaction evidence and characterization,
-  Phase 1 only. Do not change production `src/main` compaction behavior.
+  result-formatting extraction. T832 is open as Phase 1 evidence and
+  characterization for in-turn compaction, with no production `src/main`
+  behavior change authorized.
+- Next move: review T832 Phase 1 evidence and decide whether a later Phase 2
+  gist-in-stub change is justified.
 
 ```talos-wiki-claims
 {
@@ -356,6 +364,15 @@ T831 is done. Its purpose was to extract prompt-visible result formatting from
 public/static delegates and leaving compaction, retry/request extraction,
 path/call repair, stages, and `ExecutionOutcome` deferred.
 
+T832 is open. Its Phase 1 purpose is to characterize in-turn tool-loop
+compaction and measure existing local prompt-debug/provider-body evidence
+before any behavior change. It records that compaction is gated by
+`state.iterations >= 3`, keeps the last two tool results verbatim, replaces
+older tool results with char-count-only `[compacted:]` stubs, and does not
+rehydrate elided content back into later prompts. Phase 1 does not prove a
+measurable answer-quality regression, but it does show real artifact usage and
+same-turn re-read proxy signals.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -389,7 +406,7 @@ guard chain behind the stable public stage surface. T829 completed
 `ToolCallSupport` boundary scoping and selected native-call conversion as the
 T830 extraction seam. T830 completed that behavior-preserving extraction.
 T831 completed the next narrow `ToolCallSupport` seam: result formatting.
-T832 is next as Phase 1 evidence and characterization for in-turn compaction.
+T832 is open as Phase 1 evidence and characterization for in-turn compaction.
 
 ## Operating Boundaries
 
