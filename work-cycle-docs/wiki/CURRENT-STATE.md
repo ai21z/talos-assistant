@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "4de4bba6ecdd512ec487543501ac4e1c69d6fbdf"
+last_verified_commit: "141d787269e1d21baaf42435623bbe80b14a94c2"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -116,13 +116,16 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Answer Quality Finding"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-proposed.md"
+    selector: "Decision"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
     selector: "/schema, /branch, /commit, /talosVersion, /reportPaths, /jsonPaths"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
-  INFERRED_REVIEW: 16
+  INFERRED_REVIEW: 17
   DETERMINISTIC_STATIC: 20
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
@@ -134,7 +137,7 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `4de4bba6ecdd512ec487543501ac4e1c69d6fbdf`
+- Commit: `141d787269e1d21baaf42435623bbe80b14a94c2`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
@@ -173,8 +176,8 @@ confidence_histogram:
   result-formatting extraction. T832 completed Phase 1 evidence and
   characterization for in-turn compaction with no production `src/main`
   behavior change.
-- Next move: add a proposed Wave 5 structural-decomposition closeout record for
-  owner ratification.
+- Next move: owner ratification of the proposed Wave 5 structural-decomposition
+  closeout record.
 
 ```talos-wiki-claims
 {
@@ -375,6 +378,13 @@ same-turn re-read proxy signals. Report hygiene recorded the exact artifact
 scan script, original counts of 738 and 700, current hygiene rescan counts of
 740 and 702, and the live-corpus reason for the slight drift.
 
+The Wave 5 structural-decomposition closeout record is proposed, not yet owner
+ratified. It closes the executor, core/tools cycle, `ToolCallLoop` engine,
+`ToolCallExecutionStage` guard-chain, and highest-value `ToolCallSupport`
+structural seams as a deliberate diminishing-returns decision. It explicitly
+defers `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
+retry extraction, and compaction quality work to separately scoped tickets.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -409,6 +419,8 @@ guard chain behind the stable public stage surface. T829 completed
 T830 extraction seam. T830 completed that behavior-preserving extraction.
 T831 completed the next narrow `ToolCallSupport` seam: result formatting.
 T832 completed Phase 1 evidence and characterization for in-turn compaction.
+The Wave 5 structural-decomposition closeout is now proposed for owner
+ratification.
 
 ## Operating Boundaries
 

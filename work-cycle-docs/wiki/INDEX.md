@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "4de4bba6ecdd512ec487543501ac4e1c69d6fbdf"
+last_verified_commit: "141d787269e1d21baaf42435623bbe80b14a94c2"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"
@@ -104,6 +104,9 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Answer Quality Finding"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-proposed.md"
+    selector: "Decision"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
@@ -148,9 +151,9 @@ or generated reports.
 
 - None.
 
-Next planned move: add a proposed Wave 5 structural-decomposition closeout
-record for owner ratification. Production compaction behavior remains unchanged
-until a later ticket is authorized.
+Next planned move: owner ratification of the proposed Wave 5
+structural-decomposition closeout record. Production compaction behavior remains
+unchanged until a later ticket is authorized.
 
 ## Update Rule
 
