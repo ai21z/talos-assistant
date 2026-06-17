@@ -550,3 +550,13 @@ mechanically.
   `93313de56b22a93a02af9515828e00a3a77947f8`.
 - Set the next move to T832, Phase 1 evidence and characterization for
   in-turn compaction with no production `src/main` behavior change.
+
+## [2026-06-17] evidence | Open T832 in-turn compaction Phase 1
+
+- Added T832 as an evidence and characterization ticket for in-turn
+  tool-loop compaction after T831 result-formatting extraction.
+- Recorded source anchors for iteration-gated compaction, char-count-only
+  `[compacted:]` stubs, retained `readFileBodiesThisTurn` state, and the
+  separation from session-level `core.context` compaction.
+- Added local artifact measurements and a behavioral characterization test
+  without authorizing production compaction changes.
