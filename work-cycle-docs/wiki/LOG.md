@@ -59,6 +59,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
     selector: "ToolCallExecutionStage guard-chain extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T829-open-high] tool-call-support-boundary-scoping.md"
+    selector: "ToolCallSupport boundary scoping"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -485,3 +488,12 @@ mechanically.
   `4d45b3ed54b50bdf75ceb457b298a572a0783d7a`.
 - Set the next Wave 5 move to T829, a scoping/characterization ticket for the
   broad `ToolCallSupport` helper surface before any T830 extraction.
+
+## [2026-06-17] scoping | Open T829 ToolCallSupport boundary
+
+- Added T829 as characterization/scoping for the broad `ToolCallSupport`
+  helper surface after the T828 guard-chain extraction.
+- Recorded current generated evidence for `ToolCallSupport`, `LoopState`,
+  `ToolCallExecutionStage`, and `ExecutionOutcome`.
+- Kept native-call conversion, result formatting, retry/request extraction,
+  path/call repair, and compaction as hypotheses until T829 is reviewed.
