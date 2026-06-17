@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "4d45b3ed54b50bdf75ceb457b298a572a0783d7a"
+last_verified_commit: "4104a90c6a9736997b13aa8736a3be2db68c7a17"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -60,8 +60,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
     selector: "ToolCallExecutionStage guard-chain extraction closeout"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T829-open-high] tool-call-support-boundary-scoping.md"
-    selector: "ToolCallSupport boundary scoping"
+    ref: "work-cycle-docs/tickets/done/[T829-done-high] tool-call-support-boundary-scoping.md"
+    selector: "ToolCallSupport boundary scoping closeout"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -497,3 +497,12 @@ mechanically.
   `ToolCallExecutionStage`, and `ExecutionOutcome`.
 - Kept native-call conversion, result formatting, retry/request extraction,
   path/call repair, and compaction as hypotheses until T829 is reviewed.
+
+## [2026-06-17] ledger | Close T829 ToolCallSupport boundary
+
+- Moved T829 to the done ticket ledger after focused characterization, full
+  `check`, and wiki evidence gates passed.
+- Recorded architecture evidence anchored to
+  `4104a90c6a9736997b13aa8736a3be2db68c7a17`.
+- Selected T830 native-call conversion as the first production
+  `ToolCallSupport` extraction seam.

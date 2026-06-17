@@ -1,6 +1,6 @@
-# [T829-open-high] ToolCallSupport Boundary Scoping
+# [T829-done-high] ToolCallSupport Boundary Scoping
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-06-17
 Branch: `v0.9.0-beta-dev`
@@ -53,4 +53,16 @@ Out of scope:
 
 ## Completion Evidence
 
-Open until T829 is reviewed and closed in a later ledger commit.
+Completed as scoping/characterization only.
+
+- `ToolCallSupportBoundaryCharacterizationTest`: `6` tests, `0` failures,
+  `0` errors.
+- Full `check` passed.
+- `wikiEvidenceCloseGate --rerun-tasks` passed.
+- Generated architecture evidence was reviewed at
+  `4104a90c6a9736997b13aa8736a3be2db68c7a17`.
+- T829 added no production source changes and did not authorize extraction by
+  itself.
+- T830 selected the native-call conversion seam as the first production
+  `ToolCallSupport` extraction because it is a narrow data-transform boundary
+  already covered by helper-level characterization.

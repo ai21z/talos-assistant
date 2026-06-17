@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "4d45b3ed54b50bdf75ceb457b298a572a0783d7a"
+last_verified_commit: "4104a90c6a9736997b13aa8736a3be2db68c7a17"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -78,8 +78,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T829-open-high] tool-call-support-boundary-scoping.md"
-    selector: "Scope"
+    ref: "work-cycle-docs/tickets/done/[T829-done-high] tool-call-support-boundary-scoping.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -122,12 +122,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `4d45b3ed54b50bdf75ceb457b298a572a0783d7a`
+- Commit: `4104a90c6a9736997b13aa8736a3be2db68c7a17`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T829 `tool-call-support-boundary-scoping`.
+- Active tickets: none.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -155,10 +155,10 @@ confidence_histogram:
   extraction while keeping `ToolCallLoop` as the public facade; T825 completed
   scoping of the remaining `runtime.toolcall` internals; T826 completed direct
   characterization of `ToolCallExecutionStage.execute(...)`; T828 completed
-  the first production `ToolCallExecutionStage` decomposition; T829 is open
-  for `ToolCallSupport` boundary scoping.
-- Next move: review T829 scoping evidence, then choose one T830 production
-  extraction seam from the characterized `ToolCallSupport` helper surface.
+  the first production `ToolCallExecutionStage` decomposition; T829 completed
+  `ToolCallSupport` boundary scoping and selected native-call conversion as
+  the first production seam.
+- Next move: T830 `ToolCallSupport` native-call conversion extraction.
 
 ```talos-wiki-claims
 {
@@ -328,11 +328,11 @@ T828 is done. Its purpose was to extract the pre-execution guard chain from
 result-message shape, approval/trace/ledger behavior, mutation/failure
 accounting, and edit-repair ordering.
 
-T829 is open. Its purpose is to characterize and scope the broad
+T829 is done. Its purpose was to characterize and scope the broad
 `ToolCallSupport` helper surface before choosing a T830 production extraction
-seam. Candidate seams include native-call conversion, tool-result formatting,
-retry/request extraction, path/call repair, and compaction; all are hypotheses
-until T829 is reviewed.
+seam. It kept result formatting, retry/request extraction, path/call repair,
+and compaction as hypotheses, and selected native-call conversion as the first
+narrow T830 production extraction.
 
 ## Wave 5 Readiness Status
 
@@ -363,8 +363,9 @@ remaining `runtime.toolcall` internals scoping and selected T826
 `ToolCallExecutionStage` characterization before any production decomposition.
 T826 is done. T827 completed Qodana-summary evidence-order hardening. T828
 completed the first production decomposition, focused on the pre-execution
-guard chain behind the stable public stage surface. T829 is open as
-`ToolCallSupport` boundary scoping before any T830 extraction.
+guard chain behind the stable public stage surface. T829 completed
+`ToolCallSupport` boundary scoping and selected native-call conversion as the
+T830 extraction seam.
 
 ## Operating Boundaries
 
