@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "4104a90c6a9736997b13aa8736a3be2db68c7a17"
+last_verified_commit: "7ad42580e35acf053d106a1e86b011cbfd67f1f1"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -80,6 +80,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T829-done-high] tool-call-support-boundary-scoping.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T830-open-high] tool-call-support-native-call-conversion-extraction.md"
+    selector: "Scope"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -122,12 +125,12 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `4104a90c6a9736997b13aa8736a3be2db68c7a17`
+- Commit: `7ad42580e35acf053d106a1e86b011cbfd67f1f1`
 - Talos version: `0.10.5`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T830 `tool-call-support-native-call-conversion-extraction`.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -157,8 +160,9 @@ confidence_histogram:
   characterization of `ToolCallExecutionStage.execute(...)`; T828 completed
   the first production `ToolCallExecutionStage` decomposition; T829 completed
   `ToolCallSupport` boundary scoping and selected native-call conversion as
-  the first production seam.
-- Next move: T830 `ToolCallSupport` native-call conversion extraction.
+  the first production seam; T830 is open for that extraction.
+- Next move: implement and review T830 native-call conversion extraction while
+  keeping `ToolCallSupport` and `ToolCallLoop` delegates stable.
 
 ```talos-wiki-claims
 {
@@ -334,6 +338,12 @@ seam. It kept result formatting, retry/request extraction, path/call repair,
 and compaction as hypotheses, and selected native-call conversion as the first
 narrow T830 production extraction.
 
+T830 is open. Its purpose is to extract native-call conversion from
+`ToolCallSupport` into package-private `NativeToolCallConverter` while keeping
+public/static compatibility delegates stable and leaving result formatting,
+retry/request extraction, path/call repair, compaction, and trust-surface
+redaction deferred.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -365,7 +375,7 @@ T826 is done. T827 completed Qodana-summary evidence-order hardening. T828
 completed the first production decomposition, focused on the pre-execution
 guard chain behind the stable public stage surface. T829 completed
 `ToolCallSupport` boundary scoping and selected native-call conversion as the
-T830 extraction seam.
+T830 extraction seam. T830 is open for that behavior-preserving extraction.
 
 ## Operating Boundaries
 

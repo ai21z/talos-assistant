@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "4104a90c6a9736997b13aa8736a3be2db68c7a17"
+last_verified_commit: "7ad42580e35acf053d106a1e86b011cbfd67f1f1"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -62,6 +62,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T829-done-high] tool-call-support-boundary-scoping.md"
     selector: "ToolCallSupport boundary scoping closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T830-open-high] tool-call-support-native-call-conversion-extraction.md"
+    selector: "Native-call conversion extraction"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -506,3 +509,12 @@ mechanically.
   `4104a90c6a9736997b13aa8736a3be2db68c7a17`.
 - Selected T830 native-call conversion as the first production
   `ToolCallSupport` extraction seam.
+
+## [2026-06-17] extraction | Open T830 native-call conversion
+
+- Added T830 as the first production `ToolCallSupport` extraction after T829
+  scoping.
+- Scoped the move to native-call conversion and native argument rendering into
+  package-private `NativeToolCallConverter`.
+- Kept result formatting, retry/request extraction, path/call repair,
+  compaction, stages, and trust-surface redaction deferred.
