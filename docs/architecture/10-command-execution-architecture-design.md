@@ -414,6 +414,8 @@ stdout: ...
 stderr: ...
 ```
 
+Current model-context boundary: `run_command` stdout and stderr are not withheld from model context by default. Command output (run_command stdout/stderr) is passed to the model after best-effort textual redaction of recognizable secret-assignment patterns and known markers only. It is NOT withheld by default and is not classified by source path. Do not run commands that print real credentials in this beta.
+
 The final assistant outcome must be failure-dominant when:
 
 - the command is denied;

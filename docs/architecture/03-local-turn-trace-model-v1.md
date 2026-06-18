@@ -13,6 +13,8 @@ It should make an executed turn explainable without trusting model prose,
 without uploading anything, and without forcing the user to inspect a raw
 session transcript. The trace is local evidence for execution discipline.
 
+Current integrity boundary: Local traces and logs are durable evidence artifacts, but they are not tamper-evident. Local traces and turn logs are best-effort plaintext diagnostic artifacts stored under `~/.talos`. They are NOT tamper-evident: there is no hash chain, signature, or append-only enforcement, so any process with write access to your home directory can alter or delete them undetectably. Treat them as local debugging evidence, not as a cryptographically provable audit trail.
+
 It must help answer:
 
 - what task contract was resolved?

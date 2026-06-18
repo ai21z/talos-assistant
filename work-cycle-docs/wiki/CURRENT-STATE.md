@@ -89,6 +89,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T832-done-high] in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md"
+    selector: "Purpose"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -119,6 +122,9 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-ratified.md"
     selector: "Decision"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md"
+    selector: "Bounded Trust Claims"
   - type: generated_report
     ref: "build/reports/talos/architecture-intelligence/current/data/run-manifest.json"
     selector: "/schema, /branch, /commit, /talosVersion, /reportPaths, /jsonPaths"
@@ -126,7 +132,7 @@ min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 17
-  DETERMINISTIC_STATIC: 20
+  DETERMINISTIC_STATIC: 22
   DETERMINISTIC_GENERATED: 4
   OBSERVED_RUNTIME: 1
   GATED: 0
@@ -142,7 +148,7 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none.
+- Active tickets: T833 Wave 6 trust-surface honest disclosure.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -177,7 +183,9 @@ confidence_histogram:
   characterization for in-turn compaction with no production `src/main`
   behavior change.
 - Next move: Wave 5 structural-decomposition closeout is owner-ratified;
-  future Wave 5 follow-up work requires new scoped tickets.
+  future Wave 5 follow-up work requires new scoped tickets. Wave 6 has started
+  with T833, a docs-and-test honest-disclosure pass that bounds trust,
+  privacy, security, and truthfulness claims to current code.
 
 ```talos-wiki-claims
 {
@@ -385,6 +393,12 @@ structural seams as a deliberate diminishing-returns decision. It explicitly
 defers `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
 retry extraction, and compaction quality work to separately scoped tickets.
 
+T833 is open. Its purpose is Wave 6 Tier 0 honest disclosure: update
+Talos-owned README, AGENTS, and docs trust-surface claims to match current code
+and add a docs honesty regression test. It does not authorize the five HIGH code
+fixes, production `src/main` changes, capability work, compaction Phase 2,
+candidate cut, or `site/` edits.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810
@@ -422,6 +436,19 @@ T832 completed Phase 1 evidence and characterization for in-turn compaction.
 The Wave 5 structural-decomposition closeout is now owner-ratified. Future
 `LoopState`, `ExecutionOutcome`, retry, remaining `ToolCallSupport`, or
 compaction Phase 2 work must start from a new scoped ticket.
+
+## Wave 6 Trust Track Status
+
+T833 is the active Wave 6 Tier 0 ticket. It records honest limits for
+anti-overclaim scope, secret redaction, command-output handoff, Windows
+protected-path matching, model-host locality, local secret encryption, and trace
+integrity.
+
+Trust tickets folded into the Wave 6 track for later re-scoping: T274, T276,
+T281, T283, T286, T301, T319.
+
+Capability tickets explicitly deferred and not the current Talos identity:
+T294, T296, T299, T300, T302, T303, T304, T627.
 
 ## Operating Boundaries
 

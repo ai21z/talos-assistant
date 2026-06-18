@@ -588,3 +588,14 @@ mechanically.
   `ToolCallSupport` seams, retry extraction, and compaction Phase 2 are
   deferred, not abandoned.
 - Recorded that future Wave 5 follow-up work requires a new scoped ticket.
+
+## [2026-06-18] disclosure | Open T833 Wave 6 trust-surface T0
+
+- Opened T833 as the Wave 6 Tier 0 honest-disclosure pass after Wave 5
+  ratification.
+- Scoped T833 to README, AGENTS, docs, report/wiki, and a docs honesty test
+  only; production `src/main`, site copy, capability work, compaction Phase 2,
+  and the five HIGH code fixes remain out of scope.
+- Folded T274, T276, T281, T283, T286, T301, and T319 into the Wave 6 trust
+  track for later re-scoping; parked T294, T296, T299, T300, T302, T303, T304,
+  and T627 as capability backlog, explicitly deferred.

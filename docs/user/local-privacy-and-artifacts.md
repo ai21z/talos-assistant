@@ -16,6 +16,26 @@ Use private mode for sensitive workspaces:
 /privacy private on
 ```
 
+## Current Trust-Surface Limits
+
+Talos is local-first when it is configured to use local model endpoints, but the
+current beta must not be described as a general private-paperwork or secret-safe
+assistant.
+
+Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
+
+Secret redaction currently catches common key=value secret shapes and known canaries; it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, connection strings, or high-entropy blobs. Talos redacts common key=value secret shapes (api_key=, password:, token=) and known canaries from model context, logs, traces, and persisted artifacts. It does NOT yet detect bare credentials with no assignment syntax: standalone API tokens, JWTs, PEM private-key blocks, secrets embedded in URLs/connection strings, or high-entropy blobs. Do not rely on Talos to scrub such values from files it reads, command output, sessions, or traces.
+
+`run_command` stdout and stderr are not withheld from model context by default. Command output (run_command stdout/stderr) is passed to the model after best-effort textual redaction of recognizable secret-assignment patterns and known markers only. It is NOT withheld by default and is not classified by source path. Do not run commands that print real credentials in this beta.
+
+On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching. Protected-path classification currently matches on the literal path text. On Windows, file names that differ only by trailing dots or spaces, such as `id_rsa.`, are normalized away by the OS at open time and may not be recognized as protected.
+
+The chat transport does not yet enforce a localhost-only guard; a configured remote `ollama.host` can receive prompts. If you configure a remote host (`ollama.host`, `engines.llama_cpp.host`, or the `TALOS_OLLAMA_HOST` / `TALOS_ENGINE_HOST` environment variables), Talos will send full prompts, including retrieved file contents, to that host.
+
+The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody. The master key is stored on disk next to the ciphertext with no passphrase; anyone who can read `~/.talos/secrets/` can recover the stored secrets.
+
+Local traces and logs are durable evidence artifacts, but they are not tamper-evident. They are plaintext local diagnostics, not a signed append-only audit trail.
+
 ## Developer Mode
 
 Developer/default mode is designed for normal code and text workspaces.
