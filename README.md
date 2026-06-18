@@ -95,10 +95,31 @@ release gates all pass.
 Talos may create local artifacts such as model context, provider-body captures,
 prompt-debug files, local turn traces, session logs, and RAG indexes.
 
-Indirect read results are treated as a privacy boundary. `grep`, slash `/grep`,
-`retrieve`, and RAG snippets are sanitized or omitted before they are handed
-back to the model. Protected and unsupported files are excluded from new RAG
-indexes by default, and stale index metadata is used to force rebuilds when the
+#### Current Trust-Surface Limits
+
+Talos is a governance shell around local model execution, not proof that the
+model is capable or honest without runtime evidence. A documented limitation is
+not an overclaim.
+
+Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
+
+Secret redaction currently catches common key=value secret shapes and known canaries; it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, connection strings, or high-entropy blobs. Talos redacts common key=value secret shapes (api_key=, password:, token=) and known canaries from model context, logs, traces, and persisted artifacts. It does NOT yet detect bare credentials with no assignment syntax: standalone API tokens, JWTs, PEM private-key blocks, secrets embedded in URLs/connection strings, or high-entropy blobs. Do not rely on Talos to scrub such values from files it reads, command output, sessions, or traces.
+
+`run_command` stdout and stderr are not withheld from model context by default. Command output (run_command stdout/stderr) is passed to the model after best-effort textual redaction of recognizable secret-assignment patterns and known markers only. It is NOT withheld by default and is not classified by source path. Do not run commands that print real credentials in this beta.
+
+On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching. Until fixed: "Protected-path classification matches on the literal path text. On Windows, file names that differ only by trailing dots or spaces (e.g. `id_rsa.`) are normalized away by the OS at open time and may not be recognized as protected. Do not rely on protected-path gating for private-key and exact-name secret files on Windows; restrict the workspace to trusted contents."
+
+The chat transport does not yet enforce a localhost-only guard; a configured remote `ollama.host` can receive prompts. Talos does not restrict the chat model endpoint to localhost. If you configure a remote host (`ollama.host`, `engines.llama_cpp.host`, or the `TALOS_OLLAMA_HOST` / `TALOS_ENGINE_HOST` environment variables), Talos will send full prompts - including retrieved file contents - to that host. Only the embeddings endpoint is localhost-gated. Keep the chat host on `127.0.0.1` / `localhost` to remain local-first.
+
+The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody. The at-rest encryption protects against casual file inspection only. The master key is stored on disk next to the ciphertext with no passphrase, so anyone who can read your `~/.talos/secrets/` directory can recover the secrets. Treat the directory itself as the trust boundary; use OS-level disk encryption.
+
+Local traces and logs are durable evidence artifacts, but they are not tamper-evident. Local traces and turn logs are best-effort plaintext diagnostic artifacts stored under `~/.talos`. They are NOT tamper-evident: there is no hash chain, signature, or append-only enforcement, so any process with write access to your home directory (including a later Talos turn) can alter or delete them undetectably. Treat them as local debugging evidence, not as a cryptographically provable audit trail.
+
+Indirect read results are treated as a privacy boundary, but this is currently
+best-effort: protected and unsupported files are omitted by path policy, and
+non-protected matches are sanitized only by the current pattern redactor before
+model handoff. Protected and unsupported files are excluded from new RAG indexes
+by default, and stale index metadata is used to force rebuilds when the
 privacy/file-capability policy changes.
 
 Approved direct protected reads are different. In developer/default mode, an

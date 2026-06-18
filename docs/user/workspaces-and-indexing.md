@@ -52,6 +52,8 @@ Reindexing and first retrieval can also print live indexing progress. An index
 helps retrieval-oriented answers. It is not a license to inspect everything.
 Protected and unsupported files remain governed by policy.
 
+Current protected-path caveat: On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching. Do not start Talos in a workspace containing private-key or exact-name secret files that rely on trailing-dot/trailing-space distinctions for protection.
+
 ## Reindex
 
 Inside the REPL:

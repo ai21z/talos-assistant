@@ -334,6 +334,16 @@ Talos may create local artifacts:
 * generated reports
 * audit transcripts
 
+Current implementation limits to disclose:
+
+* Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
+* Secret redaction currently catches common key=value secret shapes and known canaries; it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, connection strings, or high-entropy blobs.
+* `run_command` stdout and stderr are not withheld from model context by default.
+* On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching.
+* The chat transport does not yet enforce a localhost-only guard; a configured remote `ollama.host` can receive prompts.
+* The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody.
+* Local traces and logs are durable evidence artifacts, but they are not tamper-evident.
+
 Indirect read results such as `grep`, slash `/grep`, `retrieve`, and RAG snippets must respect privacy boundaries.
 
 Protected and unsupported files should be excluded from new RAG indexes by default according to current policy.

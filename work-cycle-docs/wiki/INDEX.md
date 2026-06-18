@@ -86,6 +86,9 @@ evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T832-done-high] in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md"
+    selector: "Purpose"
   - type: repo_file
     ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
     selector: "Generated Package Evidence"
@@ -107,11 +110,14 @@ evidence_inputs:
   - type: repo_file
     ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-ratified.md"
     selector: "Decision"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md"
+    selector: "Bounded Trust Claims"
 min_confidence: INFERRED_REVIEW
 confidence_histogram:
   UNKNOWN: 0
   INFERRED_REVIEW: 11
-  DETERMINISTIC_STATIC: 17
+  DETERMINISTIC_STATIC: 19
   DETERMINISTIC_GENERATED: 0
   OBSERVED_RUNTIME: 0
   GATED: 0
@@ -149,11 +155,13 @@ or generated reports.
 
 ## Active Tickets
 
-- None.
+- [T833 Wave 6 trust-surface honest disclosure](../tickets/open/[T833-open-high]%20wave6-trust-surface-honest-disclosure.md)
 
 Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
-future Wave 5 follow-up work requires a new scoped ticket.
+future Wave 5 follow-up work requires a new scoped ticket. Wave 6 starts with
+T833, a docs-and-test honest-disclosure pass. See
+[t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 
 ## Update Rule
 

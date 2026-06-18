@@ -94,3 +94,8 @@ profiles:
 Unknown profiles are rejected. The runtime has additional internal diagnostic
 profile definitions, but normal user docs treat Gradle verification as the
 current command execution surface.
+
+`run_command` stdout and stderr are not withheld from model context by default.
+Command output is passed to the model after best-effort textual redaction of
+recognizable secret-assignment patterns and known markers only. Do not run
+commands that print real credentials in this beta.
