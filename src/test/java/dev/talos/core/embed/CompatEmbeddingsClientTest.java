@@ -15,7 +15,10 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompatEmbeddingsClientTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -59,6 +62,35 @@ class CompatEmbeddingsClientTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void lookalikeLoopbackHostBlockedByDefault() {
+        Config cfg = new Config();
+        Map<String, Object> embed = new LinkedHashMap<>();
+        embed.put("provider", "compat");
+        embed.put("model", "compat-embed");
+        embed.put("host", "http://127.0.0.1.evil.example:8080");
+        embed.put("allow_remote", false);
+        cfg.data.put("embed", embed);
+
+        SecurityException exception = assertThrows(SecurityException.class, () -> new CompatEmbeddingsClient(cfg));
+
+        assertTrue(exception.getMessage().contains("Remote embedding host"));
+        assertTrue(exception.getMessage().contains("embed.allow_remote=true"));
+    }
+
+    @Test
+    void explicitRemoteOptInAllowsCompatEmbeddingHost() {
+        Config cfg = new Config();
+        Map<String, Object> embed = new LinkedHashMap<>();
+        embed.put("provider", "compat");
+        embed.put("model", "compat-embed");
+        embed.put("host", "http://127.0.0.1.evil.example:8080");
+        embed.put("allow_remote", true);
+        cfg.data.put("embed", embed);
+
+        assertDoesNotThrow(() -> new CompatEmbeddingsClient(cfg));
     }
 
     private static Config config(HttpServer server, String model) {

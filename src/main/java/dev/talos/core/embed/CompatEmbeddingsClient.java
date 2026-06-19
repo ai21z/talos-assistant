@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.cache.CacheDb;
 
 import java.net.URI;
@@ -48,10 +49,11 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings {
         this.model = Objects.toString(embed.getOrDefault("model", runtime.embeddingModel()));
 
         boolean allowRemote = CfgUtil.boolAt(embed, "allow_remote", false);
-        if (!isLocalhost(host) && !allowRemote) {
-            throw new SecurityException("Remote embedding host '" + host
-                    + "' is not allowed. Set embed.allow_remote=true to enable remote embedding hosts.");
-        }
+        HostLocalityPolicy.enforceLocalOrAllowed(
+                "embedding host",
+                host,
+                allowRemote,
+                "embed.allow_remote");
     }
 
     @Override
@@ -158,14 +160,6 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings {
         float[] out = new float[list.size()];
         for (int i = 0; i < out.length; i++) out[i] = Float.parseFloat(String.valueOf(list.get(i)));
         return out;
-    }
-
-    private static boolean isLocalhost(String host) {
-        if (host == null) return true;
-        String lower = host.toLowerCase();
-        return lower.contains("127.0.0.1")
-                || lower.contains("localhost")
-                || lower.contains("[::1]");
     }
 
     private static String trimTrailingSlash(String value) {

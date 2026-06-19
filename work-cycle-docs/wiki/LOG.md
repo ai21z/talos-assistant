@@ -625,3 +625,12 @@ mechanically.
 - Updated the trust-claims honesty guard to pin the done ticket path and status.
 - Recorded T839 embeddings host locality as the next scoped Wave 6
   trust-surface fix; T834/T836/T837/T838 remain open.
+
+## [2026-06-20] code-fix | Implement T839 embedding host locality
+
+- Added red tests showing both embedding clients accepted
+  `127.0.0.1.evil.example` as local before the fix.
+- Renamed `ChatHostLocalityPolicy` to neutral `HostLocalityPolicy` and reused
+  the URI-based locality policy for Ollama and OpenAI-compatible embeddings.
+- Left T839 open for review/closeout; T834/T836/T837/T838 remain open
+  high-priority Wave 6 trust-surface fixes.
