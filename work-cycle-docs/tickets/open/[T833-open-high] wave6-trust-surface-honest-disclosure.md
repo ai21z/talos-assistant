@@ -13,8 +13,11 @@ T833 is the Wave 6 Tier 0 honesty pass. It updates Talos-owned
 trust/privacy/security/truthfulness claims so public and maintainer-facing docs
 match current code rather than intended future code.
 
-Source of truth:
-`work-cycle-docs/research/talos-trust-overclaim-audit-and-sources-20260616.md`.
+Tracked source of truth:
+`work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`.
+
+The larger raw audit remains local research material and is not required for a
+clean checkout or active ticket review.
 
 ## Scope
 

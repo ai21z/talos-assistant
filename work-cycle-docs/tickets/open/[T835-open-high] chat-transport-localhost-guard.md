@@ -13,7 +13,7 @@ the chat transport can send full prompts to a configured remote host.
 
 Source context:
 
-- `work-cycle-docs/research/talos-trust-overclaim-audit-and-sources-20260616.md`
+- `work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`
 - `work-cycle-docs/research/opus-wave6-deep-research-review-20260618.md`
 
 ## Scope
