@@ -29,6 +29,45 @@ class LlamaCppEngineProviderTest {
     }
 
     @Test
+    void remoteChatHostIsRejectedByDefault() {
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "host", "http://remote-llama.example.com",
+                "port", 8080,
+                "model", "talos-agent"));
+
+        SecurityException ex = assertThrows(SecurityException.class,
+                () -> new LlamaCppEngineProvider().create(cfg));
+
+        assertTrue(ex.getMessage().contains("Remote llama_cpp chat host"));
+        assertTrue(ex.getMessage().contains("engines.llama_cpp.allow_remote=true"));
+    }
+
+    @Test
+    void remoteChatHostIsAllowedOnlyWithExplicitOptIn() {
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "host", "http://remote-llama.example.com",
+                "port", 8080,
+                "model", "talos-agent",
+                "allow_remote", true));
+
+        assertDoesNotThrow(() -> new LlamaCppEngineProvider().create(cfg));
+    }
+
+    @Test
+    void loopbackChatHostIsAllowedWithoutRemoteOptIn() {
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "host", "http://localhost",
+                "port", 8080,
+                "model", "talos-agent",
+                "allow_remote", false));
+
+        assertDoesNotThrow(() -> new LlamaCppEngineProvider().create(cfg));
+    }
+
+    @Test
     void capsReportLlamaCppCompatSurface() {
         Config cfg = config(Map.of(
                 "mode", "managed",

@@ -4,11 +4,13 @@ Talos is a local-first CLI workspace operator. It is strongest when the work is
 bounded to a selected workspace, the task can be inspected through local files,
 and mutations can be approved and verified.
 
-Local-first depends on configuration. The chat transport does not yet enforce a
-localhost-only guard, so review [Model Setup](model-setup.md) and
-[Local Privacy And Artifacts](local-privacy-and-artifacts.md) before using a
-remote `ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or
-`TALOS_ENGINE_HOST`.
+Local-first depends on configuration. Chat endpoints are localhost-gated by
+default; remote configured chat endpoints (`ollama.host`,
+`engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's
+`TALOS_ENGINE_HOST` override) require explicit `allow_remote=true`. Review
+[Model Setup](model-setup.md) and
+[Local Privacy And Artifacts](local-privacy-and-artifacts.md) before allowing a
+remote chat endpoint.
 
 These pages are for users. They avoid ticket history, audit runbooks, and
 implementation design notes. Internal engineering material still exists

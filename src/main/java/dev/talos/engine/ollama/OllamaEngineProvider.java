@@ -1,14 +1,19 @@
 package dev.talos.engine.ollama;
 
 import dev.talos.core.CfgUtil;
+import dev.talos.core.ChatHostLocalityPolicy;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineConfig;
 import dev.talos.spi.ModelCatalog;
 import dev.talos.spi.ModelEngine;
 import dev.talos.spi.ModelEngineProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
 public final class OllamaEngineProvider implements ModelEngineProvider {
+    private static final Logger LOG = LoggerFactory.getLogger(OllamaEngineProvider.class);
 
     private static final String BACKEND = "ollama";
 
@@ -27,6 +32,26 @@ public final class OllamaEngineProvider implements ModelEngineProvider {
 
         // fallback
         return "http://127.0.0.1:11434";
+    }
+
+    private static String chatHostFrom(EngineConfig cfg) {
+        String host = hostFrom(cfg);
+        boolean allowRemote = allowRemoteFrom(cfg);
+        ChatHostLocalityPolicy.enforceLocalOrAllowed(
+                "Ollama",
+                host,
+                allowRemote,
+                "ollama.allow_remote");
+        if (allowRemote && !ChatHostLocalityPolicy.isLoopback(host)) {
+            LOG.warn("SECURITY: Using remote Ollama chat host: {}. Full prompts may leave this machine.",
+                    SafeLogFormatter.value(host));
+        }
+        return host;
+    }
+
+    private static boolean allowRemoteFrom(EngineConfig cfg) {
+        Map<String,Object> ollama = CfgUtil.map(cfg == null ? null : cfg.data().get("ollama"));
+        return CfgUtil.boolAt(ollama, "allow_remote", false);
     }
 
     private static String defaultModelFrom(EngineConfig cfg) {
@@ -56,10 +81,10 @@ public final class OllamaEngineProvider implements ModelEngineProvider {
     @Override public ModelEngine create(EngineConfig cfg) {
         // Engine is not model-bound; ChatRequest carries the model.
         boolean nativeTools = nativeToolCallingFrom(cfg);
-        return new OllamaEngine(hostFrom(cfg), defaultModelFrom(cfg), nativeTools);
+        return new OllamaEngine(chatHostFrom(cfg), defaultModelFrom(cfg), nativeTools);
     }
 
     @Override public ModelCatalog catalog(EngineConfig cfg) {
-        return new OllamaCatalog(hostFrom(cfg));
+        return new OllamaCatalog(chatHostFrom(cfg));
     }
 }

@@ -157,6 +157,7 @@ or generated reports.
 
 - [T834 Strong redaction across model context and durable sinks](../tickets/open/[T834-open-high]%20strong-redaction-model-context-and-durable-sinks.md)
 - [T835 Chat transport localhost guard](../tickets/open/[T835-open-high]%20chat-transport-localhost-guard.md)
+  - [T835 implementation report](../reports/t835-chat-transport-localhost-guard.md)
 - [T836 Windows protected-path canonicalization](../tickets/open/[T836-open-high]%20windows-protected-path-canonicalization.md)
 - [T837 Run command output handoff boundary](../tickets/open/[T837-open-high]%20run-command-output-handoff-boundary.md)
 - [T838 Master key custody](../tickets/open/[T838-open-high]%20master-key-custody.md)
@@ -164,8 +165,9 @@ or generated reports.
 Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
 future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
-honest disclosure is complete through T833; the open Wave 6 work is the
-T834-T838 high trust-surface code-fix track. See
+honest disclosure is complete through T833; T835 is implemented and open for
+review, and the open Wave 6 work remains the T834-T838 high trust-surface
+code-fix track. See
 [t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 
 ## Update Rule

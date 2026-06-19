@@ -608,3 +608,12 @@ mechanically.
   tracked sanitized evidence record and kept the raw audit local/untracked.
 - Kept T834-T838 open as the high-priority Wave 6 trust-surface code-fix path;
   the next implementation move is T835, the chat transport localhost guard.
+
+## [2026-06-19] code-fix | Implement T835 chat transport localhost guard
+
+- Added default-deny locality enforcement for Ollama and llama.cpp chat model
+  endpoints, with explicit remote opt-in through backend `allow_remote=true`.
+- Added focused provider/locality tests and updated the trust-claims honesty
+  guard so README, AGENTS, and docs state the post-T835 boundary.
+- Left T835 open for review/closeout; T834/T836/T837/T838 remain open
+  high-priority Wave 6 trust-surface fixes.
