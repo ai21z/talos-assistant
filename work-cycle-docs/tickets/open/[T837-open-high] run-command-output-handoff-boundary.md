@@ -14,7 +14,7 @@ handoff decision.
 
 Source context:
 
-- `work-cycle-docs/research/talos-trust-overclaim-audit-and-sources-20260616.md`
+- `work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`
 - `work-cycle-docs/research/external-review-wave6-deep-research-review-20260618.md`
 
 ## Scope

@@ -4,7 +4,7 @@ Status: open for review
 Branch: `v0.9.0-beta-dev`
 Base commit: `f8e8c3065ff60d706d8342fda89101f834727cef`
 Talos version: `0.10.5`
-Source audit: `work-cycle-docs/research/talos-trust-overclaim-audit-and-sources-20260616.md`
+Tracked source evidence: `work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`
 
 ## Summary
 
@@ -94,6 +94,12 @@ post-write readback/re-hash proof. Public positioning must avoid "provable
 agent", "makes the model provable", "tamper-proof", unqualified competitor
 claims, and any wording that treats AgentHallu or the `11.6%` figure as proof of
 Talos's mechanism.
+
+The tracked Wave 6 trust evidence source is now
+`work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`.
+It preserves finding IDs, severity, ticket mapping, fix direction, and honest
+disclosure themes while leaving exploit walkthroughs and private operational
+provenance in local raw research only.
 
 T834, T835, T836, T837, T838 are now the Wave 6 high code-fix path before public
 push. T834-T838 are the code-fix path before public push. `site/` remains

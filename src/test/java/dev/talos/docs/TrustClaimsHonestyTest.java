@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TrustClaimsHonestyTest {
 
+    private static final String SANITIZED_WAVE6_EVIDENCE =
+            "work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md";
+    private static final String RAW_WAVE6_AUDIT =
+            "work-cycle-docs/research/talos-trust-overclaim-audit-and-sources-20260616.md";
     private static final String ANTI_OVERCLAIM_BOUNDARY =
             "Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; "
                     + "`run_command` claims and read/answer factual claims are not yet equivalently covered.";
@@ -117,6 +121,35 @@ class TrustClaimsHonestyTest {
                 "route it through the privacy handoff");
         assertContains(read("work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md"),
                 "raw AES master key is not stored beside ciphertext");
+    }
+
+    @Test
+    void activeWave6TrustTicketsUseTrackedSanitizedEvidence() throws Exception {
+        String sanitized = read(SANITIZED_WAVE6_EVIDENCE);
+
+        assertContains(sanitized, "Status: sanitized tracked evidence record");
+        assertContains(sanitized, "54 confirmed or partially mitigated overclaims");
+        assertContains(sanitized, "Confirmed severity split: 5 high, 19 medium, 30 low.");
+        assertContains(sanitized, "T834");
+        assertContains(sanitized, "T835");
+        assertContains(sanitized, "T836");
+        assertContains(sanitized, "T837");
+        assertContains(sanitized, "T838");
+        assertContains(sanitized, "Do not promote the raw audit file as-is.");
+
+        for (String file : List.of(
+                "work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md",
+                "work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md",
+                "work-cycle-docs/tickets/open/[T835-open-high] chat-transport-localhost-guard.md",
+                "work-cycle-docs/tickets/open/[T836-open-high] windows-protected-path-canonicalization.md",
+                "work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md",
+                "work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md",
+                "work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md")) {
+            String text = read(file);
+            assertContains(text, SANITIZED_WAVE6_EVIDENCE);
+            assertFalse(text.contains(RAW_WAVE6_AUDIT),
+                    "Active Wave 6 trust records must not depend on the ignored raw audit: " + file);
+        }
     }
 
     private static String read(String first, String... more) throws Exception {
