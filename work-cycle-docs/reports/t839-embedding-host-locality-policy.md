@@ -1,10 +1,10 @@
 # T839 Embedding Host Locality Policy
 
-Status: open for review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Started from: `dba83275b8f1cf702d19a5d7f104f7c093f49f5e`
-Implementation commit: pending closeout
+Implementation commit: `071af4e74d377c4cb38df06e12d0775f09942887`
 
 ## Decision
 
@@ -59,6 +59,9 @@ Additional green gates:
 .\gradlew.bat check --no-daemon
 .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 ```
+
+Closeout review reran the focused locality/security/honesty test set, full
+`check --no-daemon`, and `wikiEvidenceCloseGate --rerun-tasks --no-daemon`.
 
 ## Behavior Preserved
 

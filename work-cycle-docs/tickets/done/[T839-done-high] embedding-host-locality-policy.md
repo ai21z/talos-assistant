@@ -1,6 +1,6 @@
-# [T839-open-high] Embedding Host Locality Policy
+# [T839-done-high] Embedding Host Locality Policy
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
@@ -43,7 +43,8 @@ Source context:
 
 ## Implementation Evidence
 
-Open for review after implementation.
+Completed in implementation commit `071af4e74d377c4cb38df06e12d0775f09942887`
+and closed after review.
 
 - Added red tests proving both embedding clients accepted lookalike loopback
   hosts before the fix.
@@ -55,6 +56,9 @@ Open for review after implementation.
 - Focused embedding/locality/chat provider tests, all `core.embed.*` tests,
   full `check --no-daemon`, and `wikiEvidenceCloseGate --rerun-tasks
   --no-daemon` passed after the fix.
+- Reviewer reran the focused locality/security/honesty set, full
+  `check --no-daemon`, and `wikiEvidenceCloseGate --rerun-tasks --no-daemon`
+  before closeout.
 
 ## Non-Goals
 

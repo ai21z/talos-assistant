@@ -634,3 +634,13 @@ mechanically.
   the URI-based locality policy for Ollama and OpenAI-compatible embeddings.
 - Left T839 open for review/closeout; T834/T836/T837/T838 remain open
   high-priority Wave 6 trust-surface fixes.
+
+## [2026-06-20] ledger | Close T839 embedding host locality
+
+- Moved T839 to the done ticket ledger after review of implementation commit
+  `071af4e74d377c4cb38df06e12d0775f09942887`.
+- Recorded that the focused locality/security/honesty set, full
+  `check --no-daemon`, and `wikiEvidenceCloseGate --rerun-tasks --no-daemon`
+  passed during review.
+- Left T834/T836/T837/T838 open as the remaining Wave 6 high-priority
+  trust-surface fixes; T834 strong redaction is the next planned fix.

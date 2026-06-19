@@ -150,8 +150,7 @@ confidence_histogram:
   contains the SHA of its own containing commit.
 - Active tickets: T834 strong redaction; T836 Windows protected-path
   canonicalization; T837 `run_command` output handoff boundary; T838
-  master-key custody; T839 embedding host locality policy (implemented, open
-  for review).
+  master-key custody.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -189,8 +188,7 @@ confidence_histogram:
   future Wave 5 follow-up work requires new scoped tickets. Wave 6 Tier 0
   honest disclosure is complete through T833; T835, the chat transport
   localhost guard, is done. T839, the embedding host locality policy fix, is
-  implemented and open for review while T834/T836/T837/T838 remain open
-  high-priority fixes.
+  done while T834/T836/T837/T838 remain open high-priority fixes.
 
 ```talos-wiki-claims
 {
@@ -457,11 +455,11 @@ Open Wave 6 high code-fix tickets:
 - T836: Windows protected-path canonicalization.
 - T837: `run_command` output handoff boundary.
 - T838: master-key custody.
-- T839: embedding host locality policy, implemented and open for review.
 
 Completed Wave 6 high code-fix tickets:
 
 - T835: chat transport localhost guard.
+- T839: embedding host locality policy.
 
 Trust tickets folded into the Wave 6 track for later re-scoping: T274, T276,
 T281, T283, T286, T301, T319.
