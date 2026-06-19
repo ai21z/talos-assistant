@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.cache.CacheDb;
 import dev.talos.core.util.Hash;
 import dev.talos.safety.SafeLogFormatter;
@@ -50,15 +51,14 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             allowRemote = "true".equals(str) || "1".equals(str) || "yes".equals(str);
         }
 
-        if (!isLocalhost(this.host)) {
-            if (!allowRemote) {
-                throw new SecurityException(String.format(
-                    "Remote Ollama host '%s' is not allowed. Set ollama.allow_remote=true to enable remote hosts, " +
-                    "or use localhost (127.0.0.1 or localhost).", this.host));
-            } else {
-                LOG.warn("SECURITY: Using remote Ollama host: {}. This may expose your data to external services.",
-                        SafeLogFormatter.value(this.host));
-            }
+        HostLocalityPolicy.enforceLocalOrAllowed(
+                "Ollama host",
+                this.host,
+                allowRemote,
+                "ollama.allow_remote");
+        if (allowRemote && !HostLocalityPolicy.isLoopback(this.host)) {
+            LOG.warn("SECURITY: Using remote Ollama host: {}. This may expose your data to external services.",
+                    SafeLogFormatter.value(this.host));
         }
     }
 
@@ -252,16 +252,6 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         String text = value == null ? "" : value;
         return safeLabel + "Hash=sha256:" + Hash.sha256Hex(text.getBytes(StandardCharsets.UTF_8))
                 + " " + safeLabel + "Chars=" + text.length();
-    }
-
-    private static boolean isLocalhost(String host) {
-        if (host == null) return true;
-        String lower = host.toLowerCase();
-        return lower.contains("127.0.0.1") ||
-               lower.contains("localhost") ||
-               lower.contains("[::1]") ||
-               lower.startsWith("http://127.0.0.1") ||
-               lower.startsWith("http://localhost");
     }
 
     @Override

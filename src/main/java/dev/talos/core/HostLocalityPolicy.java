@@ -4,21 +4,21 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Objects;
 
-/** Enforces Talos's local-first boundary for chat model transports. */
-public final class ChatHostLocalityPolicy {
-    private ChatHostLocalityPolicy() {}
+/** Enforces Talos's local-first boundary for model and embedding transports. */
+public final class HostLocalityPolicy {
+    private HostLocalityPolicy() {}
 
     public static void enforceLocalOrAllowed(
-            String backendLabel,
+            String endpointLabel,
             String host,
             boolean allowRemote,
             String allowRemoteSetting) {
         if (isLoopback(host) || allowRemote) {
             return;
         }
-        throw new SecurityException("Remote " + backendLabel + " chat host '" + host
+        throw new SecurityException("Remote " + endpointLabel + " '" + host
                 + "' is not allowed. Set " + allowRemoteSetting
-                + "=true to enable remote chat hosts, or use localhost (127.0.0.1, ::1, or localhost).");
+                + "=true to enable remote hosts, or use localhost (127.0.0.1, ::1, or localhost).");
     }
 
     public static boolean isLoopback(String host) {

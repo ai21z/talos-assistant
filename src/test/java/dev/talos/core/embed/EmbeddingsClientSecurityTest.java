@@ -33,6 +33,24 @@ public class EmbeddingsClientSecurityTest {
     }
 
     @Test
+    public void lookalikeLoopbackHostBlocked() {
+        Config cfg = new Config();
+
+        Map<String, Object> ollama = new LinkedHashMap<>();
+        ollama.put("host", "http://127.0.0.1.evil.example:11434");
+        ollama.put("embed", "bge-m3");
+        ollama.put("allow_remote", false);
+        cfg.data.put("ollama", ollama);
+
+        SecurityException exception = assertThrows(SecurityException.class, () -> {
+            new EmbeddingsClient(cfg);
+        });
+
+        assertTrue(exception.getMessage().contains("Remote Ollama host"));
+        assertTrue(exception.getMessage().contains("ollama.allow_remote=true"));
+    }
+
+    @Test
     public void testRemoteHostAllowedWithFlag() {
         Config cfg = new Config();
 

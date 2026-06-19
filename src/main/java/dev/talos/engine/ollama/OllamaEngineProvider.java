@@ -1,7 +1,7 @@
 package dev.talos.engine.ollama;
 
 import dev.talos.core.CfgUtil;
-import dev.talos.core.ChatHostLocalityPolicy;
+import dev.talos.core.HostLocalityPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineConfig;
 import dev.talos.spi.ModelCatalog;
@@ -37,12 +37,12 @@ public final class OllamaEngineProvider implements ModelEngineProvider {
     private static String chatHostFrom(EngineConfig cfg) {
         String host = hostFrom(cfg);
         boolean allowRemote = allowRemoteFrom(cfg);
-        ChatHostLocalityPolicy.enforceLocalOrAllowed(
-                "Ollama",
+        HostLocalityPolicy.enforceLocalOrAllowed(
+                "Ollama chat host",
                 host,
                 allowRemote,
                 "ollama.allow_remote");
-        if (allowRemote && !ChatHostLocalityPolicy.isLoopback(host)) {
+        if (allowRemote && !HostLocalityPolicy.isLoopback(host)) {
             LOG.warn("SECURITY: Using remote Ollama chat host: {}. Full prompts may leave this machine.",
                     SafeLogFormatter.value(host));
         }

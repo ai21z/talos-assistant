@@ -1,7 +1,7 @@
 package dev.talos.engine.llamacpp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.talos.core.ChatHostLocalityPolicy;
+import dev.talos.core.HostLocalityPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineConfig;
 import dev.talos.spi.ModelCatalog;
@@ -31,12 +31,12 @@ public final class LlamaCppEngineProvider implements ModelEngineProvider {
     private static LlamaCppConfig guardedConfigFrom(EngineConfig cfg) {
         LlamaCppConfig config = LlamaCppConfig.from(cfg);
         String endpoint = config.baseUrl();
-        ChatHostLocalityPolicy.enforceLocalOrAllowed(
-                "llama_cpp",
+        HostLocalityPolicy.enforceLocalOrAllowed(
+                "llama_cpp chat host",
                 endpoint,
                 config.allowRemote(),
                 "engines.llama_cpp.allow_remote");
-        if (config.allowRemote() && !ChatHostLocalityPolicy.isLoopback(endpoint)) {
+        if (config.allowRemote() && !HostLocalityPolicy.isLoopback(endpoint)) {
             LOG.warn("SECURITY: Using remote llama_cpp chat host: {}. Full prompts may leave this machine.",
                     SafeLogFormatter.value(endpoint));
         }
