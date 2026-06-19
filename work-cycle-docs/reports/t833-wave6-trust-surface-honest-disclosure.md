@@ -80,6 +80,25 @@ recommendations below are for the owner to apply after this docs/test pass.
   default developer mode can send approved protected reads and extracted
   document text to model context."
 
+## Post-Review Capture
+
+The Opus review of deep-research workflow `w352woggx` is captured as a
+secondary review artifact at
+`work-cycle-docs/research/opus-wave6-deep-research-review-20260618.md`. It is
+not the full deep-research report and should not be treated as primary source
+evidence by itself.
+
+Post-review result: T833 remains correct as the Tier 0 honest-disclosure pass.
+Talos currently has pre-approval approved-bytes == written-bytes ordering, not a
+post-write readback/re-hash proof. Public positioning must avoid "provable
+agent", "makes the model provable", "tamper-proof", unqualified competitor
+claims, and any wording that treats AgentHallu or the `11.6%` figure as proof of
+Talos's mechanism.
+
+T834, T835, T836, T837, T838 are now the Wave 6 high code-fix path before public
+push. T834-T838 are the code-fix path before public push. `site/` remains
+owner-managed and must not be edited or staged in this pass.
+
 ## File Classification
 
 | File | Classification |
