@@ -148,9 +148,9 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T834 strong redaction; T835 chat transport localhost guard
-  (implemented, open for review); T836 Windows protected-path canonicalization;
-  T837 `run_command` output handoff boundary; T838 master-key custody.
+- Active tickets: T834 strong redaction; T836 Windows protected-path
+  canonicalization; T837 `run_command` output handoff boundary; T838
+  master-key custody.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -187,8 +187,9 @@ confidence_histogram:
 - Next move: Wave 5 structural-decomposition closeout is owner-ratified;
   future Wave 5 follow-up work requires new scoped tickets. Wave 6 Tier 0
   honest disclosure is complete through T833; T835, the chat transport
-  localhost guard, is implemented and open for review/closeout while
-  T834/T836/T837/T838 remain open high-priority trust-surface fixes.
+  localhost guard, is done. T839 is the next scoped trust-surface fix for
+  embeddings host locality while T834/T836/T837/T838 remain open high-priority
+  fixes.
 
 ```talos-wiki-claims
 {
@@ -452,10 +453,13 @@ the raw audit remains local and untracked by design.
 Open Wave 6 high code-fix tickets:
 
 - T834: strong redaction across model context and durable sinks.
-- T835: chat transport localhost guard, implemented and open for review.
 - T836: Windows protected-path canonicalization.
 - T837: `run_command` output handoff boundary.
 - T838: master-key custody.
+
+Completed Wave 6 high code-fix tickets:
+
+- T835: chat transport localhost guard.
 
 Trust tickets folded into the Wave 6 track for later re-scoping: T274, T276,
 T281, T283, T286, T301, T319.

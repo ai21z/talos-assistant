@@ -1,6 +1,6 @@
-# [T835-open-high] Chat Transport Localhost Guard
+# [T835-done-high] Chat Transport Localhost Guard
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
@@ -42,7 +42,8 @@ of scope for this locality fix.
 
 ## Implementation Evidence
 
-Open for review after implementation.
+Completed in implementation commit `c3b7170a38ad05a94920aace50382ad6b855f8de`
+and closed after review.
 
 - Added `ChatHostLocalityPolicy` and provider-level enforcement for Ollama and
   llama.cpp chat/catalog endpoints.
@@ -52,8 +53,9 @@ Open for review after implementation.
   hosts.
 - Updated README, AGENTS, and tracked docs to replace the T0 "no localhost
   guard yet" disclosure with the bounded post-T835 behavior statement.
-- T835 remains open until reviewer closeout records broad gates and implementation
-  commit SHA.
+- Verified with focused provider/locality/honesty tests, full
+  `check --no-daemon`, and `wikiEvidenceCloseGate --rerun-tasks --no-daemon`.
+- `site/` remained untouched and unstaged.
 
 ## Non-Goals
 

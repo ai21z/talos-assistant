@@ -117,8 +117,9 @@ class TrustClaimsHonestyTest {
 
         assertContains(read("work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md"),
                 "ghp_`, `sk-`, JWT, PEM private-key, connection-string, and high-entropy");
-        assertContains(read("work-cycle-docs/tickets/open/[T835-open-high] chat-transport-localhost-guard.md"),
-                "Default-deny non-localhost chat hosts");
+        String t835 = read("work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md");
+        assertContains(t835, "Status: done");
+        assertContains(t835, "Default-deny non-localhost chat hosts");
         assertContains(read("work-cycle-docs/tickets/open/[T836-open-high] windows-protected-path-canonicalization.md"),
                 "`id_rsa.`, `id_rsa `, `.ssh.`, `secrets.`");
         assertContains(read("work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md"),
@@ -144,7 +145,7 @@ class TrustClaimsHonestyTest {
         for (String file : List.of(
                 "work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md",
                 "work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md",
-                "work-cycle-docs/tickets/open/[T835-open-high] chat-transport-localhost-guard.md",
+                "work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md",
                 "work-cycle-docs/tickets/open/[T836-open-high] windows-protected-path-canonicalization.md",
                 "work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md",
                 "work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md",

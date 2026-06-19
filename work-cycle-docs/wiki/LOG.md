@@ -617,3 +617,11 @@ mechanically.
   guard so README, AGENTS, and docs state the post-T835 boundary.
 - Left T835 open for review/closeout; T834/T836/T837/T838 remain open
   high-priority Wave 6 trust-surface fixes.
+
+## [2026-06-20] ledger | Close T835 chat transport localhost guard
+
+- Moved T835 to the done ticket ledger after review of implementation commit
+  `c3b7170a38ad05a94920aace50382ad6b855f8de`.
+- Updated the trust-claims honesty guard to pin the done ticket path and status.
+- Recorded T839 embeddings host locality as the next scoped Wave 6
+  trust-surface fix; T834/T836/T837/T838 remain open.
