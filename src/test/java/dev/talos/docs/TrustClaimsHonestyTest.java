@@ -4,7 +4,11 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TrustClaimsHonestyTest {
@@ -26,6 +30,14 @@ class TrustClaimsHonestyTest {
             "The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody.";
     private static final String TRACE_INTEGRITY_BOUNDARY =
             "Local traces and logs are durable evidence artifacts, but they are not tamper-evident.";
+    private static final Pattern MISUSED_AGENTHALLU_STAT =
+            Pattern.compile("11\\.6%.{0,120}(detect|detection|solution|solves|prove|proves)",
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern AGENTHALLU_PRESCRIBES_TALOS =
+            Pattern.compile("AgentHallu.{0,160}(prescribe|prescribes|solution|mechanism|Talos)",
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern UNQUALIFIED_NO_COMPETITOR =
+            Pattern.compile("\\bno\\s+competitor\\b", Pattern.CASE_INSENSITIVE);
 
     @Test
     void readmeAndPolicyDocsBoundTrustClaimsToCurrentCode() throws Exception {
@@ -60,13 +72,84 @@ class TrustClaimsHonestyTest {
         assertContains(report, "site/index.html:356");
         assertContains(report, "site/index.html:402");
         assertContains(report, "Do not edit `site/` in T833");
+        assertContains(report, "Post-Review Capture");
+        assertContains(report, "T834, T835, T836, T837, T838");
+        assertContains(report, "T834-T838 are the code-fix path before public push");
+        assertContains(ticket, "T833 remains correct as the Tier 0 disclosure pass");
+        assertContains(ticket, "Do not edit or stage `site/` in this pass");
+    }
+
+    @Test
+    void publicPitchSurfacesAvoidWave6PositioningOverclaims() throws Exception {
+        String publicPitch = read("README.md") + "\n"
+                + read("AGENTS.md") + "\n"
+                + readMarkdownTree("docs");
+
+        assertDoesNotContainIgnoringCase(publicPitch, "provable agent");
+        assertDoesNotContainIgnoringCase(publicPitch, "makes the model provable");
+        assertDoesNotContainIgnoringCase(publicPitch, "tamper-proof");
+        assertDoesNotContainIgnoringCase(publicPitch, "tamper proof");
+        assertPatternAbsent(publicPitch, UNQUALIFIED_NO_COMPETITOR);
+        assertPatternAbsent(publicPitch, MISUSED_AGENTHALLU_STAT);
+        assertPatternAbsent(publicPitch, AGENTHALLU_PRESCRIBES_TALOS);
+
+        assertContains(publicPitch, ANTI_OVERCLAIM_BOUNDARY);
+        assertContains(publicPitch, TRACE_INTEGRITY_BOUNDARY);
+    }
+
+    @Test
+    void externalReviewCaptureAndHighFollowupTicketsArePinned() throws Exception {
+        String review = read("work-cycle-docs/research/external-review-wave6-deep-research-review-20260618.md");
+
+        assertContains(review, "captured secondary review");
+        assertContains(review, "Workflow: `w352woggx`");
+        assertContains(review, "not the full deep-research report");
+        assertContains(review, "Talos does not yet perform a post-write readback/re-hash round trip");
+        assertContains(review, "Do not publish stronger trust positioning until those code fixes land");
+
+        assertContains(read("work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md"),
+                "ghp_`, `sk-`, JWT, PEM private-key, connection-string, and high-entropy");
+        assertContains(read("work-cycle-docs/tickets/open/[T835-open-high] chat-transport-localhost-guard.md"),
+                "Default-deny non-localhost chat hosts");
+        assertContains(read("work-cycle-docs/tickets/open/[T836-open-high] windows-protected-path-canonicalization.md"),
+                "`id_rsa.`, `id_rsa `, `.ssh.`, `secrets.`");
+        assertContains(read("work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md"),
+                "route it through the privacy handoff");
+        assertContains(read("work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md"),
+                "raw AES master key is not stored beside ciphertext");
     }
 
     private static String read(String first, String... more) throws Exception {
         return Files.readString(Path.of(first, more));
     }
 
+    private static String readMarkdownTree(String directory) throws Exception {
+        List<Path> files;
+        try (Stream<Path> paths = Files.walk(Path.of(directory))) {
+            files = paths
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".md"))
+                    .sorted()
+                    .toList();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Path file : files) {
+            sb.append(Files.readString(file)).append('\n');
+        }
+        return sb.toString();
+    }
+
     private static void assertContains(String text, String expected) {
         assertTrue(text.contains(expected), "Missing required trust disclosure: " + expected);
+    }
+
+    private static void assertDoesNotContainIgnoringCase(String text, String forbidden) {
+        assertFalse(text.toLowerCase().contains(forbidden.toLowerCase()),
+                "Forbidden trust-positioning phrase is present: " + forbidden);
+    }
+
+    private static void assertPatternAbsent(String text, Pattern forbidden) {
+        assertFalse(forbidden.matcher(text).find(),
+                "Forbidden trust-positioning pattern is present: " + forbidden.pattern());
     }
 }

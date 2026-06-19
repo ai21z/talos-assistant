@@ -61,6 +61,26 @@ T274, T276, T281, T283, T286, T301, T319.
 Capability backlog, explicitly deferred and not the product identity:
 T294, T296, T299, T300, T302, T303, T304, T627.
 
+## Post-Review Capture
+
+The independent review review of deep-research workflow `w352woggx` is captured as a
+secondary review artifact at
+`work-cycle-docs/research/external-review-wave6-deep-research-review-20260618.md`. It is
+not the full deep-research report.
+
+T833 remains correct as the Tier 0 disclosure pass. The code-fix path before
+public push is T834-T838:
+
+- T834: strong redaction across model context and durable sinks.
+- T835: chat transport localhost guard.
+- T836: Windows protected-path canonicalization.
+- T837: `run_command` output handoff boundary.
+- T838: master-key custody.
+
+Do not edit or stage `site/` in this pass. Do not use "provable agent",
+"makes the model provable", "tamper-proof", or unqualified competitor claims in
+public positioning.
+
 ## Verification Plan
 
 ```powershell
