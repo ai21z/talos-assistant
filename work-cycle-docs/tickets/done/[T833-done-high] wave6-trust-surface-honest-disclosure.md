@@ -1,6 +1,6 @@
-# [T833-open-high] Wave 6 trust-surface honest disclosure
+# [T833-done-high] Wave 6 trust-surface honest disclosure
 
-Status: open
+Status: done
 Priority: high
 Type: docs-and-test
 Branch: `v0.9.0-beta-dev`
@@ -24,7 +24,7 @@ clean checkout or active ticket review.
 - Bound trust-surface claims in `README.md`, `AGENTS.md`, and `docs/**`.
 - Add a docs honesty regression test that pins the bounded language.
 - Add a report with Wave 6 trust-track triage and site-copy recommendations.
-- Leave this ticket open for review.
+- Leave the five high code-fix follow-ups open for scoped implementation.
 
 ## Required Disclosures
 
@@ -94,7 +94,15 @@ git diff --check -- . ':!site'
 git status --short -- . ':!site'
 ```
 
-## Review State
+## Completion Evidence
 
-T833 remains open after implementation for owner review. Any code-fix follow-up
-starts at T834+ with a separate scoped ticket.
+- Implementation and sanitized evidence capture landed through commit
+  `991ea37c734d788e1303c2f6e2e30e4b07177378`.
+- The tracked Wave 6 evidence record is
+  `work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`.
+- The raw audit remains local and untracked by design.
+- `TrustClaimsHonestyTest` passed after commit with 5 tests, 0 failures, and
+  0 errors.
+- A clean-checkout proof confirmed the sanitized report is present, the raw
+  audit is absent, and the honesty guard passes from committed files only.
+- T834-T838 remain open as the five high trust-surface code-fix tickets.

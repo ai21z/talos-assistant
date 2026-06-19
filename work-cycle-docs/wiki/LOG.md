@@ -599,3 +599,12 @@ mechanically.
 - Folded T274, T276, T281, T283, T286, T301, and T319 into the Wave 6 trust
   track for later re-scoping; parked T294, T296, T299, T300, T302, T303, T304,
   and T627 as capability backlog, explicitly deferred.
+
+## [2026-06-19] ledger | Close T833 Wave 6 trust-surface T0
+
+- Moved T833 to the done ticket ledger after owner review of the honest
+  disclosure pass and sanitized Wave 6 trust evidence record.
+- Recorded commit `991ea37c734d788e1303c2f6e2e30e4b07177378`, which added the
+  tracked sanitized evidence record and kept the raw audit local/untracked.
+- Kept T834-T838 open as the high-priority Wave 6 trust-surface code-fix path;
+  the next implementation move is T835, the chat transport localhost guard.

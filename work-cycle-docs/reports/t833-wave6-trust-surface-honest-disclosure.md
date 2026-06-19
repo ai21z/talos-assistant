@@ -1,6 +1,6 @@
 # T833 Wave 6 Trust-Surface Honest Disclosure
 
-Status: open for review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Base commit: `f8e8c3065ff60d706d8342fda89101f834727cef`
 Talos version: `0.10.5`
@@ -122,7 +122,7 @@ owner-managed and must not be edited or staged in this pass.
 | `docs/architecture/04-declarative-allow-ask-deny-permissions.md` | architecture doc |
 | `docs/architecture/10-command-execution-architecture-design.md` | architecture doc |
 | `src/test/java/dev/talos/docs/TrustClaimsHonestyTest.java` | honesty test |
-| `work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md` | ticket |
+| `work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md` | ticket |
 | `work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md` | report |
 | `work-cycle-docs/wiki/CURRENT-STATE.md` | wiki |
 | `work-cycle-docs/wiki/INDEX.md` | wiki |

@@ -90,8 +90,8 @@ evidence_inputs:
     ref: "work-cycle-docs/tickets/done/[T832-done-high] in-turn-compaction-evidence-and-conditional-gist.md"
     selector: "Completion Evidence"
   - type: ticket
-    ref: "work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md"
-    selector: "Purpose"
+    ref: "work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md"
+    selector: "Completion Evidence"
   - type: repo_file
     ref: "work-cycle-docs/reports/t811-assistant-turn-executor-lifecycle-characterization.md"
     selector: "Lifecycle Ownership Map"
@@ -148,7 +148,9 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T833 Wave 6 trust-surface honest disclosure.
+- Active tickets: T834 strong redaction; T835 chat transport localhost guard;
+  T836 Windows protected-path canonicalization; T837 `run_command` output
+  handoff boundary; T838 master-key custody.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -183,9 +185,10 @@ confidence_histogram:
   characterization for in-turn compaction with no production `src/main`
   behavior change.
 - Next move: Wave 5 structural-decomposition closeout is owner-ratified;
-  future Wave 5 follow-up work requires new scoped tickets. Wave 6 has started
-  with T833, a docs-and-test honest-disclosure pass that bounds trust,
-  privacy, security, and truthfulness claims to current code.
+  future Wave 5 follow-up work requires new scoped tickets. Wave 6 Tier 0
+  honest disclosure is complete through T833; the next code-fix move is T835,
+  the chat transport localhost guard, while T834/T836/T837/T838 remain open
+  high-priority trust-surface fixes.
 
 ```talos-wiki-claims
 {
@@ -393,7 +396,7 @@ structural seams as a deliberate diminishing-returns decision. It explicitly
 defers `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
 retry extraction, and compaction quality work to separately scoped tickets.
 
-T833 is open. Its purpose is Wave 6 Tier 0 honest disclosure: update
+T833 is done. Its purpose was Wave 6 Tier 0 honest disclosure: update
 Talos-owned README, AGENTS, and docs trust-surface claims to match current code
 and add a docs honesty regression test. It does not authorize the five HIGH code
 fixes, production `src/main` changes, capability work, compaction Phase 2,
@@ -439,10 +442,20 @@ compaction Phase 2 work must start from a new scoped ticket.
 
 ## Wave 6 Trust Track Status
 
-T833 is the active Wave 6 Tier 0 ticket. It records honest limits for
-anti-overclaim scope, secret redaction, command-output handoff, Windows
-protected-path matching, model-host locality, local secret encryption, and trace
-integrity.
+T833 is complete. It records honest limits for anti-overclaim scope, secret
+redaction, command-output handoff, Windows protected-path matching, model-host
+locality, local secret encryption, and trace integrity. The tracked sanitized
+evidence record is
+`work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`;
+the raw audit remains local and untracked by design.
+
+Open Wave 6 high code-fix tickets:
+
+- T834: strong redaction across model context and durable sinks.
+- T835: chat transport localhost guard.
+- T836: Windows protected-path canonicalization.
+- T837: `run_command` output handoff boundary.
+- T838: master-key custody.
 
 Trust tickets folded into the Wave 6 track for later re-scoping: T274, T276,
 T281, T283, T286, T301, T319.
