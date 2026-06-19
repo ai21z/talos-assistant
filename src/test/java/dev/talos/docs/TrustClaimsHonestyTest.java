@@ -64,9 +64,9 @@ class TrustClaimsHonestyTest {
     @Test
     void t833ReportPinsWave6MapAndSiteRecommendationWithoutEditingSite() throws Exception {
         String report = read("work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md");
-        String ticket = read("work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md");
+        String ticket = read("work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md");
 
-        assertContains(ticket, "Status: open");
+        assertContains(ticket, "Status: done");
         assertContains(report, "Wave 6 trust track");
         assertContains(report, "T274, T276, T281, T283, T286, T301, T319");
         assertContains(report, "Capability backlog, explicitly deferred");
@@ -138,7 +138,7 @@ class TrustClaimsHonestyTest {
         assertContains(sanitized, "Do not promote the raw audit file as-is.");
 
         for (String file : List.of(
-                "work-cycle-docs/tickets/open/[T833-open-high] wave6-trust-surface-honest-disclosure.md",
+                "work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md",
                 "work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md",
                 "work-cycle-docs/tickets/open/[T835-open-high] chat-transport-localhost-guard.md",
                 "work-cycle-docs/tickets/open/[T836-open-high] windows-protected-path-canonicalization.md",
