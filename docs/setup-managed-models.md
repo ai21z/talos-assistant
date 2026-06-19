@@ -4,7 +4,7 @@ Talos uses `llama_cpp` as the primary local model backend for the current beta
 path. Ollama remains available as a legacy backend, but new local-agent setup
 should prefer managed llama.cpp.
 
-Local-first boundary: The chat transport does not yet enforce a localhost-only guard; a configured remote `ollama.host` can receive prompts. If you configure a remote host (`ollama.host`, `engines.llama_cpp.host`, or the `TALOS_OLLAMA_HOST` / `TALOS_ENGINE_HOST` environment variables), Talos will send full prompts, including retrieved file contents, to that host. Only the embeddings endpoint is localhost-gated. Keep the chat host on `127.0.0.1` / `localhost` to remain local-first.
+Local-first boundary: Chat endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend. When remote chat is explicitly allowed, Talos can send full prompts, including retrieved file contents, to that host. Keep the chat host on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
 
 ## Tested Profiles
 

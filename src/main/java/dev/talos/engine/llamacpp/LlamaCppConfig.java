@@ -21,6 +21,7 @@ record LlamaCppConfig(
         String host,
         int port,
         int context,
+        boolean allowRemote,
         boolean jinja,
         String chatTemplate,
         String chatTemplateFile,
@@ -51,6 +52,7 @@ record LlamaCppConfig(
         int context = mode == Mode.MANAGED
                 ? Math.max(configuredContext, MIN_MANAGED_AGENT_CONTEXT)
                 : Math.max(256, configuredContext);
+        boolean allowRemote = CfgUtil.boolAt(block, "allow_remote", false);
         boolean jinja = CfgUtil.boolAt(block, "jinja", true);
         String chatTemplate = stringAt(block, "chat_template", "");
         String chatTemplateFile = stringAt(block, "chat_template_file", "");
@@ -67,6 +69,7 @@ record LlamaCppConfig(
                 host,
                 port,
                 context,
+                allowRemote,
                 jinja,
                 chatTemplate,
                 chatTemplateFile,

@@ -11,7 +11,7 @@ selected as the backend.
 Talos does not install model weights during installation. Model setup is a
 separate step.
 
-Local-first depends on the configured chat endpoint. The chat transport does not yet enforce a localhost-only guard; a configured remote `ollama.host` can receive prompts. A remote `ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or `TALOS_ENGINE_HOST` means full prompts, including retrieved file contents, can be sent to that host.
+Local-first depends on the configured chat endpoint. Chat endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend. When remote chat is explicitly allowed, full prompts, including retrieved file contents, can be sent to that host.
 
 ## Show Setup Help
 

@@ -30,7 +30,7 @@ Secret redaction currently catches common key=value secret shapes and known cana
 
 On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching. Protected-path classification currently matches on the literal path text. On Windows, file names that differ only by trailing dots or spaces, such as `id_rsa.`, are normalized away by the OS at open time and may not be recognized as protected.
 
-The chat transport does not yet enforce a localhost-only guard; a configured remote `ollama.host` can receive prompts. If you configure a remote host (`ollama.host`, `engines.llama_cpp.host`, or the `TALOS_OLLAMA_HOST` / `TALOS_ENGINE_HOST` environment variables), Talos will send full prompts, including retrieved file contents, to that host.
+Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
 
 The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody. The master key is stored on disk next to the ciphertext with no passphrase; anyone who can read `~/.talos/secrets/` can recover the stored secrets.
 
