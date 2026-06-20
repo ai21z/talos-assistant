@@ -742,3 +742,15 @@ mechanically.
 - Updated public/docs wording and the trust-claims honesty guard to the bounded
   post-T837 claim.
 - Left T837 open for review/closeout; T838 master-key custody remains open.
+
+## [2026-06-20] closeout | Close T837 run_command output handoff
+
+- Closed T837 after review of implementation commit
+  `1fd15a44890043ec02566ba4951a4cec2b548152`.
+- Recorded the bounded high-entropy withholding tradeoff: command streams are
+  withheld rather than inline-mangled, command outcome status is preserved, and
+  normal non-sensitive command output remains model-visible for verification.
+- Repointed `TrustClaimsHonestyTest` from the open T837 ticket to the done
+  ticket so the tracked evidence remains self-contained.
+- Left T838 master-key custody as the remaining open high-priority Wave 6
+  trust-surface fix.

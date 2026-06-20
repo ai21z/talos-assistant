@@ -131,7 +131,9 @@ class TrustClaimsHonestyTest {
         assertContains(t836, "`id_rsa.`, `id_rsa `, `.ssh.`, `secrets.`");
         assertContains(t836, "SSH~1/mykey");
         assertContains(t836, "protected-content-policy-v6");
-        assertContains(read("work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md"),
+        String t837 = read("work-cycle-docs/tickets/done/[T837-done-high] run-command-output-handoff-boundary.md");
+        assertContains(t837, "Status: done");
+        assertContains(t837,
                 "route it through the privacy handoff");
         assertContains(read("work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md"),
                 "raw AES master key is not stored beside ciphertext");
@@ -156,7 +158,7 @@ class TrustClaimsHonestyTest {
                 "work-cycle-docs/tickets/done/[T834-done-high] strong-redaction-model-context-and-durable-sinks.md",
                 "work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md",
                 "work-cycle-docs/tickets/done/[T836-done-high] windows-protected-path-canonicalization.md",
-                "work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md",
+                "work-cycle-docs/tickets/done/[T837-done-high] run-command-output-handoff-boundary.md",
                 "work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md",
                 "work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md")) {
             String text = read(file);

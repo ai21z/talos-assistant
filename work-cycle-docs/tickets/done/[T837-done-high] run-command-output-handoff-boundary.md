@@ -1,6 +1,6 @@
-# [T837-open-high] Run Command Output Handoff Boundary
+# [T837-done-high] Run Command Output Handoff Boundary
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
@@ -43,18 +43,27 @@ Source context:
 
 ## Implementation State
 
-Implemented for review in T837. The change:
+Implemented in commit `1fd15a44890043ec02566ba4951a4cec2b548152` and accepted
+for closeout after review. The change:
 
 - tags executed command results with `COMMAND_OUTPUT` / `COMMAND` metadata;
 - keeps non-sensitive command output visible to the model for verification;
 - withholds command stdout/stderr from model context when command capture
-  required protected-content redaction;
+  required protected-content redaction or hit the bounded command-output
+  high-entropy detector;
 - preserves failure-dominant behavior for failed and timed-out commands;
 - updates public/docs wording to the bounded post-T837 claim;
-- leaves this ticket open for review and closeout.
+- leaves T838 master-key custody as the remaining open Wave 6 high trust fix.
 
 Report:
 
 - `work-cycle-docs/reports/t837-run-command-output-handoff-boundary.md`
 
-Implementation commit SHA is intentionally left for closeout after review.
+Closeout evidence:
+
+- Focused command/toolcall/docs suites passed before implementation commit.
+- Full `check --no-daemon` passed.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- Independent review reran focused command/toolcall suites and full `check` and
+  accepted the bounded high-entropy withholding tradeoff.
+- `site/` was not edited or staged.
