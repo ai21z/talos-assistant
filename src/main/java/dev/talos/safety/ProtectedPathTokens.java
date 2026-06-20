@@ -64,7 +64,8 @@ public final class ProtectedPathTokens {
 
     public static String protectedKind(String lowerRelative) {
         if (lowerRelative == null || lowerRelative.isBlank()) return "";
-        List<String> segments = List.of(lowerRelative.split("/+"));
+        String normalized = canonicalizeWindowsAliasSegments(lowerRelative.replace('\\', '/').toLowerCase(Locale.ROOT));
+        List<String> segments = List.of(normalized.split("/+"));
 
         // .talos is CONTROL since T788: it holds workspace-declared
         // verification profiles (.talos/profiles.yaml) and template commands
@@ -80,6 +81,7 @@ public final class ProtectedPathTokens {
         }
 
         for (String segment : segments) {
+            if (isWindowsReservedDeviceName(segment)) return "CONTROL";
             if (segment.equals(".env") || segment.startsWith(".env.")) return "SECRET";
             if (segment.endsWith(".env")) return "SECRET";
             if (segment.equals("secrets") || segment.equals("tokens") || segment.equals("credentials")) return "SECRET";
@@ -139,7 +141,7 @@ public final class ProtectedPathTokens {
         while (normalized.startsWith("./")) {
             normalized = normalized.substring(2);
         }
-        return normalized;
+        return canonicalizeWindowsAliasSegments(normalized);
     }
 
     private static String stripWrappingQuotes(String value) {
@@ -152,5 +154,44 @@ public final class ProtectedPathTokens {
             return value.substring(1, value.length() - 1);
         }
         return value;
+    }
+
+    private static String canonicalizeWindowsAliasSegments(String path) {
+        if (path == null || path.isBlank()) return "";
+        String[] rawSegments = path.split("/", -1);
+        for (int i = 0; i < rawSegments.length; i++) {
+            rawSegments[i] = stripWindowsTrailingDotsAndSpaces(rawSegments[i]);
+        }
+        return String.join("/", rawSegments);
+    }
+
+    private static String stripWindowsTrailingDotsAndSpaces(String segment) {
+        int end = segment == null ? 0 : segment.length();
+        while (end > 0) {
+            char c = segment.charAt(end - 1);
+            if (c != '.' && c != ' ') break;
+            end--;
+        }
+        return segment == null ? "" : segment.substring(0, end);
+    }
+
+    private static boolean isWindowsReservedDeviceName(String segment) {
+        if (segment == null || segment.isBlank()) return false;
+        String device = segment;
+        int dot = device.indexOf('.');
+        if (dot >= 0) {
+            device = device.substring(0, dot);
+        }
+        return switch (device) {
+            case "con", "prn", "aux", "nul" -> true;
+            default -> isNumberedWindowsDevice(device, "com") || isNumberedWindowsDevice(device, "lpt");
+        };
+    }
+
+    private static boolean isNumberedWindowsDevice(String value, String prefix) {
+        return value.length() == prefix.length() + 1
+                && value.startsWith(prefix)
+                && value.charAt(prefix.length()) >= '1'
+                && value.charAt(prefix.length()) <= '9';
     }
 }

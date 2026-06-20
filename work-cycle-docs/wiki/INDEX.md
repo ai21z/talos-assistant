@@ -156,6 +156,7 @@ or generated reports.
 ## Active Tickets
 
 - [T836 Windows protected-path canonicalization](../tickets/open/[T836-open-high]%20windows-protected-path-canonicalization.md)
+  - [T836 implementation report](../reports/t836-windows-protected-path-canonicalization.md)
 - [T837 Run command output handoff boundary](../tickets/open/[T837-open-high]%20run-command-output-handoff-boundary.md)
 - [T838 Master key custody](../tickets/open/[T838-open-high]%20master-key-custody.md)
 
@@ -171,8 +172,9 @@ Completed Wave 6 high tickets:
 Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
 future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
-honest disclosure is complete through T833; T834, T835, and T839 are done, and
-the remaining open Wave 6 high work is T836/T837/T838. See
+honest disclosure is complete through T833; T834, T835, and T839 are done,
+T836 is implemented and open for review/closeout, and the remaining
+unimplemented Wave 6 high work is T837/T838. See
 [t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 
 ## Update Rule

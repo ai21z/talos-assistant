@@ -60,6 +60,31 @@ class ProtectedPathTokensTest {
     }
 
     @Test
+    void windowsAliasSegmentsAreCanonicalizedBeforeProtectedMatching() {
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa."));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa "));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa. "));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".ssh./config"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".ssh /config"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secrets./api.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("secrets /api.txt"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("keys/server.pem."));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".git./config"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind(".github./workflows/ci.yml"));
+    }
+
+    @Test
+    void windowsReservedDeviceNamesAreControlPaths() {
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind("con"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind("nul.txt"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind("aux."));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind("com1.log"));
+        assertEquals("CONTROL", ProtectedPathTokens.protectedKind("lpt9 "));
+        assertEquals("", ProtectedPathTokens.protectedKind("company-notes.md"));
+        assertEquals("", ProtectedPathTokens.protectedKind("complete.txt"));
+    }
+
+    @Test
     void secretBearingNamesAreProtected() {
         // Names whose word runs END with a vocabulary stem stay protected
         // before and after T759 (the equals-or-suffix rule keeps them).
@@ -157,6 +182,8 @@ class ProtectedPathTokensTest {
         assertTrue(ProtectedPathTokens.looksProtectedPathToken("\".ENV\""));
         assertTrue(ProtectedPathTokens.looksProtectedPathToken(".\\secrets\\api.txt"));
         assertTrue(ProtectedPathTokens.looksProtectedPathToken("./id_rsa"));
+        assertTrue(ProtectedPathTokens.looksProtectedPathToken("./id_rsa."));
+        assertTrue(ProtectedPathTokens.looksProtectedPathToken(".\\.ssh.\\config"));
         assertFalse(ProtectedPathTokens.looksProtectedPathToken("README.md"));
         assertFalse(ProtectedPathTokens.looksProtectedPathToken("  "));
         assertFalse(ProtectedPathTokens.looksProtectedPathToken(null));

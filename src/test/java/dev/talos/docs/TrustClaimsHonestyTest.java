@@ -27,7 +27,8 @@ class TrustClaimsHonestyTest {
     private static final String COMMAND_OUTPUT_BOUNDARY =
             "`run_command` stdout and stderr are not withheld from model context by default.";
     private static final String WINDOWS_PROTECTED_PATH_BOUNDARY =
-            "On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching.";
+            "Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; "
+                    + "this is not a complete Windows path-security proof.";
     private static final String CHAT_LOCALHOST_BOUNDARY =
             "Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints "
                     + "(`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's "

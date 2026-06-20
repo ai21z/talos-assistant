@@ -19,11 +19,11 @@ class ProtectedWorkspacePathsTest {
     Path workspace;
 
     @Test
-    void policyVersionIsV4_sinceT788TalosControlSegment() {
+    void policyVersionIsV5_sinceT836WindowsAliasCanonicalization() {
         // Typed literal on purpose (never constant-vs-constant): bumping the
         // version is a deliberate act that forces stale RAG privacy
         // partitions to rebuild, and this pin makes the bump reviewable.
-        assertEquals("protected-content-policy-v4", ProtectedWorkspacePaths.POLICY_VERSION);
+        assertEquals("protected-content-policy-v5", ProtectedWorkspacePaths.POLICY_VERSION);
     }
 
     @Test
@@ -54,6 +54,36 @@ class ProtectedWorkspacePathsTest {
             assertEquals(runtime.hasPath(), direct.hasPath(), rawPath);
             assertEquals(runtime.insideWorkspace(), direct.insideWorkspace(), rawPath);
             assertEquals(runtime.workspaceEscape(), direct.workspaceEscape(), rawPath);
+            assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
+            assertEquals(runtime.protectedKind(), direct.protectedKind(), rawPath);
+        }
+    }
+
+    @Test
+    void windowsAliasPathsClassifyAsProtectedThroughRuntimePolicy() throws Exception {
+        Files.writeString(workspace.resolve("id_rsa"), "PRIVATE KEY\n");
+        Files.createDirectories(workspace.resolve(".ssh"));
+        Files.writeString(workspace.resolve(".ssh").resolve("config"), "Host example\n");
+        Files.createDirectories(workspace.resolve("secrets"));
+        Files.writeString(workspace.resolve("secrets").resolve("api.txt"), "token\n");
+        Files.createDirectories(workspace.resolve("keys"));
+        Files.writeString(workspace.resolve("keys").resolve("server.pem"), "PRIVATE KEY\n");
+
+        for (String rawPath : List.of(
+                "id_rsa.",
+                "id_rsa ",
+                "id_rsa. ",
+                ".ssh./config",
+                ".ssh /config",
+                "secrets./api.txt",
+                "secrets /api.txt",
+                "keys/server.pem.",
+                "con",
+                "nul.txt")) {
+            ProtectedWorkspacePaths.Decision direct = ProtectedWorkspacePaths.classify(workspace, rawPath);
+            ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, rawPath);
+
+            assertTrue(direct.protectedPath(), rawPath);
             assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
             assertEquals(runtime.protectedKind(), direct.protectedKind(), rawPath);
         }

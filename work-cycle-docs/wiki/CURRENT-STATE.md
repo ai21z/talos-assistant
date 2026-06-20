@@ -148,7 +148,8 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T836 Windows protected-path canonicalization; T837
+- Active tickets: T836 Windows protected-path canonicalization (implemented,
+  open for review); T837
   `run_command` output handoff boundary; T838 master-key custody.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
@@ -187,8 +188,8 @@ confidence_histogram:
   future Wave 5 follow-up work requires new scoped tickets. Wave 6 Tier 0
   honest disclosure is complete through T833; T835, the chat transport
   localhost guard, is done. T839, the embedding host locality policy fix, is
-  done. T834 strong redaction is done; T836/T837/T838 remain open
-  high-priority fixes.
+  done. T834 strong redaction is done; T836 is implemented and open for
+  review/closeout; T837/T838 remain open high-priority fixes.
 
 ```talos-wiki-claims
 {
