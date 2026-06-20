@@ -49,7 +49,15 @@ class TrustClaimsHonestyTest {
             Pattern.compile("AgentHallu.{0,160}(prescribe|prescribes|solution|mechanism|Talos)",
                     Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern UNQUALIFIED_NO_COMPETITOR =
-            Pattern.compile("\\bno\\s+competitor\\b", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("""
+                    \\b(?:no\\s+competitor
+                    |no\\s+other\\s+(?:assistant|agent|tool|coding\\s+tool)
+                    |Talos\\b.{0,80}\\bis\\s+(?:the\\s+)?only\\s+(?:assistant|agent|tool|coding\\s+tool)
+                    |Talos\\b.{0,80}\\bis\\s+(?:the\\s+)?only\\s+(?:local|agentic|coding|ai)\\s+(?:assistant|agent|tool)
+                    |Talos\\b.{0,80}\\bis\\s+(?:the\\s+)?only\\s+agentic\\s+coding\\s+tool
+                    |nobody\\s+else
+                    |unlike\\s+every\\s+competitor)\\b
+                    """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
 
     @Test
     void readmeAndPolicyDocsBoundTrustClaimsToCurrentCode() throws Exception {
@@ -107,6 +115,31 @@ class TrustClaimsHonestyTest {
 
         assertContains(publicPitch, ANTI_OVERCLAIM_BOUNDARY);
         assertContains(publicPitch, TRACE_INTEGRITY_BOUNDARY);
+    }
+
+    @Test
+    void competitorExclusivityGuardCatchesBroaderUnqualifiedClaims() {
+        for (String unsafe : List.of(
+                "No competitor does this.",
+                "No other assistant has this trust gate.",
+                "No other agent catches false file edits.",
+                "Talos is the only assistant with this guarantee.",
+                "Talos is the only agentic coding tool with this behavior.",
+                "Nobody else verifies file mutation claims.",
+                "Unlike every competitor, Talos proves edits.")) {
+            assertTrue(UNQUALIFIED_NO_COMPETITOR.matcher(unsafe).find(),
+                    "Guard should catch unqualified competitor exclusivity claim: " + unsafe);
+        }
+
+        for (String safe : List.of(
+                "No inspected source-level tool had the same post-apply gate.",
+                "The claim is bounded to inspected files and June 2026.",
+                "Talos has a narrow, time-bounded differentiator.",
+                "Talos is not the only tool with deterministic safety checks.",
+                "The read-only tool surface is selected for inspection turns.")) {
+            assertFalse(UNQUALIFIED_NO_COMPETITOR.matcher(safe).find(),
+                    "Guard should allow bounded competitor evidence wording: " + safe);
+        }
     }
 
     @Test
