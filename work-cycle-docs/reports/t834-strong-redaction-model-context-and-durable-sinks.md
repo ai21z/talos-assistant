@@ -1,13 +1,13 @@
 # T834 Strong Redaction Across Model Context And Durable Sinks
 
-Status: implemented, open for review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Base commit: `31f6a148d4e22234178788314cdcf9facc6ca3fb`
 Talos version: `0.10.5`
 
 ## Scope
 
-T834 strengthens the common safety-layer sanitizer used by model-facing and
+T834 strengthened the common safety-layer sanitizer used by model-facing and
 durable lower-layer sinks. It does not claim complete secret detection; the
 detectors are best-effort shape guards for high-risk secret formats.
 

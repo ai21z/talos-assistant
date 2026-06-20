@@ -667,3 +667,16 @@ mechanically.
   strings, and long identifiers unchanged.
 - Kept the targeted PEM, connection-string, token-prefix, `eyJ` JWT, and
   Redactor additive-builtins fixes intact; T834 remains open for review.
+
+## [2026-06-20] ledger | Close T834 strong redaction
+
+- Moved T834 to the done ticket ledger after review of implementation commits
+  `cc0179103cec7d5d70797a886081fdc70a1c930c` and
+  `61c6e0f41b3a51a716e78a19dee81495e1eab31c`.
+- Updated the trust-claims honesty guard to pin the done ticket path and status.
+- Recorded that focused T834 redaction/honesty tests, full
+  `check --no-daemon`, `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and
+  `git diff --check -- . ':!site'` passed during closeout.
+- Left T836/T837/T838 open as the remaining high-priority Wave 6 trust-surface
+  fixes; T837 `run_command` output handoff is the next recommended model-context
+  leakage boundary.
