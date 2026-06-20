@@ -644,3 +644,15 @@ mechanically.
   passed during review.
 - Left T834/T836/T837/T838 open as the remaining Wave 6 high-priority
   trust-surface fixes; T834 strong redaction is the next planned fix.
+
+## [2026-06-20] code-fix | Implement T834 strong redaction
+
+- Added safety-layer strong secret-shape detection for model-facing and durable
+  lower-layer sinks while keeping the existing `[redacted]` safety mask.
+- Kept `core.security.Redactor` on its existing `[secret]` mask and made
+  custom `redact.secrets` patterns additive with built-ins.
+- Added red-first tests for bare token/JWT/PEM/connection-string/high-entropy
+  shapes across standalone sanitizer, model-context handoff, session
+  persistence, trace redaction, result formatting, and a direct lower-layer
+  retrieve path.
+- Left T834 open for review/closeout; T836/T837/T838 remain open.

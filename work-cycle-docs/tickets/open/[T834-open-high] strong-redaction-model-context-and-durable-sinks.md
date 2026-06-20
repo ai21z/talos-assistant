@@ -35,6 +35,25 @@ Source context:
 - Existing key=value and canary redaction behavior remains covered.
 - No docs or site claim complete secret detection.
 
+## Implementation State
+
+Implemented and left open for review.
+
+Report:
+
+- `work-cycle-docs/reports/t834-strong-redaction-model-context-and-durable-sinks.md`
+
+Implementation summary:
+
+- Added safety-owned strong secret-shape detectors used by
+  `ProtectedContentSanitizer.sanitizeText(...)`.
+- Kept safety sink replacement as `[redacted]`.
+- Kept `core.security.Redactor` replacement as `[secret]`.
+- Made Redactor custom `redact.secrets` patterns additive with built-ins.
+- Added red-first and real-path tests for standalone sanitizer, formatter,
+  model-context handoff, JSON session persistence, trace redaction, and
+  `RetrieveTool` as a direct lower-layer sanitizer caller.
+
 ## Non-Goals
 
 - Do not add OCR, RAG breadth, or private-document capability expansion.

@@ -66,6 +66,21 @@ class ToolResultFormatterTest {
     }
 
     @Test
+    void sanitizesBareSecretShapesUnlessPreservationIsRequested() {
+        String token = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890";
+        ToolCall grep = new ToolCall("talos.grep", Map.of("pattern", "token"));
+        ToolResult result = ToolResult.ok("README.md:1 | leaked token " + token);
+
+        String sanitized = ToolResultFormatter.formatToolResult(grep, result);
+        String preserved = ToolResultFormatter.formatToolResult(grep, result, true);
+
+        assertAll(
+                () -> assertFalse(sanitized.contains(token), sanitized),
+                () -> assertTrue(sanitized.contains("[redacted]"), sanitized),
+                () -> assertTrue(preserved.contains(token), preserved));
+    }
+
+    @Test
     void extractsVerificationWarningSummary() {
         assertAll(
                 () -> assertEquals(

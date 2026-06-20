@@ -188,7 +188,8 @@ confidence_histogram:
   future Wave 5 follow-up work requires new scoped tickets. Wave 6 Tier 0
   honest disclosure is complete through T833; T835, the chat transport
   localhost guard, is done. T839, the embedding host locality policy fix, is
-  done while T834/T836/T837/T838 remain open high-priority fixes.
+  done. T834 strong redaction has been implemented and remains open for review;
+  T836/T837/T838 remain open high-priority fixes.
 
 ```talos-wiki-claims
 {
@@ -451,7 +452,8 @@ the raw audit remains local and untracked by design.
 
 Open Wave 6 high code-fix tickets:
 
-- T834: strong redaction across model context and durable sinks.
+- T834: strong redaction across model context and durable sinks (implemented,
+  open for review).
 - T836: Windows protected-path canonicalization.
 - T837: `run_command` output handoff boundary.
 - T838: master-key custody.

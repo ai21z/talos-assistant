@@ -283,6 +283,19 @@ class JsonSessionStoreTest {
             assertTrue(content.contains("[redacted-private-document-canary]"), content);
         }
 
+        @Test void savedSessionRedactsBareSecretShapes() throws Exception {
+            String token = "github_pat_11AAAAAAA0abcdefghijklmnopqrstuvwxyz1234567890";
+            var store = store();
+            store.save(new SessionData("strong-secret", "/tmp/ws", "token " + token, 1,
+                    Instant.parse("2026-05-17T10:00:00Z"),
+                    List.of(new SessionData.Turn("assistant", "leaked " + token)),
+                    "llama_cpp/qwen2.5-coder:14b"));
+
+            String content = Files.readString(tempDir.resolve("strong-secret.json"));
+            assertFalse(content.contains(token), content);
+            assertTrue(content.contains("[redacted]"), content);
+        }
+
         @Test void turnJsonlRedactsPrivateDocumentFactCanaries() throws Exception {
             var store = store();
             store.appendTurn("private-doc-turn", new dev.talos.runtime.TurnRecord(

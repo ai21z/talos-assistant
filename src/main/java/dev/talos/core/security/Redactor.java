@@ -2,6 +2,7 @@ package dev.talos.core.security;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.util.Sanitize;
+import dev.talos.safety.SecretShapePatterns;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -78,17 +79,9 @@ public final class Redactor {
         this.redactPaths = CfgUtil.boolAt(redact, "paths", true);
         this.redactIps   = CfgUtil.boolAt(redact, "ips",   true);
 
-        List<String> regexes = new ArrayList<>();
+        List<String> regexes = new ArrayList<>(SecretShapePatterns.redactorDefaultSecretRegexes());
         if (redact.get("secrets") instanceof List<?> xs) {
             for (Object o : xs) if (o != null) regexes.add(String.valueOf(o));
-        }
-        if (regexes.isEmpty()) {
-            // Sensible defaults: tokens/keys/password-style assignments and well-known prefixes.
-            regexes.add("(?i)\\b(api[_-]?key|token|secret|password|passwd|pwd|bearer)\\s*[:=]\\s*['\\\"]?([A-Za-z0-9._\\-+/=]{8,})");
-            regexes.add("\\b(sk-[A-Za-z0-9]{16,})\\b");         // common vendor prefixes
-            regexes.add("\\b(xox[baprs]-[A-Za-z0-9-]{12,})\\b");// Slack token shapes
-            regexes.add("\\b(ghp_[A-Za-z0-9]{20,})\\b");        // GitHub PAT
-            regexes.add("\\b([A-Za-z0-9_\\-]{20,}\\.[A-Za-z0-9_\\-]{4,}\\.[A-Za-z0-9_\\-]{20,})\\b"); // JWT-like (variable length)
         }
         List<Pattern> compiled = new ArrayList<>(regexes.size());
         for (String rx : regexes) {

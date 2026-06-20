@@ -34,6 +34,7 @@ public final class ProtectedContentSanitizer {
         if (text == null || text.isBlank()) return text;
         String redacted = redactPrivateMarkerAssignments(text);
         redacted = redactSecretLikeAssignments(redacted);
+        redacted = SecretShapePatterns.redactSecretShapes(redacted, REDACTED_VALUE);
         redacted = CANARY.matcher(redacted).replaceAll(REDACTED_CANARY);
         redacted = PRIVATE_DOCUMENT_FACT_CANARY.matcher(redacted).replaceAll(REDACTED_PRIVATE_DOCUMENT_CANARY);
         return redacted;
@@ -87,7 +88,8 @@ public final class ProtectedContentSanitizer {
         if (text == null || text.isBlank()) return false;
         return CANARY.matcher(text).find()
                 || PRIVATE_MARKER_ASSIGNMENT.matcher(text).find()
-                || SECRET_LIKE_ASSIGNMENT.matcher(text).find();
+                || SECRET_LIKE_ASSIGNMENT.matcher(text).find()
+                || SecretShapePatterns.containsSecretShape(text);
     }
 
     public static boolean containsRawCanary(String text) {
