@@ -20,11 +20,11 @@ class ProtectedWorkspacePathsTest {
     Path workspace;
 
     @Test
-    void policyVersionIsV6_sinceT836WindowsShortNameRealPathClassification() {
+    void policyVersionIsV7_sinceT840UnresolvedShortNameSegmentsFailClosed() {
         // Typed literal on purpose (never constant-vs-constant): bumping the
         // version is a deliberate act that forces stale RAG privacy
         // partitions to rebuild, and this pin makes the bump reviewable.
-        assertEquals("protected-content-policy-v6", ProtectedWorkspacePaths.POLICY_VERSION);
+        assertEquals("protected-content-policy-v7", ProtectedWorkspacePaths.POLICY_VERSION);
     }
 
     @Test
@@ -127,6 +127,48 @@ class ProtectedWorkspacePathsTest {
         assertTrue(newFile.protectedPath(), "new file under SSH~1");
         assertEquals(runtime.protectedPath(), newFile.protectedPath(), "new file under SSH~1");
         assertEquals(runtime.protectedKind(), newFile.protectedKind(), "new file under SSH~1");
+    }
+
+    @Test
+    void unresolvedWindowsShortNameSegmentsFailClosedInsideWorkspace() {
+        ProtectedWorkspacePaths.Decision direct =
+                ProtectedWorkspacePaths.classify(workspace, "SSH~1/new-key.txt");
+        ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, "SSH~1/new-key.txt");
+
+        assertTrue(direct.hasPath());
+        assertTrue(direct.insideWorkspace());
+        assertFalse(direct.workspaceEscape());
+        assertTrue(direct.protectedPath(), "unresolved short-name segments fail closed");
+        assertEquals("CONTROL", direct.protectedKind());
+        assertEquals("SSH~1/new-key.txt", direct.relativePath());
+        assertEquals(runtime.rawPath(), direct.rawPath());
+        assertEquals(runtime.relativePath(), direct.relativePath());
+        assertEquals(runtime.hasPath(), direct.hasPath());
+        assertEquals(runtime.insideWorkspace(), direct.insideWorkspace());
+        assertEquals(runtime.workspaceEscape(), direct.workspaceEscape());
+        assertEquals(runtime.protectedPath(), direct.protectedPath());
+        assertEquals(runtime.protectedKind(), direct.protectedKind());
+        assertTrue(ProtectedWorkspacePaths.isProtectedPath(
+                workspace,
+                workspace.resolve("SSH~1").resolve("new-key.txt")));
+    }
+
+    @Test
+    void unresolvedShortNameGuardDoesNotAffectOrdinarySafePaths() {
+        ProtectedWorkspacePaths.Decision normal =
+                ProtectedWorkspacePaths.classify(workspace, "docs/notes.md");
+        ProtectedWorkspacePaths.Decision tildeName =
+                ProtectedWorkspacePaths.classify(workspace, "docs/notes~draft.md");
+        ProtectedWorkspacePaths.Decision shaName =
+                ProtectedWorkspacePaths.classify(workspace,
+                        "docs/0123456789abcdef0123456789abcdef01234567.txt");
+
+        assertFalse(normal.protectedPath());
+        assertFalse(tildeName.protectedPath());
+        assertFalse(shaName.protectedPath());
+        assertFalse(ProtectedWorkspacePaths.isProtectedPath(
+                workspace,
+                workspace.resolve("docs").resolve("notes~draft.md")));
     }
 
     @Test

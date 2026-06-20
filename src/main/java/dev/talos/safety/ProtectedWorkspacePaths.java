@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** Direct workspace-path classifier for protected local paths. */
 public final class ProtectedWorkspacePaths {
@@ -21,8 +22,14 @@ public final class ProtectedWorkspacePaths {
      *  device names are canonicalized before protected-path classification.
      *  v6 (T836 reopen): existing targets and nearest existing ancestors are
      *  classified by OS real path so NTFS 8.3 aliases resolve to their
-     *  protected long-name directories before matching. */
-    public static final String POLICY_VERSION = "protected-content-policy-v6";
+     *  protected long-name directories before matching.
+     *  v7 (T840): unresolved Windows 8.3-style short-name segments fail closed
+     *  after realpath classification so realpath errors cannot leave
+     *  suspicious lexical aliases unprotected. */
+    public static final String POLICY_VERSION = "protected-content-policy-v7";
+
+    private static final Pattern WINDOWS_SHORT_NAME_SEGMENT =
+            Pattern.compile("(?i)^[a-z0-9]{1,6}~[1-9][0-9]*(\\.[a-z0-9]{1,3})?$");
 
     public record Decision(
             String rawPath,
@@ -70,6 +77,9 @@ public final class ProtectedWorkspacePaths {
         }
 
         String relative = normalizeRelative(ws.relativize(resolved));
+        if (hasUnresolvedWindowsShortNameSegment(relative)) {
+            return new Decision(rawPath, relative, true, true, false, true, "CONTROL");
+        }
         String kind = ProtectedPathTokens.protectedKind(relative.toLowerCase(Locale.ROOT));
         return new Decision(rawPath, relative, true, true, false, !kind.isBlank(), kind);
     }
@@ -81,6 +91,7 @@ public final class ProtectedWorkspacePaths {
             Path resolved = realPathForClassification(path.toAbsolutePath().normalize());
             if (!startsWithWorkspace(resolved, ws)) return false;
             String relative = normalizeRelative(ws.relativize(resolved));
+            if (hasUnresolvedWindowsShortNameSegment(relative)) return true;
             return !ProtectedPathTokens.protectedKind(relative.toLowerCase(Locale.ROOT)).isBlank();
         } catch (Exception ignored) {
             return false;
@@ -186,6 +197,17 @@ public final class ProtectedWorkspacePaths {
             s = s.substring(2);
         }
         return s;
+    }
+
+    private static boolean hasUnresolvedWindowsShortNameSegment(String relative) {
+        if (relative == null || relative.isBlank()) return false;
+        String[] segments = relative.replace('\\', '/').split("/+");
+        for (String segment : segments) {
+            if (WINDOWS_SHORT_NAME_SEGMENT.matcher(segment).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isWindows() {
