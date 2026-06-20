@@ -90,6 +90,22 @@ public record ToolContentMetadata(
                 decisionReason);
     }
 
+    public static ToolContentMetadata commandOutput(
+            String profileId,
+            boolean modelHandoffAllowed,
+            String decisionReason) {
+        return new ToolContentMetadata(
+                ContentPrivacyClass.COMMAND_OUTPUT,
+                ContentSource.COMMAND,
+                profileId,
+                modelHandoffAllowed,
+                false,
+                false,
+                decisionReason == null || decisionReason.isBlank()
+                        ? "command output"
+                        : decisionReason);
+    }
+
     public ToolContentMetadata withModelHandoffAllowed(boolean allowed, String reason) {
         return new ToolContentMetadata(
                 privacyClass,

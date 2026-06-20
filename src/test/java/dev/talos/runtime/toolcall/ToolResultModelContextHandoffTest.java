@@ -10,6 +10,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -211,6 +212,77 @@ class ToolResultModelContextHandoffTest {
     }
 
     @Test
+    void commandOutputThatRequiredRedactionIsWithheldFromModelContext() {
+        ToolResult raw = ToolResult.ok("""
+                Command succeeded: gradle_test exited with code 0 after 42ms.
+                profile: gradle_test
+                stdout:
+                token=[redacted]
+                stderr:
+                (empty)""", commandMetadata(false, "command output required redaction before model handoff"));
+
+        ToolResultModelContextHandoff.Decision decision = ToolResultModelContextHandoff.decide(
+                new ToolCall("talos.run_command", Map.of("profile", "gradle_test")),
+                state(new Config(null)),
+                "",
+                raw,
+                approvalGate(new AtomicInteger(), ApprovalResponse.APPROVED));
+
+        assertSame(raw, decision.rawResult());
+        assertSame(raw, decision.candidateResult());
+        assertTrue(decision.contentWithheldFromModelContext());
+        assertFalse(decision.preserveModelResultForToolFormatting());
+        assertEquals(ContextDecision.withheldFromModel("command output required redaction before model handoff"),
+                decision.contextDecision());
+
+        String modelOutput = decision.modelResult().output();
+        assertTrue(decision.modelResult().success(), modelOutput);
+        assertTrue(modelOutput.contains("Command succeeded: gradle_test exited with code 0"), modelOutput);
+        assertTrue(modelOutput.contains("withheld from model context"), modelOutput);
+        assertFalse(modelOutput.contains("token=[redacted]"), modelOutput);
+        assertFalse(modelOutput.contains("stdout:"), modelOutput);
+    }
+
+    @Test
+    void failedCommandOutputThatRequiredRedactionStaysFailureDominantButHidesStreams() {
+        ToolResult raw = new ToolResult(
+                false,
+                null,
+                ToolError.internal(ToolFailureReason.NONE, """
+                        Command failed: gradle_test exited with code 1 after 42ms.
+                        profile: gradle_test
+                        stdout:
+                        token=[redacted]
+                        stderr:
+                        stacktrace"""),
+                null,
+                commandMetadata(false, "command output required redaction before model handoff"));
+
+        ToolResultModelContextHandoff.Decision decision = ToolResultModelContextHandoff.decide(
+                new ToolCall("talos.run_command", Map.of("profile", "gradle_test")),
+                state(new Config(null)),
+                "",
+                raw,
+                approvalGate(new AtomicInteger(), ApprovalResponse.APPROVED));
+
+        assertSame(raw, decision.rawResult());
+        assertSame(raw, decision.candidateResult());
+        assertTrue(decision.contentWithheldFromModelContext());
+        assertFalse(decision.modelResult().success(), decision.modelResult().output());
+        assertEquals(ToolError.INTERNAL_ERROR, decision.modelResult().error().code());
+        assertEquals(ToolFailureReason.NONE, decision.modelResult().error().reason());
+        assertEquals(ContextDecision.excludedByPrivacyOrTrustPolicy("TOOL_RESULT_ERROR"),
+                decision.contextDecision());
+
+        String modelError = decision.modelResult().errorMessage();
+        assertTrue(modelError.contains("Command failed: gradle_test exited with code 1"), modelError);
+        assertTrue(modelError.contains("withheld from model context"), modelError);
+        assertFalse(modelError.contains("token=[redacted]"), modelError);
+        assertFalse(modelError.contains("stdout:"), modelError);
+        assertFalse(modelError.contains("stacktrace"), modelError);
+    }
+
+    @Test
     void toolCallExecutionStageDelegatesModelContextHandoffDecision() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
@@ -244,6 +316,17 @@ class ToolResultModelContextHandoffTest {
         return ToolContentMetadata.extractedDocument(
                 "medical-notes.docx",
                 true,
+                modelHandoffAllowed,
+                false,
+                false,
+                reason);
+    }
+
+    private static ToolContentMetadata commandMetadata(boolean modelHandoffAllowed, String reason) {
+        return new ToolContentMetadata(
+                ToolContentMetadata.ContentPrivacyClass.COMMAND_OUTPUT,
+                ToolContentMetadata.ContentSource.COMMAND,
+                "gradle_test",
                 modelHandoffAllowed,
                 false,
                 false,

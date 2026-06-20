@@ -12,6 +12,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
+import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
 
 /** Decides how a raw tool result is handed to model context for this turn. */
@@ -69,6 +70,9 @@ public final class ToolResultModelContextHandoff {
         if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
             contentWithheldFromModelContext = true;
             modelResult = approvedProtectedReadWithheldResult(state);
+        } else if (requiresCommandOutputWithholding(handoffCandidate)) {
+            contentWithheldFromModelContext = true;
+            modelResult = commandOutputWithheldResult(handoffCandidate);
         } else if (handoffCandidate != null
                 && handoffCandidate.success()
                 && handoffCandidate.contentMetadata() != null
@@ -117,6 +121,12 @@ public final class ToolResultModelContextHandoff {
         }
         if (privateDocumentPerTurnHandoffApproved) {
             return ContextDecision.includedInModel("PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED");
+        }
+        if (requiresCommandOutputWithholding(candidateResult)) {
+            if (candidateResult.success()) {
+                return ContextDecision.withheldFromModel(candidateResult.contentMetadata().decisionReason());
+            }
+            return ContextDecision.excludedByPrivacyOrTrustPolicy("TOOL_RESULT_ERROR");
         }
         if (candidateResult.contentMetadata() != null
                 && !candidateResult.contentMetadata().modelHandoffAllowed()) {
@@ -173,6 +183,29 @@ public final class ToolResultModelContextHandoff {
                 null,
                 rawResult == null ? null : rawResult.verification(),
                 rawResult == null ? null : rawResult.contentMetadata());
+    }
+
+    private static ToolResult commandOutputWithheldResult(ToolResult rawResult) {
+        ToolContentMetadata metadata = rawResult == null ? ToolContentMetadata.normal() : rawResult.contentMetadata();
+        String lead = firstLine(rawResult != null && rawResult.success()
+                ? rawResult.output()
+                : rawResult == null ? "" : rawResult.errorMessage());
+        String reason = metadata == null || metadata.decisionReason().isBlank()
+                ? "command output required redaction before model handoff"
+                : metadata.decisionReason();
+        String message = (lead.isBlank() ? "Command output was captured locally." : lead)
+                + "\nCommand stdout/stderr were captured locally but withheld from model context because "
+                + ProtectedContentPolicy.sanitizeText(reason)
+                + ". The command outcome status is preserved, but the stream content is not shown to the model.";
+        if (rawResult != null && !rawResult.success()) {
+            ToolError rawError = rawResult.error();
+            ToolError error = new ToolError(
+                    rawError == null ? ToolError.INTERNAL_ERROR : rawError.code(),
+                    message,
+                    rawError == null ? null : rawError.reason());
+            return new ToolResult(false, null, error, rawResult.verification(), metadata);
+        }
+        return new ToolResult(true, message, null, rawResult == null ? null : rawResult.verification(), metadata);
     }
 
     private record PrivateDocumentHandoffApproval(boolean approved) {}
@@ -261,5 +294,20 @@ public final class ToolResultModelContextHandoff {
         return metadata.modelHandoffAllowed()
                 && metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
                 && metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION;
+    }
+
+    private static boolean requiresCommandOutputWithholding(ToolResult result) {
+        if (result == null || result.contentMetadata() == null) return false;
+        ToolContentMetadata metadata = result.contentMetadata();
+        return !metadata.modelHandoffAllowed()
+                && metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.COMMAND_OUTPUT
+                && metadata.source() == ToolContentMetadata.ContentSource.COMMAND;
+    }
+
+    private static String firstLine(String value) {
+        if (value == null || value.isBlank()) return "";
+        String safe = ProtectedContentPolicy.sanitizeText(value).strip();
+        int newline = safe.indexOf('\n');
+        return newline >= 0 ? safe.substring(0, newline).strip() : safe;
     }
 }

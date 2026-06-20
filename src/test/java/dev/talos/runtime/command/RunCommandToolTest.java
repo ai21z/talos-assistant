@@ -3,6 +3,7 @@ package dev.talos.runtime.command;
 import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolOperationMetadata;
@@ -59,6 +60,109 @@ class RunCommandToolTest {
                 captured.get().argv());
         assertTrue(result.output().contains("Command succeeded: gradle_test exited with code 0"));
         assertTrue(result.output().contains("BUILD SUCCESSFUL"));
+    }
+
+    @Test
+    void commandResultsCarryCommandOutputMetadataForHandoff() throws Exception {
+        createGradleWrapper();
+        RunCommandTool tool = new RunCommandTool(plan -> success(plan, "BUILD SUCCESSFUL", ""));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_test")), context());
+
+        ToolContentMetadata metadata = result.contentMetadata();
+        assertEquals(ToolContentMetadata.ContentPrivacyClass.COMMAND_OUTPUT, metadata.privacyClass());
+        assertEquals(ToolContentMetadata.ContentSource.COMMAND, metadata.source());
+        assertEquals("gradle_test", metadata.sourcePath());
+        assertTrue(metadata.modelHandoffAllowed());
+        assertFalse(metadata.rawArtifactPersistenceAllowed());
+        assertFalse(metadata.ragIndexAllowed());
+        assertTrue(metadata.decisionReason().contains("command output"), metadata.decisionReason());
+    }
+
+    @Test
+    void redactedCommandResultsAreTaggedForWithheldModelHandoff() throws Exception {
+        createGradleWrapper();
+        RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
+                plan,
+                0,
+                42,
+                false,
+                false,
+                "token=[redacted]",
+                "",
+                false,
+                false,
+                true,
+                ""));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_test")), context());
+
+        ToolContentMetadata metadata = result.contentMetadata();
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(ToolContentMetadata.ContentPrivacyClass.COMMAND_OUTPUT, metadata.privacyClass());
+        assertEquals(ToolContentMetadata.ContentSource.COMMAND, metadata.source());
+        assertFalse(metadata.modelHandoffAllowed(),
+                "redacted command streams must route through an explicit withhold/summarize boundary");
+        assertFalse(metadata.rawArtifactPersistenceAllowed());
+        assertFalse(metadata.ragIndexAllowed());
+        assertTrue(result.output().contains("redactionApplied: true"), result.output());
+    }
+
+    @Test
+    void highEntropyCommandResultsAreTaggedForWithheldModelHandoff() throws Exception {
+        createGradleWrapper();
+        String highEntropy = "N7k9Qp2vLm8Xr4Ts6Wd0Yh3Za5Bc1Ef7Gj9Kl2Mn";
+        RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
+                plan,
+                0,
+                42,
+                false,
+                false,
+                "generated token " + highEntropy,
+                "",
+                false,
+                false,
+                false,
+                ""));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_test")), context());
+
+        ToolContentMetadata metadata = result.contentMetadata();
+        assertTrue(result.success(), result.errorMessage());
+        assertFalse(metadata.modelHandoffAllowed(),
+                "high-entropy command streams must be withheld even when the universal sanitizer does not redact");
+        assertTrue(metadata.decisionReason().contains("high-entropy"), metadata.decisionReason());
+        assertTrue(result.output().contains(highEntropy),
+                "local command output remains available in the raw candidate result");
+    }
+
+    @Test
+    void commandHighEntropyDetectorDoesNotWithholdOrdinaryHashesOrProse() throws Exception {
+        createGradleWrapper();
+        String gitSha = "0123456789abcdef0123456789abcdef01234567";
+        String uuid = "123e4567-e89b-12d3-a456-426614174000";
+        RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
+                plan,
+                0,
+                42,
+                false,
+                false,
+                "commit " + gitSha + "\nrequest " + uuid + "\nBUILD SUCCESSFUL",
+                "",
+                false,
+                false,
+                false,
+                ""));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_test")), context());
+
+        assertTrue(result.contentMetadata().modelHandoffAllowed(), result.contentMetadata().decisionReason());
+        assertTrue(result.output().contains(gitSha), result.output());
+        assertTrue(result.output().contains(uuid), result.output());
     }
 
     @Test
