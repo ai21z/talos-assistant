@@ -154,6 +154,30 @@ class ProtectedWorkspacePathsTest {
     }
 
     @Test
+    void unresolvedShortNameGuardCoversDosShortNameSpecialCharacters() {
+        for (String rawPath : List.of(
+                "ID_ED2~1/mykey",
+                "MY-KEY~1/config",
+                "$CACHE~1/value.txt",
+                "USER@1~1/value.txt")) {
+            ProtectedWorkspacePaths.Decision direct =
+                    ProtectedWorkspacePaths.classify(workspace, rawPath);
+            ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, rawPath);
+
+            assertTrue(direct.hasPath(), rawPath);
+            assertTrue(direct.insideWorkspace(), rawPath);
+            assertFalse(direct.workspaceEscape(), rawPath);
+            assertTrue(direct.protectedPath(), rawPath);
+            assertEquals("CONTROL", direct.protectedKind(), rawPath);
+            assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
+            assertEquals(runtime.protectedKind(), direct.protectedKind(), rawPath);
+            assertTrue(ProtectedWorkspacePaths.isProtectedPath(
+                    workspace,
+                    workspace.resolve(rawPath)));
+        }
+    }
+
+    @Test
     void unresolvedShortNameGuardDoesNotAffectOrdinarySafePaths() {
         ProtectedWorkspacePaths.Decision normal =
                 ProtectedWorkspacePaths.classify(workspace, "docs/notes.md");
