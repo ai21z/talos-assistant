@@ -1,6 +1,6 @@
-# [T840-open-high] Protected Path Realpath-Failure Fail-Closed
+# [T840-done-high] Protected Path Realpath-Failure Fail-Closed
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
@@ -46,9 +46,10 @@ miss a protected target and treat the path as an ordinary workspace path.
   `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and diff hygiene pass.
 - `site/` is not edited or staged.
 
-## Implementation Review State
+## Implementation State
 
-Implementation has landed for review in the current branch. The change:
+Implemented in commits `626e8ec4ab1c213dda3b6e3b2aadc414ac5ded95` and
+`93b73b44` and accepted for closeout after review. The change:
 
 - bumps `ProtectedWorkspacePaths.POLICY_VERSION` to
   `protected-content-policy-v7`;
@@ -61,8 +62,18 @@ Implementation has landed for review in the current branch. The change:
 - keeps successful realpath expansion behavior unchanged for real NTFS aliases;
 - leaves ordinary safe paths and non-8.3 tilde names non-protected.
 
-T840 remains open until review verifies the fail-closed behavior and gate
-results.
+Closeout evidence:
+
+- Red-first focused test failed on the unresolved short-name behavior before
+  implementation.
+- Additional review found the initial alphanumeric-only guard missed legal
+  DOS/8.3 short-name characters; `93b73b44` broadened the guard and added
+  regression coverage for `_`, `$`, `@`, and `-`.
+- `ProtectedWorkspacePathsTest`, `ProtectedPathPolicyTest`, and `dev.talos.safety.*`
+  passed.
+- Full `check --no-daemon` passed.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- `site/` was not edited or staged.
 
 ## Non-Goals
 

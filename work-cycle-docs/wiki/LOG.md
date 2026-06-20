@@ -796,3 +796,24 @@ mechanically.
 - Added portable tests for unresolved `SSH~1` fail-closed behavior and negative
   coverage for ordinary safe paths and non-8.3 tilde names.
 - Left T840 open for review/closeout.
+
+## [2026-06-20] code-fix | Harden T840 short-name charset
+
+- Broadened the unresolved Windows 8.3-style short-name guard to include
+  `_`, `$`, `@`, and `-` in the short-name base and extension.
+- Added portable regression coverage for surviving short-name shapes such as
+  `ID_ED2~1`, `MY-KEY~1`, `$CACHE~1`, and `USER@1~1`.
+- Preserved the shape-bound `~N` requirement so ordinary tilde names remain
+  non-protected.
+
+## [2026-06-20] closeout | Close T840 protected-path realpath-failure fail-closed
+
+- Closed T840 after review of implementation commits
+  `626e8ec4ab1c213dda3b6e3b2aadc414ac5ded95` and `93b73b44`.
+- Recorded that unresolved Windows 8.3-style short-name segments now fail
+  closed as protected `CONTROL` paths after realpath classification while
+  successful realpath expansion and workspace-escape behavior remain
+  unchanged.
+- Recorded that focused safety/runtime tests, full `check --no-daemon`,
+  `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and diff hygiene passed.
+- Left no active Wave 6 high trust-fix or cheap consolidation follow-up ticket.
