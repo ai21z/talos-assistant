@@ -115,7 +115,8 @@ class TrustClaimsHonestyTest {
         assertContains(review, "Talos does not yet perform a post-write readback/re-hash round trip");
         assertContains(review, "Do not publish stronger trust positioning until those code fixes land");
 
-        String t834 = read("work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md");
+        String t834 = read("work-cycle-docs/tickets/done/[T834-done-high] strong-redaction-model-context-and-durable-sinks.md");
+        assertContains(t834, "Status: done");
         assertContains(t834, "Bare `ghp_`, `sk-`, AWS access-key, JWT, PEM private-key");
         assertContains(t834, "over-redaction of SRI hashes, data URIs, and long identifiers");
         String t835 = read("work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md");
@@ -145,7 +146,7 @@ class TrustClaimsHonestyTest {
 
         for (String file : List.of(
                 "work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md",
-                "work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md",
+                "work-cycle-docs/tickets/done/[T834-done-high] strong-redaction-model-context-and-durable-sinks.md",
                 "work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md",
                 "work-cycle-docs/tickets/open/[T836-open-high] windows-protected-path-canonicalization.md",
                 "work-cycle-docs/tickets/open/[T837-open-high] run-command-output-handoff-boundary.md",

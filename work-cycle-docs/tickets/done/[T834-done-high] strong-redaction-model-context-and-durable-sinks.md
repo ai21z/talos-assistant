@@ -1,6 +1,6 @@
-# [T834-open-high] Strong Redaction Across Model Context And Durable Sinks
+# [T834-done-high] Strong Redaction Across Model Context And Durable Sinks
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
@@ -35,9 +35,9 @@ Source context:
 - Existing key=value and canary redaction behavior remains covered.
 - No docs or site claim complete secret detection.
 
-## Implementation State
+## Completion Evidence
 
-Implemented and left open for review.
+Implemented and closed after review.
 
 Report:
 
@@ -56,6 +56,20 @@ Implementation summary:
 - Revised the original bounded high-entropy detector out after adversarial
   review showed over-redaction of SRI hashes, data URIs, and long identifiers;
   added deterministic AWS `AKIA`/`ASIA` prefixes instead.
+
+Verified implementation commits:
+
+- `cc0179103cec7d5d70797a886081fdc70a1c930c` implemented the first strong
+  sink-redaction pass.
+- `61c6e0f41b3a51a716e78a19dee81495e1eab31c` revised the detector scope after
+  adversarial review.
+
+Closeout gates:
+
+- Focused T834 redaction and honesty tests passed.
+- `.\gradlew.bat check --no-daemon` passed.
+- `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- `git diff --check -- . ':!site'` was clean.
 
 ## Non-Goals
 
