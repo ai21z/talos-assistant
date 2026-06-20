@@ -32,7 +32,7 @@ Windows trailing-dot and trailing-space path aliases are canonicalized before pr
 
 Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
 
-The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody. The master key is stored on disk next to the ciphertext with no passphrase; anyone who can read `~/.talos/secrets/` can recover the stored secrets.
+On Windows, the local secret-store master key is protected at rest with DPAPI CurrentUser and is tied to the Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect it. On non-Windows platforms, master-key custody remains unchanged and is not yet OS-backed. Treat `~/.talos/secrets/` and your OS account as part of the trust boundary.
 
 Local traces and logs are durable evidence artifacts, but they are not tamper-evident. They are plaintext local diagnostics, not a signed append-only audit trail.
 
