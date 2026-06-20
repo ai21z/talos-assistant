@@ -1,11 +1,11 @@
-# [T836-open-high] Windows Protected-Path Canonicalization
+# [T836-done-high] Windows Protected-Path Canonicalization
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
-Implementation state: implemented, open for review
+Implementation state: done
 
 ## Purpose
 
@@ -44,6 +44,7 @@ Source context:
 ## Implementation Record
 
 - Report: `work-cycle-docs/reports/t836-windows-protected-path-canonicalization.md`
+- Implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
 - `ProtectedPathTokens` now canonicalizes trailing dots and spaces per segment
   before protected-token matching.
 - `ProtectedWorkspacePaths.POLICY_VERSION` is bumped to
@@ -52,4 +53,7 @@ Source context:
 - Public docs now use the bounded current behavior wording:
   "Windows trailing-dot and trailing-space path aliases are canonicalized before
   protected-path matching; this is not a complete Windows path-security proof."
-- T836 remains open for review and closeout.
+- Review accepted after focused safety/docs tests, runtime/privacy/architecture
+  focused tests, full `check --no-daemon`,
+  `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and
+  `git diff --check HEAD^ HEAD -- . ':!site'` passed.

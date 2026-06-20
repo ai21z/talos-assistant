@@ -1,8 +1,9 @@
 # T836 Windows Protected-Path Canonicalization
 
-Status: implemented, open for review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Base commit: `7f7a4560c9650587d39bdd0b522106e65c28b19d`
+Implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
 Talos version: `0.10.5`
 
 ## Purpose
@@ -62,3 +63,15 @@ security, implement full NT namespace handling, or close unrelated protected
 path edge cases such as Unicode/homoglyph tricks. Remaining Wave 6 high trust
 work stays scoped to T837 (`run_command` output handoff) and T838 (master-key
 custody).
+
+## Closeout Evidence
+
+- Focused safety/docs tests passed:
+  `ProtectedPathTokensTest`, `ProtectedWorkspacePathsTest`, and
+  `TrustClaimsHonestyTest`.
+- Runtime/privacy/architecture focused tests passed:
+  `ProtectedReadScopeIntegrationTest`, `dev.talos.runtime.policy.*`,
+  `IndexerPolicyMetadataTest`, and `LayeredArchitectureTest`.
+- Full `check --no-daemon` passed.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- `git diff --check HEAD^ HEAD -- . ':!site'` passed.

@@ -693,3 +693,13 @@ mechanically.
   bounded current behavior wording.
 - Left T836 open for review/closeout; T837/T838 remain open high-priority Wave
   6 trust-surface fixes.
+
+## [2026-06-20] ledger | Close T836 Windows protected-path canonicalization
+
+- Moved T836 to the done ticket ledger after review of implementation commit
+  `bbab3bcd53c505d74160ace66cbe852eb2893509`.
+- Updated the trust-claims honesty guard to pin the done ticket path and status.
+- Recorded that focused safety/docs tests, runtime/privacy/architecture
+  focused tests, full `check --no-daemon`,
+  `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and diff hygiene passed.
+- Left T837/T838 open as the remaining high-priority Wave 6 trust-surface fixes.
