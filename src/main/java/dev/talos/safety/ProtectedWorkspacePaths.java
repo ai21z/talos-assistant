@@ -14,8 +14,10 @@ public final class ProtectedWorkspacePaths {
      *  v4 (T788): the workspace .talos directory became a CONTROL segment
      *  (it holds verification-profile declarations and template commands) —
      *  stale indexes would misclassify .talos content in the privacy
-     *  partition, so they must rebuild. */
-    public static final String POLICY_VERSION = "protected-content-policy-v4";
+     *  partition, so they must rebuild.
+     *  v5 (T836): Windows trailing-dot/trailing-space aliases and reserved
+     *  device names are canonicalized before protected-path classification. */
+    public static final String POLICY_VERSION = "protected-content-policy-v5";
 
     public record Decision(
             String rawPath,
@@ -84,14 +86,39 @@ public final class ProtectedWorkspacePaths {
             return raw;
         }
         String trimmed = raw.strip();
-        if (trimmed.equals(raw) || trimmed.isBlank()) {
+        String canonical = canonicalizeWindowsAliasPath(trimmed);
+        if ((trimmed.equals(raw) && canonical.equals(raw)) || trimmed.isBlank()) {
             return raw;
         }
         Path rawResolved = resolve(workspace, raw);
         Path trimmedResolved = resolve(workspace, trimmed);
+        Path canonicalResolved = resolve(workspace, canonical);
         boolean rawExists = rawResolved != null && Files.exists(rawResolved);
         boolean trimmedExists = trimmedResolved != null && Files.exists(trimmedResolved);
+        boolean canonicalExists = canonicalResolved != null && Files.exists(canonicalResolved);
+        if (!rawExists && canonicalExists) {
+            return canonical;
+        }
         return !rawExists && trimmedExists ? trimmed : raw;
+    }
+
+    private static String canonicalizeWindowsAliasPath(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) return rawPath == null ? "" : rawPath;
+        String[] segments = rawPath.replace('\\', '/').split("/", -1);
+        for (int i = 0; i < segments.length; i++) {
+            segments[i] = stripWindowsTrailingDotsAndSpaces(segments[i]);
+        }
+        return String.join("/", segments);
+    }
+
+    private static String stripWindowsTrailingDotsAndSpaces(String segment) {
+        int end = segment == null ? 0 : segment.length();
+        while (end > 0) {
+            char c = segment.charAt(end - 1);
+            if (c != '.' && c != ' ') break;
+            end--;
+        }
+        return segment == null ? "" : segment.substring(0, end);
     }
 
     private static Path resolve(Path workspace, String value) {

@@ -249,7 +249,7 @@ Recommended defaults:
 This preserves Talos's current local-first ergonomics while preventing silent
 secret reads and silent protected-path writes.
 
-Current Windows caveat: On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching. Protected-path classification currently matches on the literal path text; names such as `id_rsa.` may be normalized by the OS at open time and may not be recognized as protected until a later policy ticket closes that gap.
+Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 
 ## Protected Path Behavior
 

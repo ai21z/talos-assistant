@@ -680,3 +680,16 @@ mechanically.
 - Left T836/T837/T838 open as the remaining high-priority Wave 6 trust-surface
   fixes; T837 `run_command` output handoff is the next recommended model-context
   leakage boundary.
+
+## [2026-06-20] code-fix | Implement T836 Windows protected-path canonicalization
+
+- Canonicalized Windows trailing-dot and trailing-space path aliases before
+  protected-token matching in the safety classifier.
+- Classified Windows reserved device-name aliases as `CONTROL`.
+- Bumped `ProtectedWorkspacePaths.POLICY_VERSION` to
+  `protected-content-policy-v5` so stale RAG privacy partitions rebuild under
+  the new protected-path classifier.
+- Updated public documentation from the old Windows bypass caveat to the
+  bounded current behavior wording.
+- Left T836 open for review/closeout; T837/T838 remain open high-priority Wave
+  6 trust-surface fixes.

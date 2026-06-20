@@ -5,6 +5,7 @@ Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
+Implementation state: implemented, open for review
 
 ## Purpose
 
@@ -39,3 +40,16 @@ Source context:
 - Do not redesign the permission model.
 - Do not claim complete cross-platform path security beyond the tested
   canonicalization and sandbox boundaries.
+
+## Implementation Record
+
+- Report: `work-cycle-docs/reports/t836-windows-protected-path-canonicalization.md`
+- `ProtectedPathTokens` now canonicalizes trailing dots and spaces per segment
+  before protected-token matching.
+- `ProtectedWorkspacePaths.POLICY_VERSION` is bumped to
+  `protected-content-policy-v5`.
+- Runtime `ProtectedPathPolicy` remains aligned through the existing delegate.
+- Public docs now use the bounded current behavior wording:
+  "Windows trailing-dot and trailing-space path aliases are canonicalized before
+  protected-path matching; this is not a complete Windows path-security proof."
+- T836 remains open for review and closeout.

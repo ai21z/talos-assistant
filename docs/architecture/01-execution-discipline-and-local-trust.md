@@ -74,7 +74,7 @@ Secret redaction currently catches common key=value secret shapes and known cana
 
 `run_command` stdout and stderr are not withheld from model context by default.
 
-On Windows, paths that differ only by trailing dots or spaces can bypass exact-name protected-path matching.
+Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 
 Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine.
 
