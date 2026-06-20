@@ -754,3 +754,16 @@ mechanically.
   ticket so the tracked evidence remains self-contained.
 - Left T838 master-key custody as the remaining open high-priority Wave 6
   trust-surface fix.
+
+## [2026-06-20] code-fix | Implement T838 master-key custody
+
+- Added Windows DPAPI CurrentUser custody for `FileSecretStore` master keys so
+  `.master.key` is a versioned protected blob on Windows, not raw AES key
+  material.
+- Preserved the per-entry AES-GCM format and migration compatibility: legacy
+  raw master keys are protected in place without re-encrypting `.bin` entries
+  and without leaving a persistent plaintext backup.
+- Kept non-Windows custody unchanged and updated public/docs disclosure to the
+  bounded Windows-only claim.
+- Added focused custody, migration, fail-closed, and docs-honesty tests.
+- Left T838 open for review of DPAPI shell-out security and migration safety.

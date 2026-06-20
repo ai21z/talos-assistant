@@ -36,6 +36,15 @@ Source context:
 - Public docs do not claim cross-platform OS-backed custody until macOS and
   Linux implementations exist.
 
+## Implementation Review State
+
+Implementation has landed for review with report:
+
+- `work-cycle-docs/reports/t838-master-key-custody.md`
+
+T838 remains open until the DPAPI shell-out, migration safety, fail-closed
+behavior, and bounded disclosure are reviewed.
+
 ## Non-Goals
 
 - Do not claim protection against a same-user process that can ask the OS

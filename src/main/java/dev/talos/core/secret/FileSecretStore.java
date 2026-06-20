@@ -2,11 +2,13 @@ package dev.talos.core.secret;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.core.security.WindowsDpapiKeyCustody;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -23,7 +25,7 @@ import static java.nio.file.StandardOpenOption.*;
  * - Entry files        : ~/.talos/secrets/<scope>/<safe-key>.bin  (AES-GCM)
  *
  * Notes:
- *  - This is a pragmatic stub for Phase-1. On Windows we can later swap to CredMan.
+ *  - On Windows, the master key file is DPAPI-protected with CurrentUser custody.
  *  - We avoid Strings for secret payloads; callers should wipe char[] after use.
  *  - Filenames are sanitized; scope and key are not allowed to escape directories.
  */
@@ -34,8 +36,9 @@ public final class FileSecretStore implements SecretStore {
     private static final int GCM_TAG_BITS = 128;
 
     private final Path baseDir;
-    private final SecretKey master;
+    private final WindowsDpapiKeyCustody masterKeyCustody;
     private final SecureRandom rng = new SecureRandom();
+    private volatile SecretKey master;
 
     /** Create using Config. secrets.dir may override the default base dir. */
     @SuppressWarnings("unchecked")
@@ -50,16 +53,20 @@ public final class FileSecretStore implements SecretStore {
         }
         try { Files.createDirectories(baseDir); } catch (Exception ignored) {}
 
-        this.master = loadOrCreateMasterKey(baseDir.resolve(".master.key"));
+        this.masterKeyCustody = new WindowsDpapiKeyCustody();
     }
 
     /** Create using an explicit base directory. */
     public FileSecretStore(Path baseDir) {
+        this(baseDir, new WindowsDpapiKeyCustody());
+    }
+
+    FileSecretStore(Path baseDir, WindowsDpapiKeyCustody masterKeyCustody) {
         this.baseDir = baseDir == null
                 ? Paths.get(System.getProperty("user.home"), ".talos", "secrets")
                 : baseDir.toAbsolutePath().normalize();
         try { Files.createDirectories(this.baseDir); } catch (Exception ignored) {}
-        this.master = loadOrCreateMasterKey(this.baseDir.resolve(".master.key"));
+        this.masterKeyCustody = Objects.requireNonNull(masterKeyCustody, "masterKeyCustody");
     }
 
     @Override
@@ -79,7 +86,7 @@ public final class FileSecretStore implements SecretStore {
 
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_BITS, iv);
-            c.init(Cipher.ENCRYPT_MODE, master, spec);
+            c.init(Cipher.ENCRYPT_MODE, masterKey(), spec);
             // bind to entry coordinates as AAD
             c.updateAAD((sc + ":" + k).getBytes(StandardCharsets.UTF_8));
             byte[] cipher = c.doFinal(plaintext);
@@ -122,7 +129,7 @@ public final class FileSecretStore implements SecretStore {
 
         Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
         GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_BITS, iv);
-        c.init(Cipher.DECRYPT_MODE, master, spec);
+        c.init(Cipher.DECRYPT_MODE, masterKey(), spec);
         c.updateAAD((sc + ":" + k).getBytes(StandardCharsets.UTF_8));
         byte[] plain = c.doFinal(cipher);
 
@@ -145,27 +152,34 @@ public final class FileSecretStore implements SecretStore {
 
     /* -------------------- helpers -------------------- */
 
-    private static SecretKey loadOrCreateMasterKey(Path path) {
-        try {
-            if (Files.exists(path)) {
-                byte[] raw = Files.readAllBytes(path);
-                // basic sanity: 32 bytes expected
-                if (raw.length == 32) {
-                    trySetOwnerOnly(path);
-                    return new javax.crypto.spec.SecretKeySpec(raw, "AES");
-                }
+    private SecretKey masterKey() {
+        SecretKey current = master;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            if (master != null) {
+                return master;
             }
-            // create a new 256-bit AES key
+            byte[] raw = masterKeyCustody.loadOrCreateMasterKey(
+                    baseDir.resolve(".master.key"),
+                    FileSecretStore::generateMasterKeyBytes);
+            try {
+                master = new SecretKeySpec(raw, "AES");
+                return master;
+            } finally {
+                Arrays.fill(raw, (byte) 0);
+            }
+        }
+    }
+
+    private static byte[] generateMasterKeyBytes() {
+        try {
             KeyGenerator kg = KeyGenerator.getInstance("AES");
             kg.init(256);
-            SecretKey sk = kg.generateKey();
-            byte[] raw = sk.getEncoded();
-            Files.write(path, raw, CREATE, TRUNCATE_EXISTING, WRITE);
-            trySetOwnerOnly(path);
-            Arrays.fill(raw, (byte)0);
-            return sk;
+            return kg.generateKey().getEncoded();
         } catch (Exception e) {
-            throw new RuntimeException("Unable to create or load master key: " + e.getMessage(), e);
+            throw new RuntimeException("Unable to generate master key: " + e.getMessage(), e);
         }
     }
 

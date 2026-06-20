@@ -341,7 +341,7 @@ Current implementation limits to disclose:
 * `run_command` stdout and stderr pass through the model-context handoff boundary. Non-sensitive command output remains visible to the model for verification answers; command output that required secret redaction is withheld from model context and replaced with a bounded notice. This is not a complete command-output privacy proof.
 * Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 * Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine.
-* The local master key is still stored beside the encrypted data, so current encryption is casual-inspection protection, not OS-backed key custody.
+* On Windows, the local secret-store master key is protected at rest with DPAPI CurrentUser and is tied to the Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect it. On non-Windows platforms, master-key custody remains unchanged and is not yet OS-backed.
 * Local traces and logs are durable evidence artifacts, but they are not tamper-evident.
 
 Indirect read results such as `grep`, slash `/grep`, `retrieve`, and RAG snippets must respect privacy boundaries.

@@ -148,7 +148,8 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T838 master-key custody remains open.
+- Active tickets: T838 master-key custody remains open for implementation
+  review.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -188,7 +189,8 @@ confidence_histogram:
   localhost guard, is done. T839, the embedding host locality policy fix, is
   done. T834 strong redaction is done; T836 Windows protected-path
   canonicalization is done after the NTFS 8.3 short-name follow-up; T837
-  `run_command` output handoff boundary is done, and T838 remains open.
+  `run_command` output handoff boundary is done, and T838 master-key custody
+  has an implementation report open for review.
 
 ```talos-wiki-claims
 {
