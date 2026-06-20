@@ -115,8 +115,9 @@ class TrustClaimsHonestyTest {
         assertContains(review, "Talos does not yet perform a post-write readback/re-hash round trip");
         assertContains(review, "Do not publish stronger trust positioning until those code fixes land");
 
-        assertContains(read("work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md"),
-                "ghp_`, `sk-`, JWT, PEM private-key, connection-string, and high-entropy");
+        String t834 = read("work-cycle-docs/tickets/open/[T834-open-high] strong-redaction-model-context-and-durable-sinks.md");
+        assertContains(t834, "Bare `ghp_`, `sk-`, AWS access-key, JWT, PEM private-key");
+        assertContains(t834, "over-redaction of SRI hashes, data URIs, and long identifiers");
         String t835 = read("work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md");
         assertContains(t835, "Status: done");
         assertContains(t835, "Default-deny non-localhost chat hosts");

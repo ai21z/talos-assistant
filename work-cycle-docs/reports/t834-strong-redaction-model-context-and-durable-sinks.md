@@ -49,10 +49,9 @@ Added safety-owned best-effort detectors for:
 - connection-string userinfo, including JDBC-style
   `jdbc:postgresql://user:password@host/db`;
 - broadened token prefixes: `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`,
-  `github_pat_`, `sk-`, `sk-proj-`, `sk-ant-`, and Slack `xox*`;
-- `eyJ`-anchored JWT-like tokens;
-- bounded high-entropy tokens with length, character-class, entropy, git-SHA,
-  and UUID negative checks.
+  `github_pat_`, `sk-`, `sk-proj-`, `sk-ant-`, AWS `AKIA`/`ASIA`, and
+  Slack `xox*`;
+- `eyJ`-anchored JWT-like tokens.
 
 `ProtectedContentSanitizer.sanitizeText(...)` now applies these detectors after
 existing key/value assignment redaction and before canary/private-document fact
@@ -63,10 +62,10 @@ line-compatible built-ins and treats configured `redact.secrets` patterns as
 additive rather than replacing all built-ins. It keeps the existing Redactor
 mask: `[secret]`. T834 does not force Redactor to emit `[redacted]`.
 
-PEM block and bounded high-entropy logic remain safety-sink behavior in this
-ticket because `Redactor.redactBlock(...)` is deliberately line-preserving and
-currently applies `redactLine(...)` line by line. Sharing those behaviors into
-Redactor without changing its API is left out of scope.
+PEM block logic remains safety-sink behavior in this ticket because
+`Redactor.redactBlock(...)` is deliberately line-preserving and currently
+applies `redactLine(...)` line by line. Sharing PEM block behavior into Redactor
+without changing its API is left out of scope.
 
 ## Red-First Evidence
 
@@ -107,6 +106,28 @@ The detector was tightened to allow `=` only as trailing base64 padding.
 Targeted rerun of the two failed tests plus `ProtectedContentSanitizerTest`
 passed.
 
+Post-implementation adversarial review found that the generic bounded
+high-entropy detector still over-redacted legitimate model-facing content such
+as SRI hashes, base64 data URIs, and long mixed-case identifiers while missing
+deterministic provider prefixes such as AWS access keys. The revision removed
+generic high-entropy detection from the universal sanitizer, added deterministic
+AWS `AKIA`/`ASIA` prefix detection, and expanded the sanitizer negative corpus
+to keep SRI hashes, data URIs, base32-like strings, and long identifiers
+unchanged.
+
+The revision followed the same red/green discipline. The revised
+`ProtectedContentSanitizerTest` failed first against implementation commit
+`cc0179103cec7d5d70797a886081fdc70a1c930c`:
+
+- `ProtectedContentSanitizerTest.redactsBareSecretShapes`
+- `ProtectedContentSanitizerTest.negativeCorpusIsNotMangled`
+
+After the revision, the focused T834 set passed:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.safety.ProtectedContentSanitizerTest" --tests "dev.talos.core.security.RedactorTest" --tests "dev.talos.runtime.toolcall.ToolResultFormatterTest" --tests "dev.talos.runtime.toolcall.ToolResultModelContextHandoffTest" --tests "dev.talos.runtime.JsonSessionStoreTest" --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.tools.impl.RetrieveToolTest" --no-daemon
+```
+
 Final gates passed:
 
 ```powershell
@@ -119,6 +140,9 @@ git diff --check -- . ':!site'
 ## Non-Claims
 
 - T834 does not make Talos a complete secret detector.
+- T834 does not include generic high-entropy/blob redaction in the universal
+  sanitizer; that tradeoff is intentional to avoid corrupting legitimate
+  model-facing source content.
 - T834 does not change `tools.ContentSanitizer` or the file-write
   approved-bytes invariant.
 - T834 does not change `run_command` model handoff policy; T837 remains open.
