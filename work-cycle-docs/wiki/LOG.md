@@ -656,3 +656,14 @@ mechanically.
   persistence, trace redaction, result formatting, and a direct lower-layer
   retrieve path.
 - Left T834 open for review/closeout; T836/T837/T838 remain open.
+
+## [2026-06-20] code-fix | Revise T834 high-entropy detector
+
+- Removed the generic bounded high-entropy detector after adversarial review
+  showed over-redaction of SRI hashes, base64 data URIs, and long mixed-case
+  identifiers in the universal model/durable sanitizer path.
+- Added deterministic AWS `AKIA`/`ASIA` access-key prefix detection and expanded
+  the sanitizer negative corpus to keep SRI hashes, data URIs, base32-like
+  strings, and long identifiers unchanged.
+- Kept the targeted PEM, connection-string, token-prefix, `eyJ` JWT, and
+  Redactor additive-builtins fixes intact; T834 remains open for review.

@@ -22,7 +22,7 @@ class ProtectedContentSanitizerTest {
                 bW9yZUZha2VLZXlNYXRlcmlhbEZvclRhbG9zVGVzdE9ubHk=
                 -----END PRIVATE KEY-----""";
         String postgres = "jdbc:postgresql://talos_user:Sup3rSecretPassword@localhost:5432/appdb";
-        String entropy = "N7qP4mV9zK2xR8sT5cL1aB6dF3hJ0uY2wE9rQ4tP8nM6";
+        String awsAccessKey = "AKIAIOSFODNN7EXAMPLE";
 
         String sanitized = ProtectedContentSanitizer.sanitizeText(String.join("\n",
                 "github=" + ghp,
@@ -30,7 +30,7 @@ class ProtectedContentSanitizerTest {
                 "jwt=" + jwt,
                 pem,
                 "db=" + postgres,
-                "blob=" + entropy));
+                "aws=" + awsAccessKey));
 
         assertAll(
                 () -> assertFalse(sanitized.contains(ghp), sanitized),
@@ -38,7 +38,7 @@ class ProtectedContentSanitizerTest {
                 () -> assertFalse(sanitized.contains(jwt), sanitized),
                 () -> assertFalse(sanitized.contains("MIIEvQIBADAN"), sanitized),
                 () -> assertFalse(sanitized.contains("Sup3rSecretPassword"), sanitized),
-                () -> assertFalse(sanitized.contains(entropy), sanitized),
+                () -> assertFalse(sanitized.contains(awsAccessKey), sanitized),
                 () -> assertTrue(sanitized.contains(ProtectedContentSanitizer.REDACTED_VALUE), sanitized));
     }
 
@@ -64,7 +64,13 @@ class ProtectedContentSanitizerTest {
         String gitSha = "0123456789abcdef0123456789abcdef01234567";
         String uuid = "123e4567-e89b-12d3-a456-426614174000";
         String prose = "The release notes discuss entropy, jwt parsing, and github tokens without including one.";
-        String input = String.join("\n", prose, gitSha, uuid);
+        String sriHash =
+                "integrity=\"sha512-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890+/AbCdEfGhIjKlMnOpQrStUvWxYz1234567890+/==\"";
+        String dataUri =
+                "background:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAbCdEfGhIjKlMnOpQrStUvWxYz1234567890+/==)";
+        String longIdentifier = "handleWorkspaceSnapshotHydrationRequest42Callback";
+        String base32 = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+        String input = String.join("\n", prose, gitSha, uuid, sriHash, dataUri, longIdentifier, base32);
 
         assertEquals(input, ProtectedContentSanitizer.sanitizeText(input));
     }

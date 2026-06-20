@@ -27,9 +27,9 @@ Source context:
 
 ## Acceptance Criteria
 
-- Bare `ghp_`, `sk-`, JWT, PEM private-key, connection-string, and high-entropy
-  fixtures are redacted through the actual handoff/persistence paths, not only
-  through a standalone detector unit test.
+- Bare `ghp_`, `sk-`, AWS access-key, JWT, PEM private-key, and
+  connection-string fixtures are redacted through the actual
+  handoff/persistence paths, not only through a standalone detector unit test.
 - Regression tests prove the same sanitizer used by model context and session
   persistence redacts those shapes.
 - Existing key=value and canary redaction behavior remains covered.
@@ -53,6 +53,9 @@ Implementation summary:
 - Added red-first and real-path tests for standalone sanitizer, formatter,
   model-context handoff, JSON session persistence, trace redaction, and
   `RetrieveTool` as a direct lower-layer sanitizer caller.
+- Revised the original bounded high-entropy detector out after adversarial
+  review showed over-redaction of SRI hashes, data URIs, and long identifiers;
+  added deterministic AWS `AKIA`/`ASIA` prefixes instead.
 
 ## Non-Goals
 
