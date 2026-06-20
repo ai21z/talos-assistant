@@ -1,11 +1,11 @@
-# [T836-done-high] Windows Protected-Path Canonicalization
+# [T836-open-high] Windows Protected-Path Canonicalization
 
-Status: done
+Status: open
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
-Implementation state: done
+Implementation state: reopened after review; NTFS 8.3 follow-up implemented, open for review
 
 ## Purpose
 
@@ -27,8 +27,10 @@ Source context:
 
 ## Acceptance Criteria
 
-- Tests cover `id_rsa.`, `id_rsa `, `.ssh.`, `secrets.`, and trailing-space
-  variants.
+- Tests cover `id_rsa.`, `id_rsa `, `.ssh.`, `secrets.`, trailing-space
+  variants, and NTFS 8.3 short-name aliases such as `SSH~1/mykey`,
+  `AWS~1/config`, and `AZURE~1/profile.json` when the filesystem exposes
+  those aliases.
 - Exact private-key filenames and secret directory segments remain protected
   after Windows canonicalization.
 - Existing workspace-boundary protections remain intact.
@@ -44,16 +46,20 @@ Source context:
 ## Implementation Record
 
 - Report: `work-cycle-docs/reports/t836-windows-protected-path-canonicalization.md`
-- Implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
+- Initial implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
+- Reopen finding: review of the closed ticket reproduced an NTFS 8.3 short-name
+  bypass on this host. `SSH~1/mykey`, `AWS~1/config`, and
+  `AZURE~1/profile.json` reached `.ssh`, `.aws`, and `.azure` content while
+  classifying as ordinary in-workspace paths.
 - `ProtectedPathTokens` now canonicalizes trailing dots and spaces per segment
   before protected-token matching.
 - `ProtectedWorkspacePaths.POLICY_VERSION` is bumped to
-  `protected-content-policy-v5`.
+  `protected-content-policy-v6`.
+- `ProtectedWorkspacePaths` now classifies existing targets and nearest
+  existing ancestors by OS real path, so NTFS short-name aliases resolve to
+  their protected long-name directories before token matching.
 - Runtime `ProtectedPathPolicy` remains aligned through the existing delegate.
 - Public docs now use the bounded current behavior wording:
   "Windows trailing-dot and trailing-space path aliases are canonicalized before
   protected-path matching; this is not a complete Windows path-security proof."
-- Review accepted after focused safety/docs tests, runtime/privacy/architecture
-  focused tests, full `check --no-daemon`,
-  `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and
-  `git diff --check HEAD^ HEAD -- . ':!site'` passed.
+- The reopened implementation remains open for review/closeout.

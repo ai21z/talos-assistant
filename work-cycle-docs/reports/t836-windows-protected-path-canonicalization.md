@@ -1,9 +1,10 @@
 # T836 Windows Protected-Path Canonicalization
 
-Status: done
+Status: reopened, NTFS 8.3 follow-up implemented and open for review
 Branch: `v0.9.0-beta-dev`
 Base commit: `7f7a4560c9650587d39bdd0b522106e65c28b19d`
-Implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
+Initial implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
+Premature closeout commit: `ed8d0230775e379a140a7d969015c01e82d9c789`
 Talos version: `0.10.5`
 
 ## Purpose
@@ -22,12 +23,16 @@ redaction, index privacy partitioning, and repair/readback sensitivity.
   `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, including extension aliases such
   as `nul.txt`) as `CONTROL`.
 - `ProtectedWorkspacePaths` bumps the protected-path policy version to
-  `protected-content-policy-v5`, forcing stale RAG privacy partitions to rebuild
+  `protected-content-policy-v6`, forcing stale RAG privacy partitions to rebuild
   under the new classifier.
 - `ProtectedWorkspacePaths` prefers the canonical alias target when the literal
   spelling does not exist and the canonical target does, while still relying on
   `ProtectedPathTokens` for fail-closed classification of literal alias
   spellings.
+- `ProtectedWorkspacePaths` classifies existing targets and nearest existing
+  ancestors by OS real path. On Windows this expands NTFS 8.3 aliases such as
+  `SSH~1/mykey` to their long-name protected target (`.ssh/mykey`) before
+  token matching.
 - Runtime `ProtectedPathPolicy` remains a delegate to
   `ProtectedWorkspacePaths`, so direct safety classification and runtime
   resource classification stay aligned.
@@ -43,6 +48,9 @@ New and updated tests cover:
 - `.git./config` and `.github./workflows/ci.yml`.
 - Reserved device aliases such as `con`, `nul.txt`, `aux.`, `com1.log`, and
   `lpt9 `.
+- NTFS 8.3 short-name aliases such as `SSH~1/mykey`, `AWS~1/config`, and
+  `AZURE~1/profile.json` when the filesystem exposes those aliases.
+- New files under a short-name protected directory such as `SSH~1/new-key.txt`.
 - Runtime policy parity between `ProtectedWorkspacePaths` and
   `ProtectedPathPolicy`.
 
@@ -64,7 +72,20 @@ path edge cases such as Unicode/homoglyph tricks. Remaining Wave 6 high trust
 work stays scoped to T837 (`run_command` output handoff) and T838 (master-key
 custody).
 
-## Closeout Evidence
+## Reopen Finding
+
+The first T836 closeout was premature. Post-closeout review reproduced an NTFS
+8.3 short-name bypass on this Windows host:
+
+- `.ssh` resolved through `SSH~1`, `.aws` through `AWS~1`, and `.azure` through
+  `AZURE~1`.
+- Java could read the real protected content through the short-name alias.
+- The closed T836 implementation classified `SSH~1/mykey`,
+  `AWS~1/config`, and `AZURE~1/profile.json` as unprotected in-workspace paths.
+
+T836 is therefore reopened until the 8.3 follow-up fix is reviewed and closed.
+
+## Closeout Evidence For Initial Implementation
 
 - Focused safety/docs tests passed:
   `ProtectedPathTokensTest`, `ProtectedWorkspacePathsTest`, and

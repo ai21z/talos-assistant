@@ -1,7 +1,9 @@
 package dev.talos.safety;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Locale;
 
 /** Direct workspace-path classifier for protected local paths. */
@@ -16,8 +18,11 @@ public final class ProtectedWorkspacePaths {
      *  stale indexes would misclassify .talos content in the privacy
      *  partition, so they must rebuild.
      *  v5 (T836): Windows trailing-dot/trailing-space aliases and reserved
-     *  device names are canonicalized before protected-path classification. */
-    public static final String POLICY_VERSION = "protected-content-policy-v5";
+     *  device names are canonicalized before protected-path classification.
+     *  v6 (T836 reopen): existing targets and nearest existing ancestors are
+     *  classified by OS real path so NTFS 8.3 aliases resolve to their
+     *  protected long-name directories before matching. */
+    public static final String POLICY_VERSION = "protected-content-policy-v6";
 
     public record Decision(
             String rawPath,
@@ -51,9 +56,11 @@ public final class ProtectedWorkspacePaths {
         Path resolved;
         String effectivePath = effectivePath(workspace, rawPath);
         try {
-            ws = workspace.toAbsolutePath().normalize();
+            ws = realPathForClassification(workspace.toAbsolutePath().normalize());
             Path candidate = Path.of(effectivePath);
-            resolved = (candidate.isAbsolute() ? candidate : ws.resolve(candidate)).normalize();
+            Path lexicalWorkspace = workspace.toAbsolutePath().normalize();
+            Path lexicalResolved = (candidate.isAbsolute() ? candidate : lexicalWorkspace.resolve(candidate)).normalize();
+            resolved = realPathForClassification(lexicalResolved);
         } catch (Exception e) {
             return new Decision(rawPath, "", true, false, true, false, "");
         }
@@ -70,8 +77,8 @@ public final class ProtectedWorkspacePaths {
     public static boolean isProtectedPath(Path workspace, Path path) {
         if (workspace == null || path == null) return false;
         try {
-            Path ws = workspace.toAbsolutePath().normalize();
-            Path resolved = path.toAbsolutePath().normalize();
+            Path ws = realPathForClassification(workspace.toAbsolutePath().normalize());
+            Path resolved = realPathForClassification(path.toAbsolutePath().normalize());
             if (!startsWithWorkspace(resolved, ws)) return false;
             String relative = normalizeRelative(ws.relativize(resolved));
             return !ProtectedPathTokens.protectedKind(relative.toLowerCase(Locale.ROOT)).isBlank();
@@ -100,6 +107,32 @@ public final class ProtectedWorkspacePaths {
             return canonical;
         }
         return !rawExists && trimmedExists ? trimmed : raw;
+    }
+
+    private static Path realPathForClassification(Path path) {
+        if (path == null) return null;
+        Path normalized = path.toAbsolutePath().normalize();
+        Path current = normalized;
+        var missingSuffix = new ArrayList<Path>();
+        while (current != null && !Files.exists(current)) {
+            Path fileName = current.getFileName();
+            if (fileName != null) {
+                missingSuffix.add(0, fileName);
+            }
+            current = current.getParent();
+        }
+        if (current == null) {
+            return normalized;
+        }
+        try {
+            Path real = current.toRealPath();
+            for (Path segment : missingSuffix) {
+                real = real.resolve(segment);
+            }
+            return real.normalize();
+        } catch (IOException | RuntimeException ignored) {
+            return normalized;
+        }
     }
 
     private static String canonicalizeWindowsAliasPath(String rawPath) {
