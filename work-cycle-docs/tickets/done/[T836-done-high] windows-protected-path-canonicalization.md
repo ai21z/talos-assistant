@@ -1,11 +1,11 @@
-# [T836-open-high] Windows Protected-Path Canonicalization
+# [T836-done-high] Windows Protected-Path Canonicalization
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
-Implementation state: reopened after review; NTFS 8.3 follow-up implemented, open for review
+Implementation state: done
 
 ## Purpose
 
@@ -47,6 +47,7 @@ Source context:
 
 - Report: `work-cycle-docs/reports/t836-windows-protected-path-canonicalization.md`
 - Initial implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
+- NTFS 8.3 follow-up commit: `56e2243569ce9b5329cb44c1bfcb6169e9bb54b1`
 - Reopen finding: review of the closed ticket reproduced an NTFS 8.3 short-name
   bypass on this host. `SSH~1/mykey`, `AWS~1/config`, and
   `AZURE~1/profile.json` reached `.ssh`, `.aws`, and `.azure` content while
@@ -62,4 +63,8 @@ Source context:
 - Public docs now use the bounded current behavior wording:
   "Windows trailing-dot and trailing-space path aliases are canonicalized before
   protected-path matching; this is not a complete Windows path-security proof."
-- The reopened implementation remains open for review/closeout.
+- Review accepted after the NTFS 8.3 regression ran on this Windows host,
+  direct post-fix probing showed `SSH~1` aliases classifying as protected,
+  focused safety/docs tests, runtime/privacy/architecture focused tests,
+  full `check --no-daemon`, `wikiEvidenceCloseGate --rerun-tasks --no-daemon`,
+  and diff hygiene passed.

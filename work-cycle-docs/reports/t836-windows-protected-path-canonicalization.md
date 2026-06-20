@@ -1,10 +1,11 @@
 # T836 Windows Protected-Path Canonicalization
 
-Status: reopened, NTFS 8.3 follow-up implemented and open for review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Base commit: `7f7a4560c9650587d39bdd0b522106e65c28b19d`
 Initial implementation commit: `bbab3bcd53c505d74160ace66cbe852eb2893509`
 Premature closeout commit: `ed8d0230775e379a140a7d969015c01e82d9c789`
+NTFS 8.3 follow-up commit: `56e2243569ce9b5329cb44c1bfcb6169e9bb54b1`
 Talos version: `0.10.5`
 
 ## Purpose
@@ -83,7 +84,7 @@ The first T836 closeout was premature. Post-closeout review reproduced an NTFS
 - The closed T836 implementation classified `SSH~1/mykey`,
   `AWS~1/config`, and `AZURE~1/profile.json` as unprotected in-workspace paths.
 
-T836 is therefore reopened until the 8.3 follow-up fix is reviewed and closed.
+T836 was reopened until the 8.3 follow-up fix could be reviewed and closed.
 
 ## Closeout Evidence For Initial Implementation
 
@@ -96,3 +97,21 @@ T836 is therefore reopened until the 8.3 follow-up fix is reviewed and closed.
 - Full `check --no-daemon` passed.
 - `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
 - `git diff --check HEAD^ HEAD -- . ':!site'` passed.
+
+## Closeout Evidence For NTFS 8.3 Follow-Up
+
+- The regression first failed on the closed implementation with
+  `protectedPath=false` for an NTFS short-name protected-directory alias.
+- The regression now runs on this Windows host and passes for
+  `SSH~1/mykey`, `AWS~1/config`, `AZURE~1/profile.json`, and
+  `SSH~1/new-key.txt`.
+- A direct post-fix probe confirmed `SSH~1/mykey` and `SSH~1/new-key.txt`
+  classify as `.ssh/...`, `protectedPath=true`, `protectedKind=SECRET`.
+- Focused safety/docs tests passed:
+  `ProtectedPathTokensTest`, `ProtectedWorkspacePathsTest`, and
+  `TrustClaimsHonestyTest`.
+- Runtime/privacy/architecture focused tests passed:
+  `ProtectedReadScopeIntegrationTest`, `dev.talos.runtime.policy.*`,
+  `IndexerPolicyMetadataTest`, and `LayeredArchitectureTest`.
+- Full `check --no-daemon` passed.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
