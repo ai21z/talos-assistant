@@ -2,6 +2,7 @@ package dev.talos.safety;
 
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResourceDecision;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,11 +20,11 @@ class ProtectedWorkspacePathsTest {
     Path workspace;
 
     @Test
-    void policyVersionIsV5_sinceT836WindowsAliasCanonicalization() {
+    void policyVersionIsV6_sinceT836WindowsShortNameRealPathClassification() {
         // Typed literal on purpose (never constant-vs-constant): bumping the
         // version is a deliberate act that forces stale RAG privacy
         // partitions to rebuild, and this pin makes the bump reviewable.
-        assertEquals("protected-content-policy-v5", ProtectedWorkspacePaths.POLICY_VERSION);
+        assertEquals("protected-content-policy-v6", ProtectedWorkspacePaths.POLICY_VERSION);
     }
 
     @Test
@@ -87,6 +88,45 @@ class ProtectedWorkspacePathsTest {
             assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
             assertEquals(runtime.protectedKind(), direct.protectedKind(), rawPath);
         }
+    }
+
+    @Test
+    void windowsShortNameAliasesClassifyByRealProtectedTarget() throws Exception {
+        Assumptions.assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("win"),
+                "NTFS 8.3 aliases are Windows-specific");
+
+        Files.createDirectories(workspace.resolve(".ssh"));
+        Files.writeString(workspace.resolve(".ssh").resolve("mykey"), "PRIVATE KEY\n");
+        Files.createDirectories(workspace.resolve(".aws"));
+        Files.writeString(workspace.resolve(".aws").resolve("config"), "aws_secret_access_key = redacted\n");
+        Files.createDirectories(workspace.resolve(".azure"));
+        Files.writeString(workspace.resolve(".azure").resolve("profile.json"), "{}\n");
+
+        var aliases = List.of(
+                "SSH~1/mykey",
+                "AWS~1/config",
+                "AZURE~1/profile.json");
+        Assumptions.assumeTrue(aliases.stream().anyMatch(alias -> Files.exists(workspace.resolve(alias))),
+                "NTFS 8.3 aliases are not available on this filesystem");
+
+        for (String rawPath : aliases) {
+            if (!Files.exists(workspace.resolve(rawPath))) {
+                continue;
+            }
+            ProtectedWorkspacePaths.Decision direct = ProtectedWorkspacePaths.classify(workspace, rawPath);
+            ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, rawPath);
+
+            assertTrue(direct.protectedPath(), rawPath);
+            assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
+            assertEquals(runtime.protectedKind(), direct.protectedKind(), rawPath);
+        }
+
+        ProtectedWorkspacePaths.Decision newFile = ProtectedWorkspacePaths.classify(workspace, "SSH~1/new-key.txt");
+        ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, "SSH~1/new-key.txt");
+
+        assertTrue(newFile.protectedPath(), "new file under SSH~1");
+        assertEquals(runtime.protectedPath(), newFile.protectedPath(), "new file under SSH~1");
+        assertEquals(runtime.protectedKind(), newFile.protectedKind(), "new file under SSH~1");
     }
 
     @Test

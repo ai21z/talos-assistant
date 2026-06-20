@@ -703,3 +703,17 @@ mechanically.
   focused tests, full `check --no-daemon`,
   `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and diff hygiene passed.
 - Left T837/T838 open as the remaining high-priority Wave 6 trust-surface fixes.
+
+## [2026-06-20] code-fix | Reopen T836 for NTFS 8.3 short-name alias
+
+- Reopened T836 after review reproduced an NTFS 8.3 short-name bypass:
+  `SSH~1/mykey`, `AWS~1/config`, and `AZURE~1/profile.json` reached protected
+  `.ssh`, `.aws`, and `.azure` content while the closed T836 implementation
+  classified those paths as ordinary in-workspace paths.
+- Added a Windows-aware regression for short-name protected-directory aliases
+  and new-file paths under `SSH~1`.
+- Updated `ProtectedWorkspacePaths` to classify existing targets and nearest
+  existing ancestors by OS real path before protected-token matching.
+- Bumped the protected path policy version to `protected-content-policy-v6`.
+- Left T836 open for review/closeout; T837/T838 remain open high-priority Wave
+  6 trust-surface fixes.
