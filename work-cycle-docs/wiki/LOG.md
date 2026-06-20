@@ -817,3 +817,15 @@ mechanically.
 - Recorded that focused safety/runtime tests, full `check --no-daemon`,
   `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and diff hygiene passed.
 - Left no active Wave 6 high trust-fix or cheap consolidation follow-up ticket.
+
+## [2026-06-21] test-hardening | Harden competitor-claim honesty guard
+
+- Added T841 as a tracked docs-honesty guard hardening follow-up after the
+  local-only competitor matrix and absence-hardening research.
+- Broadened `TrustClaimsHonestyTest` beyond exact `no competitor` so tracked
+  README, AGENTS, and `docs/**` surfaces reject unqualified public phrases such
+  as `no other assistant`, `only agentic coding tool`, `nobody else`, and
+  `unlike every competitor`.
+- Kept the local competitor reports in ignored `local/marketing/`; no
+  competitor matrix data was promoted to tracked docs or the site.
+- Left active Wave 6 high trust-fix and cheap consolidation tickets at none.

@@ -172,6 +172,7 @@ Completed Wave 6 high tickets:
 - [T839 Embedding host locality policy](../tickets/done/[T839-done-high]%20embedding-host-locality-policy.md)
   - [T839 implementation report](../reports/t839-embedding-host-locality-policy.md)
 - [T840 Protected path realpath-failure fail-closed](../tickets/done/[T840-done-high]%20protected-path-realpath-failure-fail-closed.md)
+- [T841 Competitor claim honesty guard hardening](../tickets/done/[T841-done-medium]%20competitor-claim-honesty-guard-hardening.md)
 
 Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
@@ -179,6 +180,8 @@ future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
 honest disclosure is complete through T833; T834, T835, T836, and T839 are
 done; T837 is done; T838 master-key custody is done; and T840 closed the
 unresolved Windows 8.3-style short-name fail-closed consolidation follow-up.
+T841 hardened tracked public-doc competitor-claim wording guards while keeping
+the competitor matrix local-only.
 See
 [t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 

@@ -149,7 +149,8 @@ confidence_histogram:
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: none in the Wave 6 high trust-fix or cheap consolidation
-  follow-up track. T840 protected-path realpath-failure fail-closed is done.
+  follow-up track. T840 protected-path realpath-failure fail-closed is done;
+  T841 competitor-claim honesty guard hardening is done.
 - Active wave context: first Wave 5 lifecycle-ownership ticket completed the
   turn-preparation extraction; T812 completed model-dispatch characterization;
   T813 completed the model-dispatch extraction.
@@ -190,7 +191,9 @@ confidence_histogram:
   Windows protected-path canonicalization, T837 `run_command` output handoff,
   T838 master-key custody, and T839 embedding host locality policy are done.
   T840 resolved the cheap consolidation follow-up for unresolved Windows
-  8.3-style short-name segments after realpath failure.
+  8.3-style short-name segments after realpath failure. T841 broadened the
+  tracked README/AGENTS/docs honesty guard against unqualified competitor
+  exclusivity claims while keeping competitor-matrix evidence local-only.
 
 ```talos-wiki-claims
 {
@@ -462,6 +465,7 @@ Open Wave 6 consolidation follow-up tickets:
 Completed Wave 6 consolidation follow-up tickets:
 
 - T840: protected-path realpath-failure fail-closed.
+- T841: competitor-claim honesty guard hardening.
 
 Completed Wave 6 high code-fix tickets:
 
