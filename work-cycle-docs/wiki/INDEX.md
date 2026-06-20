@@ -156,6 +156,7 @@ or generated reports.
 ## Active Tickets
 
 - [T837 Run command output handoff boundary](../tickets/open/[T837-open-high]%20run-command-output-handoff-boundary.md)
+  - [T837 implementation report](../reports/t837-run-command-output-handoff-boundary.md)
 - [T838 Master key custody](../tickets/open/[T838-open-high]%20master-key-custody.md)
 
 Completed Wave 6 high tickets:
@@ -173,7 +174,8 @@ Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
 future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
 honest disclosure is complete through T833; T834, T835, T836, and T839 are
-done, and the remaining unimplemented Wave 6 high work is T837/T838. See
+done, T837 is implemented and open for review, and the remaining unimplemented
+Wave 6 high work is T838. See
 [t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 
 ## Update Rule

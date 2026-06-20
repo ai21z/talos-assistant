@@ -25,7 +25,10 @@ class TrustClaimsHonestyTest {
                     + "it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, "
                     + "connection strings, or high-entropy blobs.";
     private static final String COMMAND_OUTPUT_BOUNDARY =
-            "`run_command` stdout and stderr are not withheld from model context by default.";
+            "`run_command` stdout and stderr pass through the model-context handoff boundary. "
+                    + "Non-sensitive command output remains visible to the model for verification answers; "
+                    + "command output that required secret redaction is withheld from model context and replaced "
+                    + "with a bounded notice. This is not a complete command-output privacy proof.";
     private static final String WINDOWS_PROTECTED_PATH_BOUNDARY =
             "Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; "
                     + "this is not a complete Windows path-security proof.";

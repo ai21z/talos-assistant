@@ -40,3 +40,21 @@ Source context:
 
 - Do not add arbitrary shell execution.
 - Do not weaken command profile bounds, timeout handling, or argv validation.
+
+## Implementation State
+
+Implemented for review in T837. The change:
+
+- tags executed command results with `COMMAND_OUTPUT` / `COMMAND` metadata;
+- keeps non-sensitive command output visible to the model for verification;
+- withholds command stdout/stderr from model context when command capture
+  required protected-content redaction;
+- preserves failure-dominant behavior for failed and timed-out commands;
+- updates public/docs wording to the bounded post-T837 claim;
+- leaves this ticket open for review and closeout.
+
+Report:
+
+- `work-cycle-docs/reports/t837-run-command-output-handoff-boundary.md`
+
+Implementation commit SHA is intentionally left for closeout after review.

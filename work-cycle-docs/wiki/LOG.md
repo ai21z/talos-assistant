@@ -728,3 +728,17 @@ mechanically.
   `check --no-daemon`, `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and
   diff hygiene passed.
 - Left T837/T838 open as the remaining high-priority Wave 6 trust-surface fixes.
+
+## [2026-06-20] code-fix | Implement T837 run_command output handoff
+
+- Added command-output content metadata to executed `talos.run_command`
+  results.
+- Routed redacted command output through `ToolResultModelContextHandoff` so
+  stdout/stderr that required protected-content redaction are replaced with a
+  bounded model-context notice.
+- Preserved normal non-sensitive command output visibility for verification
+  answers and preserved failure-dominant behavior for failed/timed-out command
+  runs.
+- Updated public/docs wording and the trust-claims honesty guard to the bounded
+  post-T837 claim.
+- Left T837 open for review/closeout; T838 master-key custody remains open.

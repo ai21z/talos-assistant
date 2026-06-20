@@ -4,6 +4,7 @@ import dev.talos.core.capability.CapabilityKind;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolError;
@@ -14,10 +15,14 @@ import dev.talos.tools.ToolRiskLevel;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Runs approved, bounded command profiles. V1 exposes Gradle verification only. */
 public final class RunCommandTool implements TalosTool {
     private static final String NAME = CommandToolPlanner.TOOL_NAME;
+    private static final Pattern HIGH_ENTROPY_COMMAND_TOKEN = Pattern.compile(
+            "(?<![A-Za-z0-9_+/=-])([A-Za-z0-9_+/-]{40,}={0,2})(?![A-Za-z0-9_+/=-])");
 
     private final CommandProfileRegistry registry;
     private final CommandRunner runner;
@@ -92,14 +97,15 @@ public final class RunCommandTool implements TalosTool {
         LocalTurnTraceCapture.recordCommandStarted("", call, plan);
         CommandResult result = runner.run(plan);
         LocalTurnTraceCapture.recordCommandFinished("", call, result);
+        ToolContentMetadata metadata = commandOutputMetadata(result);
         if (result.success()) {
-            return ToolResult.ok(renderSuccess(result));
+            return ToolResult.ok(renderSuccess(result), metadata);
         }
         if (result.timedOut()) {
-            return ToolResult.fail(ToolError.internal(
-                    ToolFailureReason.COMMAND_TIMEOUT, renderFailure(result)));
+            return commandFailure(ToolError.internal(
+                    ToolFailureReason.COMMAND_TIMEOUT, renderFailure(result)), metadata);
         }
-        return ToolResult.fail(ToolError.internal(renderFailure(result)));
+        return commandFailure(ToolError.internal(renderFailure(result)), metadata);
     }
 
     private static String renderSuccess(CommandResult result) {
@@ -146,5 +152,75 @@ public final class RunCommandTool implements TalosTool {
 
     private static String blankIfEmpty(String value) {
         return value == null || value.isBlank() ? "(empty)" : value;
+    }
+
+    private static ToolContentMetadata commandOutputMetadata(CommandResult result) {
+        CommandPlan plan = result == null ? null : result.plan();
+        boolean redactionApplied = result != null && result.redactionApplied();
+        boolean highEntropyOutput = containsHighEntropyCommandOutput(result);
+        boolean modelHandoffAllowed = !redactionApplied && !highEntropyOutput;
+        return ToolContentMetadata.commandOutput(
+                plan == null ? "" : plan.profileId(),
+                modelHandoffAllowed,
+                redactionApplied
+                        ? "command output required redaction before model handoff"
+                        : highEntropyOutput
+                        ? "command output contained high-entropy content before model handoff"
+                        : "command output accepted for model handoff");
+    }
+
+    private static ToolResult commandFailure(ToolError error, ToolContentMetadata metadata) {
+        return new ToolResult(false, null, error, null, metadata);
+    }
+
+    private static boolean containsHighEntropyCommandOutput(CommandResult result) {
+        if (result == null) return false;
+        return containsHighEntropyToken(result.stdout()) || containsHighEntropyToken(result.stderr());
+    }
+
+    private static boolean containsHighEntropyToken(String value) {
+        if (value == null || value.isBlank()) return false;
+        Matcher matcher = HIGH_ENTROPY_COMMAND_TOKEN.matcher(value);
+        while (matcher.find()) {
+            if (isHighEntropyToken(matcher.group(1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isHighEntropyToken(String raw) {
+        if (raw == null) return false;
+        String token = raw.replaceAll("=+$", "");
+        if (token.length() < 40 || token.length() > 512) return false;
+        if (token.matches("(?i)[a-f0-9]{40}|[a-f0-9]{64}")) return false;
+        if (token.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+            return false;
+        }
+        long classes = java.util.stream.Stream.of(
+                        token.chars().anyMatch(Character::isLowerCase),
+                        token.chars().anyMatch(Character::isUpperCase),
+                        token.chars().anyMatch(Character::isDigit),
+                        token.chars().anyMatch(ch -> "_+/-".indexOf(ch) >= 0))
+                .filter(Boolean::booleanValue)
+                .count();
+        if (classes < 3) return false;
+        return shannonEntropy(token) >= 4.5d;
+    }
+
+    private static double shannonEntropy(String value) {
+        if (value == null || value.isEmpty()) return 0d;
+        Map<Integer, Long> counts = value.chars()
+                .boxed()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        java.util.function.Function.identity(),
+                        java.util.stream.Collectors.counting()));
+        double length = value.length();
+        double entropy = 0d;
+        for (long count : counts.values()) {
+            double probability = count / length;
+            entropy -= probability * (Math.log(probability) / Math.log(2d));
+        }
+        return entropy;
     }
 }

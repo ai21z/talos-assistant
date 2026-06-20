@@ -105,7 +105,7 @@ Talos's deterministic no-change/no-success correction is strongest for file-muta
 
 Secret redaction currently catches common key=value secret shapes and known canaries; it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, connection strings, or high-entropy blobs. Talos redacts common key=value secret shapes (api_key=, password:, token=) and known canaries from model context, logs, traces, and persisted artifacts. It does NOT yet detect bare credentials with no assignment syntax: standalone API tokens, JWTs, PEM private-key blocks, secrets embedded in URLs/connection strings, or high-entropy blobs. Do not rely on Talos to scrub such values from files it reads, command output, sessions, or traces.
 
-`run_command` stdout and stderr are not withheld from model context by default. Command output (run_command stdout/stderr) is passed to the model after best-effort textual redaction of recognizable secret-assignment patterns and known markers only. It is NOT withheld by default and is not classified by source path. Do not run commands that print real credentials in this beta.
+`run_command` stdout and stderr pass through the model-context handoff boundary. Non-sensitive command output remains visible to the model for verification answers; command output that required secret redaction is withheld from model context and replaced with a bounded notice. This is not a complete command-output privacy proof. Do not run commands that print real credentials in this beta.
 
 Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 

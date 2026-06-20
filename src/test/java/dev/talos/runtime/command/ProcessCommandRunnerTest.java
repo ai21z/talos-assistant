@@ -85,6 +85,25 @@ class ProcessCommandRunnerTest {
     }
 
     @Test
+    void redactsBareSecretShapesFromCommandOutput(@TempDir Path workspace) {
+        CommandResult result = new ProcessCommandRunner().run(plan(
+                javaExecutable(),
+                List.of("-cp", classPath(), SecretShapePrinter.class.getName()),
+                workspace,
+                20_000,
+                CommandOutputLimits.defaults()));
+
+        assertTrue(result.success(), result.stderr());
+        assertTrue(result.redactionApplied());
+        assertFalse(result.stdout().contains("ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"), result.stdout());
+        assertFalse(result.stdout().contains("sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"), result.stdout());
+        assertFalse(result.stdout().contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"), result.stdout());
+        assertFalse(result.stdout().contains("PRIVATE KEY"), result.stdout());
+        assertFalse(result.stdout().contains("supersecret"), result.stdout());
+        assertTrue(result.stdout().contains("[redacted]"), result.stdout());
+    }
+
+    @Test
     void internalFailureRedactsProtectedExecutablePath(@TempDir Path workspace) {
         Path protectedExecutable = workspace.resolve("protected").resolve("FILE_DISCOVERED_CANARY_CMD_EXEC.exe");
 
@@ -159,6 +178,21 @@ class ProcessCommandRunnerTest {
     public static final class SecretPrinter {
         public static void main(String[] args) {
             System.out.println("API_TOKEN=abc123");
+        }
+    }
+
+    public static final class SecretShapePrinter {
+        public static void main(String[] args) {
+            System.out.println("bare github token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890");
+            System.out.println("openai token sk-proj-abcdefghijklmnopqrstuvwxyz1234567890");
+            System.out.println("jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                    + "eyJzdWIiOiJ0YWxvcyIsIm5hbWUiOiJUZXN0In0."
+                    + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c");
+            System.out.println("""
+                    -----BEGIN PRIVATE KEY-----
+                    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCfakefixtureonly
+                    -----END PRIVATE KEY-----""");
+            System.out.println("jdbc:postgresql://user:supersecret@localhost/db");
         }
     }
 }
