@@ -155,7 +155,7 @@ or generated reports.
 
 ## Active Tickets
 
-- None in the Wave 6 high trust-fix track.
+- [T840 Protected path realpath-failure fail-closed](../tickets/open/[T840-open-high]%20protected-path-realpath-failure-fail-closed.md)
 
 Completed Wave 6 high tickets:
 
@@ -176,7 +176,9 @@ Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
 future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
 honest disclosure is complete through T833; T834, T835, T836, and T839 are
-done; T837 is done; and T838 master-key custody is done. See
+done; T837 is done; and T838 master-key custody is done. T840 is open as a
+cheap consolidation follow-up for unresolved Windows 8.3-style short-name
+segments after realpath failure. See
 [t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 
 ## Update Rule

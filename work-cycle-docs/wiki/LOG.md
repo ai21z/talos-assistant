@@ -782,3 +782,17 @@ mechanically.
   during review.
 - Closed the last remaining Wave 6 high-priority trust-surface code-fix ticket;
   cheap consolidation follow-up requires a new scoped ticket.
+
+## [2026-06-20] code-fix | Implement T840 protected-path realpath-failure fail-closed
+
+- Opened T840 as a cheap consolidation follow-up after the Wave 6 high trust
+  fixes.
+- Added a post-realpath unresolved Windows 8.3-style short-name guard in
+  `ProtectedWorkspacePaths` so surviving `~N` path segments fail closed as
+  protected `CONTROL` rather than ordinary workspace paths.
+- Bumped `ProtectedWorkspacePaths.POLICY_VERSION` to
+  `protected-content-policy-v7` so stale protected-content privacy partitions
+  rebuild.
+- Added portable tests for unresolved `SSH~1` fail-closed behavior and negative
+  coverage for ordinary safe paths and non-8.3 tilde names.
+- Left T840 open for review/closeout.
