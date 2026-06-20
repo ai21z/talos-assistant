@@ -1,6 +1,6 @@
-# [T838-open-high] Master Key Custody
+# [T838-done-high] Master Key Custody
 
-Status: open
+Status: done
 Priority: high
 Type: code-fix
 Branch: `v0.9.0-beta-dev`
@@ -36,14 +36,37 @@ Source context:
 - Public docs do not claim cross-platform OS-backed custody until macOS and
   Linux implementations exist.
 
-## Implementation Review State
+## Implementation State
 
-Implementation has landed for review with report:
+Implemented in commit `7a4decca55b1dc3a1a4bbfbfbdf5c48517b046b3` and accepted
+for closeout after review. The change:
+
+- adds Windows DPAPI CurrentUser custody for `FileSecretStore` master keys;
+- stores `.master.key` as a versioned DPAPI-protected blob on Windows instead
+  of raw AES key bytes;
+- preserves the per-entry AES-GCM format and migrates legacy raw master keys in
+  place without re-encrypting `.bin` entries;
+- verifies the protected blob round-trips before replacing a legacy raw key and
+  leaves no persistent plaintext `.master.key.legacy` backup;
+- passes key material to PowerShell DPAPI through stdin/base64, not process
+  arguments or environment variables;
+- fails closed on protect, unprotect, or timeout failures without silently
+  writing plaintext on Windows;
+- keeps non-Windows custody unchanged and documents that bounded limitation.
+
+Report:
 
 - `work-cycle-docs/reports/t838-master-key-custody.md`
 
-T838 remains open until the DPAPI shell-out, migration safety, fail-closed
-behavior, and bounded disclosure are reviewed.
+Closeout evidence:
+
+- Focused custody, security, and docs-honesty tests passed.
+- Real Windows DPAPI tests executed on this host and passed.
+- Full `check --no-daemon` passed.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- Independent review verified DPAPI shell-out security, migration safety,
+  fail-closed behavior, and bounded disclosure.
+- `site/` was not edited or staged.
 
 ## Non-Goals
 

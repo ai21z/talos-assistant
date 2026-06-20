@@ -135,7 +135,7 @@ class TrustClaimsHonestyTest {
         assertContains(t837, "Status: done");
         assertContains(t837,
                 "route it through the privacy handoff");
-        assertContains(read("work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md"),
+        assertContains(read("work-cycle-docs/tickets/done/[T838-done-high] master-key-custody.md"),
                 "raw AES master key is not stored beside ciphertext");
     }
 
@@ -159,7 +159,7 @@ class TrustClaimsHonestyTest {
                 "work-cycle-docs/tickets/done/[T835-done-high] chat-transport-localhost-guard.md",
                 "work-cycle-docs/tickets/done/[T836-done-high] windows-protected-path-canonicalization.md",
                 "work-cycle-docs/tickets/done/[T837-done-high] run-command-output-handoff-boundary.md",
-                "work-cycle-docs/tickets/open/[T838-open-high] master-key-custody.md",
+                "work-cycle-docs/tickets/done/[T838-done-high] master-key-custody.md",
                 "work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md")) {
             String text = read(file);
             assertContains(text, SANITIZED_WAVE6_EVIDENCE);

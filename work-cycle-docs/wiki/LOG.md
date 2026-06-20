@@ -767,3 +767,18 @@ mechanically.
   bounded Windows-only claim.
 - Added focused custody, migration, fail-closed, and docs-honesty tests.
 - Left T838 open for review of DPAPI shell-out security and migration safety.
+
+## [2026-06-20] closeout | Close T838 master-key custody
+
+- Closed T838 after review of implementation commit
+  `7a4decca55b1dc3a1a4bbfbfbdf5c48517b046b3`.
+- Repointed `TrustClaimsHonestyTest` from the open T838 ticket to the done
+  ticket so the tracked Wave 6 trust evidence remains self-contained.
+- Recorded that the DPAPI shell-out passes key material via stdin, uses fixed
+  scripts, verifies legacy migration before atomic replacement, leaves no
+  persistent plaintext backup, and keeps non-Windows custody bounded in docs.
+- Recorded that focused custody/docs tests, full `check --no-daemon`,
+  `wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and diff hygiene passed
+  during review.
+- Closed the last remaining Wave 6 high-priority trust-surface code-fix ticket;
+  cheap consolidation follow-up requires a new scoped ticket.
