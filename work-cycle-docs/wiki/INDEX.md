@@ -155,8 +155,6 @@ or generated reports.
 
 ## Active Tickets
 
-- [T836 Windows protected-path canonicalization](../tickets/open/[T836-open-high]%20windows-protected-path-canonicalization.md)
-  - [T836 implementation report](../reports/t836-windows-protected-path-canonicalization.md)
 - [T837 Run command output handoff boundary](../tickets/open/[T837-open-high]%20run-command-output-handoff-boundary.md)
 - [T838 Master key custody](../tickets/open/[T838-open-high]%20master-key-custody.md)
 
@@ -166,16 +164,16 @@ Completed Wave 6 high tickets:
   - [T834 implementation report](../reports/t834-strong-redaction-model-context-and-durable-sinks.md)
 - [T835 Chat transport localhost guard](../tickets/done/[T835-done-high]%20chat-transport-localhost-guard.md)
   - [T835 implementation report](../reports/t835-chat-transport-localhost-guard.md)
+- [T836 Windows protected-path canonicalization](../tickets/done/[T836-done-high]%20windows-protected-path-canonicalization.md)
+  - [T836 implementation report](../reports/t836-windows-protected-path-canonicalization.md)
 - [T839 Embedding host locality policy](../tickets/done/[T839-done-high]%20embedding-host-locality-policy.md)
   - [T839 implementation report](../reports/t839-embedding-host-locality-policy.md)
 
 Wave 5 structural-decomposition closeout is owner-ratified. Production
 compaction behavior remains unchanged until a later ticket is authorized, and
 future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
-honest disclosure is complete through T833; T834, T835, and T839 are done,
-T836 is reopened after NTFS 8.3 short-name bypass review with follow-up
-implementation open for review, and the remaining unimplemented Wave 6 high
-work is T837/T838. See
+honest disclosure is complete through T833; T834, T835, T836, and T839 are
+done, and the remaining unimplemented Wave 6 high work is T837/T838. See
 [t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
 
 ## Update Rule
