@@ -53,7 +53,8 @@ Implementation has landed for review in the current branch. The change:
 - bumps `ProtectedWorkspacePaths.POLICY_VERSION` to
   `protected-content-policy-v7`;
 - classifies unresolved Windows 8.3-style short-name segments inside the
-  workspace as protected `CONTROL` paths;
+  workspace as protected `CONTROL` paths, including surviving short-name
+  shapes that contain `_`, `$`, `@`, or `-`;
 - makes `isProtectedPath(...)` fail closed on the same unresolved short-name
   shape;
 - preserves existing workspace-escape behavior before the short-name guard;

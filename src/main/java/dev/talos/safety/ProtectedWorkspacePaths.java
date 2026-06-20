@@ -29,7 +29,7 @@ public final class ProtectedWorkspacePaths {
     public static final String POLICY_VERSION = "protected-content-policy-v7";
 
     private static final Pattern WINDOWS_SHORT_NAME_SEGMENT =
-            Pattern.compile("(?i)^[a-z0-9]{1,6}~[1-9][0-9]*(\\.[a-z0-9]{1,3})?$");
+            Pattern.compile("(?i)^[a-z0-9_$@-]{1,6}~[1-9][0-9]*(\\.[a-z0-9_$@-]{1,3})?$");
 
     public record Decision(
             String rawPath,
