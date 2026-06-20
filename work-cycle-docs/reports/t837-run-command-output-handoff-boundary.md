@@ -1,8 +1,9 @@
 # T837 Run Command Output Handoff Boundary
 
-Status: implemented, open for review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
+Implementation commit: `1fd15a44890043ec02566ba4951a4cec2b548152`
 
 ## Purpose
 
@@ -77,7 +78,12 @@ The shipped claim is bounded:
 - T837 does not close T838 master-key custody.
 - T837 does not edit `site/`.
 
-## Review State
+## Closeout State
 
-T837 remains open for review and closeout. The implementation commit SHA should
-be recorded in the ticket during closeout after the full gate is reviewed.
+T837 is closed after review. Independent review accepted the command-output
+high-entropy withholding as a bounded secrecy-over-detail tradeoff: the stream
+is withheld rather than inline-mangled, command outcome status is preserved, git
+SHA and UUID negatives are pinned, and non-sensitive verification output remains
+model-visible.
+
+T838 master-key custody remains the last open Wave 6 high trust fix.
