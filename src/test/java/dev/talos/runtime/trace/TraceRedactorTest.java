@@ -65,6 +65,16 @@ class TraceRedactorTest {
     }
 
     @Test
+    void redactsBareSecretShapes() {
+        String token = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";
+
+        String redacted = TraceRedactor.redactSecretLikeAssignments("tool output contained " + token);
+
+        assertFalse(redacted.contains(token), redacted);
+        assertTrue(redacted.contains("[redacted]"), redacted);
+    }
+
+    @Test
     void redactsPrivateDocumentFactCanaries() {
         String input = """
                 Patient Name: Eleni Nikolaou

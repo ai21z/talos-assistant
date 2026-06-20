@@ -298,11 +298,20 @@ final class RedactorTest {
             // An invalid regex should be silently skipped (with stderr warning)
             assertDoesNotThrow(() -> {
                 Redactor r = withConfig(Map.of("secrets", List.of("[invalid((")));
-                // The redactor should still work, just without that pattern
+                // Built-ins remain active even when a custom list is malformed.
                 String out = r.redactLine("password=ABCDEFGHIJKLMNOP");
-                // No default patterns loaded (user provided a list), so no secret redaction
-                assertEquals("password=ABCDEFGHIJKLMNOP", out);
+                assertEquals("password=[secret]", out);
             });
+        }
+
+        @Test
+        void custom_secret_patterns_are_additive_with_builtins() {
+            Redactor r = withConfig(Map.of("secrets", List.of("\\b(DANGER_[A-Z]{8,})\\b")));
+
+            assertAll(
+                    () -> assertEquals("[secret]", r.redactLine("DANGER_ABCDEFGH")),
+                    () -> assertEquals("password=[secret]", r.redactLine("password=ABCDEFGHIJKLMNOP")),
+                    () -> assertEquals("[secret]", r.redactLine("sk-ABCDEFGHIJKLmnop1234")));
         }
 
         @Test

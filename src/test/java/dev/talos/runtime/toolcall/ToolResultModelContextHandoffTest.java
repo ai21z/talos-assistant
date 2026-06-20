@@ -193,6 +193,24 @@ class ToolResultModelContextHandoffTest {
     }
 
     @Test
+    void ordinaryModelContextHandoffRedactsBareSecretShapes() {
+        String token = "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890";
+        ToolResult raw = ToolResult.ok("Build log included token " + token);
+
+        ToolResultModelContextHandoff.Decision decision = ToolResultModelContextHandoff.decide(
+                readCall("README.md"),
+                state(new Config(null)),
+                "README.md",
+                raw,
+                approvalGate(new AtomicInteger(), ApprovalResponse.APPROVED));
+
+        assertEquals(raw, decision.rawResult());
+        assertFalse(decision.modelResult().output().contains(token), decision.modelResult().output());
+        assertTrue(decision.modelResult().output().contains("[redacted]"), decision.modelResult().output());
+        assertEquals(ContextDecision.includedInModel("TOOL_RESULT_MODEL_HANDOFF"), decision.contextDecision());
+    }
+
+    @Test
     void toolCallExecutionStageDelegatesModelContextHandoffDecision() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));

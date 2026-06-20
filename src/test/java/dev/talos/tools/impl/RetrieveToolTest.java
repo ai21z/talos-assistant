@@ -152,6 +152,33 @@ class RetrieveToolTest {
     }
 
     @Test
+    void retrieve_redactsBareSecretShapesThroughDirectSafetyCaller(@TempDir Path workspace) {
+        String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                + "eyJzdWIiOiJ0YWxvcyIsIm5hbWUiOiJUZXN0In0."
+                + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                return new Prepared(
+                        List.of(new ContextResult.Snippet(
+                                "README.md",
+                                "Authorization bearer " + jwt,
+                                ChunkMetadata.empty())),
+                        List.of("README.md"));
+            }
+        });
+
+        ToolResult r = tool.execute(new ToolCall("talos.retrieve", Map.of("query", "auth")),
+                testContext(workspace));
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains(jwt), r.output());
+        assertTrue(r.output().contains("[redacted]"), r.output());
+        assertTrue(r.output().contains("Some retrieval snippets contained protected markers or secret-like values"),
+                r.output());
+    }
+
+    @Test
     void retrieve_renders_symbolHitEvidenceBeforeSnippets(@TempDir Path workspace) {
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
             @Override

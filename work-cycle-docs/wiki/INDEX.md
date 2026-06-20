@@ -156,6 +156,7 @@ or generated reports.
 ## Active Tickets
 
 - [T834 Strong redaction across model context and durable sinks](../tickets/open/[T834-open-high]%20strong-redaction-model-context-and-durable-sinks.md)
+  - [T834 implementation report](../reports/t834-strong-redaction-model-context-and-durable-sinks.md)
 - [T836 Windows protected-path canonicalization](../tickets/open/[T836-open-high]%20windows-protected-path-canonicalization.md)
 - [T837 Run command output handoff boundary](../tickets/open/[T837-open-high]%20run-command-output-handoff-boundary.md)
 - [T838 Master key custody](../tickets/open/[T838-open-high]%20master-key-custody.md)
