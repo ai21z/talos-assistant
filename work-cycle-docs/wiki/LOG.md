@@ -970,3 +970,16 @@ mechanically.
 - The answer did not infer `loqj-cli` from the workspace path. Workspace
   status/diff artifacts were empty. T850 is closed; T852 remains open as the
   next beta-correctness ticket.
+
+## [2026-06-22] code-fix | Implement T852 evidence-complete read-only stop
+
+- Added a deterministic T852 regression for the T842/scn-11 shape: three
+  requested files are read, the model repeats duplicate reads, and the loop now
+  stops with a bounded evidence-complete failure instead of the generic
+  no-progress failure policy.
+- Added a narrow terminal read-only stop for multi-target `READ_ONLY_QA` turns
+  where every requested target was already read and the current iteration made
+  no progress.
+- Preserved the fail-safe loop limit and did not synthesize unsupported facts.
+  T852 remains open pending the GPT-OSS scn-11 live rerun on the installed
+  build.

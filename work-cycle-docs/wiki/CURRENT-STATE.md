@@ -208,7 +208,12 @@ confidence_histogram:
   longer infers `loqj-cli` from the workspace path when no inspected file states
   it. T851 is closed after the live two-model scn-14 rerun and a
   target-present GPT-OSS corruption probe proved the read-display containment
-  guard blocks poisoned `N |` write payloads before they reach disk.
+  guard blocks poisoned `N |` write payloads before they reach disk. T852 has a
+  deterministic implementation for multi-document read-only no-progress loops:
+  when every requested file has already been read and the model keeps repeating
+  reads, Talos now returns a bounded evidence-complete failure instead of the
+  generic no-progress failure. T852 remains open pending the GPT-OSS scn-11 live
+  rerun on the current installed build.
 
 ```talos-wiki-claims
 {

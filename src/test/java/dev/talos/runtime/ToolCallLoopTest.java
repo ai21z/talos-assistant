@@ -7,6 +7,7 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
@@ -4275,6 +4276,67 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void multiTargetReadOnlyDuplicateLoopStopsWithEvidenceCompleteFailure() throws Exception {
+        Path ws = Files.createTempDirectory("talos-read-only-multitarget-evidence-complete-");
+        try {
+            var readTool = stubReadFileTool(Map.of(
+                    "budget.xlsx", "Category,Amount\nMarketing,1200\nEngineering,5400\n",
+                    "q3.pdf", "Q3 Financial Summary. Total revenue was 48250 dollars for the quarter.",
+                    "targets.csv", "Category,Target\nMarketing,1500\nEngineering,5000\n"));
+            var registry = new ToolRegistry();
+            registry.register(readTool);
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+
+            String request = "Using q3.pdf, budget.xlsx and targets.csv: what was Q3 revenue, "
+                    + "and did Engineering spend over or under its target, and by exactly how much? Cite each file.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var scripted = ScriptedNativeLlmClient.of(List.of(
+                    readNative("reread_budget", "budget.xlsx", 200),
+                    readNative("reread_q3", "q3.pdf", 1000),
+                    readNative("reread_targets", "targets.csv", 200)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(scripted)
+                    .nativeToolSpecs(nativeSpecs(readTool))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run(
+                    "",
+                    List.of(
+                            new ChatMessage.NativeToolCall(
+                                    "read_budget",
+                                    "talos.read_file",
+                                    Map.of("path", "budget.xlsx")),
+                            new ChatMessage.NativeToolCall(
+                                    "read_q3",
+                                    "talos.read_file",
+                                    Map.of("path", "q3.pdf")),
+                            new ChatMessage.NativeToolCall(
+                                    "read_targets",
+                                    "talos.read_file",
+                                    Map.of("path", "targets.csv"))),
+                    messages,
+                    ws,
+                    ctx);
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertFalse(result.finalAnswer().contains("failure policy stopped"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("Read evidence complete"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("budget.xlsx"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("q3.pdf"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("targets.csv"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("model repeated read calls instead of producing a final answer"),
+                    result.finalAnswer());
+            assertEquals(0, result.mutatingToolSuccesses());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void singleTargetMutationReadOnlyOverInspectionUsesCompactMutationContinuation() throws Exception {
         Path ws = Files.createTempDirectory("talos-read-only-mutation-budget-");
         try {
@@ -5108,6 +5170,23 @@ class ToolCallLoopTest {
             }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("style.css:12:.cta-button");
+            }
+        };
+    }
+
+    private static TalosTool stubReadFileTool(Map<String, String> outputsByPath) {
+        return new TalosTool() {
+            @Override public String name() { return "talos.read_file"; }
+            @Override public String description() { return "Read file"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.read_file", "Read file");
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                String path = ToolCallSupport.normalizePath(call.param("path", ""));
+                String output = outputsByPath.get(path);
+                return output == null
+                        ? ToolResult.fail("File not found: " + path)
+                        : ToolResult.ok(output);
             }
         };
     }
