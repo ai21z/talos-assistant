@@ -1,6 +1,6 @@
-# [T848-open-high] Mutation Intent Fix-File Prompts
+# [T848-done-high] Mutation Intent Fix-File Prompts
 
-Status: open
+Status: done
 Priority: high
 Type: implementation
 Branch: `v0.9.0-beta-dev`
@@ -300,10 +300,37 @@ Verified broad gates:
 
 Result: PASS.
 
-Remaining before closeout:
+Closeout (Opus independent verification, 2026-06-21):
 
-- Review by owner/Opus.
-- Live scn-13 rerun on both audited beta models.
+- Final implementation commit: `aacc232837d0327d1f3bcbe29c1a01beec094fb8` (pass 4),
+  preceded by `4477a47a` (pass 1), `faea0a5b` (pass 2), `97337292` (pass 3).
+- Focused suites re-run by Opus at pass 4: MutationIntentTest 19/0/0,
+  TaskContractResolverTest 138/0/0, ToolSurfacePlannerTest 39/0/0.
+- LIVE battery rebuilt+installed and run on BOTH audited models
+  (qwen2.5-coder-14b and gpt-oss-20b), captured under
+  `local/beta-pre-release-test-scenarios/scn-13*` (+ `runs/gpt-oss-20b/`):
+  - Positives EDIT on both models: real scn-13
+    (`explicit-file-scoped-defect-fix-request`), canonical `Fix the bug in calc.py.`
+    (`explicit-fix-problem-in-file-target`), and assistant-directed
+    `Can you fix it?` (`explicit-mutation-marker`).
+  - Read-only variants stay non-mutating on both models with no file change:
+    `How would you fix it?` (`advisory-mutation-question`),
+    `Don't fix it yet...` (`global-read-only-negation`),
+    `Should I fix it?` (`advisory-mutation-question`).
+- The pass-3 residual (modal self-question `Should/Can/May I fix it?` mutating via
+  the bare `fix it` marker, which on qwen produced a real unwanted edit) is closed:
+  the `I|we`-only modal self-question detector keeps self-deliberation read-only
+  while assistant-directed `you` requests still mutate (no false negative).
+- Permanent regression scenarios added to the local harness: scn-13b (canonical
+  positive), scn-13d (how-would-you question), scn-13e (don't-fix negation),
+  scn-13f (should-I self-question), scn-13g (can-you request positive).
+
+Known residual (systemic, deferred): the bare `fix it/the/this/that` markers can
+still fire inside less common interrogatives not yet patterned (e.g.
+`Do I need to fix it?`). The durable fix is to gate those markers behind general
+question detection rather than enumerating modal families; tracked as a possible
+follow-up, not a beta blocker. The reported and natural read-only `fix` families
+are closed and proven on both models.
 
 ## Work-Test Cycle Notes
 
