@@ -1,19 +1,20 @@
-# [T851-open-high] Read-Display Line-Number Write Containment
+# [T851-done-high] Read-Display Line-Number Write Containment
 
-Status: open
+Status: done
 Priority: high
 Type: implementation
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 
-Implementation state: deterministic guard implemented; live scn-14 review
-pending before closeout.
+Implementation state: deterministic guard implemented; live two-model review
+passed; ticket closed.
 
 ## Evidence Summary
 
 - Source: T842 manual beta scenario evidence.
 - Date: 2026-06-21.
-- Talos version / commit: `0.10.5`; local summaries do not capture a commit.
+- Talos version / commit: `0.10.5`; implementation commit
+  `34f8f832377e6fdd5bd26141faf2b1b972cfb8da`.
 - Model/backend: `gpt-oss:20b` through managed `llama.cpp`; qwen did not show
   the same corruption.
 - Workspace fixture: T842 scn-14 and related scn-13 output.
@@ -227,12 +228,28 @@ Focused deterministic gate:
 Result: PASS after the red-first failure was observed on the two blocking
 cases.
 
+Live closeout evidence:
+
+- Current installed build was refreshed with `.\gradlew.bat installDist
+  --no-daemon`.
+- The existing T842/scn-14 absent-target corruption fixture was rerun on both
+  beta models:
+  - `qwen2.5-coder-14b`: final `helper.py` unchanged, empty git status, no
+    approval or mutation. The run failed honestly because `foo()` did not exist.
+  - `gpt-oss-20b`: final `helper.py` unchanged, empty git status, no approval or
+    mutation. The run failed honestly because `foo()` did not exist.
+- A direct target-present corruption probe was also run because the original
+  scn-14 fixture is now blocked first by T849:
+  - `qwen2.5-coder-14b`: made a clean edit to `bar()` and did not copy `N |`
+    prefixes into the file.
+  - `gpt-oss-20b`: first attempted a contaminated `write_file` payload; the
+    T851 guard blocked it with `READ_DISPLAY_WRITE_CONTAINMENT` /
+    `READ_DISPLAY_PREFIX_WRITE`; the model retried cleanly; final file contains
+    no `N |` prefixes.
+
 Review status:
 
-- T851 remains open.
-- Required before closeout: rerun the T842/scn-14 corruption probe on both
-  beta models and confirm the file is not corrupted by read-display line
-  prefixes.
+- T851 accepted and closed.
 
 ## Work-Test Cycle Notes
 
@@ -246,4 +263,5 @@ Review status:
 
 ## Known Follow-Ups
 
-- Re-run T842 scn-14 on gpt-oss after implementation.
+- None for this specific containment guard.
+- T850 and T852 remain separate beta-correctness tickets.

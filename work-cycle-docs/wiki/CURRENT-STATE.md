@@ -204,8 +204,9 @@ confidence_histogram:
   beta-correctness triage tickets: T848 mutation-intent fix-file prompts, T849
   absent named-target guard, T850 read-only path/name grounding, T851
   read-display write containment, and T852 GPT-OSS multi-document no-progress
-  synthesis. T851 has a deterministic pre-approval containment guard
-  implemented and remains open pending the live two-model scn-14 review.
+  synthesis. T851 is now closed after the live two-model scn-14 rerun and a
+  target-present GPT-OSS corruption probe proved the read-display containment
+  guard blocks poisoned `N |` write payloads before they reach disk.
 
 ```talos-wiki-claims
 {
