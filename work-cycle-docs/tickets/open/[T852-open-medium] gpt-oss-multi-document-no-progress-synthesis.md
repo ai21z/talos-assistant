@@ -114,6 +114,20 @@ Characterize before changing behavior. Prefer a report/test that pins the
 current no-progress shape, then evaluate whether terminal answer context or a
 reprompt adjustment can improve synthesis without increasing risk.
 
+Implementation pass:
+
+- Added deterministic regression coverage in
+  `ToolCallLoopTest.multiTargetReadOnlyDuplicateLoopStopsWithEvidenceCompleteFailure`.
+- Added a narrow terminal read-only stop in
+  `TerminalReadOnlyStopAnswer` for multi-target `READ_ONLY_QA` turns where all
+  requested targets were already read and the current iteration made no further
+  progress.
+- The new stop returns a bounded evidence-complete failure that lists gathered
+  targets and states that no files were changed, instead of falling through to
+  the generic no-progress failure policy.
+- The loop limit is unchanged.
+- T852 remains open pending the GPT-OSS scn-11 live rerun.
+
 ## Architecture Metadata
 
 Capability:
@@ -168,10 +182,11 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Characterization test for repeated read-only no-progress after evidence is
+- `ToolCallLoopTest.multiTargetReadOnlyDuplicateLoopStopsWithEvidenceCompleteFailure`
+  characterizes repeated read-only no-progress after all requested evidence is
   gathered.
-- Integration test or scripted provider fixture for terminal no-progress answer
-  shape.
+- Report:
+  `work-cycle-docs/reports/t852-gpt-oss-multi-document-no-progress-synthesis.md`.
 
 Commands:
 

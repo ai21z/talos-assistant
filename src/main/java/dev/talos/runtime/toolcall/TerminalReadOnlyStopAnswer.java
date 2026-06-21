@@ -58,6 +58,13 @@ public final class TerminalReadOnlyStopAnswer {
                     "Stopping read-target loop after required read_file evidence.");
         }
 
+        String multiTargetEvidenceComplete = multiTargetEvidenceCompleteStopAnswer(state, outcome);
+        if (multiTargetEvidenceComplete != null) {
+            return new Answer(
+                    multiTargetEvidenceComplete,
+                    "Stopping read-only multi-target loop after all requested files were read.");
+        }
+
         return null;
     }
 
@@ -122,6 +129,41 @@ public final class TerminalReadOnlyStopAnswer {
         return message.toLowerCase(Locale.ROOT).contains(candidate.toLowerCase(Locale.ROOT))
                 ? candidate
                 : "";
+    }
+
+    private static String multiTargetEvidenceCompleteStopAnswer(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (state == null || outcome == null) return null;
+        if (outcome.successesThisIteration() > 0
+                || outcome.failuresThisIteration() > 0
+                || outcome.mutationsThisIteration() > 0) {
+            return null;
+        }
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() < 2) {
+            return null;
+        }
+        List<String> targets = contract.expectedTargets().stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(target -> target != null && !target.isBlank())
+                .sorted()
+                .toList();
+        if (targets.size() < 2) return null;
+        if (!targets.stream().allMatch(target -> state.pathsReadThisTurn.contains(target))) {
+            return null;
+        }
+
+        StringBuilder out = new StringBuilder(
+                "Read evidence complete, but no final synthesis was produced.\n"
+                        + "Talos already read all requested files:");
+        for (String target : targets) {
+            out.append("\n- ").append(target);
+        }
+        out.append("\n\nThe model repeated read calls instead of producing a final answer. ")
+                .append("No files were changed. Retry with a narrower question if you need a full synthesis.");
+        return out.toString();
     }
 
     private static String directoryListingStopAnswer(

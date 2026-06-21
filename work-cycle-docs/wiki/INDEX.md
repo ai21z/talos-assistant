@@ -170,6 +170,9 @@ or generated reports.
   - Deterministic implementation report:
     [T851 read-display write containment](../reports/t851-read-display-line-number-write-containment.md)
 - [T852 GPT-OSS multi-document no-progress synthesis](../tickets/open/[T852-open-medium]%20gpt-oss-multi-document-no-progress-synthesis.md)
+  - Deterministic implementation report:
+    [T852 GPT-OSS multi-document no-progress synthesis](../reports/t852-gpt-oss-multi-document-no-progress-synthesis.md)
+  - Status: implemented, awaiting GPT-OSS scn-11 live review before closeout.
 
 Completed pre-release tickets:
 

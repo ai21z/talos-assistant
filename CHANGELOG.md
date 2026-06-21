@@ -2,13 +2,21 @@
 
 ## [Unreleased]
 
+- [T852] Multi-document read-only turns now stop more constructively when the
+  model has already read every requested target but keeps repeating read calls.
+  Instead of falling through to the generic no-progress failure policy, Talos
+  returns a bounded evidence-complete failure that lists the files already read,
+  states that no files were changed, and asks for a narrower retry if a full
+  synthesis is still needed. The loop limit is unchanged, and T852 remains open
+  pending the GPT-OSS scn-11 live rerun.
 - [T850] Read-only workspace QA and workspace-explain turns now receive a
   current-turn `[FileGroundedAnswer]` instruction that separates workspace
   path/name metadata from inspected file evidence. The model may use paths as
   location labels, but must not present a workspace directory name as a project
   name or other file-grounded fact unless that fact appears in current-turn
-  read/search/list results. This is a prompt-frame grounding fix only; T850
-  remains open pending the qwen scn-10 live rerun.
+  read/search/list results. This is a prompt-frame grounding fix only; T850 is
+  closed after the qwen scn-10 live rerun proved Talos no longer inferred
+  `loqj-cli` from the workspace path when no inspected file stated it.
 - [T851] Added a pre-approval containment guard for Talos read-display line
   prefixes in mutation payloads. After a same-turn `read_file` display, a
   `write_file` content body or `edit_file` replacement that carries `N | ...`
