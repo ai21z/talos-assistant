@@ -135,6 +135,7 @@ public final class CurrentTurnCapabilityFrame {
                     Follow the visible tool surface and task contract.
                     Do not claim unavailable workspace capabilities that the runtime has exposed.""");
                 }
+        appendFileGroundedAnswerGuidance(frame, contract, mutationAllowed);
         appendReadOnlyProposalGroundingGuidance(frame, contract, mutationAllowed);
         appendDirectoryAwareVerificationGuidance(frame, contract, visibleTools);
         frame.append('\n').append(evidenceGuidance(evidence));
@@ -193,6 +194,29 @@ public final class CurrentTurnCapabilityFrame {
                 Do not state commands, dependencies, package managers, frameworks, scripts, licenses, or file meanings as facts unless they were observed in the inspected workspace evidence.
                 If a command or dependency is only a possible suggestion, mark it as "if applicable" or a placeholder.
                 Respect current-turn exclusions such as protected files the user says not to inspect or discuss.""");
+    }
+
+    private static void appendFileGroundedAnswerGuidance(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed
+    ) {
+        if (mutationAllowed || contract == null || contract.type() == null) return;
+        if (!isFileGroundedReadOnlyType(contract.type())) return;
+
+        frame.append("""
+
+                [FileGroundedAnswer]
+                Workspace path/name metadata is not file evidence.
+                Use workspace paths as location labels only.
+                Do not present a workspace directory name as a project name, package name, product name, framework, dependency, script, or other file-grounded fact unless that fact appears in current-turn read/search/list results.
+                When the user asks to only state facts from files, only state file-grounded facts that were observed in read/search/list results; otherwise say the inspected files do not state it.""");
+    }
+
+    private static boolean isFileGroundedReadOnlyType(TaskType type) {
+        return type == TaskType.READ_ONLY_QA
+                || type == TaskType.WORKSPACE_EXPLAIN
+                || type == TaskType.DIAGNOSE_ONLY;
     }
 
     private static void appendExpectedTargets(

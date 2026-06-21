@@ -945,3 +945,15 @@ mechanically.
   retried with clean content.
 - Closed T851. T850 read-only path/name grounding and T852 GPT-OSS
   multi-document no-progress synthesis remain open.
+
+## [2026-06-22] code-fix | Implement T850 file-grounded answer framing
+
+- Added a deterministic current-turn `[FileGroundedAnswer]` frame for
+  non-mutating read-only/workspace-inspection turns.
+- The frame now states that workspace path/name metadata is not file evidence,
+  that paths are location labels only, and that directory names must not be
+  presented as project names or other file-grounded facts unless observed in
+  current-turn read/search/list results.
+- Added a red-first `CurrentTurnCapabilityFrameTest` regression for the T842
+  scn-10 prompt shape. T850 remains open pending the qwen scn-10 live rerun
+  before closeout.
