@@ -169,10 +169,10 @@ or generated reports.
 - [T851 Read-display line-number write containment](../tickets/done/[T851-done-high]%20read-display-line-number-write-containment.md) (done)
   - Deterministic implementation report:
     [T851 read-display write containment](../reports/t851-read-display-line-number-write-containment.md)
-- [T852 GPT-OSS multi-document no-progress synthesis](../tickets/open/[T852-open-medium]%20gpt-oss-multi-document-no-progress-synthesis.md)
+- [T852 GPT-OSS multi-document no-progress synthesis](../tickets/done/[T852-done-medium]%20gpt-oss-multi-document-no-progress-synthesis.md) (done)
   - Deterministic implementation report:
     [T852 GPT-OSS multi-document no-progress synthesis](../reports/t852-gpt-oss-multi-document-no-progress-synthesis.md)
-  - Status: implemented, awaiting GPT-OSS scn-11 live review before closeout.
+  - Status: closed after GPT-OSS scn-11 live review.
 
 Completed pre-release tickets:
 

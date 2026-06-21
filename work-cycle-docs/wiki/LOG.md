@@ -983,3 +983,16 @@ mechanically.
 - Preserved the fail-safe loop limit and did not synthesize unsupported facts.
   T852 remains open pending the GPT-OSS scn-11 live rerun on the installed
   build.
+
+## [2026-06-22] closeout | Close T852 evidence-complete read-only stop
+
+- Reran the T842/scn-11 mixed-format prompt on GPT-OSS against the installed
+  build at `6ec410a71fd2219356e3c80cc624b75be7c67002`.
+- Artifact:
+  `local/beta-pre-release-test-scenarios/runs/t852-6ec410a7/gpt-oss-20b/scn-11-mixed-format-analysis/transcript.txt`.
+- Talos returned the bounded `Read evidence complete` stop, listed
+  `budget.xlsx`, `q3.pdf`, and `targets.csv`, required zero approvals, and left
+  git status/diff artifacts empty.
+- Closed T852. The T848-T852 beta-correctness triage queue is complete; T847
+  retrieval evidence and gold-context measurement can resume while T842 remains
+  the parallel manual audit track.

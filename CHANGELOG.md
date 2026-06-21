@@ -7,8 +7,10 @@
   Instead of falling through to the generic no-progress failure policy, Talos
   returns a bounded evidence-complete failure that lists the files already read,
   states that no files were changed, and asks for a narrower retry if a full
-  synthesis is still needed. The loop limit is unchanged, and T852 remains open
-  pending the GPT-OSS scn-11 live rerun.
+  synthesis is still needed. The loop limit is unchanged. T852 is closed after
+  the GPT-OSS scn-11 live rerun proved the installed build now returns the
+  bounded evidence-complete failure instead of the generic no-progress policy
+  message, with no approvals and no workspace diff.
 - [T850] Read-only workspace QA and workspace-explain turns now receive a
   current-turn `[FileGroundedAnswer]` instruction that separates workspace
   path/name metadata from inspected file evidence. The model may use paths as
