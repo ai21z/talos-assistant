@@ -108,7 +108,11 @@ class TaskContractResolverTest {
         for (String input : List.of(
                 "There is a bug in calc.py. Explain how to fix multiply.",
                 "There is a bug in calc.py. Should I fix multiply?",
-                "There is a bug in calc.py, but do not change files.")) {
+                "There is a bug in calc.py. How would you fix it?",
+                "There is a bug in calc.py, but do not change files.",
+                "There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertFalse(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE, input);

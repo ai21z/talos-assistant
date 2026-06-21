@@ -241,6 +241,29 @@ Verified focused gate:
 
 Result: PASS.
 
+Third implementation pass:
+
+- independent review/owner review verified the real scn-13 prompt now edits on both audited
+  models, but adversarial live prompts exposed pre-existing `fix it`
+  false positives through `explicit-mutation-marker`.
+- Added red tests for:
+  - `There is a bug in calc.py. How would you fix it?`
+  - `There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.`
+  - `There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.`
+  - `There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.`
+- Added `fix` forms to the global read-only negation set and added a narrow
+  embedded advisory pronoun-question detector so `How would you fix it?` stays
+  non-mutating.
+- Kept the real scn-13 positive on the file-edit target apply surface.
+
+Verified focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --no-daemon
+```
+
+Result: PASS.
+
 Verified broad gates:
 
 ```powershell
