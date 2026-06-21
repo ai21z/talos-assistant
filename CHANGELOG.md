@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T851] Added a pre-approval containment guard for Talos read-display line
+  prefixes in mutation payloads. After a same-turn `read_file` display, a
+  `write_file` content body or `edit_file` replacement that carries `N | ...`
+  display lines for that target now fails before approval and before disk
+  writes, with a visible tool-result diagnostic. Ordinary source writes remain
+  allowed, and literal numbered-pipe text is not blocked unless it is tied to
+  same-turn read-display evidence. T851 remains open for owner/live scn-14
+  review before closeout.
 - [T849] Named-function mutation requests such as "Modify foo() in helper.py"
   and "Modify the existing function foo() in helper.py" now fail closed before
   approval when the same-turn readback proves that `foo()` is absent from

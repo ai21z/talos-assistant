@@ -921,3 +921,13 @@ mechanically.
 - Assistant-directed modal requests with `you`, such as `Can you fix it?`, stay
   mutation-capable, as does the real scn-13 imperative `Fix multiply...` prompt.
 - T848 remains open for review and the live scn-13b-f battery before closeout.
+
+## [2026-06-21] code-fix | Implement T851 read-display write containment
+
+- Added a pre-approval guard for `write_file` and `edit_file` payloads that
+  carry Talos `read_file` display prefixes such as `N | ...` for a same-turn
+  read target.
+- Added direct guard tests and a `ToolCallLoop` regression proving the poisoned
+  payload fails before approval and leaves the target file unchanged.
+- Left T851 open pending the live T842/scn-14 corruption probe on both beta
+  models before closeout.

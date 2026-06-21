@@ -280,6 +280,41 @@ final class ToolCallPreExecutionGuardChain {
             return Result.blocked(effective, pathContext, failures, false);
         }
 
+        String readDisplayWriteDiagnostic = ReadDisplayWriteContainmentGuard.diagnostic(
+                effective,
+                state,
+                pathHint);
+        if (readDisplayWriteDiagnostic != null) {
+            int failures = 0;
+            if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                failures++;
+            }
+            ToolResult result = ToolResult.fail(ToolError.invalidParams(readDisplayWriteDiagnostic));
+            toolResultEmitter.emit(effective.toolName(), result);
+            LocalTurnTraceCapture.recordActionObligation(
+                    "READ_DISPLAY_WRITE_CONTAINMENT",
+                    "FAILED",
+                    readDisplayWriteDiagnostic,
+                    "READ_DISPLAY_PREFIX_WRITE");
+            LocalTurnTraceCapture.recordToolCallBlocked(
+                    "tool_loop",
+                    effective,
+                    readDisplayWriteDiagnostic);
+            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                    effective,
+                    pathHint,
+                    readDisplayWriteDiagnostic,
+                    workspaceOperationPlan,
+                    ToolFailureReason.NONE));
+            resultMessageAppender.append(state, nativePath, callIndex,
+                    ToolCallSupport.formatToolResult(effective, result));
+            LOG.debug("Blocked read-display-contaminated {} for {} before approval: {}",
+                    effective.toolName(),
+                    SafeLogFormatter.value(pathHint),
+                    SafeLogFormatter.text(readDisplayWriteDiagnostic));
+            return Result.blocked(effective, pathContext, failures, false);
+        }
+
         String staticWebRewriteGroundingDiagnostic =
                 StaticWebRewriteGroundingGuard.diagnostic(
                         effective,

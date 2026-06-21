@@ -6,6 +6,9 @@ Type: implementation
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 
+Implementation state: deterministic guard implemented; live scn-14 review
+pending before closeout.
+
 ## Evidence Summary
 
 - Source: T842 manual beta scenario evidence.
@@ -186,6 +189,50 @@ Commands:
 .\gradlew.bat check --no-daemon
 .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 ```
+
+## Implementation Evidence
+
+Implementation batch:
+
+- Added package-private `ReadDisplayWriteContainmentGuard` in
+  `dev.talos.runtime.toolcall`.
+- Wired it into `ToolCallPreExecutionGuardChain` after named-target existence
+  checks and before later write-grounding guards.
+- The guard is deliberately narrow: it applies only to `write_file` content
+  payloads and `edit_file` replacement payloads, only when the same target has
+  same-turn `read_file` display evidence, and only when the mutation payload
+  carries whole-line `N | ...` display prefixes.
+- The guard records a failed pre-execution mutation outcome, emits an
+  `INVALID_PARAMS` tool result, records a trace block/action-obligation event,
+  and stops before approval or disk mutation.
+
+Deterministic tests added:
+
+- `ReadDisplayWriteContainmentGuardTest`
+  - blocks `write_file` display-prefix payloads before approval;
+  - blocks `edit_file` replacement display-prefix payloads before approval;
+  - allows clean source writes after same-turn read display;
+  - allows literal numbered-pipe text when there is no same-turn read display
+    evidence for the target.
+- `ToolCallLoopTest.readDisplayWritePayloadIsBlockedBeforeApprovalAndLeavesFileUnchanged`
+  proves the loop-level write path leaves the file unchanged and does not ask
+  for approval when the payload is contaminated by read-display line prefixes.
+
+Focused deterministic gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ReadDisplayWriteContainmentGuardTest" --tests "dev.talos.runtime.ToolCallLoopTest.readDisplayWritePayloadIsBlockedBeforeApprovalAndLeavesFileUnchanged" --no-daemon
+```
+
+Result: PASS after the red-first failure was observed on the two blocking
+cases.
+
+Review status:
+
+- T851 remains open.
+- Required before closeout: rerun the T842/scn-14 corruption probe on both
+  beta models and confirm the file is not corrupted by read-display line
+  prefixes.
 
 ## Work-Test Cycle Notes
 
