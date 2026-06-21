@@ -8,16 +8,16 @@
       content="Talos is a local-first CLI workspace operator. Inspects before acting, asks before mutation, verifies before claiming success, and records local trace evidence for interactive turns."
     />
     <meta name="theme-color" content="#090c0c" />
-    <link rel="icon" type="image/png" href="./design/talos-icon.png" />
+    <link rel="icon" type="image/png" href="./design/talos-icon-64.png" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Talos — Local-first CLI workspace operator" />
+    <meta property="og:title" content="Talos. Local-first CLI workspace operator" />
     <meta
       property="og:description"
       content="Inspects before acting. Asks before mutation. Verifies before claiming success. Local engine, approved writes, local trace evidence."
     />
     <meta property="og:image" content="./design/talos-icon.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Talos — Local-first CLI workspace operator" />
+    <meta name="twitter:title" content="Talos. Local-first CLI workspace operator" />
     <meta
       name="twitter:description"
       content="A local-first CLI operator that inspects, asks before mutation, and verifies before claiming success."
@@ -47,16 +47,25 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <canvas class="forge" aria-hidden="true"></canvas>
+    <canvas class="smoke" aria-hidden="true"></canvas>
+    <canvas class="mycelium" aria-hidden="true"></canvas>
     <div class="grain" aria-hidden="true"></div>
     <div class="vein" aria-hidden="true">
       <span class="vein-fill"></span>
       <span class="vein-node"></span>
     </div>
     <span class="vein-nail" aria-hidden="true"></span>
+    <nav class="vein-rail" aria-label="Section navigation">
+      <a class="vein-stop" href="#overview" data-section-nav aria-current="page"><span class="vein-stop-dot" aria-hidden="true"></span><span class="vein-stop-label">Overview</span></a>
+      <a class="vein-stop" href="#execution" data-section-nav><span class="vein-stop-dot" aria-hidden="true"></span><span class="vein-stop-label">Execution</span></a>
+      <a class="vein-stop" href="#turn-ui" data-section-nav><span class="vein-stop-dot" aria-hidden="true"></span><span class="vein-stop-label">Turn UI</span></a>
+      <a class="vein-stop" href="#local-boundaries" data-section-nav><span class="vein-stop-dot" aria-hidden="true"></span><span class="vein-stop-label">Local Boundaries</span></a>
+      <a class="vein-stop" href="#good-fits" data-section-nav><span class="vein-stop-dot" aria-hidden="true"></span><span class="vein-stop-label">Good Fits</span></a>
+      <a class="vein-stop" href="#docs" data-section-nav><span class="vein-stop-dot" aria-hidden="true"></span><span class="vein-stop-label">Docs</span></a>
+    </nav>
     <div class="awaken" aria-hidden="true">
       <div class="awaken-core">
-        <img class="awaken-shield" src="./design/talos-icon.png" alt="" decoding="async" />
+        <img class="awaken-shield" src="./design/talos-icon-256.png" alt="" decoding="async" />
         <p class="awaken-name">TALOS</p>
         <div class="awaken-log">
           <p style="--i: 0"><span class="awaken-tick">✓</span> forge kindled</p>
@@ -70,7 +79,7 @@
         <div class="container header-inner">
           <a class="wordmark" href="#overview" aria-label="Talos home">
             <span class="brand-mark" aria-hidden="true">
-              <img class="brand-icon" src="./design/talos-icon.png" alt="" width="30" height="30" decoding="async" />
+              <img class="brand-icon" src="./design/talos-icon-64.png" alt="" width="30" height="30" decoding="async" />
             </span>
             <span class="wordmark-name">Talos</span>
           </a>
@@ -82,16 +91,40 @@
             <a href="#good-fits" data-section-nav>Good Fits</a>
             <a href="#docs" data-section-nav>Docs</a>
           </nav>
-          <a class="button button--ghost header-cta" href="https://github.com/ai21z/talos-cli" rel="noopener">
+          <a class="button button--ghost header-cta" href="https://github.com/ai21z/talos-cli">
             GitHub
           </a>
+          <button class="menu-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="ritual-menu" aria-label="Open menu">
+            <img class="menu-trigger-head" src="./design/talos-icon-64.png" alt="" width="34" height="34" decoding="async" />
+          </button>
         </div>
       </header>
+
+      <span class="ichor-bar" aria-hidden="true"></span>
+
+      <div class="ritual" id="ritual-menu" role="dialog" aria-modal="true" aria-label="Talos sections" tabindex="-1">
+        <div class="ritual-inner">
+          <div class="ritual-head">
+            <img class="ritual-sigil" src="./design/talos-icon-256.png" alt="" width="64" height="64" decoding="async" />
+            <p class="ritual-name">TALOS</p>
+            <button class="ritual-close" type="button" aria-label="Close menu">×</button>
+          </div>
+          <nav class="ritual-nav" aria-label="Sections">
+            <a href="#overview" data-section-nav><span class="ritual-no">01</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Overview</span></a>
+            <a href="#execution" data-section-nav><span class="ritual-no">02</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Execution</span></a>
+            <a href="#turn-ui" data-section-nav><span class="ritual-no">03</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Turn UI</span></a>
+            <a href="#local-boundaries" data-section-nav><span class="ritual-no">04</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Local Boundaries</span></a>
+            <a href="#good-fits" data-section-nav><span class="ritual-no">05</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Good Fits</span></a>
+            <a href="#docs" data-section-nav><span class="ritual-no">06</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Docs</span></a>
+          </nav>
+          <a class="button button--ghost ritual-cta" href="https://github.com/ai21z/talos-cli">View on GitHub</a>
+        </div>
+      </div>
 
       <main id="main">
         <section id="overview" class="section hero-section">
           <div class="guardian-parallax" aria-hidden="true">
-            <img src="./design/talos-icon.png" alt="" decoding="async" />
+            <img src="./design/talos-icon-256.png" alt="" decoding="async" />
           </div>
           <div class="container hero-grid">
             <div class="hero-copy reveal">
@@ -105,7 +138,7 @@
                 Interactive turns leave local trace evidence.
               </p>
               <div class="hero-actions" aria-label="Primary actions">
-                <a class="button button--primary" href="https://github.com/ai21z/talos-cli" rel="noopener">
+                <a class="button button--primary" href="https://github.com/ai21z/talos-cli">
                   View on GitHub
                 </a>
                 <a class="button button--ghost" href="#docs">Read docs</a>
@@ -130,7 +163,7 @@ talos</code></pre>
                 </p>
                 <p>
                   Source setup remains documented in the
-                  <a class="inline-link" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/public-installation.md" rel="noopener">
+                  <a class="inline-link" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/public-installation.md">
                     installation docs
                   </a>.
                 </p>
@@ -165,15 +198,15 @@ talos</code></pre>
                   </div>
                 </div>
                 <figcaption id="live-terminal-caption" class="banner-caption">
-                  Rendered from the real Talos turn grammar. Values mirror a managed
+                  Modeled on the real Talos turn grammar. Values mirror a managed
                   <code>llama.cpp</code> run on <code>llama_cpp/gpt-oss-20b</code>.
                 </figcaption>
               </figure>
               <p class="sr-only">
-                Talos terminal turn: prompt "what does this workspace do?"; route
-                ask, read-only, workspace bounded; inspect README.md, src/, docs/;
-                read 4 files in 38 ms; answer: Local-first CLI workspace operator,
-                Java 21 sources under src/, architecture notes under docs/; turn 1,
+                Talos terminal turn. Prompt: what does this workspace do? Route
+                ask, read-only, workspace bounded. Inspect README.md, src/, docs/.
+                Read 4 files in 38 ms. Answer: Local-first CLI workspace operator,
+                Java 21 sources under src/, architecture notes under docs/. Turn 1,
                 1.2 s, /last trace available. Running TALOS v0.10.5 with engine
                 llama.cpp (managed), model llama_cpp/gpt-oss-20b, index ready
                 (5 chunks), policy ask before mutation.
@@ -184,59 +217,74 @@ talos</code></pre>
 
         <section id="execution" class="section execution-section" aria-labelledby="execution-heading">
           <div class="container">
-            <div class="section-header reveal">
-              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Execution contract</p>
-              <h2 id="execution-heading">One ordered flow. No skipped steps.</h2>
-              <p class="section-lede">
-                Talos narrows the request, inspects evidence, gates mutation,
-                checks outcomes, and keeps the result inspectable.
-              </p>
-            </div>
-
-            <ol class="contract-flow" data-reveal-stagger aria-label="Talos execution contract">
-              <li class="contract-step contract-step--classify">
-                <span class="contract-index">01</span>
-                <h3>Classify</h3>
-                <p>Resolve the request into a bounded task contract and expected target.</p>
-              </li>
-              <li class="contract-step contract-step--inspect">
-                <span class="contract-index">02</span>
-                <h3>Inspect</h3>
-                <p>Gather read-only workspace evidence before proposing action.</p>
-              </li>
-              <li class="contract-step contract-step--approve">
-                <span class="contract-index">03</span>
-                <h3>Approve</h3>
-                <p>Show mutation intent, target path, and risk before local writes.</p>
-              </li>
-              <li class="contract-step contract-step--mutate">
-                <span class="contract-index">04</span>
-                <h3>Mutate</h3>
-                <p>Run only the approved file, workspace, or command operation.</p>
-              </li>
-              <li class="contract-step contract-step--verify">
-                <span class="contract-index">05</span>
-                <h3>Verify</h3>
-                <p>Read back files or inspect command output before reporting success.</p>
-              </li>
-              <li class="contract-step contract-step--trace">
-                <span class="contract-index">06</span>
-                <h3>Trace</h3>
-                <p>Keep prompts, tool calls, approvals, and outcomes inspectable.</p>
-              </li>
-            </ol>
-
-            <div class="execution-tool-strip reveal" aria-label="Execution evidence examples">
-              <code>talos.list_dir</code>
-              <code>talos.read_file</code>
-              <code>talos.write_file</code>
-              <code>talos.run_command</code>
-              <code>/last trace</code>
+            <div class="cycle-layout">
+              <div class="cycle-copy reveal">
+                <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>The Execution Cycle</p>
+                <h2 id="execution-heading">One ordered flow. No skipped steps.</h2>
+                <p class="section-lede">
+                  Talos narrows the request, inspects evidence, gates mutation,
+                  checks outcomes, and keeps the result inspectable. Every turn
+                  runs the same six stations, in order.
+                </p>
+                <dl class="cycle-detail" data-cycle-detail aria-live="polite">
+                  <dt class="cycle-detail-step"><span class="cycle-detail-num">01</span> Classify</dt>
+                  <dd class="cycle-detail-text">Resolve the request into a bounded task contract and expected target.</dd>
+                </dl>
+                <p class="execution-tool-strip" aria-label="Execution evidence examples">
+                  <code>talos.list_dir</code>
+                  <code>talos.read_file</code>
+                  <code>talos.write_file</code>
+                  <code>talos.run_command</code>
+                  <code>/last trace</code>
+                </p>
+              </div>
+              <div class="cycle-dial reveal">
+                <svg class="dial" viewBox="0 0 420 420" role="img" aria-label="The execution cycle: Classify, Inspect, Approve, Mutate, Verify, Trace, repeating every turn.">
+                  <circle class="dial-ring dial-ring--outer" cx="210" cy="210" r="162" />
+                  <circle class="dial-ring" cx="210" cy="210" r="140" />
+                  <circle class="dial-ticks" cx="210" cy="210" r="140" />
+                  <circle class="dial-ring dial-ring--inner" cx="210" cy="210" r="118" />
+                  <g class="dial-hub" aria-hidden="true">
+                    <circle class="dial-hub-ring" cx="210" cy="210" r="34" />
+                    <text class="dial-hub-label" x="210" y="216" text-anchor="middle">Turn</text>
+                  </g>
+                  <g class="dial-stations">
+                    <g class="dial-station"><circle class="dial-node" cx="210" cy="70" r="15" /><text class="dial-num" x="210" y="75" text-anchor="middle">01</text></g>
+                    <g class="dial-station"><circle class="dial-node" cx="331" cy="140" r="15" /><text class="dial-num" x="331" y="145" text-anchor="middle">02</text></g>
+                    <g class="dial-station"><circle class="dial-node" cx="331" cy="280" r="15" /><text class="dial-num" x="331" y="285" text-anchor="middle">03</text></g>
+                    <g class="dial-station"><circle class="dial-node" cx="210" cy="350" r="15" /><text class="dial-num" x="210" y="355" text-anchor="middle">04</text></g>
+                    <g class="dial-station"><circle class="dial-node" cx="89" cy="280" r="15" /><text class="dial-num" x="89" y="285" text-anchor="middle">05</text></g>
+                    <g class="dial-station"><circle class="dial-node" cx="89" cy="140" r="15" /><text class="dial-num" x="89" y="145" text-anchor="middle">06</text></g>
+                  </g>
+                  <g class="dial-labels">
+                    <text class="dial-label" x="210" y="36" text-anchor="middle">Classify</text>
+                    <text class="dial-label" x="362" y="126" text-anchor="start">Inspect</text>
+                    <text class="dial-label" x="362" y="300" text-anchor="start">Approve</text>
+                    <text class="dial-label" x="210" y="396" text-anchor="middle">Mutate</text>
+                    <text class="dial-label" x="58" y="300" text-anchor="end">Verify</text>
+                    <text class="dial-label" x="58" y="126" text-anchor="end">Trace</text>
+                  </g>
+                  <circle class="dial-pulse" cx="210" cy="70" r="5.5" />
+                </svg>
+                <div class="cycle-controls" data-cycle-controls data-playing="true" role="group" aria-label="Execution cycle playback">
+                  <button type="button" class="cycle-btn" data-cycle-prev aria-label="Previous step">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.2 5.4 8l4.6 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  </button>
+                  <button type="button" class="cycle-btn cycle-btn--play" data-cycle-play aria-label="Pause" aria-pressed="true">
+                    <svg class="icon-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.4h2.1v9.2H5zM8.9 3.4H11v9.2H8.9z" /></svg>
+                    <svg class="icon-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.3v9.4L12.6 8z" /></svg>
+                  </button>
+                  <button type="button" class="cycle-btn" data-cycle-next aria-label="Next step">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.2 10.6 8 6 12.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  </button>
+                  <span class="cycle-status" data-cycle-status aria-hidden="true">auto</span>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
-        <section id="turn-ui" class="section turn-ui-section" aria-labelledby="turn-ui-heading">
+        <section id="turn-ui" class="section" aria-labelledby="turn-ui-heading">
           <div class="container two-column">
             <div class="section-copy reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Turn UI</p>
@@ -282,7 +330,7 @@ talos</code></pre>
           </div>
         </section>
 
-        <section id="local-boundaries" class="section boundaries-section" aria-labelledby="boundaries-heading">
+        <section id="local-boundaries" class="section" aria-labelledby="boundaries-heading">
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Local boundaries</p>
@@ -325,25 +373,46 @@ talos</code></pre>
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Good Fits</p>
-              <h2 id="good-fits-heading">Bounded developer work. Narrow claims.</h2>
+              <h2 id="good-fits-heading">What Talos does today. And what's taking root for v1.</h2>
+              <p class="section-lede">
+                A living map of the work Talos handles now, and the branches budding
+                for v1. Hover any node for what it covers.
+              </p>
             </div>
-            <ul class="use-case-grid" data-reveal-stagger role="list">
-              <li class="use-case"><span class="use-case-tag">01</span><h3>Understand a codebase</h3><p>Inspect structure and read files before touching anything.</p></li>
-              <li class="use-case"><span class="use-case-tag">02</span><h3>Make bounded edits</h3><p>Propose, preview, and apply edits behind explicit approval.</p></li>
-              <li class="use-case"><span class="use-case-tag">03</span><h3>Verify static web fixes</h3><p>Diagnose selector bugs and confirm the fix on the right file, not a similar one.</p></li>
-              <li class="use-case"><span class="use-case-tag">04</span><h3>Inspect changed files</h3><p>Review diffs and changed-file summaries grounded in the trace.</p></li>
-              <li class="use-case"><span class="use-case-tag">05</span><h3>Summarize supported files</h3><p>Markdown, JSON/YAML/TOML, CSV, source, and other text-oriented project files.</p></li>
-              <li class="use-case"><span class="use-case-tag">06</span><h3>Run approved commands</h3><p>Test, build, and verification commands routed through configured profiles.</p></li>
-            </ul>
+            <div class="scope-layout">
+              <div class="scope-graph reveal">
+                <svg class="scope" viewBox="0 0 620 600" role="img" aria-label="An interactive force-directed graph of what Talos can do. Talos, a local workspace operator, links to four capabilities. Explore the workspace, available now: folders and files, search, changes. Summarize documents, available now: code and text, data files, and PDFs, Word and Excel. Scheduled for v1: PowerPoint and a sensitive-paperwork workflow. Edit code, available now: reviewed edits and edits across files. Run commands, available now: tests and builds. Drag a node to move it, click a node for details."></svg>
+                <noscript>
+                  <ul class="scope-fallback">
+                    <li>Explore the workspace (now): folders &amp; files, search, changes</li>
+                    <li>Summarize documents (now): code &amp; text, data files, PDFs, Word, Excel. v1: PowerPoint, sensitive-paperwork workflow</li>
+                    <li>Edit code (now): reviewed edits, edits across files</li>
+                    <li>Run commands (now): tests, builds</li>
+                  </ul>
+                </noscript>
+              </div>
+              <div class="scope-readout reveal">
+                <div class="scope-legend" aria-hidden="true">
+                  <span><span class="dot dot--now"></span>available now</span>
+                  <span><span class="dot dot--v1"></span>scheduled for v1</span>
+                </div>
+                <div class="scope-detail" data-scope-detail aria-live="polite">
+                  <p class="scope-detail-kind">local operator</p>
+                  <p class="scope-detail-name">Talos</p>
+                  <p class="scope-detail-text">A local-first operator for your workspace. It reads before acting, asks before writing, and keeps every turn on your machine.</p>
+                  <p class="scope-detail-meta">local engine · workspace-bounded · approved writes · local trace</p>
+                </div>
+              </div>
+            </div>
             <p class="use-case-caveat">
-              Scanned PDFs, image-only files, PowerPoint, corrupt or encrypted
-              documents, and sensitive personal paperwork remain out of beta
-              positioning.
+              PDFs, Word, and Excel are read and summarized on your machine today.
+              PowerPoint, image OCR, and the guided sensitive-paperwork workflow are
+              on the v1 roadmap.
             </p>
           </div>
         </section>
 
-        <section id="docs" class="section docs-section" aria-labelledby="docs-heading">
+        <section id="docs" class="section" aria-labelledby="docs-heading">
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Docs</p>
@@ -392,7 +461,7 @@ talos</code></pre>
           <div class="footer-brand">
             <a class="wordmark wordmark--footer" href="#overview" aria-label="Talos home">
               <span class="brand-mark" aria-hidden="true">
-                <img class="brand-icon" src="./design/talos-icon.png" alt="" width="26" height="26" decoding="async" />
+                <img class="brand-icon" src="./design/talos-icon-64.png" alt="" width="26" height="26" loading="lazy" decoding="async" />
               </span>
               <span>Talos</span>
             </a>
@@ -401,11 +470,25 @@ talos</code></pre>
             </p>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">
-            <a href="https://github.com/ai21z/talos-cli" rel="noopener">GitHub</a>
+            <a href="https://github.com/ai21z/talos-cli">GitHub</a>
             <a href="#execution">Execution</a>
             <a href="#local-boundaries">Boundaries</a>
             <a href="#docs">Docs</a>
           </nav>
+        </div>
+        <div class="container footer-signature">
+          <p class="signature">
+            <span class="signature-lead">Lovecrafted by</span>
+            <span class="signature-sep" aria-hidden="true">·</span>
+            <a class="signature-sigil-link" href="https://zounarakis.com" aria-label="Vissarion Zounarakis, personal site">
+              <img class="signature-sigil" src="./design/vz-sigil.png" alt="" width="24" height="24" loading="lazy" decoding="async" />
+            </a>
+            <span class="signature-sep" aria-hidden="true">·</span>
+            <a class="signature-name" href="https://zounarakis.com">Vissarion Zounarakis</a>
+            <span class="signature-year">2026</span>
+            <span class="signature-sep" aria-hidden="true">·</span>
+            <a class="signature-email" href="mailto:vissarion@zounarakis.com">vissarion@zounarakis.com</a>
+          </p>
         </div>
       </footer>
     </div>
