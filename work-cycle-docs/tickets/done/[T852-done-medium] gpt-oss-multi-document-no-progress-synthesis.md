@@ -1,6 +1,6 @@
-# [T852-open-medium] GPT-OSS Multi-Document No-Progress Synthesis
+# [T852-done-medium] GPT-OSS Multi-Document No-Progress Synthesis
 
-Status: open
+Status: done
 Priority: medium
 Type: implementation
 Branch: `v0.9.0-beta-dev`
@@ -126,7 +126,14 @@ Implementation pass:
   targets and states that no files were changed, instead of falling through to
   the generic no-progress failure policy.
 - The loop limit is unchanged.
-- T852 remains open pending the GPT-OSS scn-11 live rerun.
+- Implementation commit:
+  `6ec410a71fd2219356e3c80cc624b75be7c67002`.
+- Live closeout rerun:
+  `local/beta-pre-release-test-scenarios/runs/t852-6ec410a7/gpt-oss-20b/scn-11-mixed-format-analysis/transcript.txt`.
+- The live GPT-OSS scn-11 rerun on the installed build returned the bounded
+  `Read evidence complete` stop, listed `budget.xlsx`, `q3.pdf`, and
+  `targets.csv`, required zero approvals, and left git status/diff artifacts
+  empty.
 
 ## Architecture Metadata
 
@@ -208,4 +215,7 @@ Commands:
 
 ## Known Follow-Ups
 
-- Re-run T842 scn-11 on gpt-oss after implementation.
+- Broader GPT-OSS multi-document synthesis quality remains a model/runtime
+  quality topic for future retrieval or synthesis work. T852 closes only the
+  generic no-progress terminal outcome for the evidence-complete read-only
+  case.

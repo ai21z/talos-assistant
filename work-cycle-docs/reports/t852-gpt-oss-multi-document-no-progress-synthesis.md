@@ -1,13 +1,13 @@
 # T852 GPT-OSS Multi-Document No-Progress Synthesis
 
-Status: implemented awaiting live review
+Status: done
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
-Implementation state: pending commit in this changeset
+Implementation commit: `6ec410a71fd2219356e3c80cc624b75be7c67002`
 
 ## Source Evidence
 
-- Ticket: `work-cycle-docs/tickets/open/[T852-open-medium] gpt-oss-multi-document-no-progress-synthesis.md`
+- Ticket: `work-cycle-docs/tickets/done/[T852-done-medium] gpt-oss-multi-document-no-progress-synthesis.md`
 - T842 scenario: `local/beta-pre-release-test-scenarios/scn-11-mixed-format-analysis`
 - Historical failing model/backend: `gpt-oss:20b` through managed `llama.cpp`
 - Historical prompt:
@@ -69,6 +69,35 @@ Focused suites run during implementation:
 The first red run failed because the old behavior still returned the generic
 no-progress failure. The final focused runs passed.
 
+## Live Closeout Evidence
+
+Installed build rerun:
+
+```powershell
+.\gradlew.bat installDist --no-daemon
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\local\beta-pre-release-test-scenarios\run-scenarios.ps1 -Only scn-11-mixed-format-analysis -Model gpt-oss-20b -ModelPath "C:\Users\arisz\.cache\huggingface\hub\models--ggml-org--gpt-oss-20b-GGUF\snapshots\e1dc459feff949ff451ce107337a2026daa80df8\gpt-oss-20b-mxfp4.gguf" -Port 18121 -Context 16384 -OutSubdir "runs\t852-6ec410a7\gpt-oss-20b" -StopStale
+```
+
+Artifact:
+
+```text
+local/beta-pre-release-test-scenarios/runs/t852-6ec410a7/gpt-oss-20b/scn-11-mixed-format-analysis/transcript.txt
+```
+
+Observed result:
+
+- contract: `READ_ONLY_QA`;
+- model/backend: `llama_cpp/gpt-oss-20b`;
+- tools: four `talos.read_file` calls;
+- final answer: `Read evidence complete, but no final synthesis was produced.`;
+- listed gathered files: `budget.xlsx`, `q3.pdf`, `targets.csv`;
+- approvals: `required=0 granted=0 denied=0`;
+- git status artifact: empty;
+- git diff artifact: empty.
+
+T852 therefore satisfies the bounded terminal-outcome acceptance condition. It
+does not prove GPT-OSS can now synthesize the full cross-document answer.
+
 ## Non-Claims
 
 - T852 does not prove GPT-OSS now produces a complete cross-document answer.
@@ -77,13 +106,7 @@ no-progress failure. The final focused runs passed.
 - T852 does not close broader GPT-OSS multi-document synthesis quality work.
 - T852 does not replace the required live scn-11 rerun before ticket closeout.
 
-## Remaining Review Gate
+## Closeout
 
-Before closing T852, rerun the T842 scn-11 mixed-format analysis prompt on
-GPT-OSS against the current installed build. Acceptable outcomes:
-
-- GPT-OSS produces a grounded answer from the gathered files; or
-- Talos stops with the bounded evidence-complete failure instead of the generic
-  failure-policy message.
-
-The run must confirm no files changed and no approval/mutation path was entered.
+T852 is closed. Future retrieval or synthesis quality work should continue
+under T847 or a later scoped ticket.
