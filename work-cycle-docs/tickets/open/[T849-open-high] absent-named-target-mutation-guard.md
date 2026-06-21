@@ -125,6 +125,10 @@ Implementation update:
   `dev.talos.runtime.toolcall`.
 - The guard currently covers high-confidence `name()` in `file` requests such
   as `Modify foo() in helper.py`.
+- Pass 2 expands the same edit-verb guard to the real scn-14 wording
+  `Modify the existing function foo() in helper.py...` while keeping
+  `add` / `create` outside the trigger so new-function requests are not
+  over-blocked.
 - The guard requires complete same-turn read evidence before approval. If the
   readback proves the named Python function is absent, it blocks `write_file`
   and `edit_file` before execution, records a failed pre-execution mutation,

@@ -3,12 +3,14 @@
 ## [Unreleased]
 
 - [T849] Named-function mutation requests such as "Modify foo() in helper.py"
-  now fail closed before approval when the same-turn readback proves that
-  `foo()` is absent from `helper.py`. The guard is intentionally narrow: it
-  covers high-confidence `name()`-in-file requests, requires complete
-  same-turn read evidence before approval, and blocks both `write_file` and
-  `edit_file` attempts from retargeting another function. T849 remains open
-  for owner/Opus live scn-14 review before closeout.
+  and "Modify the existing function foo() in helper.py" now fail closed before
+  approval when the same-turn readback proves that `foo()` is absent from
+  `helper.py`. The guard is intentionally narrow: it covers high-confidence
+  `name()`-in-file edit requests, requires complete same-turn read evidence
+  before approval, and blocks both `write_file` and `edit_file` attempts from
+  retargeting another function. Add/create requests such as "Add a function
+  foo() to helper.py" are not blocked by this guard. T849 remains open for
+  owner/Opus live scn-14 review before closeout.
 - [T848] Direct "fix <problem> in <file>" prompts and file-scoped defect
   prompts such as "There is a bug in calc.py... Fix multiply..." now resolve
   to a mutation-capable file-edit contract instead of a read-only turn. The
