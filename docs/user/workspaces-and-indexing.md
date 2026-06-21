@@ -54,6 +54,12 @@ Protected and unsupported files remain governed by policy.
 
 Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
 
+For RAG, BM25, vector retrieval, and when to prefer direct reads, see
+[Retrieval And Vectors](retrieval-and-vectors.md).
+
+RAG in Talos means the local Lucene index and retrieval pipeline, not cloud
+search or a vector database.
+
 ## Reindex
 
 Inside the REPL:
@@ -73,6 +79,13 @@ stale.
 Retrieval and direct file reads are different:
 
 - retrieval uses the index and snippets
+- BM25 works without embeddings and is best for exact names, paths,
+  identifiers, config keys, and obvious text matches
+- vector retrieval requires a local embedding endpoint and helps with semantic
+  or fuzzy questions
+- if embeddings are disabled or fail, Talos falls back to BM25-only retrieval
+- Vector retrieval requires a local embedding endpoint. When embeddings are
+  disabled or fail, Talos falls back to BM25-only retrieval.
 - direct reads inspect specific files through tools
 - protected content may require approval before direct inspection
 - private mode changes how protected or extracted content can enter model

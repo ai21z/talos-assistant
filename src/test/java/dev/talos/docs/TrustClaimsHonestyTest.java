@@ -21,9 +21,20 @@ class TrustClaimsHonestyTest {
             "Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; "
                     + "`run_command` claims and read/answer factual claims are not yet equivalently covered.";
     private static final String SECRET_REDACTION_BOUNDARY =
-            "Secret redaction currently catches common key=value secret shapes and known canaries; "
-                    + "it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, "
-                    + "connection strings, or high-entropy blobs.";
+            "Secret redaction is best-effort. It covers common key=value secret shapes, "
+                    + "known canaries, common standalone token prefixes, AWS access-key shapes, "
+                    + "JWT-like tokens, PEM private-key blocks, and URL/connection-string userinfo "
+                    + "in model-context and durable sinks. Command-output handoff also withholds "
+                    + "bounded high-entropy command streams before model context. This is not "
+                    + "complete secret, PII, or credential detection.";
+    private static final String RAG_LOCAL_BOUNDARY =
+            "RAG in Talos means the local Lucene index and retrieval pipeline, not cloud search "
+                    + "or a vector database.";
+    private static final String VECTOR_OPTIONAL_BOUNDARY =
+            "Vector retrieval requires a local embedding endpoint. When embeddings are disabled "
+                    + "or fail, Talos falls back to BM25-only retrieval.";
+    private static final String RETRIEVAL_PERMISSION_BOUNDARY =
+            "Retrieval is evidence, not permission to inspect everything.";
     private static final String COMMAND_OUTPUT_BOUNDARY =
             "`run_command` stdout and stderr pass through the model-context handoff boundary. "
                     + "Non-sensitive command output remains visible to the model for verification answers; "
@@ -57,6 +68,23 @@ class TrustClaimsHonestyTest {
                     |Talos\\b.{0,80}\\bis\\s+(?:the\\s+)?only\\s+agentic\\s+coding\\s+tool
                     |nobody\\s+else
                     |unlike\\s+every\\s+competitor)\\b
+                    """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
+    private static final Pattern UNBOUNDED_VECTOR_CLAIM =
+            Pattern.compile("""
+                    \\b(?:vector\\s+retrieval\\s+is\\s+always\\s+active
+                    |always\\s+uses\\s+vectors
+                    |vectors\\s+are\\s+always\\s+enabled
+                    |requires\\s+a\\s+vector\\s+database
+                    |cloud\\s+vector\\s+database)\\b
+                    """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
+    private static final Pattern COMPLETE_SECRET_CLAIM =
+            Pattern.compile("""
+                    \\b(?:detects\\s+all\\s+secrets
+                    |guaranteed\\s+secret\\s+redaction
+                    |complete\\s+credential\\s+detection
+                    |complete\\s+PII\\s+detection
+                    |secret-proof
+                    |PII-proof)\\b
                     """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
 
     @Test
@@ -115,6 +143,36 @@ class TrustClaimsHonestyTest {
 
         assertContains(publicPitch, ANTI_OVERCLAIM_BOUNDARY);
         assertContains(publicPitch, TRACE_INTEGRITY_BOUNDARY);
+        assertPatternAbsent(publicPitch, UNBOUNDED_VECTOR_CLAIM);
+        assertPatternAbsent(publicPitch, COMPLETE_SECRET_CLAIM);
+    }
+
+    @Test
+    void ragVectorAndBestPracticeDocsBoundRetrievalClaims() throws Exception {
+        String retrieval = read("docs/user/retrieval-and-vectors.md");
+        String bestPractices = read("docs/user/beta-best-practices.md");
+        String workspaceIndexing = read("docs/user/workspaces-and-indexing.md");
+        String readme = read("README.md");
+        String publicDocs = read("README.md") + "\n" + read("AGENTS.md") + "\n" + readMarkdownTree("docs");
+
+        for (String doc : new String[] { retrieval, workspaceIndexing, readme }) {
+            assertContainsNormalized(doc, RAG_LOCAL_BOUNDARY);
+            assertContainsNormalized(doc, VECTOR_OPTIONAL_BOUNDARY);
+        }
+
+        assertContainsNormalized(retrieval, RETRIEVAL_PERMISSION_BOUNDARY);
+        assertContains(bestPractices, "Start Talos in the project directory you actually want to work on.");
+        assertContains(bestPractices, "Index only workspaces where local indexing is acceptable.");
+        assertContains(bestPractices, "Use RAG for broad discovery");
+        assertContains(bestPractices, "Use direct reads for exact facts");
+        assertContains(bestPractices, "Do not index folders full of private paperwork");
+        assertContains(retrieval, "Private mode disables RAG/retrieve by default unless explicitly enabled.");
+        assertContains(retrieval, "Do not assume the vector lane is active.");
+        assertContainsNormalized(retrieval,
+                "Talos does not yet claim measured workspace-intelligence quality across a broad corpus.");
+
+        assertPatternAbsent(publicDocs, UNBOUNDED_VECTOR_CLAIM);
+        assertPatternAbsent(publicDocs, COMPLETE_SECRET_CLAIM);
     }
 
     @Test
@@ -223,6 +281,12 @@ class TrustClaimsHonestyTest {
 
     private static void assertContains(String text, String expected) {
         assertTrue(text.contains(expected), "Missing required trust disclosure: " + expected);
+    }
+
+    private static void assertContainsNormalized(String text, String expected) {
+        String normalizedText = text.replaceAll("\\s+", " ").trim();
+        String normalizedExpected = expected.replaceAll("\\s+", " ").trim();
+        assertTrue(normalizedText.contains(normalizedExpected), "Missing required bounded wording: " + expected);
     }
 
     private static void assertDoesNotContainIgnoringCase(String text, String forbidden) {

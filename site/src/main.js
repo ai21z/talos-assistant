@@ -579,8 +579,8 @@ function setupScope() {
 
   const root = {
     name: "Talos",
-    text: "A local-first operator for your workspace. It reads before acting, asks before writing, and keeps every turn on your machine.",
-    meta: "local engine · workspace-bounded · approved writes · local trace",
+    text: "A local-by-default operator for your workspace. It reads before acting, asks before writing, and keeps model turns on localhost unless remote endpoints are explicitly allowed.",
+    meta: "localhost-gated by default · workspace-bounded · approved writes · local trace",
   };
   const branches = [
     {

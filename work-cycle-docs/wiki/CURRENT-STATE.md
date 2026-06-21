@@ -194,6 +194,13 @@ confidence_histogram:
   8.3-style short-name segments after realpath failure. T841 broadened the
   tracked README/AGENTS/docs honesty guard against unqualified competitor
   exclusivity claims while keeping competitor-matrix evidence local-only.
+- Pre-release work after Wave 6 trust fixes is now ticketed from T842 onward:
+  T842 owner-run full manual audit remains parallel, T843 site honesty fixes
+  are implemented and awaiting owner copy acceptance, T844 RAG/vector and beta
+  best-practices docs are implemented and awaiting review, T845 model/hardware
+  range evidence is waiting on accepted T842 data, T846 doctor diagnostics are
+  implemented and awaiting review, and T847 opens the retrieval gold-context
+  harness track.
 
 ```talos-wiki-claims
 {

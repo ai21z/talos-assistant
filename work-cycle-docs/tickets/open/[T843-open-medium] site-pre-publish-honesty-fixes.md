@@ -44,6 +44,22 @@ items the test suite does not catch or that are softer framing.
 - `cd site; npm run build` succeeds.
 - No capability claim regresses (PDF/DOCX/XLSX now, PowerPoint/OCR/sensitive-docs v1).
 
+## Implementation State
+
+Status: implemented-awaiting-owner-acceptance
+
+- Items 1 through 4 were reworded in `site/index.html`, `site/docs.html`,
+  `site/src/main.js`, and `site/src/docs.js`.
+- The site honesty suite is now wired into `.github/workflows/beta-dev-ci.yml`
+  before the Java checks, with `npm ci --prefix site`, `npm test --prefix site`,
+  and `npm run build --prefix site`.
+- The static site test suite now pins the bounded wording and bans the old
+  absolute "every turn" claims.
+- Verification on 2026-06-21:
+  - `npm test` from `site/`: 33 tests, 0 failures.
+  - `npm run build` from `site/`: build successful.
+- The ticket remains open until the owner accepts the revised site copy.
+
 ## Non-Goals
 
 - Not a pre-commit blocker. The site is committed to dev as-is.

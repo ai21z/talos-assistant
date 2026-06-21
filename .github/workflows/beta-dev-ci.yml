@@ -37,6 +37,19 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Run site honesty and build checks
+        run: |
+          npm ci --prefix site
+          npm test --prefix site
+          npm run build --prefix site
+
       - name: Run unit tests
         run: .\gradlew.bat test --no-daemon
 

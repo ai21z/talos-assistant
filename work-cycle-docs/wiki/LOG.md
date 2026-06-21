@@ -829,3 +829,18 @@ mechanically.
 - Kept the local competitor reports in ignored `local/marketing/`; no
   competitor matrix data was promoted to tracked docs or the site.
 - Left active Wave 6 high trust-fix and cheap consolidation tickets at none.
+
+## [2026-06-21] pre-release | Open T843-T847 beta readiness track
+
+- Implemented the scoped T843 site honesty copy fixes and wired `site` static
+  honesty/build checks into `.github/workflows/beta-dev-ci.yml`; T843 remains
+  open for owner copy acceptance.
+- Added T844 RAG/vector and beta best-practices user docs, plus tracked docs
+  honesty guards for bounded retrieval and best-effort redaction wording.
+- Added T845 as an evidence-waiting model/hardware range report scaffold
+  pending accepted T842 manual-test data.
+- Implemented T846 doctor diagnostics for bounded runtime/hardware facts,
+  retrieval/vector state, embedding host locality, BM25-only visibility, and
+  explicit `GPU/VRAM not probed by Talos` wording.
+- Added T847 as the next retrieval gold-context harness ticket so retrieval
+  intelligence work starts from measured context quality.

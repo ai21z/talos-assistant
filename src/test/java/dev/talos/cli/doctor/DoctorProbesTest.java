@@ -57,6 +57,22 @@ class DoctorProbesTest {
         assertTrue(result.detail().contains("under strict mode"));
     }
 
+    // ── runtime environment ─────────────────────────────────────────────
+
+    @Test
+    void runtimeEnvironmentReportsBoundedHardwareFactsWithoutGpuClaim() {
+        ProbeResult result = new RuntimeEnvironmentProbe().run(ctx(new Config()));
+
+        assertEquals(ProbeResult.Status.PASS, result.status());
+        assertTrue(result.detail().contains("os="), result.detail());
+        assertTrue(result.detail().contains("arch="), result.detail());
+        assertTrue(result.detail().contains("java="), result.detail());
+        assertTrue(result.detail().contains("cpu="), result.detail());
+        assertTrue(result.detail().contains("jvmMaxMemoryMb="), result.detail());
+        assertTrue(result.detail().contains("talosHomeFreeMb="), result.detail());
+        assertTrue(result.detail().contains("GPU/VRAM not probed by Talos"), result.detail());
+    }
+
     // ── engine-files ─────────────────────────────────────────────────────
 
     @Test
@@ -224,6 +240,64 @@ class DoctorProbesTest {
         ProbeResult result = new HomeWritableProbe().run(ctx);
 
         assertEquals(ProbeResult.Status.FAIL, result.status());
+    }
+
+    // ── retrieval / vectors ─────────────────────────────────────────────
+
+    @Test
+    void retrievalStateShowsBm25OnlyWhenVectorsDisabled() {
+        Config cfg = new Config();
+        Map<String, Object> rag = new LinkedHashMap<>();
+        rag.put("vectors", Map.of("enabled", false));
+        cfg.data.put("rag", rag);
+        cfg.data.put("embed", Map.of("provider", "disabled", "model", "none"));
+
+        ProbeResult result = new RetrievalStateProbe().run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.PASS, result.status());
+        assertTrue(result.detail().contains("vectors=OFF"), result.detail());
+        assertTrue(result.detail().contains("BM25-only"), result.detail());
+        assertTrue(result.detail().contains("embedding=disabled/none"), result.detail());
+        assertTrue(result.detail().contains("embedding dimension not probed by doctor"), result.detail());
+        assertTrue(result.detail().contains("GPU/VRAM not probed by Talos"), result.detail());
+    }
+
+    @Test
+    void retrievalStateShowsRemoteEmbeddingHostRejectedWithoutAllowRemote() {
+        Config cfg = new Config();
+        cfg.data.put("embed", Map.of(
+                "provider", "compat",
+                "model", "embedder",
+                "host", "http://127.0.0.1.evil.com:8000",
+                "allow_remote", false));
+        cfg.data.put("rag", Map.of("vectors", Map.of("enabled", true)));
+
+        ProbeResult result = new RetrievalStateProbe().run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.WARN, result.status());
+        assertTrue(result.detail().contains("locality=remote-rejected"), result.detail());
+        assertTrue(result.detail().contains("BM25-only fallback likely"), result.detail());
+    }
+
+    @Test
+    void retrievalStateSanitizesSecretShapedEmbeddingHost() {
+        Config cfg = new Config();
+        String secretHost = "https://user:sk-test-secretsecretsecretsecret@example.com";
+        cfg.data.put("embed", Map.of(
+                "provider", "compat",
+                "model", "embedder",
+                "host", secretHost,
+                "allow_remote", true));
+        cfg.data.put("rag", Map.of("vectors", Map.of("enabled", true)));
+
+        ProbeResult result = new RetrievalStateProbe().run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.PASS, result.status());
+        assertTrue(result.detail().contains("host=[redacted]"), result.detail());
+        assertTrue(result.detail().contains("locality=remote-allowed"), result.detail());
+        assertTrue(result.detail().contains("mode=hybrid if embedding probe succeeds"), result.detail());
+        assertTrue(result.detail().contains("model=embedder"), result.detail());
+        assertTrue(!result.detail().contains("sk-test-secretsecretsecretsecret"), result.detail());
     }
 
     // ── helpers ──────────────────────────────────────────────────────────
