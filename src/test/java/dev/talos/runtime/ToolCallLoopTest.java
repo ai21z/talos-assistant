@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -222,6 +223,69 @@ class ToolCallLoopTest {
                     "same-turn read evidence should match canonical equivalent ./ write paths");
             assertEquals("Intro\n", writeOutcome.mutationEvidence().oldString());
             assertEquals("Intro\nRelease gate note\n", writeOutcome.mutationEvidence().newString());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void readDisplayWritePayloadIsBlockedBeforeApprovalAndLeavesFileUnchanged() throws Exception {
+        Path ws = Files.createTempDirectory("talos-read-display-write-containment-");
+        try {
+            Files.writeString(ws.resolve("helper.py"), """
+                    def bar():
+                        return 1
+                    """);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            AtomicInteger approvals = new AtomicInteger();
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 3);
+
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("Modify helper.py so bar returns 99.")));
+            var calls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_read",
+                            "talos.read_file",
+                            Map.of("path", "helper.py")),
+                    new ChatMessage.NativeToolCall(
+                            "call_write",
+                            "talos.write_file",
+                            Map.of(
+                                    "path", "helper.py",
+                                    "content", "1 | def bar():\n2 |     return 99\n")));
+            Context ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("No file was changed.")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run("", calls, messages, ws, ctx);
+
+            ToolCallLoop.ToolOutcome writeOutcome = result.toolOutcomes().stream()
+                    .filter(outcome -> "talos.write_file".equals(outcome.toolName()))
+                    .findFirst()
+                    .orElseThrow();
+            assertAll(
+                    () -> assertFalse(writeOutcome.success(), "poisoned write must fail before execution"),
+                    () -> assertTrue(writeOutcome.errorMessage().contains("read-display line prefixes"),
+                            writeOutcome.errorMessage()),
+                    () -> assertEquals(0, approvals.get(), "guard must block before approval is requested"),
+                    () -> assertEquals("""
+                            def bar():
+                                return 1
+                            """, Files.readString(ws.resolve("helper.py"))),
+                    () -> assertEquals(0, result.mutatingToolSuccesses()));
         } finally {
             deleteRecursive(ws);
         }
