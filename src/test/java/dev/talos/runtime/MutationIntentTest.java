@@ -97,9 +97,13 @@ class MutationIntentTest {
                 "How would you fix multiply in calc.py?",
                 "Can you explain how to fix the bug in calc.py?",
                 "There is a bug in calc.py. Explain how to fix multiply.",
+                "There is a bug in calc.py. How would you fix it?",
                 "Should I fix the bug in calc.py?",
                 "There is a bug in calc.py. Should I fix multiply?",
-                "There is a bug in calc.py, but do not change files.")) {
+                "There is a bug in calc.py, but do not change files.",
+                "There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.")) {
             assertFalse(MutationIntent.looksExplicitMutationRequest(input), input);
         }
     }

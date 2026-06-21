@@ -114,11 +114,11 @@ public final class MutationIntent {
     private static final Set<String> READ_ONLY_NEGATIONS = Set.of(
             "do not change", "do not edit", "do not modify", "do not write",
             "do not create", "do not save", "do not apply", "do not touch",
-            "do not mutate", "don't change", "don't edit", "don't modify",
+            "do not mutate", "do not fix", "don't change", "don't edit", "don't modify",
             "don't write", "don't create", "don't save", "don't apply",
-            "don't touch", "don't mutate", "dont change", "dont edit",
+            "don't touch", "don't mutate", "don't fix", "dont change", "dont edit",
             "dont modify", "dont write", "dont create", "dont save",
-            "dont apply", "dont touch", "dont mutate", "leave files unchanged",
+            "dont apply", "dont touch", "dont mutate", "dont fix", "leave files unchanged",
             "no file changes", "without changing"
     );
 
@@ -249,6 +249,10 @@ public final class MutationIntent {
     private static final Pattern ADVISORY_WHAT_HOW_MUTATION_QUESTION = Pattern.compile(
             "^" + PREFIX + "(?:what|how)\\s+(?:would|should|could)\\s+(?:you|i|we)\\s+"
                     + CORE_MUTATION_VERBS + "\\b");
+
+    private static final Pattern EMBEDDED_ADVISORY_PRONOUN_MUTATION_QUESTION = Pattern.compile(
+            "(?:^|[.!?]\\s+)(?:what|how)\\s+(?:would|should|could)\\s+(?:you|i|we)\\s+"
+                    + CORE_MUTATION_VERBS + "\\s+(?:it|this|that|them)\\s*\\?");
 
     private static final Pattern INSTRUCTIONAL_MUTATION_QUESTION = Pattern.compile(
             "\\b(?:how\\s+to|how\\s+(?:can|could|should)\\s+(?:i|we)|"
@@ -495,7 +499,8 @@ public final class MutationIntent {
     private static boolean looksAdvisoryMutationQuestion(String lower) {
         return lower != null
                 && (ADVISORY_MUTATION_QUESTION.matcher(lower).find()
-                || ADVISORY_WHAT_HOW_MUTATION_QUESTION.matcher(lower).find());
+                || ADVISORY_WHAT_HOW_MUTATION_QUESTION.matcher(lower).find()
+                || EMBEDDED_ADVISORY_PRONOUN_MUTATION_QUESTION.matcher(lower).find());
     }
 
     private static boolean looksInstructionalMutationQuestion(String lower) {

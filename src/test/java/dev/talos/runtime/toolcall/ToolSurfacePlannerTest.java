@@ -134,6 +134,25 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void fileScopedDefectAdviceAndNegationOmitMutationTools() {
+        for (String input : List.of(
+                "There is a bug in calc.py. How would you fix it?",
+                "There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.")) {
+            ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                    TaskContractResolver.fromUserRequest(input),
+                    ExecutionPhase.APPLY,
+                    registry());
+
+            List<String> names = plan.nativeToolNames();
+            assertFalse(names.contains("talos.write_file"), input + " -> " + names);
+            assertFalse(names.contains("talos.edit_file"), input + " -> " + names);
+            assertFalse(names.contains("talos.apply_workspace_batch"), input + " -> " + names);
+        }
+    }
+
+    @Test
     void sourceDerivedExactFileCreationUsesFileWriteSurface() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(

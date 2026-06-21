@@ -897,3 +897,16 @@ mechanically.
   `TaskContractResolverTest`, and `ToolSurfacePlannerTest`, while preserving
   advisory/explanatory/no-change variants as non-mutating.
 - T848 remains open for owner/Opus review and live scn-13 rerun before closeout.
+
+## [2026-06-21] code-fix | Harden T848 fix-it false positives
+
+- Added a third T848 implementation pass after adversarial live prompts showed
+  old `fix it` markers could still expose mutation tools for read-only
+  questions and explicit no-fix requests.
+- `do not fix`, `don't fix`, and `dont fix` now count as global read-only
+  negations.
+- Embedded advisory pronoun questions such as `There is a bug in calc.py. How
+  would you fix it?` now stay non-mutating, while the real scn-13 imperative
+  `Fix multiply...` prompt remains mutation-capable.
+- T848 remains open for review and live rerun of scn-13 plus the adversarial
+  question/no-fix prompts before closeout.
