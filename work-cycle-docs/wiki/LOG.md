@@ -955,5 +955,18 @@ mechanically.
   presented as project names or other file-grounded facts unless observed in
   current-turn read/search/list results.
 - Added a red-first `CurrentTurnCapabilityFrameTest` regression for the T842
-  scn-10 prompt shape. T850 remains open pending the qwen scn-10 live rerun
-  before closeout.
+  scn-10 prompt shape. At implementation time, T850 was left open pending the
+  qwen scn-10 live rerun before closeout.
+
+## [2026-06-22] closeout | Close T850 read-only grounding
+
+- Reran the T842/scn-10 grounding/no-invention prompt on qwen against the
+  current installed build at `679dd17fe137e119567971afe445a7f5fca99147`.
+- Artifact:
+  `local/beta-pre-release-test-scenarios/runs/t850-679dd17f/qwen2.5-coder-14b/scn-10-grounding-no-invention/transcript.txt`.
+- Talos used one read-only tool call, `talos.read_file -> calc.py [ok]`, and
+  answered that it could not determine the project name from files in the
+  workspace.
+- The answer did not infer `loqj-cli` from the workspace path. Workspace
+  status/diff artifacts were empty. T850 is closed; T852 remains open as the
+  next beta-correctness ticket.
