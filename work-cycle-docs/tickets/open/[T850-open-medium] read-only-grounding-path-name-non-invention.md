@@ -6,6 +6,9 @@ Type: implementation
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 
+Implementation state: deterministic current-turn frame guard implemented;
+awaiting qwen scn-10 live review before closeout.
+
 ## Evidence Summary
 
 - Source: T842 manual beta scenario evidence.
@@ -177,6 +180,47 @@ Commands:
 .\gradlew.bat check --no-daemon
 .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 ```
+
+## Implementation Evidence
+
+Implementation batch:
+
+- Added a `[FileGroundedAnswer]` section to `CurrentTurnCapabilityFrame` for
+  non-mutating `READ_ONLY_QA`, `WORKSPACE_EXPLAIN`, and `DIAGNOSE_ONLY` turns.
+- The section states that workspace path/name metadata is not file evidence and
+  that workspace directory names must not be presented as project names or other
+  file-grounded facts unless observed in current-turn read/search/list results.
+- The implementation does not change mutation classification, tool selection,
+  retrieval behavior, or final-answer verification.
+
+Deterministic test added:
+
+- `CurrentTurnCapabilityFrameTest.readOnlyFileGroundedPromptSeparatesWorkspacePathMetadataFromFileEvidence`
+
+Red-first focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest.readOnlyFileGroundedPromptSeparatesWorkspacePathMetadataFromFileEvidence" --no-daemon
+```
+
+Result: FAIL before implementation because the frame did not include the
+workspace-path-not-file-evidence boundary.
+
+Focused green gates:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest.readOnlyFileGroundedPromptSeparatesWorkspacePathMetadataFromFileEvidence" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --tests "dev.talos.runtime.policy.CurrentTurnPromptInstructionsTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon
+```
+
+Result: PASS.
+
+Review status:
+
+- T850 remains open.
+- Required before closeout: rerun the T842/scn-10 grounding/no-invention prompt
+  on qwen and confirm Talos does not infer a project name from the workspace path
+  when no inspected file states it.
 
 ## Work-Test Cycle Notes
 

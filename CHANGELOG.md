@@ -2,14 +2,21 @@
 
 ## [Unreleased]
 
+- [T850] Read-only workspace QA and workspace-explain turns now receive a
+  current-turn `[FileGroundedAnswer]` instruction that separates workspace
+  path/name metadata from inspected file evidence. The model may use paths as
+  location labels, but must not present a workspace directory name as a project
+  name or other file-grounded fact unless that fact appears in current-turn
+  read/search/list results. This is a prompt-frame grounding fix only; T850
+  remains open pending the qwen scn-10 live rerun.
 - [T851] Added a pre-approval containment guard for Talos read-display line
   prefixes in mutation payloads. After a same-turn `read_file` display, a
   `write_file` content body or `edit_file` replacement that carries `N | ...`
   display lines for that target now fails before approval and before disk
   writes, with a visible tool-result diagnostic. Ordinary source writes remain
   allowed, and literal numbered-pipe text is not blocked unless it is tied to
-  same-turn read-display evidence. T851 remains open for owner/live scn-14
-  review before closeout.
+  same-turn read-display evidence. T851 is closed after two-model scn-14
+  rerun and target-present GPT-OSS containment evidence.
 - [T849] Named-function mutation requests such as "Modify foo() in helper.py"
   and "Modify the existing function foo() in helper.py" now fail closed before
   approval when the same-turn readback proves that `foo()` is absent from

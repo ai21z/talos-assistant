@@ -204,7 +204,9 @@ confidence_histogram:
   beta-correctness triage tickets: T848 mutation-intent fix-file prompts, T849
   absent named-target guard, T850 read-only path/name grounding, T851
   read-display write containment, and T852 GPT-OSS multi-document no-progress
-  synthesis. T851 is now closed after the live two-model scn-14 rerun and a
+  synthesis. T850 has a deterministic current-turn `[FileGroundedAnswer]`
+  framing guard implemented and remains open pending the qwen scn-10 live
+  rerun. T851 is closed after the live two-model scn-14 rerun and a
   target-present GPT-OSS corruption probe proved the read-display containment
   guard blocks poisoned `N |` write payloads before they reach disk.
 

@@ -395,6 +395,25 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void readOnlyFileGroundedPromptSeparatesWorkspacePathMetadataFromFileEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Only state facts from the files you read. What is the project name?");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file", "talos.grep"),
+                List.of("talos.list_dir", "talos.read_file", "talos.grep"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("Workspace path/name metadata is not file evidence"), frame);
+        assertTrue(frame.contains("Do not present a workspace directory name as a project name"), frame);
+        assertTrue(frame.contains("only state file-grounded facts that were observed in read/search/list results"),
+                frame);
+    }
+
+    @Test
     void renderOmitsSuppressedContextDetailsFromModelGuidance() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,
