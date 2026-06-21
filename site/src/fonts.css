@@ -1,0 +1,54 @@
+/* Self-hosted faces, woff2 only. The site already requires WebGL2 and
+   backdrop-filter, so every browser that can render it supports woff2. The
+   .woff fallbacks @fontsource ships are dead weight, so these declarations
+   reference the woff2 files directly and drop the fallback. Latin subset for
+   the English text, Greek subset only for the ΤΑΛΩΣ wordmark. */
+@font-face {
+  font-family: "IM Fell English";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("../node_modules/@fontsource/im-fell-english/files/im-fell-english-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("../node_modules/@fontsource/spectral/files/spectral-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("../node_modules/@fontsource/spectral/files/spectral-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("../node_modules/@fontsource/spectral/files/spectral-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "GFS Neohellenic";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("../node_modules/@fontsource/gfs-neohellenic/files/gfs-neohellenic-greek-700-normal.woff2") format("woff2");
+}

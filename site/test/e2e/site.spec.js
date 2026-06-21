@@ -129,8 +129,8 @@ test("scroll-spy moves the active nav state as sections are visited", async ({ p
 test("staggered card grids reveal when scrolled into view", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  const card = page.locator(".use-case").first();
-  await page.locator("#good-fits").scrollIntoViewIfNeeded();
+  const card = page.locator(".boundary-band").first();
+  await page.locator("#local-boundaries").scrollIntoViewIfNeeded();
   await expect
     .poll(async () => Number(await card.evaluate((node) => getComputedStyle(node).opacity)), {
       timeout: 5000,

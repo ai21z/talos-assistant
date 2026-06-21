@@ -1,6 +1,8 @@
 import "./styles.css";
+import { setupRitualMenu } from "./menu.js";
 
 document.documentElement.classList.add("js");
+setupRitualMenu();
 
 // Import all user docs as raw strings at build time. The path is relative to
 // this file: site/src -> ../../docs/user. Vite resolves the glob and inlines
@@ -43,7 +45,7 @@ function renderInline(text) {
 
   working = escapeHtml(working);
 
-  // Bold (**x**) and italic (*x*) — bold first.
+  // Bold (**x**) and italic (*x*), bold first.
   working = working.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   working = working.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
 
@@ -182,7 +184,7 @@ function renderMarkdown(md) {
       continue;
     }
 
-    // Paragraph — collect contiguous non-blank lines that aren't block starts.
+    // Paragraph. Collect contiguous non-blank lines that aren't block starts.
     const buf = [line];
     i++;
     while (i < lines.length) {

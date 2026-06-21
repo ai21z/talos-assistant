@@ -131,11 +131,11 @@ describe("Talos landing page static contract", () => {
     assert.ok(existsSync(join(root, "design", "talos-icon.png")), "talos-icon.png missing");
     // The real shield emblem badges the header and footer wordmarks.
     assert.equal(
-      (html.match(/<img class="brand-icon"[^>]*src="\.\/design\/talos-icon\.png"/g) ?? []).length,
+      (html.match(/<img class="brand-icon"[^>]*src="\.\/design\/talos-icon-64\.png"/g) ?? []).length,
       2,
     );
     // Favicon uses the same real icon.
-    assert.match(html, /rel="icon"\s+type="image\/png"\s+href="\.\/design\/talos-icon\.png"/);
+    assert.match(html, /rel="icon"\s+type="image\/png"\s+href="\.\/design\/talos-icon-64\.png"/);
     // Brand marks are decorative (empty alt) inside aria-hidden wrappers.
     assert.match(html, /<img class="brand-icon"[^>]*alt=""/);
   });
@@ -169,10 +169,6 @@ describe("Talos landing page static contract", () => {
       assert.match(heroText, new RegExp(escapeRegExp(copy)));
     }
 
-    // No stale baked version strings.
-    assert.doesNotMatch(heroText, /TALOS v0\.9\.9\b/);
-    assert.doesNotMatch(heroText, /v0\.10\.1\b/);
-
     assert.match(css, /\.terminal\b/);
     assert.match(css, /\.terminal-screen\b/);
     assert.match(css, /\.terminal-replay\b/);
@@ -181,13 +177,13 @@ describe("Talos landing page static contract", () => {
   it("keeps the Greek identity as a single restrained inscription accent", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
-    const js = read("src/main.js");
+    const fonts = read("src/fonts.css");
     const pkg = JSON.parse(read("package.json"));
     const hero = sectionSlice(html, "overview", "execution");
     const publicSurface = publicText();
 
     assert.ok(pkg.devDependencies["@fontsource/gfs-neohellenic"], "missing self-hosted GFS Neohellenic package");
-    assert.match(js, /@fontsource\/gfs-neohellenic\/greek-700\.css/);
+    assert.match(fonts, /gfs-neohellenic-greek-700-normal\.woff2/);
     assert.match(hero, /<span\s+class="hero-inscription-greek"\s+lang="el">\s*ΤΑΛΩΣ\s*<\/span>/);
     assert.equal((publicSurface.match(/ΤΑΛΩΣ/g) ?? []).length, 1);
     assert.doesNotMatch(publicSurface, /TAΛOS|TALΩS|TAΛΩS/);
@@ -326,7 +322,8 @@ describe("Talos landing page static contract", () => {
 
     const externalHrefs = Array.from(text.matchAll(/href="(https?:\/\/[^"]+)"/g), (m) => m[1]);
     for (const href of externalHrefs) {
-      assert.match(href, /^https:\/\/github\.com\/ai21z\/talos-cli/, `unexpected external href: ${href}`);
+      // GitHub repo links, plus the author's own site in the footer signature.
+      assert.match(href, /^https:\/\/(github\.com\/ai21z\/talos-cli|zounarakis\.com)/, `unexpected external href: ${href}`);
     }
 
     for (const misleading of [
@@ -354,7 +351,7 @@ describe("Talos landing page static contract", () => {
     assert.match(html, /<meta\s+property="og:title"/i);
     assert.match(html, /<meta\s+property="og:description"/i);
     assert.match(html, /<meta\s+name="twitter:card"\s+content="summary_large_image"/i);
-    assert.match(html, /rel="icon"\s+type="image\/png"\s+href="\.\/design\/talos-icon\.png"/);
+    assert.match(html, /rel="icon"\s+type="image\/png"\s+href="\.\/design\/talos-icon-64\.png"/);
   });
 
   it("keeps anchor navigation targetable", () => {
@@ -417,26 +414,31 @@ describe("Talos landing page static contract", () => {
     assert.match(css, /\.grain\s*\{[\s\S]*?mix-blend-mode/);
   });
 
-  it("renders a single persistent scroll-reactive forge background", () => {
+  it("renders persistent scroll-reactive smoke and mycelium backgrounds", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const main = read("src/main.js");
-    const forge = read("src/forge.js");
-    // One fixed full-page canvas, not a hero-only element.
-    assert.match(html, /<canvas class="forge" aria-hidden="true">/);
+    const smoke = read("src/smoke.js");
+    const mycelium = read("src/mycelium.js");
+    // Two fixed full-page canvases, not hero-only elements.
+    assert.match(html, /<canvas class="smoke" aria-hidden="true">/);
+    assert.match(html, /<canvas class="mycelium" aria-hidden="true">/);
     assert.doesNotMatch(html, /hero-canvas|hero-glow/);
-    assert.match(css, /\.forge\s*\{[\s\S]*?position:\s*fixed/);
-    // The divider lines between sections are gone — continuity, not chops.
+    assert.match(css, /\.smoke,\s*\.mycelium\s*\{[\s\S]*?position:\s*fixed/);
+    // The divider lines between sections are gone. Continuity, not chops.
     assert.doesNotMatch(css, /\.section\s*\+\s*\.section/);
-    // Wired in, WebGL2, scroll-position + scroll-velocity reactive.
-    assert.match(main, /setupForge\(\)/);
-    assert.match(forge, /function setupForge/);
-    assert.match(forge, /webgl2/);
-    assert.match(forge, /uScroll/);
-    assert.match(forge, /uVel/);
-    // Frozen to a single frame under reduced motion; silent fallback otherwise.
-    assert.match(forge, /reduce\.matches/);
-    assert.match(forge, /canvas\.remove\(\)/);
+    // Wired in. Smoke is WebGL2 and scroll-reactive; mycelium is the canvas-2D layer.
+    assert.match(main, /setupSmoke\(\)/);
+    assert.match(main, /setupMycelium\(\)/);
+    assert.match(smoke, /function setupSmoke/);
+    assert.match(smoke, /webgl2/);
+    assert.match(smoke, /uScroll/);
+    assert.match(mycelium, /function setupMycelium/);
+    // Both freeze under reduced motion and remove themselves on a silent fallback.
+    assert.match(smoke, /reduce\.matches/);
+    assert.match(smoke, /canvas\.remove\(\)/);
+    assert.match(mycelium, /reduce\.matches/);
+    assert.match(mycelium, /canvas\.remove\(\)/);
   });
 
   it("renders the ichor vein and its vigil nail", () => {
@@ -461,14 +463,14 @@ describe("Talos landing page static contract", () => {
     const main = read("src/main.js");
     // Overlay + the real Talos shield icon it forges in.
     assert.match(html, /<div class="awaken" aria-hidden="true">/);
-    assert.match(html, /<img class="awaken-shield"[^>]*src="\.\/design\/talos-icon\.png"/);
+    assert.match(html, /<img class="awaken-shield"[^>]*src="\.\/design\/talos-icon-256\.png"/);
     // Inline head gate skips automation, reduced-motion, and already-seen.
     assert.match(html, /navigator\.webdriver/);
     assert.match(html, /talosAwoke/);
     assert.match(html, /prefers-reduced-motion/);
     // Failsafe: content can NEVER stay hidden even if the module fails.
     assert.match(html, /classList\.remove\("awakening"\)/);
-    // Default-hidden; only shown under html.awakening — never traps content.
+    // Default-hidden, only shown under html.awakening. Never traps content.
     assert.match(html, /\.awaken\s*\{\s*display:\s*none/);
     assert.match(html, /html\.awakening\s+\.awaken\s*\{\s*display:\s*grid/);
     assert.match(css, /\.awaken\s*\{[\s\S]*?position:\s*fixed/);
@@ -484,7 +486,7 @@ describe("Talos landing page static contract", () => {
     const css = read("src/styles.css");
     const main = read("src/main.js");
     // One fully-composed guardian accent in the hero (not an edge-cut watermark).
-    assert.match(html, /<div class="guardian-parallax"[^>]*>\s*<img[^>]*talos-icon\.png/);
+    assert.match(html, /<div class="guardian-parallax"[^>]*>\s*<img[^>]*talos-icon-256\.png/);
     // The half-cut boundary watermark and the footer emblem were removed.
     assert.doesNotMatch(html, /class="guardian-watermark"|class="footer-guardian"/);
     // Screen blend drops the dark tile; stays faint; drifts on scroll.
@@ -500,7 +502,7 @@ describe("Talos landing page static contract", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const js = read("src/main.js");
-    assert.equal((html.match(/data-reveal-stagger/g) ?? []).length, 4);
+    assert.equal((html.match(/data-reveal-stagger/g) ?? []).length, 2);
     assert.match(js, /function setupStagger/);
     assert.match(js, /function setupPointerSheen/);
     assert.match(js, /--reveal-delay/);

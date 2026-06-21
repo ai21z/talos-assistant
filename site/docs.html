@@ -7,7 +7,7 @@
       name="description"
       content="Talos documentation. Local-first CLI workspace operator. Install, setup, commands, approvals, privacy, and troubleshooting."
     />
-    <link rel="icon" type="image/png" href="./design/talos-icon.png" />
+    <link rel="icon" type="image/png" href="./design/talos-icon-64.png" />
     <title>Talos documentation | Local-first CLI workspace operator</title>
   </head>
   <body class="docs-body">
@@ -17,7 +17,7 @@
         <div class="container header-inner">
           <a class="wordmark" href="./index.html" aria-label="Talos home">
             <span class="brand-mark" aria-hidden="true">
-              <img class="brand-icon" src="./design/talos-icon.png" alt="" width="30" height="30" decoding="async" />
+              <img class="brand-icon" src="./design/talos-icon-64.png" alt="" width="30" height="30" decoding="async" />
             </span>
             <span class="wordmark-name">Talos</span>
           </a>
@@ -29,9 +29,31 @@
             <a href="./index.html#good-fits">Good Fits</a>
             <a href="./docs.html" aria-current="page">Docs</a>
           </nav>
-          <a class="button button--ghost header-cta" href="https://github.com/ai21z/talos-cli" rel="noopener">View on GitHub</a>
+          <a class="button button--ghost header-cta" href="https://github.com/ai21z/talos-cli">View on GitHub</a>
+          <button class="menu-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="ritual-menu" aria-label="Open menu">
+            <img class="menu-trigger-head" src="./design/talos-icon-64.png" alt="" width="34" height="34" decoding="async" />
+          </button>
         </div>
       </header>
+
+      <div class="ritual" id="ritual-menu" role="dialog" aria-modal="true" aria-label="Talos sections" tabindex="-1">
+        <div class="ritual-inner">
+          <div class="ritual-head">
+            <img class="ritual-sigil" src="./design/talos-icon-256.png" alt="" width="64" height="64" decoding="async" />
+            <p class="ritual-name">TALOS</p>
+            <button class="ritual-close" type="button" aria-label="Close menu">×</button>
+          </div>
+          <nav class="ritual-nav" aria-label="Sections">
+            <a href="./index.html#overview"><span class="ritual-no">01</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Overview</span></a>
+            <a href="./index.html#execution"><span class="ritual-no">02</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Execution</span></a>
+            <a href="./index.html#turn-ui"><span class="ritual-no">03</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Turn UI</span></a>
+            <a href="./index.html#local-boundaries"><span class="ritual-no">04</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Local Boundaries</span></a>
+            <a href="./index.html#good-fits"><span class="ritual-no">05</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Good Fits</span></a>
+            <a href="./docs.html" aria-current="page"><span class="ritual-no">06</span><span class="ritual-dot" aria-hidden="true"></span><span class="ritual-label">Docs</span></a>
+          </nav>
+          <a class="button button--ghost ritual-cta" href="https://github.com/ai21z/talos-cli">View on GitHub</a>
+        </div>
+      </div>
 
       <div class="docs-shell container">
         <aside class="docs-sidebar" aria-label="Documentation navigation">
@@ -79,7 +101,7 @@
               <p>
                 Talos is a local-first CLI workspace operator. The documentation pages
                 are rendered with JavaScript. Browse the
-                <a href="https://github.com/ai21z/talos-cli/tree/v0.9.0-beta-dev/docs/user" rel="noopener">source Markdown on GitHub</a>
+                <a href="https://github.com/ai21z/talos-cli/tree/v0.9.0-beta-dev/docs/user">source Markdown on GitHub</a>
                 if scripts are disabled.
               </p>
             </noscript>
@@ -92,7 +114,7 @@
           <div class="footer-brand">
             <a class="wordmark wordmark--footer" href="./index.html" aria-label="Talos home">
               <span class="brand-mark" aria-hidden="true">
-                <img class="brand-icon" src="./design/talos-icon.png" alt="" width="26" height="26" decoding="async" />
+                <img class="brand-icon" src="./design/talos-icon-64.png" alt="" width="26" height="26" loading="lazy" decoding="async" />
               </span>
               <span>Talos</span>
             </a>
@@ -101,11 +123,25 @@
             </p>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">
-            <a href="https://github.com/ai21z/talos-cli" rel="noopener">GitHub</a>
+            <a href="https://github.com/ai21z/talos-cli">GitHub</a>
             <a href="./index.html#execution">Execution</a>
             <a href="./index.html#local-boundaries">Boundaries</a>
             <a href="./docs.html">Docs</a>
           </nav>
+        </div>
+        <div class="container footer-signature">
+          <p class="signature">
+            <span class="signature-lead">Lovecrafted by</span>
+            <span class="signature-sep" aria-hidden="true">·</span>
+            <a class="signature-sigil-link" href="https://zounarakis.com" aria-label="Vissarion Zounarakis, personal site">
+              <img class="signature-sigil" src="./design/vz-sigil.png" alt="" width="24" height="24" loading="lazy" decoding="async" />
+            </a>
+            <span class="signature-sep" aria-hidden="true">·</span>
+            <a class="signature-name" href="https://zounarakis.com">Vissarion Zounarakis</a>
+            <span class="signature-year">2026</span>
+            <span class="signature-sep" aria-hidden="true">·</span>
+            <a class="signature-email" href="mailto:vissarion@zounarakis.com">vissarion@zounarakis.com</a>
+          </p>
         </div>
       </footer>
     </div>
