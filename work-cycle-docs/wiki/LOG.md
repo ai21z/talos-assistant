@@ -857,3 +857,17 @@ mechanically.
   `rag.vectors.enabled: true`.
 - Left T845 open for review and T847 open as the next measurement-first
   retrieval/workspace-intelligence ticket.
+
+## [2026-06-21] pre-release | Close T845 and ticket T842 correctness findings
+
+- Moved T845 to the done ticket ledger after owner/Opus review accepted the
+  narrow beta model/hardware evidence snapshot.
+- Preserved the report caveats: one Windows 11 machine, managed `llama.cpp`,
+  Qwen/GPT-OSS coverage, BM25-only retrieval, no validated hybrid/vector run,
+  and unknown hardware/timing fields left unknown.
+- Opened T848-T852 from the T842 manual findings before starting T847:
+  mutation-intent fix-file classification, absent named-target guarding,
+  read-only path/name grounding, read-display write containment, and GPT-OSS
+  multi-document no-progress synthesis.
+- Updated T847 so its retrieval follow-up themes remain valid but their ticket
+  numbers will be assigned after the beta-correctness sequence.

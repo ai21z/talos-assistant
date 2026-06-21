@@ -157,15 +157,20 @@ or generated reports.
 
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/Opus manual testing in parallel.
-- [T845 Beta model and hardware range evidence](../tickets/open/[T845-open-high]%20beta-model-and-hardware-range-evidence.md)
-  - Populated from accepted T842/Opus summaries; awaiting review.
 - [T847 Retrieval evidence and gold-context harness](../tickets/open/[T847-open-high]%20retrieval-evidence-and-gold-context-harness.md)
-  - Next measured retrieval/workspace-intelligence track.
+  - Retrieval/workspace-intelligence measurement track; paused behind the
+    current beta-correctness triage.
+- [T848 Mutation intent fix-file prompts](../tickets/open/[T848-open-high]%20mutation-intent-fix-file-prompts.md)
+- [T849 Absent named-target mutation guard](../tickets/open/[T849-open-high]%20absent-named-target-mutation-guard.md)
+- [T850 Read-only grounding path-name non-invention](../tickets/open/[T850-open-medium]%20read-only-grounding-path-name-non-invention.md)
+- [T851 Read-display line-number write containment](../tickets/open/[T851-open-high]%20read-display-line-number-write-containment.md)
+- [T852 GPT-OSS multi-document no-progress synthesis](../tickets/open/[T852-open-medium]%20gpt-oss-multi-document-no-progress-synthesis.md)
 
 Completed pre-release tickets:
 
 - [T843 Site pre-publish honesty fixes](../tickets/done/[T843-done-medium]%20site-pre-publish-honesty-fixes.md)
 - [T844 RAG, vectors, and beta best-practices docs](../tickets/done/[T844-done-high]%20rag-vectors-and-beta-best-practices-docs.md)
+- [T845 Beta model and hardware range evidence](../tickets/done/[T845-done-high]%20beta-model-and-hardware-range-evidence.md)
 - [T846 Beta hardware and retrieval diagnostics](../tickets/done/[T846-done-high]%20beta-hardware-and-retrieval-diagnostics.md)
 
 Completed Wave 6 high tickets:
