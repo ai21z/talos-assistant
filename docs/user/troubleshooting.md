@@ -8,6 +8,7 @@ Run:
 
 ```powershell
 talos status --verbose
+talos doctor
 ```
 
 Inside the REPL:
@@ -29,6 +30,12 @@ For top-level `talos status --verbose`, check:
 
 For REPL `/status --verbose`, check active mode, model, index path, config,
 limits, cache, document extraction, and XML compatibility status.
+
+`talos doctor` and `/doctor` run the same fast preflight probes. They report
+bounded local hardware/runtime facts, chat backend and model setup, RAG index
+state, vector setting, embedding provider/model/host locality, and whether
+retrieval is currently BM25-only or hybrid-if-embeddings-work. Doctor does not
+probe GPU/VRAM and says so explicitly.
 
 ## `talos` Is Not Found
 

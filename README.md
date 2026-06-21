@@ -103,7 +103,7 @@ not an overclaim.
 
 Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
 
-Secret redaction currently catches common key=value secret shapes and known canaries; it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, connection strings, or high-entropy blobs. Talos redacts common key=value secret shapes (api_key=, password:, token=) and known canaries from model context, logs, traces, and persisted artifacts. It does NOT yet detect bare credentials with no assignment syntax: standalone API tokens, JWTs, PEM private-key blocks, secrets embedded in URLs/connection strings, or high-entropy blobs. Do not rely on Talos to scrub such values from files it reads, command output, sessions, or traces.
+Secret redaction is best-effort. It covers common key=value secret shapes, known canaries, common standalone token prefixes, AWS access-key shapes, JWT-like tokens, PEM private-key blocks, and URL/connection-string userinfo in model-context and durable sinks. Command-output handoff also withholds bounded high-entropy command streams before model context. This is not complete secret, PII, or credential detection. Do not rely on Talos to scrub arbitrary sensitive text from files it reads, command output, sessions, or traces.
 
 `run_command` stdout and stderr pass through the model-context handoff boundary. Non-sensitive command output remains visible to the model for verification answers; command output that required secret redaction is withheld from model context and replaced with a bounded notice. This is not a complete command-output privacy proof. Do not run commands that print real credentials in this beta.
 
@@ -267,6 +267,14 @@ Talos has a local indexing and retrieval path:
 - `rag-ask` asks through the retrieval pipeline directly.
 - The unified assistant can use retrieval as a tool when workspace context is
   needed.
+
+RAG in Talos means the local Lucene index and retrieval pipeline, not cloud
+search or a vector database. BM25 retrieval works without embeddings and is
+best for exact names, paths, identifiers, config keys, and obvious text
+matches. Vector retrieval requires a local embedding endpoint. When embeddings
+are disabled or fail, Talos falls back to BM25-only retrieval. Use direct file
+reads for exact file contents, edits, line-sensitive reasoning, and
+verification.
 
 ### Tool Use
 

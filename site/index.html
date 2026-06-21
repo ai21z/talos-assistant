@@ -220,11 +220,11 @@ talos</code></pre>
             <div class="cycle-layout">
               <div class="cycle-copy reveal">
                 <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>The Execution Cycle</p>
-                <h2 id="execution-heading">One ordered flow. No skipped steps.</h2>
+                <h2 id="execution-heading">One ordered flow. Stations run in order.</h2>
                 <p class="section-lede">
-                  Talos narrows the request, inspects evidence, gates mutation,
-                  checks outcomes, and keeps the result inspectable. Every turn
-                  runs the same six stations, in order.
+                  Talos narrows the request, inspects evidence, gates mutation when needed,
+                  checks outcomes, and keeps the result inspectable. A turn uses only the
+                  stations it needs, and never runs them out of order.
                 </p>
                 <dl class="cycle-detail" data-cycle-detail aria-live="polite">
                   <dt class="cycle-detail-step"><span class="cycle-detail-num">01</span> Classify</dt>
@@ -346,7 +346,7 @@ talos</code></pre>
               <article class="boundary-band boundary-band--reads">
                 <h3>Reads</h3>
                 <p><span class="state state--allow">allow</span> Workspace files inside the selected workspace.</p>
-                <p><span class="state state--ask">ask</span> Protected paths require explicit approval.</p>
+                <p><span class="state state--ask">ask</span> Defined protected paths require explicit approval.</p>
                 <p><span class="state state--deny">refuse</span> Unsupported documents are reported honestly.</p>
               </article>
               <article class="boundary-band boundary-band--mutations">
@@ -399,8 +399,8 @@ talos</code></pre>
                 <div class="scope-detail" data-scope-detail aria-live="polite">
                   <p class="scope-detail-kind">local operator</p>
                   <p class="scope-detail-name">Talos</p>
-                  <p class="scope-detail-text">A local-first operator for your workspace. It reads before acting, asks before writing, and keeps every turn on your machine.</p>
-                  <p class="scope-detail-meta">local engine · workspace-bounded · approved writes · local trace</p>
+                  <p class="scope-detail-text">A local-by-default operator for your workspace. It reads before acting, asks before writing, and keeps model turns on localhost unless remote endpoints are explicitly allowed.</p>
+                  <p class="scope-detail-meta">localhost-gated by default · workspace-bounded · approved writes · local trace</p>
                 </div>
               </div>
             </div>
@@ -466,7 +466,7 @@ talos</code></pre>
               <span>Talos</span>
             </a>
             <p class="footer-line">
-              Local-first CLI workspace operator. Java 21. Windows-first beta.
+              Local-first CLI workspace operator. Java 21. Planned Windows-first public beta.
             </p>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">

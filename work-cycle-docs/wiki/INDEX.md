@@ -155,7 +155,18 @@ or generated reports.
 
 ## Active Tickets
 
-- None in the Wave 6 high trust-fix or cheap consolidation follow-up track.
+- [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
+  - Owner/independent review manual testing in parallel.
+- [T843 Site pre-publish honesty fixes](../tickets/open/[T843-open-medium]%20site-pre-publish-honesty-fixes.md)
+  - Implemented, awaiting owner copy acceptance.
+- [T844 RAG, vectors, and beta best-practices docs](../tickets/open/[T844-open-high]%20rag-vectors-and-beta-best-practices-docs.md)
+  - Implemented, awaiting review.
+- [T845 Beta model and hardware range evidence](../tickets/open/[T845-open-high]%20beta-model-and-hardware-range-evidence.md)
+  - Waiting on accepted T842/manual evidence.
+- [T846 Beta hardware and retrieval diagnostics](../tickets/open/[T846-open-high]%20beta-hardware-and-retrieval-diagnostics.md)
+  - Implemented, awaiting review.
+- [T847 Retrieval evidence and gold-context harness](../tickets/open/[T847-open-high]%20retrieval-evidence-and-gold-context-harness.md)
+  - Next measured retrieval/workspace-intelligence track.
 
 Completed Wave 6 high tickets:
 

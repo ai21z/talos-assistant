@@ -61,8 +61,8 @@ class DoctorEngineTest {
     void defaultProbeSetIsTheDocumentedSixInOrder() {
         List<String> ids = DoctorEngine.defaultProbes().stream().map(DoctorProbe::id).toList();
 
-        assertEquals(List.of("config", "engine-profile", "engine-files",
-                "server", "index-writable", "home-writable"), ids);
+        assertEquals(List.of("config", "runtime-env", "engine-profile", "engine-files",
+                "server", "retrieval", "index-writable", "home-writable"), ids);
     }
 
     private DoctorContext ctx() {

@@ -1,0 +1,69 @@
+# [T847-open-high] Retrieval Evidence And Gold-Context Harness
+
+Status: open
+Priority: high
+Type: evaluation-harness
+Branch: `v0.9.0-beta-dev`
+Talos version: `0.10.5`
+
+## Purpose
+
+Measure Talos workspace-intelligence quality directly before changing retrieval
+ranking, repo maps, graph expansion, or memory behavior.
+
+The current direction is clear: Talos is not behind on vector database plumbing.
+It needs measured evidence that retrieval assembles the right files, symbols,
+ranges, related tests, and reasons.
+
+## Scope
+
+Build a small gold-context benchmark for retrieval quality:
+
+- 20 to 30 initial tasks;
+- expected files;
+- expected symbols;
+- expected line ranges when meaningful;
+- expected related tests;
+- BM25/vector/symbol lane contribution;
+- token budget used by context;
+- junk context;
+- missing-core-evidence rate;
+- privacy cases for protected-path exclusion and private-mode RAG disablement.
+
+## Metrics
+
+The first harness should report:
+
+- file recall;
+- file precision;
+- MRR or nDCG for expected evidence;
+- junk-context rate;
+- missing-core-evidence rate;
+- whether BM25, vector, symbol, or future graph evidence mattered.
+
+## Non-Goals
+
+- No ranking behavior change in the characterization phase.
+- No vector database replacement.
+- No graph expansion until the harness shows where it helps.
+- No public claim that Talos has strong codebase intelligence until the metric
+  results support it.
+
+## Expected Follow-Up Track
+
+- T848: retrieval trace and context-explain surface.
+- T849: repo map builder.
+- T850: symbol index hardening.
+- T851: file-first ranking and context assembler.
+- T852+: bounded graph expansion or memory candidates only if the harness shows
+  value.
+
+## Acceptance Criteria
+
+- The harness can run without a live cloud service.
+- It can run BM25-only and hybrid configurations separately when embeddings
+  are available.
+- It records protected-path and private-mode negative cases.
+- Results are written as local/tracked evidence only after leak review.
+- The first implementation ticket after T847 is selected from measured failure
+  modes, not from vector hype.

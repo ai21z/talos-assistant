@@ -70,7 +70,7 @@ stay visible in product, architecture, and audit docs.
 
 Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
 
-Secret redaction currently catches common key=value secret shapes and known canaries; it does not yet detect standalone API tokens, JWTs, PEM private-key blocks, connection strings, or high-entropy blobs.
+Secret redaction is best-effort. It covers common key=value secret shapes, known canaries, common standalone token prefixes, AWS access-key shapes, JWT-like tokens, PEM private-key blocks, and URL/connection-string userinfo in model-context and durable sinks. Command-output handoff also withholds bounded high-entropy command streams before model context. This is not complete secret, PII, or credential detection.
 
 `run_command` stdout and stderr pass through the model-context handoff boundary. Non-sensitive command output remains visible to the model for verification answers; command output that required secret redaction is withheld from model context and replaced with a bounded notice. This is not a complete command-output privacy proof.
 

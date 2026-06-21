@@ -236,7 +236,7 @@ describe("Talos landing page static contract", () => {
     }
     for (const required of [
       "Workspace files",
-      "Protected paths",
+      "Defined protected paths",
       "File writes",
       "Command execution",
       "Unsupported documents",
@@ -268,6 +268,9 @@ describe("Talos landing page static contract", () => {
     for (const tooAbsolute of [
       "Every turn leaves a trace",
       "Every Talos turn runs the same six lanes",
+      "Every turn runs the same six stations",
+      "One ordered flow. No skipped steps.",
+      "keeps every turn on your machine",
       "The model cannot bypass them by rewording the request",
       "install now with winget",
       "Linux public beta",
@@ -277,6 +280,7 @@ describe("Talos landing page static contract", () => {
     ]) {
       assert.doesNotMatch(text, new RegExp(escapeRegExp(tooAbsolute), "i"));
     }
+    assert.match(text, /localhost-gated by default/i);
   });
 
   it("curates the docs gateway to four in-site user documentation cards", () => {

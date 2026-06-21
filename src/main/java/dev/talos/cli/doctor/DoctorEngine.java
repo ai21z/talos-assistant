@@ -27,9 +27,11 @@ public final class DoctorEngine {
     public static List<DoctorProbe> probes(boolean startServer) {
         return List.of(
                 new ConfigProbe(),
+                new RuntimeEnvironmentProbe(),
                 new EngineProfileProbe(),
                 new EngineFilesProbe(),
                 new ServerProbe(startServer),
+                new RetrievalStateProbe(),
                 new IndexWritableProbe(),
                 new HomeWritableProbe());
     }

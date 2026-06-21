@@ -25,6 +25,8 @@ elsewhere in the repository, but it is not the normal path for learning Talos.
 | Configure a local model | [Model Setup](model-setup.md) |
 | Understand the first terminal screen | [First Run](first-run.md) |
 | Learn workspace and index behavior | [Workspaces And Indexing](workspaces-and-indexing.md) |
+| Understand RAG, BM25, and vectors | [Retrieval And Vectors](retrieval-and-vectors.md) |
+| Use beta Talos safely and effectively | [Beta Best Practices](beta-best-practices.md) |
 | Learn the execution discipline | [How Talos Works](how-talos-works.md) |
 | Understand approvals | [Approvals And Permissions](approvals-and-permissions.md) |
 | Understand privacy and local artifacts | [Local Privacy And Artifacts](local-privacy-and-artifacts.md) |

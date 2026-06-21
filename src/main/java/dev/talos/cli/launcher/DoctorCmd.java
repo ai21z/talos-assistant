@@ -14,9 +14,10 @@ import java.util.concurrent.Callable;
 
 /**
  * {@code talos doctor} — fast environment preflight: config loads, the
- * engine profile resolves, the managed server binary and model file exist,
- * the server responds (or is honestly reported as not-yet-started), and the
- * index/home directories are writable.
+ * runtime environment is bounded, the engine profile resolves, the managed
+ * server binary and model file exist, the server responds (or is honestly
+ * reported as not-yet-started), retrieval state is visible, and the index/home
+ * directories are writable.
  *
  * <p>Unlike {@code talos diagnose} (a retrieval/answer-quality deep dive
  * that generates a real answer), doctor never loads a model unless
@@ -24,7 +25,7 @@ import java.util.concurrent.Callable;
  */
 @CommandLine.Command(
         name = "doctor",
-        description = "Verify the local environment: config, engine profile, model files, server, index and home")
+        description = "Verify the local environment: config, hardware, engine, model files, retrieval, index and home")
 public class DoctorCmd implements Callable<Integer> {
 
     @CommandLine.Option(names = "--root",
