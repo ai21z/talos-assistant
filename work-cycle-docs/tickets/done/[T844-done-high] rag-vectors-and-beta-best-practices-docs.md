@@ -1,6 +1,6 @@
-# [T844-open-high] RAG, Vectors, And Beta Best-Practices Docs
+# [T844-done-high] RAG, Vectors, And Beta Best-Practices Docs
 
-Status: open
+Status: done
 Priority: high
 Type: docs-honesty
 Branch: `v0.9.0-beta-dev`
@@ -49,7 +49,7 @@ a retrieval implementation ticket.
 
 ## Implementation State
 
-Status: implemented-awaiting-review
+Status: done
 
 Docs added:
 
@@ -63,3 +63,18 @@ Focused verification:
 
 - `.\gradlew.bat test --tests "dev.talos.docs.TrustClaimsHonestyTest" --no-daemon`
   passed after the bounded RAG/vector and redaction guards were added.
+
+Completion Evidence:
+
+- Implementation commit:
+  `496e2b521417c28fad7ea21d05fe2912ed07ff35`.
+- Review accepted the bounded vector/RAG mechanism:
+  Talos ships with `rag.vectors.enabled: true`, but vector retrieval still
+  requires a working local embedding endpoint and falls back to BM25-only when
+  embeddings fail or are unavailable.
+- Review verification on 2026-06-21:
+  - `npm test` and `npm run build` from `site/` passed;
+  - focused docs/doctor tests passed;
+  - `.\gradlew.bat check --no-daemon` passed;
+  - `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed;
+  - `git diff --check` passed.

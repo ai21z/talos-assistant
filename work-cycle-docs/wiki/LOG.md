@@ -844,3 +844,16 @@ mechanically.
   explicit `GPU/VRAM not probed by Talos` wording.
 - Added T847 as the next retrieval gold-context harness ticket so retrieval
   intelligence work starts from measured context quality.
+
+## [2026-06-21] pre-release | Close T843/T844/T846 and populate T845
+
+- Moved T843, T844, and T846 to the done ticket ledger after owner acceptance
+  of the site copy, review acceptance of the RAG/vector docs and doctor
+  diagnostics, and green focused, full `check`, wiki evidence, site, and diff
+  gates.
+- Populated T845 from the accepted local T842/independent review summaries while preserving
+  the key caveat: the beta evidence exercised BM25-only retrieval, not
+  hybrid/vector retrieval, even though the shipped default has
+  `rag.vectors.enabled: true`.
+- Left T845 open for review and T847 open as the next measurement-first
+  retrieval/workspace-intelligence ticket.

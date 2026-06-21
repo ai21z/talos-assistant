@@ -195,12 +195,13 @@ confidence_histogram:
   tracked README/AGENTS/docs honesty guard against unqualified competitor
   exclusivity claims while keeping competitor-matrix evidence local-only.
 - Pre-release work after Wave 6 trust fixes is now ticketed from T842 onward:
-  T842 owner-run full manual audit remains parallel, T843 site honesty fixes
-  are implemented and awaiting owner copy acceptance, T844 RAG/vector and beta
-  best-practices docs are implemented and awaiting review, T845 model/hardware
-  range evidence is waiting on accepted T842 data, T846 doctor diagnostics are
-  implemented and awaiting review, and T847 opens the retrieval gold-context
-  harness track.
+  T842 owner-run full manual audit remains parallel. T843 site honesty fixes,
+  T844 RAG/vector and beta best-practices docs, and T846 doctor diagnostics
+  are done after owner/review acceptance of implementation commit
+  `496e2b521417c28fad7ea21d05fe2912ed07ff35`. T845 model/hardware range
+  evidence is populated from the accepted T842/independent review summaries and remains
+  open for review. T847 remains open as the retrieval gold-context harness
+  track and should start after T845 review.
 
 ```talos-wiki-claims
 {
