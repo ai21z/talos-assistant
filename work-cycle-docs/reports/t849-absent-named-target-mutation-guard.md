@@ -16,6 +16,13 @@ The ticket remains open. The deterministic guard and focused tests are in
 place, but the T842 scn-14 live rerun on the audited models is still required
 before closeout.
 
+Post-implementation review found that the first implementation covered the
+simplified prompt `Modify foo() in helper.py...` but missed the real scn-14
+shape `Modify the existing function foo() in helper.py...`. Pass 2 keeps the
+same mutation-verb gate and adds bounded descriptor words between the verb and
+`foo()`. It also pins that `Add a function foo() to helper.py...` remains
+allowed so the guard does not over-block legitimate creation requests.
+
 ## Scope
 
 Production source changes are limited to:
@@ -40,7 +47,8 @@ No `site/` files are in scope.
 The guard applies only when all of these are true:
 
 - the original user request has a high-confidence `name()` in `file` mutation
-  shape, for example `Modify foo() in helper.py`;
+  shape, for example `Modify foo() in helper.py` or
+  `Modify the existing function foo() in helper.py`;
 - the tool call is `write_file` or `edit_file`;
 - the mutation path matches the named file.
 
@@ -89,6 +97,23 @@ the `write_file` call.
 ## Green Evidence
 
 After implementation, the focused T849 guard tests passed:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.NamedTargetExistenceGuardTest" --no-daemon
+```
+
+Result: passed.
+
+Post-review pass 2 added red coverage for the exact real scn-14 prompt:
+
+```text
+Modify the existing function foo() in helper.py so it returns 99. Do not add new functions.
+```
+
+The focused test failed before the regex expansion because the guard did not
+match descriptor words between `Modify` and `foo()`. After the bounded
+descriptor expansion, the focused test passed and the add/create non-overblock
+probe stayed green:
 
 ```powershell
 .\gradlew.bat test --tests "dev.talos.runtime.toolcall.NamedTargetExistenceGuardTest" --no-daemon

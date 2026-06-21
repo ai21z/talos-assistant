@@ -71,6 +71,87 @@ class NamedTargetExistenceGuardTest {
     }
 
     @Test
+    void realScn14ExistingFunctionPromptIsBlockedWhenTargetIsAbsentFromSameTurnReadback() throws Exception {
+        Files.writeString(workspace.resolve("helper.py"), """
+                def bar():
+                    return 1
+                """);
+        String request = "Modify the existing function foo() in helper.py so it returns 99. Do not add new functions.";
+        LoopState state = loopState(request);
+        addReadback(state, "helper.py", """
+                1 | def bar():
+                2 |     return 1
+                """);
+        ToolCall write = writeFile("helper.py", """
+                def bar():
+                    return 1
+
+                def foo():
+                    return 99
+                """);
+        List<String> modelMessages = new ArrayList<>();
+        List<ToolResult> emitted = new ArrayList<>();
+        ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
+                false,
+                (s, nativePath, callIndex, content) -> modelMessages.add(content),
+                (toolName, result) -> emitted.add(result));
+
+        ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
+                state,
+                write,
+                ToolExecutionPathContext.from(write),
+                TaskContractResolver.fromUserRequest(request),
+                false,
+                0,
+                Set.of(),
+                Set.of());
+
+        assertAll(
+                () -> assertTrue(result.blocked(), "real scn-14 prompt must not slip past the guard"),
+                () -> assertEquals(1, emitted.size()),
+                () -> assertTrue(emitted.getFirst().errorMessage().contains("foo()"), emitted.getFirst().errorMessage()),
+                () -> assertTrue(modelMessages.getFirst().contains("Do not mutate another function"))
+        );
+    }
+
+    @Test
+    void addFunctionRequestIsNotBlockedWhenFunctionDoesNotExistYet() throws Exception {
+        Files.writeString(workspace.resolve("helper.py"), """
+                def bar():
+                    return 1
+                """);
+        String request = "Add a function foo() to helper.py so it returns 99.";
+        LoopState state = loopState(request);
+        addReadback(state, "helper.py", """
+                1 | def bar():
+                2 |     return 1
+                """);
+        ToolCall write = writeFile("helper.py", """
+                def bar():
+                    return 1
+
+                def foo():
+                    return 99
+                """);
+        ToolCallPreExecutionGuardChain chain = new ToolCallPreExecutionGuardChain(
+                false,
+                (s, nativePath, callIndex, content) -> fail("create/add function request should not trigger named-target guard"),
+                (toolName, result) -> fail("create/add function request should not emit a failed result"));
+
+        ToolCallPreExecutionGuardChain.Result result = chain.evaluate(
+                state,
+                write,
+                ToolExecutionPathContext.from(write),
+                TaskContractResolver.fromUserRequest(request),
+                false,
+                0,
+                Set.of(),
+                Set.of());
+
+        assertFalse(result.blocked());
+    }
+
+    @Test
     void editFileIsBlockedWhenItRetargetsAnotherFunctionAfterRequestedTargetIsAbsent() throws Exception {
         Files.writeString(workspace.resolve("helper.py"), """
                 def bar():

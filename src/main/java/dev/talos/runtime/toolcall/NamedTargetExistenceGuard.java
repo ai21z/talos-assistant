@@ -9,7 +9,9 @@ import java.util.regex.Pattern;
 
 final class NamedTargetExistenceGuard {
     private static final Pattern FUNCTION_TARGET_IN_FILE = Pattern.compile(
-            "(?i)\\b(?:modify|change|update|fix|repair|edit)\\s+`?"
+            "(?i)\\b(?:modify|change|update|fix|repair|edit)\\s+"
+                    + "(?:(?:the|a|an|this|that|existing|current|broken|target|requested)\\s+){0,5}"
+                    + "(?:(?:function|method|def|routine|symbol)\\s+)?`?"
                     + "([A-Za-z_][A-Za-z0-9_]*)\\s*\\(\\)\\s*`?\\s+"
                     + "(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?`?"
                     + "([^`\\s,;:!?]+\\.[A-Za-z0-9]{1,12})`?");
