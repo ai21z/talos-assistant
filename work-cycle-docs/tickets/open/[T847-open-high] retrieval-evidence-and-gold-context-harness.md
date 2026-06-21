@@ -51,12 +51,17 @@ The first harness should report:
 
 ## Expected Follow-Up Track
 
-- T848: retrieval trace and context-explain surface.
-- T849: repo map builder.
-- T850: symbol index hardening.
-- T851: file-first ranking and context assembler.
-- T852+: bounded graph expansion or memory candidates only if the harness shows
-  value.
+The original retrieval follow-up numbers are intentionally released for the
+T842 beta-correctness findings. After T847 is accepted, retrieval follow-ups
+should be renumbered after the current beta-correctness ticket sequence.
+
+Expected retrieval follow-up themes remain:
+
+- retrieval trace and context-explain surface;
+- repo map builder;
+- symbol index hardening;
+- file-first ranking and context assembler;
+- bounded graph expansion or memory candidates only if the harness shows value.
 
 ## Acceptance Criteria
 

@@ -1,6 +1,6 @@
 # T845 Beta Model And Hardware Range Evidence
 
-Status: evidence-populated-awaiting-review
+Status: accepted
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Created: 2026-06-21
@@ -14,6 +14,9 @@ model and hardware wording. It is intentionally narrow: the evidence covers one
 Windows 11 machine, two managed `llama.cpp` chat models, and BM25-only
 retrieval. It does not validate a general hardware matrix or hybrid/vector
 retrieval quality.
+
+Owner/independent review review accepted this report on 2026-06-21 as a narrow beta-range
+evidence snapshot. The broader T842 manual audit remains open.
 
 ## Evidence Source
 
@@ -87,9 +90,17 @@ The accepted summaries cover 15 scenarios on both audited models.
 
 ## Acceptance Rule
 
-This report can be closed only after review accepts the narrowness of the
-evidence. Unknown hardware and timing fields must stay unknown. Hybrid/vector
-retrieval must stay unvalidated until a later run includes a working local
-embedding endpoint and records retrieval-lane behavior.
+This report is accepted only for its narrow evidence boundary. Unknown hardware
+and timing fields stay unknown. Hybrid/vector retrieval stays unvalidated until
+a later run includes a working local embedding endpoint and records
+retrieval-lane behavior.
 
 Unknown is acceptable. Invented is not.
+
+## Closeout
+
+- Accepted source: owner/independent review review of the T842 local scenario summaries.
+- Population commit: `d35f708f34fc08e3b406afe217ec07f862c493a8`.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed during review.
+- Follow-up beta-correctness findings from T842 are tracked separately as
+  T848-T852.

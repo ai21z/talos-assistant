@@ -1,6 +1,6 @@
-# [T845-open-high] Beta Model And Hardware Range Evidence
+# [T845-done-high] Beta Model And Hardware Range Evidence
 
-Status: open
+Status: done
 Priority: high
 Type: research-report
 Branch: `v0.9.0-beta-dev`
@@ -14,12 +14,12 @@ requirements from desired positioning.
 
 ## Current State
 
-Status: evidence-populated-awaiting-review
+Status: done
 
 The first accepted T842/independent review manual evidence has been summarized into the
-initial report. T842 itself remains open because the full owner-run audit packet
-and interactive evidence are broader than this beta hardware/model range
-snapshot.
+report and accepted for this narrow beta model/hardware range snapshot. T842
+itself remains open because the full owner-run audit packet and interactive
+evidence are broader than this report.
 
 ## Evidence Required
 
@@ -81,3 +81,16 @@ See `work-cycle-docs/reports/t845-beta-model-and-hardware-range-evidence.md`.
 - CPU, RAM, disk type, GPU/VRAM, startup latency, indexing latency, and
   retrieval latency were not captured in the accepted summaries and remain
   unratified.
+
+## Completion Evidence
+
+- Accepted evidence source: owner/independent review review of the local T842 scenario
+  summaries.
+- Population commit: `d35f708f34fc08e3b406afe217ec07f862c493a8`.
+- The report preserves the required caveats: one Windows 11 machine, managed
+  `llama.cpp` Qwen/GPT-OSS coverage, BM25-only retrieval, no validated
+  hybrid/vector run, and unknown hardware/timing fields left unknown.
+- `wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed during review of
+  the populated report.
+- Closeout batch creates separate beta-correctness tickets for the T842
+  executor findings instead of letting T847 retrieval work absorb them.

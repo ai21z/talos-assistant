@@ -196,12 +196,15 @@ confidence_histogram:
   exclusivity claims while keeping competitor-matrix evidence local-only.
 - Pre-release work after Wave 6 trust fixes is now ticketed from T842 onward:
   T842 owner-run full manual audit remains parallel. T843 site honesty fixes,
-  T844 RAG/vector and beta best-practices docs, and T846 doctor diagnostics
-  are done after owner/review acceptance of implementation commit
-  `496e2b521417c28fad7ea21d05fe2912ed07ff35`. T845 model/hardware range
-  evidence is populated from the accepted T842/independent review summaries and remains
-  open for review. T847 remains open as the retrieval gold-context harness
-  track and should start after T845 review.
+  T844 RAG/vector and beta best-practices docs, T845 model/hardware range
+  evidence, and T846 doctor diagnostics are done. T845 records the accepted
+  one-machine, managed-`llama.cpp`, BM25-only beta-range evidence and does not
+  validate hybrid/vector retrieval. T847 remains open as the retrieval
+  gold-context harness track, but it is paused behind the T842
+  beta-correctness triage tickets: T848 mutation-intent fix-file prompts, T849
+  absent named-target guard, T850 read-only path/name grounding, T851
+  read-display write containment, and T852 GPT-OSS multi-document no-progress
+  synthesis.
 
 ```talos-wiki-claims
 {
