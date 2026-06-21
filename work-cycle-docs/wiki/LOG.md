@@ -910,3 +910,14 @@ mechanically.
   `Fix multiply...` prompt remains mutation-capable.
 - T848 remains open for review and live rerun of scn-13 plus the adversarial
   question/no-fix prompts before closeout.
+
+## [2026-06-21] code-fix | Harden T848 modal self-questions
+
+- Added a fourth T848 implementation pass after live probing showed
+  `There is a bug in calc.py. Should I fix it?` still exposed mutation tools
+  through the old `fix it` marker.
+- Embedded modal self-questions with `I|we`, such as `Should I fix it?`,
+  `Can I fix it?`, and `Could we fix it?`, now stay non-mutating.
+- Assistant-directed modal requests with `you`, such as `Can you fix it?`, stay
+  mutation-capable, as does the real scn-13 imperative `Fix multiply...` prompt.
+- T848 remains open for review and the live scn-13b-f battery before closeout.

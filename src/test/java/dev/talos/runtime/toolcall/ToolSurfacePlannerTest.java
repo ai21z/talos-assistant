@@ -139,7 +139,12 @@ class ToolSurfacePlannerTest {
                 "There is a bug in calc.py. How would you fix it?",
                 "There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.",
                 "There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.",
-                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.")) {
+                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Should I fix it?",
+                "There is a bug in calc.py. Can I fix it?",
+                "There is a bug in calc.py. May I fix it?",
+                "There is a bug in calc.py. Would we fix it?",
+                "There is a bug in calc.py. Could we fix it?")) {
             ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                     TaskContractResolver.fromUserRequest(input),
                     ExecutionPhase.APPLY,
@@ -149,6 +154,25 @@ class ToolSurfacePlannerTest {
             assertFalse(names.contains("talos.write_file"), input + " -> " + names);
             assertFalse(names.contains("talos.edit_file"), input + " -> " + names);
             assertFalse(names.contains("talos.apply_workspace_batch"), input + " -> " + names);
+        }
+    }
+
+    @Test
+    void assistantDirectedFixItRequestsKeepFileEditTargetApplySurface() {
+        for (String input : List.of(
+                "There is a bug in calc.py. Can you fix it?",
+                "There is a bug in calc.py. Would you fix it?",
+                "There is a bug in calc.py. Could you fix it?")) {
+            ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                    TaskContractResolver.fromUserRequest(input),
+                    ExecutionPhase.APPLY,
+                    registry());
+
+            List<String> names = plan.nativeToolNames();
+            assertEquals("file edit target apply surface", plan.reason(), input);
+            assertTrue(names.contains("talos.read_file"), input + " -> " + names);
+            assertTrue(names.contains("talos.write_file"), input + " -> " + names);
+            assertTrue(names.contains("talos.edit_file"), input + " -> " + names);
         }
     }
 

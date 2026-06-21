@@ -112,12 +112,32 @@ class TaskContractResolverTest {
                 "There is a bug in calc.py, but do not change files.",
                 "There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.",
                 "There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.",
-                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.")) {
+                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Should I fix it?",
+                "There is a bug in calc.py. Can I fix it?",
+                "There is a bug in calc.py. May I fix it?",
+                "There is a bug in calc.py. Would we fix it?",
+                "There is a bug in calc.py. Could we fix it?")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertFalse(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE, input);
             assertFalse(contract.mutationRequested(), input);
             assertFalse(contract.mutationAllowed(), input);
+        }
+    }
+
+    @Test
+    void assistantDirectedFixItRequestsRemainFileEditContracts() {
+        for (String input : List.of(
+                "There is a bug in calc.py. Can you fix it?",
+                "There is a bug in calc.py. Would you fix it?",
+                "There is a bug in calc.py. Could you fix it?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertEquals(Set.of("calc.py"), contract.expectedTargets(), input);
         }
     }
 

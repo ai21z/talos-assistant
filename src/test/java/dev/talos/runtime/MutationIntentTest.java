@@ -103,8 +103,24 @@ class MutationIntentTest {
                 "There is a bug in calc.py, but do not change files.",
                 "There is a bug in calc.py. Don't fix it yet, just tell me what is wrong.",
                 "There is a bug in calc.py. Do not fix it yet, just tell me what is wrong.",
-                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.")) {
+                "There is a bug in calc.py. Dont fix it yet, just tell me what is wrong.",
+                "There is a bug in calc.py. Should I fix it?",
+                "There is a bug in calc.py. Can I fix it?",
+                "There is a bug in calc.py. May I fix it?",
+                "There is a bug in calc.py. Would we fix it?",
+                "There is a bug in calc.py. Could we fix it?")) {
             assertFalse(MutationIntent.looksExplicitMutationRequest(input), input);
+        }
+    }
+
+    @Test
+    void assistantDirectedFixItRequestsStayMutationIntent() {
+        for (String input : java.util.List.of(
+                "There is a bug in calc.py. Can you fix it?",
+                "There is a bug in calc.py. Would you fix it?",
+                "There is a bug in calc.py. Could you fix it?",
+                "Fix it.")) {
+            assertTrue(MutationIntent.looksExplicitMutationRequest(input), input);
         }
     }
 
