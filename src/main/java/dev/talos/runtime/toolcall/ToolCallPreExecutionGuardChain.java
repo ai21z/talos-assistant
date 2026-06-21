@@ -242,6 +242,44 @@ final class ToolCallPreExecutionGuardChain {
             return Result.blocked(effective, pathContext, failures, false);
         }
 
+        String namedTargetExistenceDiagnostic = NamedTargetExistenceGuard.diagnostic(
+                effective,
+                state,
+                currentTaskContract,
+                pathHint);
+        if (namedTargetExistenceDiagnostic != null) {
+            int failures = 0;
+            if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                failures++;
+            }
+            ToolResult result = ToolResult.fail(ToolError.invalidParams(
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                    namedTargetExistenceDiagnostic));
+            toolResultEmitter.emit(effective.toolName(), result);
+            LocalTurnTraceCapture.recordActionObligation(
+                    "NAMED_TARGET_EXISTENCE",
+                    "FAILED",
+                    namedTargetExistenceDiagnostic,
+                    "NAMED_TARGET_NOT_FOUND");
+            LocalTurnTraceCapture.recordToolCallBlocked(
+                    "tool_loop",
+                    effective,
+                    namedTargetExistenceDiagnostic);
+            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                    effective,
+                    pathHint,
+                    namedTargetExistenceDiagnostic,
+                    workspaceOperationPlan,
+                    ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED));
+            resultMessageAppender.append(state, nativePath, callIndex,
+                    ToolCallSupport.formatToolResult(effective, result));
+            LOG.debug("Blocked named-target {} for {} before approval: {}",
+                    effective.toolName(),
+                    SafeLogFormatter.value(pathHint),
+                    SafeLogFormatter.text(namedTargetExistenceDiagnostic));
+            return Result.blocked(effective, pathContext, failures, false);
+        }
+
         String staticWebRewriteGroundingDiagnostic =
                 StaticWebRewriteGroundingGuard.diagnostic(
                         effective,
