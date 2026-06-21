@@ -871,3 +871,16 @@ mechanically.
   multi-document no-progress synthesis.
 - Updated T847 so its retrieval follow-up themes remain valid but their ticket
   numbers will be assigned after the beta-correctness sequence.
+
+## [2026-06-21] code-fix | Implement T848 fix-file mutation intent
+
+- Added deterministic mutation-intent coverage for direct
+  `fix <problem> in <file>` wording, including the audited
+  `Fix the bug in calc.py.` prompt shape.
+- Kept advisory and instructional variants read-only, including
+  `How would you fix...`, `Can you explain how to fix...`, and
+  `Should I fix...`.
+- Pinned the resulting task contract and file-edit target tool surface so the
+  direct fix request exposes `talos.read_file`, `talos.write_file`, and
+  `talos.edit_file` behind the existing approval policy.
+- Left T848 open for owner/independent review review before closeout.

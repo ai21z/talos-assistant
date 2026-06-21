@@ -103,6 +103,20 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void fixProblemInNamedFileUsesFileEditTargetApplySurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest("Fix the bug in calc.py."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+    }
+
+    @Test
     void sourceDerivedExactFileCreationUsesFileWriteSurface() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(

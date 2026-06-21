@@ -58,6 +58,34 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void fixProblemInNamedFileBecomesFileEditContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Fix the bug in calc.py.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("calc.py"), contract.expectedTargets());
+        assertEquals("explicit-fix-problem-in-file-target", contract.classificationReason());
+    }
+
+    @Test
+    void advisoryFixProblemInNamedFileStaysReadOnly() {
+        for (String input : List.of(
+                "How would you fix the bug in calc.py?",
+                "Can you explain how to fix the bug in calc.py?",
+                "Should I fix the bug in calc.py?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.READ_ONLY_QA, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals(Set.of("calc.py"), contract.expectedTargets(), input);
+        }
+    }
+
+    @Test
     void appendLineRequestBecomesFileEditContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Append exactly this line to README.md: Release gate note");
