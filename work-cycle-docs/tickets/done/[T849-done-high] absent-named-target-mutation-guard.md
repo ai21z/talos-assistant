@@ -1,7 +1,7 @@
-# [T849-open-high] Absent Named Target Mutation Guard
+# [T849-done-high] Absent Named Target Mutation Guard
 
-Status: open
-Implementation state: implemented-awaiting-review
+Status: done
+Implementation state: closed-verified
 Priority: high
 Type: implementation
 Branch: `v0.9.0-beta-dev`
@@ -135,7 +135,27 @@ Implementation update:
   emits a tool-result error, and records a trace action-obligation failure.
 - The guard deliberately does not broaden into semantic symbol lookup or
   retrieval ranking.
-- T849 remains open pending owner/Opus live scn-14 rerun on the audited models.
+Closeout (Opus independent verification, 2026-06-21):
+
+- Final commit `a3d05b8215c3b0dccf49a5e30690c7e68e593974` (pass 2), preceded by
+  `33007ae6` (pass 1). NamedTargetExistenceGuardTest 7/0/0; toolcall suite green.
+- Pass 1 was safe but incomplete: the guard regex required the edit verb directly
+  before `foo()`, so the simplified `Modify foo() in helper.py` blocked but the real
+  scn-14 prompt slipped past and the mutation persisted (qwen added `foo`, gpt-oss a
+  no-op) on both models. Pass 2 added bounded descriptor words and re-verified.
+- LIVE on BOTH audited models (qwen2.5-coder-14b, gpt-oss-20b), captured under
+  `local/beta-pre-release-test-scenarios/scn-14*` (+ `runs/gpt-oss-20b/`):
+  - Real scn-14 (`Modify the existing function foo() in helper.py...`) now BLOCKS
+    before approval with no mutation on both models (helper.py unchanged, outcome
+    FAILED, named-target diagnostic emitted).
+  - Simplified `Modify foo() in helper.py` still blocks with no mutation.
+  - Create probe `Add a function foo() to helper.py` is NOT over-blocked: `foo` is
+    added and `bar` preserved on both models (the `add`/`create` exclusion holds).
+- Trust posture verified: the guard blocks before approval, fails closed honestly
+  ("no approval was requested and no file was changed"), records a trace
+  action-obligation failure, and does not weaken approval/checkpoint/redaction.
+- Permanent regression scenarios added to the local harness: scn-14b
+  (simplified-positive block) and scn-14c (create/over-block guard).
 
 Implementation report:
 
