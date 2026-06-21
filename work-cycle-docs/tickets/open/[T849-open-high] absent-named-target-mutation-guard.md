@@ -1,6 +1,7 @@
 # [T849-open-high] Absent Named Target Mutation Guard
 
 Status: open
+Implementation state: implemented-awaiting-review
 Priority: high
 Type: implementation
 Branch: `v0.9.0-beta-dev`
@@ -117,6 +118,24 @@ Start with a narrow deterministic guard for named target forms that the runtime
 can parse with high confidence. If the target cannot be checked deterministically,
 fail honest or leave unclaimed rather than guessing. Do not block ordinary
 free-form edits that do not name a specific absent target.
+
+Implementation update:
+
+- Added package-private `NamedTargetExistenceGuard` in
+  `dev.talos.runtime.toolcall`.
+- The guard currently covers high-confidence `name()` in `file` requests such
+  as `Modify foo() in helper.py`.
+- The guard requires complete same-turn read evidence before approval. If the
+  readback proves the named Python function is absent, it blocks `write_file`
+  and `edit_file` before execution, records a failed pre-execution mutation,
+  emits a tool-result error, and records a trace action-obligation failure.
+- The guard deliberately does not broaden into semantic symbol lookup or
+  retrieval ranking.
+- T849 remains open pending owner/independent review live scn-14 rerun on the audited models.
+
+Implementation report:
+
+- `work-cycle-docs/reports/t849-absent-named-target-mutation-guard.md`
 
 ## Architecture Metadata
 
