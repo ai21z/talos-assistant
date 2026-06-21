@@ -163,10 +163,9 @@ or generated reports.
 - [T848 Mutation intent fix-file prompts](../tickets/done/[T848-done-high]%20mutation-intent-fix-file-prompts.md) (done)
 - [T849 Absent named-target mutation guard](../tickets/done/[T849-done-high]%20absent-named-target-mutation-guard.md) (done)
 - [T850 Read-only grounding path-name non-invention](../tickets/open/[T850-open-medium]%20read-only-grounding-path-name-non-invention.md)
-- [T851 Read-display line-number write containment](../tickets/open/[T851-open-high]%20read-display-line-number-write-containment.md)
+- [T851 Read-display line-number write containment](../tickets/done/[T851-done-high]%20read-display-line-number-write-containment.md) (done)
   - Deterministic implementation report:
     [T851 read-display write containment](../reports/t851-read-display-line-number-write-containment.md)
-  - Status: implemented, awaiting live scn-14 review before closeout.
 - [T852 GPT-OSS multi-document no-progress synthesis](../tickets/open/[T852-open-medium]%20gpt-oss-multi-document-no-progress-synthesis.md)
 
 Completed pre-release tickets:

@@ -931,3 +931,17 @@ mechanically.
   payload fails before approval and leaves the target file unchanged.
 - Left T851 open pending the live T842/scn-14 corruption probe on both beta
   models before closeout.
+
+## [2026-06-21] closeout | Close T851 read-display write containment
+
+- Reran the current installed build against the existing T842/scn-14
+  absent-target corruption fixture on both beta models. `helper.py` stayed
+  unchanged on `qwen2.5-coder-14b` and `gpt-oss-20b`; both runs failed honestly
+  before approval because `foo()` was absent.
+- Added a target-present live corruption probe to exercise T851 directly.
+  Qwen made a clean edit without copying `N |` prefixes. GPT-OSS first attempted
+  a contaminated `write_file` payload, which the T851 guard blocked with
+  `READ_DISPLAY_WRITE_CONTAINMENT` / `READ_DISPLAY_PREFIX_WRITE`; the model then
+  retried with clean content.
+- Closed T851. T850 read-only path/name grounding and T852 GPT-OSS
+  multi-document no-progress synthesis remain open.
