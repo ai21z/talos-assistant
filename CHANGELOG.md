@@ -2,12 +2,14 @@
 
 ## [Unreleased]
 
-- [T848] Direct "fix <problem> in <file>" prompts now resolve to a
-  mutation-capable file-edit contract instead of a read-only turn. The
+- [T848] Direct "fix <problem> in <file>" prompts and file-scoped defect
+  prompts such as "There is a bug in calc.py... Fix multiply..." now resolve
+  to a mutation-capable file-edit contract instead of a read-only turn. The
   classifier remains deterministic and narrow: advice-only variants such as
-  "How would you fix the bug in calc.py?" stay read-only, while the apply
-  surface for the direct fix request exposes the normal read/write/edit tools
-  behind existing approval policy.
+  "How would you fix the bug in calc.py?" and "There is a bug in calc.py.
+  Explain how to fix multiply." stay non-mutating, while the apply surface for
+  the direct fix request exposes the normal read/write/edit tools behind
+  existing approval policy.
 
 ## [0.10.5] - 2026-06-12
 

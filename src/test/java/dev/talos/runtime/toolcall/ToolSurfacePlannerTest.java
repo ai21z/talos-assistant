@@ -117,6 +117,23 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void fileScopedDefectThenImperativeFixUsesFileEditTargetApplySurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "There is a bug in calc.py: multiply returns the wrong result. "
+                                + "Fix multiply so it returns the product of a and b. "
+                                + "Change only what is necessary."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+    }
+
+    @Test
     void sourceDerivedExactFileCreationUsesFileWriteSurface() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(

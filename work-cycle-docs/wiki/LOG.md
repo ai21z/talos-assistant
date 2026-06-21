@@ -884,3 +884,16 @@ mechanically.
   direct fix request exposes `talos.read_file`, `talos.write_file`, and
   `talos.edit_file` behind the existing approval policy.
 - Left T848 open for owner/independent review review before closeout.
+
+## [2026-06-21] code-fix | Extend T848 to real scn-13 fix prompt
+
+- Added a second T848 implementation pass after review showed the first pass
+  covered the simplified `Fix the bug in calc.py.` shape but not the real T842
+  scn-13 wording.
+- The deterministic classifier now treats a file-scoped defect mention followed
+  by an imperative fix sentence, for example `There is a bug in calc.py... Fix
+  multiply...`, as a mutation-capable file-edit request.
+- Added regression coverage across `MutationIntentTest`,
+  `TaskContractResolverTest`, and `ToolSurfacePlannerTest`, while preserving
+  advisory/explanatory/no-change variants as non-mutating.
+- T848 remains open for owner/independent review review and live scn-13 rerun before closeout.
