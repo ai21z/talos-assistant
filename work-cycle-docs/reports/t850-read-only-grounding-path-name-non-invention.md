@@ -1,6 +1,6 @@
 # T850 Read-Only Grounding Path-Name Non-Invention
 
-Status: implemented; awaiting live scn-10 review before ticket closeout
+Status: done
 Date: 2026-06-22
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
@@ -71,11 +71,26 @@ Related focused gate:
 
 Result: PASS.
 
-## Remaining Review Gate
+## Live Closeout Evidence
 
-T850 is not closed by this report.
+The T842/scn-10 grounding/no-invention prompt was rerun on qwen against the
+current installed build at commit
+`679dd17fe137e119567971afe445a7f5fca99147`.
 
-Before closeout, rerun the T842/scn-10 grounding/no-invention prompt on qwen and
-confirm the answer does not infer `loqj-cli` or any project name from the
-workspace path when no inspected file states that name. A two-model rerun is
-useful for parity, but qwen is the model that produced the original finding.
+Artifact path:
+
+```text
+local/beta-pre-release-test-scenarios/runs/t850-679dd17f/qwen2.5-coder-14b/scn-10-grounding-no-invention/transcript.txt
+```
+
+Result:
+
+- Talos classified the turn as `WORKSPACE_EXPLAIN` with mutation disabled.
+- The only tool call was `talos.read_file -> calc.py [ok]`.
+- `calc.py` does not contain `loqj-cli` or any project-name declaration.
+- The answer said it could not determine the project name from files in the
+  workspace.
+- The answer did not infer `loqj-cli` from the workspace path.
+- Workspace `git status` and `git diff` artifacts were empty.
+
+T850 is closed by this live review.
