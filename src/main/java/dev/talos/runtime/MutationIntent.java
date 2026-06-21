@@ -141,6 +141,14 @@ public final class MutationIntent {
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
 
+    private static final String FIX_PROBLEM_FILE_TARGET =
+            "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
+                    + "(?:html|htm|css|js|jsx|ts|tsx|java|py|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
+                    + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
+                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
+
     private static final String CAPTURED_FILE_TARGET =
             "`?((?:(?:[a-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
@@ -151,6 +159,12 @@ public final class MutationIntent {
 
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
+    private static final Pattern FIX_PROBLEM_IN_FILE_TARGET = Pattern.compile(
+            "\\bfix\\s+(?:(?:the|a|an)\\s+)?(?:[a-z0-9_#$./\\\\-]+\\s+){1,8}"
+                    + "(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + FIX_PROBLEM_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern SUMMARIZE_SOURCE_TO_TARGET = Pattern.compile(
@@ -250,6 +264,7 @@ public final class MutationIntent {
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
+        if (looksFixProblemInFileTarget(lower)) return "explicit-fix-problem-in-file-target";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
@@ -337,6 +352,10 @@ public final class MutationIntent {
 
     private static boolean looksExplicitFileTargetMutation(String lower) {
         return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    }
+
+    private static boolean looksFixProblemInFileTarget(String lower) {
+        return lower != null && FIX_PROBLEM_IN_FILE_TARGET.matcher(lower).find();
     }
 
     private static Optional<SourceToTargetArtifact> sourceToTargetArtifact(Matcher matcher) {

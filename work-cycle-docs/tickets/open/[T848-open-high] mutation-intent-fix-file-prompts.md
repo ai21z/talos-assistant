@@ -185,6 +185,43 @@ Commands:
 .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 ```
 
+## Implementation Evidence
+
+Implementation commit: this implementation commit; exact SHA to be recorded at
+closeout.
+
+Implementation summary:
+
+- Added deterministic coverage for direct `fix <problem> in <file>` wording.
+- Added a `.py`-aware target matcher local to that fix-problem detector so
+  `calc.py` is covered without broadening the existing source/artifact target
+  capture used by unrelated Python creation flows.
+- Kept advisory and instructional forms read-only.
+- Pinned the resulting apply-phase tool surface in `ToolSurfacePlannerTest`:
+  the audited prompt now uses the narrowed file-edit target surface with
+  `talos.read_file`, `talos.write_file`, and `talos.edit_file` available.
+
+Verified focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --no-daemon
+```
+
+Result: PASS.
+
+Verified broad gates:
+
+```powershell
+.\gradlew.bat check --no-daemon
+.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
+```
+
+Result: PASS.
+
+Remaining before closeout:
+
+- Review by owner/Opus.
+
 ## Work-Test Cycle Notes
 
 - Use the inner dev loop.

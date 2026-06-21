@@ -67,6 +67,28 @@ class MutationIntentTest {
     }
 
     @Test
+    void fixProblemInNamedFileIsExplicitMutationIntent() {
+        for (String input : java.util.List.of(
+                "Fix the bug in calc.py.",
+                "Fix a bug in src/App.java.",
+                "Please fix the failing test in FooTest.java.")) {
+            assertTrue(MutationIntent.looksExplicitMutationRequest(input), input);
+            assertEquals("explicit-fix-problem-in-file-target",
+                    MutationIntent.classificationReason(input), input);
+        }
+    }
+
+    @Test
+    void advisoryFixProblemInNamedFileStaysReadOnly() {
+        for (String input : java.util.List.of(
+                "How would you fix the bug in calc.py?",
+                "Can you explain how to fix the bug in calc.py?",
+                "Should I fix the bug in calc.py?")) {
+            assertFalse(MutationIntent.looksExplicitMutationRequest(input), input);
+        }
+    }
+
+    @Test
     void retryStatusReviewAndAdvisoryEditPromptsStayReadOnly() {
         for (String input : java.util.List.of(
                 "Review README.md",

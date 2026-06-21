@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T848] Direct "fix <problem> in <file>" prompts now resolve to a
+  mutation-capable file-edit contract instead of a read-only turn. The
+  classifier remains deterministic and narrow: advice-only variants such as
+  "How would you fix the bug in calc.py?" stay read-only, while the apply
+  surface for the direct fix request exposes the normal read/write/edit tools
+  behind existing approval policy.
+
 ## [0.10.5] - 2026-06-12
 
 ### Changed
@@ -987,4 +994,3 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
-
