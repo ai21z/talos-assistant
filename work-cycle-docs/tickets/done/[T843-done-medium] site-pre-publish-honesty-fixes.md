@@ -1,6 +1,6 @@
-# [T843-open-medium] Site Pre-Publish Honesty Fixes
+# [T843-done-medium] Site Pre-Publish Honesty Fixes
 
-Status: open
+Status: done
 Priority: medium
 Type: site-honesty
 Branch: `v0.9.0-beta-dev`
@@ -46,7 +46,7 @@ items the test suite does not catch or that are softer framing.
 
 ## Implementation State
 
-Status: implemented-awaiting-owner-acceptance
+Status: done
 
 - Items 1 through 4 were reworded in `site/index.html`, `site/docs.html`,
   `site/src/main.js`, and `site/src/docs.js`.
@@ -58,7 +58,14 @@ Status: implemented-awaiting-owner-acceptance
 - Verification on 2026-06-21:
   - `npm test` from `site/`: 33 tests, 0 failures.
   - `npm run build` from `site/`: build successful.
-- The ticket remains open until the owner accepts the revised site copy.
+- Owner accepted the revised site copy on 2026-06-21.
+- Implementation commit:
+  `496e2b521417c28fad7ea21d05fe2912ed07ff35`.
+- Review verification on 2026-06-21:
+  - focused docs/doctor tests passed;
+  - `.\gradlew.bat check --no-daemon` passed;
+  - `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed;
+  - `git diff --check` passed.
 
 ## Non-Goals
 

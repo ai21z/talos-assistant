@@ -14,11 +14,12 @@ requirements from desired positioning.
 
 ## Current State
 
-Status: waiting-on-T842-manual-evidence
+Status: evidence-populated-awaiting-review
 
-T842 full manual testing is running in parallel. Until the T842 evidence packet
-is accepted, this ticket can define the evidence schema and provisional wording
-only.
+The first accepted T842/Opus manual evidence has been summarized into the
+initial report. T842 itself remains open because the full owner-run audit packet
+and interactive evidence are broader than this beta hardware/model range
+snapshot.
 
 ## Evidence Required
 
@@ -62,3 +63,21 @@ matrix as provisional.
 ## Initial Report
 
 See `work-cycle-docs/reports/t845-beta-model-and-hardware-range-evidence.md`.
+
+## Evidence Populated 2026-06-21
+
+- Source packet:
+  - `local/beta-pre-release-test-scenarios/SUMMARY.md`
+  - `local/beta-pre-release-test-scenarios/SUMMARY-batch2.md`
+  - `local/beta-pre-release-test-scenarios/SUMMARY-gpt-oss-vs-qwen.md`
+- The accepted evidence covers one Windows 11 machine.
+- Both audited models ran through managed `llama.cpp`:
+  - `qwen2.5-coder-14b`
+  - `gpt-oss-20b`
+- The accepted retrieval evidence is BM25-only. Talos ships with
+  `rag.vectors.enabled: true`, but the accepted T842 run did not validate
+  hybrid/vector retrieval because no working local embedding endpoint was part
+  of the evidence packet.
+- CPU, RAM, disk type, GPU/VRAM, startup latency, indexing latency, and
+  retrieval latency were not captured in the accepted summaries and remain
+  unratified.

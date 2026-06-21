@@ -1,6 +1,6 @@
-# [T846-open-high] Beta Hardware And Retrieval Diagnostics
+# [T846-done-high] Beta Hardware And Retrieval Diagnostics
 
-Status: open
+Status: done
 Priority: high
 Type: diagnostics
 Branch: `v0.9.0-beta-dev`
@@ -41,7 +41,7 @@ expensive embedding probes by default.
 
 ## Implementation State
 
-Status: implemented-awaiting-review
+Status: done
 
 - Added `RuntimeEnvironmentProbe`.
 - Added `RetrievalStateProbe`.
@@ -54,3 +54,17 @@ Focused red-first state:
 - The doctor suite failed before implementation because the two probe classes
   did not exist.
 - After implementation, `dev.talos.cli.doctor.*` passed.
+
+Completion Evidence:
+
+- Implementation commit:
+  `496e2b521417c28fad7ea21d05fe2912ed07ff35`.
+- Review confirmed the diagnostic wording is bounded: host text is sanitized,
+  remote embedding hosts are warned as rejected unless explicitly allowed,
+  vector mode is reported as `hybrid if embedding probe succeeds`, and
+  GPU/VRAM plus embedding dimensions are explicitly not probed.
+- Review verification on 2026-06-21:
+  - focused docs/doctor tests passed;
+  - `.\gradlew.bat check --no-daemon` passed;
+  - `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed;
+  - `git diff --check` passed.

@@ -1,21 +1,33 @@
 # T845 Beta Model And Hardware Range Evidence
 
-Status: waiting-on-T842-manual-evidence
+Status: evidence-populated-awaiting-review
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Created: 2026-06-21
 
 ## Decision State
 
-No beta hardware range is ratified by this report yet.
+No broad beta hardware range is ratified by this report.
 
-T842 full manual testing is running in parallel. This report is the tracked
-schema for the evidence we need before public beta hardware and model wording
-is credible.
+This report records the first accepted T842/Opus manual evidence for beta
+model and hardware wording. It is intentionally narrow: the evidence covers one
+Windows 11 machine, two managed `llama.cpp` chat models, and BM25-only
+retrieval. It does not validate a general hardware matrix or hybrid/vector
+retrieval quality.
 
-## Current Provisional Wording
+## Evidence Source
 
-Use only the following provisional language until T842 evidence is accepted:
+Accepted local T842 summaries:
+
+- `local/beta-pre-release-test-scenarios/SUMMARY.md`
+- `local/beta-pre-release-test-scenarios/SUMMARY-batch2.md`
+- `local/beta-pre-release-test-scenarios/SUMMARY-gpt-oss-vs-qwen.md`
+
+These local summaries are not promoted as release-clean tracked artifacts.
+They are the accepted owner/Opus evidence packet for this first beta-range
+snapshot.
+
+## Beta Wording Allowed From This Evidence
 
 - Minimum practical path: BM25-only retrieval plus one configured local chat
   model.
@@ -25,37 +37,59 @@ Use only the following provisional language until T842 evidence is accepted:
 - Unproven path: low-RAM machines, unknown GPUs, remote endpoints, private
   paperwork folders, OCR workflows, and PowerPoint workflows.
 
-If the accepted evidence covers only one machine, say so. Do not convert a
-single-machine pass into a broad hardware matrix.
+Important retrieval caveat: Talos ships with `rag.vectors.enabled: true`, but
+the accepted T842 beta evidence exercised BM25-only retrieval. Hybrid/vector
+retrieval was not validated because no working local embedding endpoint was
+part of the accepted run.
 
-## Evidence Fields To Fill
+## Evidence Matrix
 
-| Field | Required value |
+| Field | Accepted evidence |
 | --- | --- |
-| Audit packet | T842/manual evidence root and accepted report |
-| Branch | `git branch --show-current` from the evidence run |
-| Commit | `git rev-parse HEAD` from the evidence run |
-| Talos version | `talosVersion` from the evidence run |
-| OS | Version and architecture |
-| CPU | Model or family when captured |
-| RAM | Installed or OS-visible memory when captured |
-| Disk | SSD/HDD/NVMe when captured |
-| GPU/VRAM | Only if reliably probed or observed |
-| Backend | Managed `llama.cpp`, Ollama, or other |
-| Model A | Qwen profile and runtime model identity, or explicit absence |
-| Model B | GPT-OSS profile and runtime model identity, or explicit absence |
-| Embeddings | Provider/model/host locality and success/failure |
-| Retrieval mode | Hybrid or BM25-only for each relevant run |
-| Startup latency | Observed, not estimated |
-| Indexing latency | Observed, not estimated |
-| Retrieval latency | Observed, not estimated |
-| Turn latency | Observed, not estimated |
-| Failures | Findings and contaminated evidence |
+| Audit packet | T842 local beta pre-release scenario summaries listed above |
+| Branch | `v0.9.0-beta-dev` in ticket context |
+| Commit | Not captured in the local summaries; current implementation base before this report was `496e2b521417c28fad7ea21d05fe2912ed07ff35` |
+| Talos version | `0.10.5`; summaries also state Talos 0.10.5 clean build/install |
+| OS | One Windows 11 machine, per accepted Opus/T842 review |
+| CPU | Not captured in accepted summaries |
+| RAM | Not captured in accepted summaries |
+| Disk | Not captured in accepted summaries |
+| GPU/VRAM | Not reliably probed or captured |
+| Backend | Managed `llama.cpp` |
+| Model A | `qwen2.5-coder-14b` |
+| Model B | `gpt-oss-20b` |
+| Embeddings | No working local embedding endpoint was part of the accepted evidence |
+| Retrieval mode | BM25-only for the accepted run; hybrid/vector path not validated |
+| Startup latency | Not captured in accepted summaries |
+| Indexing latency | Not captured in accepted summaries |
+| Retrieval latency | Not captured in accepted summaries |
+| Turn latency | Approximately 5-12s observed in accepted review; no per-turn timing table in the local summaries |
+| Failures | No trust break in either model; systemic classifier gap for `fix <thing> in <file>`; systemic absent named-target handling gap; qwen-specific grounding weakness; gpt-oss-specific multi-read loop/read-display echo issues |
+
+## Scenario Evidence Summary
+
+The accepted summaries cover 15 scenarios on both audited models.
+
+- Qwen batch 1: 6/6 pass for PDF, Excel, DOCX, data files, code explanation,
+  and create-empty-workspace.
+- Qwen batch 2: 6/9 full pass; trust surface held in all 9; three
+  model/prompt/classifier quality gaps were recorded.
+- Cross-model run: qwen and gpt-oss both show 12 PASS / 2 FAIL / 1 MIXED over
+  scenarios 1 through 15.
+- Trust surface held across both models: deterministic unsupported-format
+  refusal, anti-overclaim file-mutation guard, checkpoints, tool-surface
+  narrowing, loop guard, privacy redaction, and honest verification status.
+- Capability evidence supports beta claims for text-bearing PDF, DOCX, Excel,
+  JSON/CSV, code explanation, file creation, precise edit, and delete in this
+  scenario bank.
+- Unsupported PowerPoint and image OCR are honest refusals, not beta
+  capabilities.
 
 ## Acceptance Rule
 
-This report can be promoted from `waiting-on-T842-manual-evidence` only after
-the T842 packet identifies the hardware, models, backend, retrieval state, and
-observed latencies or explicitly records that those values were not captured.
+This report can be closed only after review accepts the narrowness of the
+evidence. Unknown hardware and timing fields must stay unknown. Hybrid/vector
+retrieval must stay unvalidated until a later run includes a working local
+embedding endpoint and records retrieval-lane behavior.
 
 Unknown is acceptable. Invented is not.
