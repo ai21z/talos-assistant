@@ -28,6 +28,11 @@ class MutationIntentTest {
                     + "The complete file must contain exactly two lines: first line T61-B exact README; "
                     + "second line Line two; no other characters.";
 
+    private static final String SCN13_FIX_PROMPT =
+            "There is a bug in calc.py: multiply returns the wrong result. "
+                    + "Fix multiply so it returns the product of a and b. "
+                    + "Change only what is necessary.";
+
     @Test
     void overwriteRewriteReplaceAndNaturalCreationPhrasingAreExplicitMutationIntent() {
         for (String input : java.util.List.of(
@@ -79,11 +84,22 @@ class MutationIntentTest {
     }
 
     @Test
+    void fileScopedDefectThenImperativeFixIsExplicitMutationIntent() {
+        assertTrue(MutationIntent.looksExplicitMutationRequest(SCN13_FIX_PROMPT));
+        assertEquals("explicit-file-scoped-defect-fix-request",
+                MutationIntent.classificationReason(SCN13_FIX_PROMPT));
+    }
+
+    @Test
     void advisoryFixProblemInNamedFileStaysReadOnly() {
         for (String input : java.util.List.of(
                 "How would you fix the bug in calc.py?",
+                "How would you fix multiply in calc.py?",
                 "Can you explain how to fix the bug in calc.py?",
-                "Should I fix the bug in calc.py?")) {
+                "There is a bug in calc.py. Explain how to fix multiply.",
+                "Should I fix the bug in calc.py?",
+                "There is a bug in calc.py. Should I fix multiply?",
+                "There is a bug in calc.py, but do not change files.")) {
             assertFalse(MutationIntent.looksExplicitMutationRequest(input), input);
         }
     }

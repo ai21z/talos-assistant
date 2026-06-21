@@ -167,6 +167,19 @@ public final class MutationIntent {
                     + FIX_PROBLEM_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
+    private static final Pattern FILE_SCOPED_DEFECT_MENTION = Pattern.compile(
+            "\\b(?:bug|defect|issue|problem|error|failure|failing|broken)\\b.{0,120}"
+                    + "\\b(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + FIX_PROBLEM_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
+            Pattern.DOTALL);
+
+    private static final Pattern IMPERATIVE_FIX_AFTER_DEFECT_CONTEXT = Pattern.compile(
+            "(?:^|[.!?:;]\\s+)fix\\s+(?:(?:the|a|an)\\s+)?"
+                    + "(?:[a-z0-9_#$./\\\\-]+\\s+){0,4}[a-z0-9_#$./\\\\-]+"
+                    + "(?:\\s+(?:so|to|by|because|that|with)\\b|[.!?]|$)",
+            Pattern.DOTALL);
+
     private static final Pattern SUMMARIZE_SOURCE_TO_TARGET = Pattern.compile(
             "\\b(?:summarize|summarise|condense|"
                     + "write\\s+(?:a\\s+)?summary\\s+of|"
@@ -264,6 +277,7 @@ public final class MutationIntent {
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
+        if (looksFileScopedDefectFixRequest(lower)) return "explicit-file-scoped-defect-fix-request";
         if (looksFixProblemInFileTarget(lower)) return "explicit-fix-problem-in-file-target";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
@@ -356,6 +370,18 @@ public final class MutationIntent {
 
     private static boolean looksFixProblemInFileTarget(String lower) {
         return lower != null && FIX_PROBLEM_IN_FILE_TARGET.matcher(lower).find();
+    }
+
+    private static boolean looksFileScopedDefectFixRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        Matcher defectMention = FILE_SCOPED_DEFECT_MENTION.matcher(lower);
+        while (defectMention.find()) {
+            String tail = lower.substring(defectMention.end());
+            if (IMPERATIVE_FIX_AFTER_DEFECT_CONTEXT.matcher(tail).find()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Optional<SourceToTargetArtifact> sourceToTargetArtifact(Matcher matcher) {

@@ -22,7 +22,8 @@ Talos version: `0.10.5`
 Redacted prompt sequence:
 
 ```text
-Fix the bug in calc.py.
+There is a bug in calc.py: multiply returns the wrong result. Fix multiply so
+it returns the product of a and b. Change only what is necessary.
 ```
 
 Expected behavior:
@@ -72,9 +73,9 @@ Tell the model harder to edit.
 Architectural hypothesis:
 
 ```text
-The deterministic mutation-intent/task-contract layer does not treat "fix
-<thing> in <file>" as an explicit mutation request unless the user uses more
-direct edit wording.
+The deterministic mutation-intent/task-contract layer does not treat a
+file-scoped defect mention followed by an imperative fix sentence as an
+explicit mutation request unless the user uses more direct edit wording.
 ```
 
 Likely code/document areas:
@@ -94,7 +95,8 @@ The tool surface must be correct before the model can act.
 ## Goal
 
 ```text
-Classify direct "fix <problem> in <file>" requests as FILE_EDIT while preserving
+Classify direct "fix <problem> in <file>" requests and file-scoped defect
+requests followed by imperative fix action as FILE_EDIT while preserving
 read-only negation, proposal-only, and explanatory "how would I fix" behavior.
 ```
 
@@ -159,6 +161,8 @@ Refactor scope:
 ## Acceptance Criteria
 
 - `Fix the bug in calc.py` resolves to a mutation-capable file-edit contract.
+- `There is a bug in calc.py... Fix multiply...` resolves to a
+  mutation-capable file-edit contract.
 - Equivalent explicit fix phrases with named file targets expose edit tools.
 - Proposal-only/read-only variants remain read-only.
 - Existing mutation, denial, checkpoint, and verification tests remain green.
@@ -171,8 +175,10 @@ Required deterministic regression:
 
 - Unit test: `MutationIntentTest` for direct fix-file phrasing and negative
   read-only/proposal phrasing.
-- Integration/executor test: `TaskContractResolverTest` proving FILE_EDIT tool
-  surface for the scn-13 prompt shape.
+- Integration test: `TaskContractResolverTest` proving FILE_EDIT contract for
+  the real scn-13 prompt shape.
+- Tool-surface test: `ToolSurfacePlannerTest` proving the real scn-13 prompt
+  exposes the file-edit target apply surface.
 - JSON e2e scenario: optional follow-up after unit/integration coverage.
 - Trace assertion: contract type and classification reason should be visible in
   existing prompt-debug/trace surfaces when relevant.
@@ -193,6 +199,9 @@ closeout.
 Implementation summary:
 
 - Added deterministic coverage for direct `fix <problem> in <file>` wording.
+- Added deterministic coverage for the actual T842 scn-13 prompt shape: a
+  file-scoped defect mention followed by an imperative `Fix multiply...`
+  sentence.
 - Added a `.py`-aware target matcher local to that fix-problem detector so
   `calc.py` is covered without broadening the existing source/artifact target
   capture used by unrelated Python creation flows.
@@ -200,6 +209,29 @@ Implementation summary:
 - Pinned the resulting apply-phase tool surface in `ToolSurfacePlannerTest`:
   the audited prompt now uses the narrowed file-edit target surface with
   `talos.read_file`, `talos.write_file`, and `talos.edit_file` available.
+
+Verified focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --no-daemon
+```
+
+Result: PASS.
+
+Second implementation pass:
+
+- Opus/owner review showed the first implementation covered the simplified
+  `Fix the bug in calc.py.` shape but not the real T842 scn-13 prompt.
+- Added red tests for the real prompt and for advisory/explanatory/no-change
+  negatives:
+  - `There is a bug in calc.py: multiply returns the wrong result. Fix multiply
+    so it returns the product of a and b. Change only what is necessary.`
+  - `How would you fix multiply in calc.py?`
+  - `There is a bug in calc.py. Explain how to fix multiply.`
+  - `There is a bug in calc.py. Should I fix multiply?`
+  - `There is a bug in calc.py, but do not change files.`
+- Added a narrow file-scoped-defect plus imperative-fix detector in
+  `MutationIntent`, ordered after read-only/advisory/instructional gates.
 
 Verified focused gate:
 
@@ -221,6 +253,7 @@ Result: PASS.
 Remaining before closeout:
 
 - Review by owner/Opus.
+- Live scn-13 rerun on both audited beta models.
 
 ## Work-Test Cycle Notes
 

@@ -35,6 +35,11 @@ class TaskContractResolverTest {
                     + "The complete file must contain exactly two lines: first line T61-B exact README; "
                     + "second line Line two; no other characters.";
 
+    private static final String SCN13_FIX_PROMPT =
+            "There is a bug in calc.py: multiply returns the wrong result. "
+                    + "Fix multiply so it returns the product of a and b. "
+                    + "Change only what is necessary.";
+
     // Exact shape of MissingMutationRetry's WORKSPACE_OPERATION_REQUIRED retry frame, which is
     // re-parsed as the latest user request by expected-target progress accounting (T763).
     private static final String WORKSPACE_OPERATION_RETRY_FRAME =
@@ -71,9 +76,22 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void fileScopedDefectThenImperativeFixBecomesFileEditContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(SCN13_FIX_PROMPT);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("calc.py"), contract.expectedTargets());
+        assertEquals("explicit-file-scoped-defect-fix-request", contract.classificationReason());
+    }
+
+    @Test
     void advisoryFixProblemInNamedFileStaysReadOnly() {
         for (String input : List.of(
                 "How would you fix the bug in calc.py?",
+                "How would you fix multiply in calc.py?",
                 "Can you explain how to fix the bug in calc.py?",
                 "Should I fix the bug in calc.py?")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
@@ -82,6 +100,20 @@ class TaskContractResolverTest {
             assertFalse(contract.mutationRequested(), input);
             assertFalse(contract.mutationAllowed(), input);
             assertEquals(Set.of("calc.py"), contract.expectedTargets(), input);
+        }
+    }
+
+    @Test
+    void fileScopedDefectAdviceAndNegationStayNonMutating() {
+        for (String input : List.of(
+                "There is a bug in calc.py. Explain how to fix multiply.",
+                "There is a bug in calc.py. Should I fix multiply?",
+                "There is a bug in calc.py, but do not change files.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE, input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
         }
     }
 
