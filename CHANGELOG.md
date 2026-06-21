@@ -8,9 +8,10 @@
   classifier remains deterministic and narrow: advice-only variants such as
   "How would you fix the bug in calc.py?" and "There is a bug in calc.py.
   Explain how to fix multiply." stay non-mutating. Pronoun advisory/no-fix
-  variants such as "How would you fix it?" and "Don't fix it yet" also stay
-  non-mutating, while the apply surface for the direct fix request exposes the
-  normal read/write/edit tools behind existing approval policy.
+  variants such as "How would you fix it?", "Should I fix it?", and "Don't fix
+  it yet" also stay non-mutating, while assistant-directed requests such as
+  "Can you fix it?" still expose the normal read/write/edit tools behind
+  existing approval policy.
 
 ## [0.10.5] - 2026-06-12
 

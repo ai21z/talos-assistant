@@ -264,6 +264,33 @@ Verified focused gate:
 
 Result: PASS.
 
+Fourth implementation pass:
+
+- Opus/owner live battery confirmed the third pass fixed the owner gate prompts
+  but still left modal self-question prompts exposed through the old `fix it`
+  marker.
+- Added red tests for:
+  - `There is a bug in calc.py. Should I fix it?`
+  - `There is a bug in calc.py. Can I fix it?`
+  - `There is a bug in calc.py. May I fix it?`
+  - `There is a bug in calc.py. Would we fix it?`
+  - `There is a bug in calc.py. Could we fix it?`
+- Added positive guards proving assistant-directed requests still mutate:
+  - `There is a bug in calc.py. Can you fix it?`
+  - `There is a bug in calc.py. Would you fix it?`
+  - `There is a bug in calc.py. Could you fix it?`
+  - `Fix it.`
+- Added a narrow embedded modal self-question detector for `I|we` only. It does
+  not include `you`, because `Can you fix it?` is a direct assistant request.
+
+Verified focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --no-daemon
+```
+
+Result: PASS.
+
 Verified broad gates:
 
 ```powershell

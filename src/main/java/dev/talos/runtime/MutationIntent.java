@@ -254,6 +254,10 @@ public final class MutationIntent {
             "(?:^|[.!?]\\s+)(?:what|how)\\s+(?:would|should|could)\\s+(?:you|i|we)\\s+"
                     + CORE_MUTATION_VERBS + "\\s+(?:it|this|that|them)\\s*\\?");
 
+    private static final Pattern EMBEDDED_ADVISORY_SELF_MODAL_MUTATION_QUESTION = Pattern.compile(
+            "(?:^|[.!?]\\s+)(?:should|would|could|can|may)\\s+(?:i|we)\\s+"
+                    + CORE_MUTATION_VERBS + "\\s+(?:it|this|that|them)\\s*\\?");
+
     private static final Pattern INSTRUCTIONAL_MUTATION_QUESTION = Pattern.compile(
             "\\b(?:how\\s+to|how\\s+(?:can|could|should)\\s+(?:i|we)|"
                     + "(?:explain|show|tell)\\s+(?:me\\s+)?how\\s+to)\\s+"
@@ -500,7 +504,8 @@ public final class MutationIntent {
         return lower != null
                 && (ADVISORY_MUTATION_QUESTION.matcher(lower).find()
                 || ADVISORY_WHAT_HOW_MUTATION_QUESTION.matcher(lower).find()
-                || EMBEDDED_ADVISORY_PRONOUN_MUTATION_QUESTION.matcher(lower).find());
+                || EMBEDDED_ADVISORY_PRONOUN_MUTATION_QUESTION.matcher(lower).find()
+                || EMBEDDED_ADVISORY_SELF_MODAL_MUTATION_QUESTION.matcher(lower).find());
     }
 
     private static boolean looksInstructionalMutationQuestion(String lower) {
