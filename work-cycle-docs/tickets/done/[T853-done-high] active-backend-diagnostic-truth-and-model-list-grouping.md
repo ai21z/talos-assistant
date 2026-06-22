@@ -1,6 +1,6 @@
-# [T853-open-high] Active Backend Diagnostic Truth And Model List Grouping
+# [T853-done-high] Active Backend Diagnostic Truth And Model List Grouping
 
-Status: open
+Status: done
 Priority: high
 Type: implementation
 Branch: `v0.9.0-beta-dev`
@@ -46,7 +46,7 @@ before comparing managed `llama.cpp` GGUF models against optional Ollama models.
 
 ## Implementation Notes
 
-Implementation status: implemented, awaiting review.
+Implementation status: implemented and reviewed; accepted at closeout.
 
 - `LlmClient` now exposes a `ContextWindowDiagnostics` view backed by the same
   effective-context calculation used before engine requests are sent.
@@ -97,9 +97,32 @@ git status --short -- . ':!site'
 
 ## Review / Closeout Requirements
 
-Leave this ticket open until external review verifies:
+Closeout (independent review independent verification, 2026-06-22):
 
-- the `/context` row uses the active model/backend after `/set model`;
-- the Ollama row shows the effective runtime context, not static config;
-- the llama.cpp warning path was not lost;
-- `/models` grouping is product-truthful without implying Ollama is removed.
+Final commit `9fce29befa280df903acd7657077a52ea739165f`. All four review requirements VERIFIED:
+
+- the `/context` row uses the active model/backend after `/set model` -- VERIFIED in code
+  (ContextCommand.liveEngineRow reads ctx.llm().contextWindowDiagnostics().model() = getModel(),
+  the live backend/model that setModel mutates) AND LIVE on a real ollama probe;
+- the Ollama row shows the effective runtime context, not static config -- VERIFIED: LlmClient
+  ContextWindowDiagnostics.effectiveWindowTokens uses the SAME effectiveContextWindowTokens(configured,
+  engineWindow)=min(...) the runtime enforces before requests, so the diagnostic cannot drift;
+- the llama.cpp warning path was not lost -- VERIFIED (renderActiveLlamaCppRow + renderLlamaCppConfigRow
+  keep the divergence WARNING/note; pinned by ContextCommandTest.activeLlamaCppModelRowKeepsEngineContextDivergenceWarning);
+- `/models` grouping is product-truthful without implying Ollama removed -- VERIFIED: groups
+  "Recommended managed llama.cpp" then "Legacy/optional Ollama" then other; ollama still listed.
+
+Tests re-run by me: ContextCommandTest 11/0/0, ModelsCommandTest 1/0/0 (incl the regression
+asserting the row must NOT report "llama.cpp context 32,768" after /set model ollama/...).
+
+LIVE reproduction of the original bug's fix (isolated config default_backend=llama_cpp, context=32768,
+ollama reachable): after `/set model ollama/gpt-oss:20b`, `/context` reported
+"Engine: ollama/gpt-oss:20b effective context 8,192 tokens (active model; limits.llm_context_max_tokens=32,768;
+engine-reported context=8,192) WARNING: runtime enforces the smaller active model window" -- NOT the old
+"llama.cpp context 32,768". `/models` rendered the Recommended/Legacy groups. Default-config ollama comment present.
+
+Known residual (NOT in T853 scope, NOT a blocker, separate pre-existing deferred item): the context-METER
+rows above the engine line (Max context 32,768; Budgets assist ~18,022 "active") are still computed from
+limits.llm_context_max_tokens, not the active engine window; the new engine-row WARNING flags this divergence
+(so it is no longer a silent lie), but full meter-to-active-engine reconciliation remains deferred -- candidate
+for a future ticket.

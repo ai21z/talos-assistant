@@ -157,7 +157,7 @@ or generated reports.
 
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/independent review manual testing in parallel.
-- [T853 Active backend diagnostic truth and model list grouping](../tickets/open/[T853-open-high]%20active-backend-diagnostic-truth-and-model-list-grouping.md)
+- [T853 Active backend diagnostic truth and model list grouping](../tickets/done/[T853-done-high]%20active-backend-diagnostic-truth-and-model-list-grouping.md) (done)
   - Diagnostics/product-truth fix for `/context` after `/set model` and
     grouped `/models` output.
   - Deterministic implementation report:
