@@ -86,6 +86,14 @@ class TrustClaimsHonestyTest {
                     |secret-proof
                     |PII-proof)\\b
                     """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
+    private static final Pattern DEFAULT_OLLAMA_EMBEDDING_CLAIM =
+            Pattern.compile("""
+                    \\b(?:embeddings?\\s+via\\s+Ollama
+                    |vectors?\\s+via\\s+Ollama
+                    |only\\s+Ollama\\s+(?:is\\s+)?(?:supported|implemented)
+                    |provider:\\s*"?ollama"?\\s*\\#\\s*only\\s+"?ollama"?\\s+supported
+                    |Use\\s+Ollama's\\s+native\\s+tool\\s+API)\\b
+                    """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
 
     @Test
     void readmeAndPolicyDocsBoundTrustClaimsToCurrentCode() throws Exception {
@@ -173,6 +181,22 @@ class TrustClaimsHonestyTest {
 
         assertPatternAbsent(publicDocs, UNBOUNDED_VECTOR_CLAIM);
         assertPatternAbsent(publicDocs, COMPLETE_SECRET_CLAIM);
+    }
+
+    @Test
+    void currentProductSurfacesDoNotPresentOllamaAsTheDefaultEmbeddingOrToolPath() throws Exception {
+        String currentSurfaces = read("README.md") + "\n"
+                + read("AGENTS.md") + "\n"
+                + read("docs/user/retrieval-and-vectors.md") + "\n"
+                + read("docs/user/model-setup.md") + "\n"
+                + read("docs/setup-managed-models.md") + "\n"
+                + read("docs/architecture/23-embedding-provider-architecture.md") + "\n"
+                + read("src/main/resources/config/default-config.yaml") + "\n"
+                + read("src/main/java/dev/talos/cli/launcher/RagIndexCmd.java");
+
+        assertPatternAbsent(currentSurfaces, DEFAULT_OLLAMA_EMBEDDING_CLAIM);
+        assertContainsNormalized(currentSurfaces,
+                "Vector retrieval requires a local embedding endpoint. When embeddings are disabled or fail, Talos falls back to BM25-only retrieval.");
     }
 
     @Test

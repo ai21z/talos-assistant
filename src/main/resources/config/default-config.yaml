@@ -108,7 +108,7 @@ rag:
   embed_concurrency: 4  # Control concurrent embedding requests
   force_full_reindex: false  # Set to true to ignore file hashes and rebuild everything
   vectors:
-    enabled: true
+    enabled: false
 
 document_extraction:
   enabled: true
@@ -130,8 +130,8 @@ llm:
   model: "talos-agent"
 
 embed:
-  provider: "compat"
-  model: "talos-embed"
+  provider: "disabled"
+  model: "none"
   host: ""
   allow_remote: false
 
@@ -189,7 +189,7 @@ limits:
   llm_context_max_tokens: 8192   # Default token budget for prompt validation (fallback if model info unavailable)
 
 tools:
-  native_calling: true   # Use Ollama's native tool API; set false to fall back to XML prompt injection
+  native_calling: true   # Use backend-native structured tool calls when supported; set false for XML prompt injection
 
 session:
   persistence: true      # Persist session evidence and allow explicit /session load; set false for ephemeral sessions

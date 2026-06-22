@@ -55,7 +55,7 @@ avoid split-brain architecture ownership.
 | `talos-harness-main-plan.md` | Most current harness roadmap among the harness-plan documents; keep as the primary harness plan snapshot. |
 | `talos-harness-plan.md` | Older rollout plan; useful historical source, not the first current roadmap. |
 | `talos-harness-source-of-truth.md` | Older independent review/source-pack framing; useful context, not a current branch truth packet. |
-| `23-embedding-provider-architecture.md` | Frozen embedding/provider architecture reference. |
+| `23-embedding-provider-architecture.md` | Current bounded embedding-provider and RAG-vector reference. |
 | `25-xml-retirement-review.md` | XML tool-call retirement review and migration analysis. |
 | `26-pre-harness-prerequisites.md` | Historical pre-harness prerequisite checklist; verify against current code before treating any open item as still open. |
 | `27-codebase-cleanup-and-refactor-overview.md` | Cleanup/refactor overview from the v0.9.0 beta cleanup stream. |

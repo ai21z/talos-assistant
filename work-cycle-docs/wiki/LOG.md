@@ -1030,3 +1030,19 @@ mechanically.
   REPL model context.
 - T854 remains open pending external review and a real installed
   `/set model ollama/...`, `/status`, and `/status --verbose` check.
+
+## [2026-06-22] product-truth | Implement T855 Ollama independence default-path gate
+
+- Added T855 after model/backend review showed the default beta path still had
+  misleading Ollama-adjacent surfaces: vectors-on placeholder embedding config,
+  default `/models` scanning all provider catalogs, REPL active-model sync into
+  the legacy Ollama block, stale embedding docs, and dead first-run Ollama
+  helper code.
+- Changed bundled/fallback embedding defaults to BM25-only
+  (`embed.provider=disabled`, `embed.model=none`, `rag.vectors.enabled=false`)
+  until a local embedding endpoint is explicitly configured.
+- `/models` no longer queries the Ollama catalog by default while managed
+  `llama_cpp` is active; explicit Ollama backend selection still keeps Ollama
+  available.
+- T855 remains open pending review. T856 managed `llama.cpp` embeddings are
+  deliberately not implemented by this ticket.

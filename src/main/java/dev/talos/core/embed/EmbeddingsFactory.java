@@ -14,9 +14,10 @@ import java.util.Objects;
  * the query client wraps the raw transport with the appropriate instruction
  * prefix.
  * <p>
- * Supports explicit transport selection through {@code embed.provider}.
- * Ollama remains available as a legacy provider, while compat providers use
- * OpenAI-compatible local embedding endpoints.
+ * Supports explicit transport selection through {@code embed.provider}. The
+ * default is disabled/BM25-only until a user configures a local embedding
+ * endpoint. Ollama remains available as a legacy provider, while compat
+ * providers use OpenAI-compatible local embedding endpoints.
  */
 public final class EmbeddingsFactory {
     private EmbeddingsFactory() {}
@@ -24,8 +25,9 @@ public final class EmbeddingsFactory {
      * Resolve the active embedding profile from configuration.
      * <p>
      * Reads {@code embed.model} first (new canonical key), falling back to
-     * {@code ollama.embed} (legacy key), then to the bge-m3 built-in default.
-     * Provider is read from {@code embed.provider}, defaulting to {@code "compat"}.
+     * {@code ollama.embed} (legacy key for explicit Ollama configs), then to
+     * {@code "none"}. Provider is read from {@code embed.provider}, defaulting
+     * to {@code "disabled"}.
      * <p>
      * When the resolved model name matches a known built-in profile, the
      * built-in is used as <em>defaults</em> — not as an unconditional
@@ -39,15 +41,15 @@ public final class EmbeddingsFactory {
         Map<String, Object> embedCfg = CfgUtil.map(cfg.data.get("embed"));
         Map<String, Object> ollamaCfg = CfgUtil.map(cfg.data.get("ollama"));
 
-        // Provider: embed.provider > "compat"
-        String provider = stringOr(embedCfg.get("provider"), "compat");
+        // Provider: embed.provider > "disabled"
+        String provider = stringOr(embedCfg.get("provider"), "disabled");
 
         // Model: embed.model > provider-specific fallback
         String model = stringOr(embedCfg.get("model"), null);
         if (model == null) {
             model = "ollama".equals(provider)
                     ? stringOr(ollamaCfg.get("embed"), "bge-m3")
-                    : "talos-embed";
+                    : "none";
         }
 
         // Find built-in defaults for this model (may be null for unknown models)

@@ -293,8 +293,8 @@ public class Config implements EngineConfig {
         // ----- embed -----
         Map<String,Object> embed = map(data.get("embed"));
         if (embed == null) { embed = new LinkedHashMap<>(); data.put("embed", embed); defaulted("embed"); }
-        putIfAbsent(embed, "provider", "compat", "embed.provider");
-        putIfAbsent(embed, "model", "talos-embed", "embed.model");
+        putIfAbsent(embed, "provider", "disabled", "embed.provider");
+        putIfAbsent(embed, "model", "none", "embed.model");
         putIfAbsent(embed, "host", "", "embed.host");
         putIfAbsent(embed, "allow_remote", Boolean.FALSE, "embed.allow_remote");
 

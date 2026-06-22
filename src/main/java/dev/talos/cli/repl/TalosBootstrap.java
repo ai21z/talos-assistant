@@ -736,10 +736,27 @@ public final class TalosBootstrap {
 
     private static void syncActiveModelIntoConfig(Config cfg, String activeModel) {
         if (cfg == null || activeModel == null || activeModel.isBlank()) return;
-        String modelName = activeModel.contains("/") ? activeModel.substring(activeModel.indexOf('/') + 1) : activeModel;
-        Map<String, Object> ollama = new java.util.LinkedHashMap<>(CfgUtil.map(cfg.data.get("ollama")));
-        ollama.put("model", modelName);
-        cfg.data.put("ollama", ollama);
+        String backend = null;
+        String modelName = activeModel.trim();
+        int slash = modelName.indexOf('/');
+        if (slash > 0 && slash < modelName.length() - 1) {
+            backend = modelName.substring(0, slash).trim();
+            modelName = modelName.substring(slash + 1).trim();
+        }
+        if (modelName.isBlank()) return;
+
+        Map<String, Object> llm = new java.util.LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        if (backend != null && !backend.isBlank()) {
+            llm.put("default_backend", backend);
+        }
+        llm.put("model", modelName);
+        cfg.data.put("llm", llm);
+
+        if ("ollama".equals(backend)) {
+            Map<String, Object> ollama = new java.util.LinkedHashMap<>(CfgUtil.map(cfg.data.get("ollama")));
+            ollama.put("model", modelName);
+            cfg.data.put("ollama", ollama);
+        }
     }
 }
 

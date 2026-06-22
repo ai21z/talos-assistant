@@ -11,6 +11,7 @@ import java.io.PrintStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -187,6 +188,38 @@ class TalosBootstrapTest {
     }
 
     @Test
+    void syncActiveManagedModelUpdatesLlmWithoutMutatingLegacyOllamaBlock() throws Exception {
+        Config cfg = new Config(null);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ollama = (Map<String, Object>) cfg.data.get("ollama");
+        String originalOllamaModel = String.valueOf(ollama.get("model"));
+
+        invokeSyncActiveModelIntoConfig(cfg, "llama_cpp/qwen2.5-coder-14b");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> llm = (Map<String, Object>) cfg.data.get("llm");
+        assertEquals("llama_cpp", llm.get("default_backend"));
+        assertEquals("qwen2.5-coder-14b", llm.get("model"));
+        assertEquals(originalOllamaModel, ollama.get("model"),
+                "selecting a managed model must not rewrite the legacy Ollama model block");
+    }
+
+    @Test
+    void syncActiveOllamaModelUpdatesLlmAndLegacyOllamaCompatibilityBlock() throws Exception {
+        Config cfg = new Config(null);
+
+        invokeSyncActiveModelIntoConfig(cfg, "ollama/gpt-oss:20b");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> llm = (Map<String, Object>) cfg.data.get("llm");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ollama = (Map<String, Object>) cfg.data.get("ollama");
+        assertEquals("ollama", llm.get("default_backend"));
+        assertEquals("gpt-oss:20b", llm.get("model"));
+        assertEquals("gpt-oss:20b", ollama.get("model"));
+    }
+
+    @Test
     void backwardCompatibleConstructorWorks() {
         SessionState session = new SessionState() {
             private int k = 6; private boolean dbg;
@@ -298,6 +331,12 @@ class TalosBootstrapTest {
         assertTrue(router.tryHandle("/q"));
         assertTrue(router.shouldQuit());
         assertFalse(sink.toString(StandardCharsets.UTF_8).contains("__QUIT__"));
+    }
+
+    private static void invokeSyncActiveModelIntoConfig(Config cfg, String activeModel) throws Exception {
+        Method method = TalosBootstrap.class.getDeclaredMethod("syncActiveModelIntoConfig", Config.class, String.class);
+        method.setAccessible(true);
+        method.invoke(null, cfg, activeModel);
     }
 }
 

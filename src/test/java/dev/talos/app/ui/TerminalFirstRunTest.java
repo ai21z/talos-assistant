@@ -124,18 +124,6 @@ class TerminalFirstRunTest {
         }
     }
 
-    @Nested class OllamaDetection {
-        @Test void checkOllamaInstalled_doesNotThrow() {
-            assertDoesNotThrow(() -> TerminalFirstRun.checkOllamaInstalled());
-        }
-        @Test void checkModelAvailable_doesNotThrow() {
-            assertDoesNotThrow(() -> TerminalFirstRun.checkModelAvailable("nonexistent-model:latest"));
-        }
-        @Test void checkModelAvailable_withNullModel_doesNotThrow() {
-            assertDoesNotThrow(() -> TerminalFirstRun.checkModelAvailable(null));
-        }
-    }
-
     @Nested class MainIntegration {
         @Test void mainClass_usesTerminalFirstRun() {
             assertNotNull(TerminalFirstRun.class);

@@ -72,12 +72,21 @@ class EngineRuntimeConfigTest {
         Config cfg = new Config(null);
         cfg.data.put("embed", new LinkedHashMap<>(Map.of(
                 "provider", "compat",
-                "model", "talos-embed")));
+                "model", "custom-embed")));
 
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
 
         assertEquals("compat", runtime.embeddingProvider());
-        assertEquals("talos-embed", runtime.embeddingModel());
-        assertEquals("compat/talos-embed", runtime.embeddingLabel());
+        assertEquals("custom-embed", runtime.embeddingModel());
+        assertEquals("compat/custom-embed", runtime.embeddingLabel());
+    }
+
+    @Test
+    void defaultEmbeddingSummaryIsDisabled() {
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(new Config(null));
+
+        assertEquals("disabled", runtime.embeddingProvider());
+        assertEquals("none", runtime.embeddingModel());
+        assertEquals("disabled/none", runtime.embeddingLabel());
     }
 }
