@@ -41,7 +41,8 @@ public record EmbeddingProfile(
 
     /**
      * bge-m3: lightweight 1024-dim model, no instruction prefixes, runs on CPU.
-     * This is the current Talos default.
+     * This remains a supported legacy Ollama embedding profile. The default
+     * beta configuration is BM25-only until the user configures embeddings.
      */
     public static final EmbeddingProfile BGE_M3 = new EmbeddingProfile(
             "ollama", "bge-m3", 1024,
@@ -53,8 +54,9 @@ public record EmbeddingProfile(
      * Qwen/Qwen3-Embedding-8B: instruction-aware, 4096 native dims
      * (recommended at 1024 via Matryoshka for index compat with bge-m3).
      * <p>
-     * Default provider is {@code "ollama"} — the only transport currently
-     * implemented. Future PRs may add vLLM/OpenAI-compatible transport.
+     * Default built-in provider is {@code "ollama"} for explicit legacy
+     * Ollama embedding configs. OpenAI-compatible local embedding endpoints are
+     * available through {@code embed.provider: "compat"}.
      * <p>
      * The query instruction uses a neutral retrieval prompt. Override via
      * {@code embed.query_instruction} in config for domain-specific tuning.

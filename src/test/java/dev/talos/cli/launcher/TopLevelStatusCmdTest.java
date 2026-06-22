@@ -17,7 +17,7 @@ class TopLevelStatusCmdTest {
 
         assertTrue(output.contains("Backend     : llama_cpp"));
         assertTrue(output.contains("Chat model  : talos-agent"));
-        assertTrue(output.contains("Embeddings  : compat/talos-embed"));
+        assertTrue(output.contains("Embeddings  : disabled/none"));
         assertFalse(output.contains("Ollama host"));
     }
 

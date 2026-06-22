@@ -7,11 +7,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 class EmbeddingsFactoryTest {
     @Test
-    void defaultConfigResolvesCompatEmbeddingProfile() {
+    void defaultConfigResolvesDisabledEmbeddingProfile() {
         Config cfg = new Config(null);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        assertEquals("compat", profile.provider());
-        assertEquals("talos-embed", profile.model());
+        assertEquals("disabled", profile.provider());
+        assertEquals("none", profile.model());
     }
     @Test
     void legacyOllamaEmbedKeyResolvesBgeM3() {
@@ -34,7 +34,7 @@ class EmbeddingsFactoryTest {
         cfg.data.put("embed", embedSection);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertEquals("custom-embed", profile.model());
-        assertEquals("compat", profile.provider());
+        assertEquals("disabled", profile.provider());
     }
     @Test
     void qwen3ModelNameResolvesBuiltInProfile() {
@@ -79,8 +79,8 @@ class EmbeddingsFactoryTest {
                 "Overridden dimensions must produce a new profile");
         assertEquals(2048, profile.dimensions(),
                 "Resolved profile must preserve the config dimensions override");
-        assertEquals("compat", profile.provider(),
-                "Non-overridden provider should default to compat");
+        assertEquals("disabled", profile.provider(),
+                "Non-overridden provider should default to disabled until the user opts into embeddings");
         assertTrue(profile.instructionAware(),
                 "Should inherit instruction-aware from built-in");
     }

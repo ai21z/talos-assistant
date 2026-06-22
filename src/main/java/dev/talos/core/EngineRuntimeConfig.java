@@ -73,12 +73,12 @@ public record EngineRuntimeConfig(
         Map<String, Object> embed = CfgUtil.map(safeCfg.data.get("embed"));
         String embedProvider = firstNonBlank(
                 stringAt(embed, "provider", ""),
-                "ollama".equals(backend) ? "ollama" : "compat");
+                "ollama".equals(backend) ? "ollama" : "disabled");
         String embedModel = firstNonBlank(
                 stringAt(embed, "model", ""),
                 "ollama".equals(embedProvider)
                         ? stringAt(CfgUtil.map(safeCfg.data.get("ollama")), "embed", "bge-m3")
-                        : "talos-embed");
+                        : "none");
 
         String network = networkEnabled(safeCfg) ? "network on" : "network off";
         String policy = "ollama".equals(backend)

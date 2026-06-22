@@ -42,12 +42,26 @@ Vectors help with semantic or fuzzy questions where the relevant file may not
 share the same words as the question. They do not replace direct reads and they
 do not make retrieval complete.
 
-The current local embedding configuration uses keys such as:
+The shipped beta default is BM25-only:
+
+```yaml
+embed:
+  provider: "disabled"
+  model: "none"
+  host: ""
+  allow_remote: false
+
+rag:
+  vectors:
+    enabled: false
+```
+
+An explicit local embedding endpoint uses keys such as:
 
 ```yaml
 embed:
   provider: "compat"
-  model: "talos-embed"
+  model: "<local-embedding-model>"
   host: "http://127.0.0.1:<port>"
   allow_remote: false
 

@@ -27,9 +27,9 @@ class ConfigViewTest {
         @Test void excludes_isNonEmpty() {
             assertFalse(view.rag().excludes().isEmpty());
         }
-        @Test void vectorsEnabled_fromDefault() {
-            // default-config.yaml has vectors.enabled: true
-            assertTrue(view.rag().vectors().enabled());
+        @Test void vectorsDisabled_fromDefault() {
+            // Default beta setup is BM25-only unless the user configures a local embedding endpoint.
+            assertFalse(view.rag().vectors().enabled());
         }
     }
     @Nested class OllamaAccessors {

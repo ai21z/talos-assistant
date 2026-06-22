@@ -8,7 +8,7 @@ import picocli.CommandLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-@CommandLine.Command(name = "rag-index", description = "Index repository (Lucene + embeddings via Ollama)")
+@CommandLine.Command(name = "rag-index", description = "Index repository (Lucene BM25; optional local vector embeddings)")
 public class RagIndexCmd implements Runnable {
     @CommandLine.Option(names="--root", description="Path to project root (default: current dir)")
     String root;

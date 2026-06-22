@@ -433,6 +433,11 @@ and add a docs honesty regression test. It does not authorize the five HIGH code
 fixes, production `src/main` changes, capability work, compaction Phase 2,
 candidate cut, or `site/` edits.
 
+T855 is open for review. It hardens Talos's Ollama-independence truth boundary:
+the default beta path is managed `llama.cpp` chat plus BM25-only retrieval
+unless a local embedding endpoint is explicitly configured. Ollama remains an
+explicit optional backend, not a default dependency.
+
 ## Wave 5 Readiness Status
 
 Talos has entered the first Wave 5 refactor ticket after the T807-T810

@@ -15,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Terminal-based first-run setup flow.
@@ -42,8 +41,6 @@ public final class TerminalFirstRun {
 
     private static final Path SENTINEL =
             Paths.get(System.getProperty("user.home"), ".talos", "first_run_done");
-
-    private static final long OLLAMA_PROBE_TIMEOUT_SECONDS = 5;
 
     private TerminalFirstRun() {}
 
@@ -126,71 +123,6 @@ public final class TerminalFirstRun {
                 + "  Run `talos setup models` to configure a tested managed llama.cpp profile.\n"
                 + "  Advanced users can set engines.llama_cpp.server_path and model_path in ~/.talos/config.yaml.\n"
                 + "  Ollama can still be selected explicitly as a legacy backend.";
-    }
-
-    static boolean checkOllamaInstalled() {
-        try {
-            Process p = new ProcessBuilder("ollama", "version")
-                    .redirectErrorStream(true)
-                    .start();
-            if (!waitForProbe(p)) return false;
-            return p.exitValue() == 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static String getOllamaVersion() {
-        try {
-            Process p = new ProcessBuilder("ollama", "version")
-                    .redirectErrorStream(true)
-                    .start();
-            if (!waitForProbe(p)) return null;
-            String output = new String(p.getInputStream().readAllBytes()).trim();
-            return p.exitValue() == 0 ? output : null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    static boolean checkModelAvailable(String model) {
-        if (model == null || model.isBlank()) return false;
-        try {
-            Process p = new ProcessBuilder("ollama", "list")
-                    .redirectErrorStream(true)
-                    .start();
-            if (!waitForProbe(p)) return false;
-            String output = new String(p.getInputStream().readAllBytes());
-            if (p.exitValue() != 0) return false;
-            // Model name may appear with tag, e.g. "qwen3:8b"
-            String baseName = model.contains(":") ? model.substring(0, model.indexOf(':')) : model;
-            return output.contains(model) || output.contains(baseName);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static boolean pullModel(String model) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder("ollama", "pull", model)
-                    .redirectErrorStream(true)
-                    .inheritIO();
-            Process p = pb.start();
-            int code = p.waitFor();
-            return code == 0;
-        } catch (Exception e) {
-            LOG.warn("Failed to pull model {}: {}",
-                    SafeLogFormatter.value(model), SafeLogFormatter.throwableMessage(e));
-            return false;
-        }
-    }
-
-    private static boolean waitForProbe(Process process) throws InterruptedException {
-        if (process.waitFor(OLLAMA_PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-            return true;
-        }
-        process.destroyForcibly();
-        return false;
     }
 
     static void writeSentinel() {

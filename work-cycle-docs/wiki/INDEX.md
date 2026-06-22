@@ -157,6 +157,11 @@ or generated reports.
 
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/Opus manual testing in parallel.
+- [T855 Ollama independence truth and default-path gate](../tickets/open/[T855-open-high]%20ollama-independence-truth-and-default-path-gate.md)
+  - Product-truth/default-path hardening for managed `llama.cpp` beta posture.
+  - Deterministic implementation report:
+    [T855 Ollama independence truth and default-path gate](../reports/t855-ollama-independence-truth-and-default-path-gate.md)
+  - Status: implemented, awaiting review.
 - [T854 Status active backend diagnostic truth](../tickets/done/[T854-done-high]%20status-active-backend-diagnostic-truth.md) (done)
   - Diagnostics/product-truth fix for `/status` after `/set model`.
   - Deterministic implementation report:

@@ -87,6 +87,7 @@ public final class EngineRegistry implements AutoCloseable {
     /** All installed models across backends, backend/name sorted. */
     public List<ModelRef> installed() {
         return providers.entrySet().stream()
+                .filter(e -> includeCatalogInDefaultInstalled(e.getKey(), activeBackend))
                 .flatMap(e -> {
                     String backend = e.getKey();
                     ModelCatalog c = catalogs.get(backend);
@@ -98,6 +99,16 @@ public final class EngineRegistry implements AutoCloseable {
                 })
                 .sorted(Comparator.comparing(ModelRef::backend).thenComparing(ModelRef::name))
                 .collect(Collectors.toList());
+    }
+
+    static boolean includeCatalogInDefaultInstalled(String backend, String activeBackend) {
+        if (backend == null || backend.isBlank()) {
+            return false;
+        }
+        if ("ollama".equals(backend)) {
+            return "ollama".equals(activeBackend);
+        }
+        return true;
     }
 
     /** Resolve "backend/model" or bare "model" by scanning catalogs. */
