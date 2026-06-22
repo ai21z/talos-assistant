@@ -1,6 +1,6 @@
-# [T847-open-high] Retrieval Evidence And Gold-Context Harness
+# [T847-done-high] Retrieval Evidence And Gold-Context Harness
 
-Status: open
+Status: done
 Priority: high
 Type: evaluation-harness
 Branch: `v0.9.0-beta-dev`
@@ -75,7 +75,7 @@ Expected retrieval follow-up themes remain:
 
 ## Implementation Pass
 
-Status: implemented awaiting review.
+Pass status: implemented and reviewed (accepted at closeout).
 
 Added:
 
@@ -92,4 +92,22 @@ Scope:
 - Metrics for file recall, file precision, MRR, nDCG, junk context,
   missing-core-evidence, line-range hits, and lane contributions.
 
-No production retrieval behavior changed. T847 remains open pending review.
+No production retrieval behavior changed.
+
+Closeout (independent review independent review, 2026-06-21):
+
+- Implementation commit `0a5cc8c6005f88952af9d94b7713d9550182a682`. Scope verified
+  test/report/docs only (no `src/main`, no retrieval/vector/RAG behavior change, no `site/`).
+- I read the harness and confirmed it is NOT hollow or circular: it runs the real
+  `RetrievalPipeline` (Bm25 + Knn + RRF + reranker + dedup over `LuceneStore`) and
+  compares actual retrieved paths against INDEPENDENT gold expectations defined per
+  task over a 24-document synthetic Talos-like corpus. Recall/precision/MRR/nDCG/
+  junk-context/missing-core-evidence are real formulas over real retrieval output;
+  the 0.60 recall floor is a measured baseline, not a rigged pass.
+- The two privacy negatives are genuine: protected-path exclusion asserts forbidden
+  paths are absent from results; private-mode asserts retrieval is skipped.
+- `RetrievalGoldContextHarnessTest` 4/0/0 re-run by me. Report is honest: synthetic
+  corpus, explicit Non-Claims (does not prove strong codebase intelligence, does not
+  validate live embeddings or a real repo), recall threshold "not a public quality claim".
+- Accepted as the measurement-first baseline. The next retrieval ticket must come from
+  measured harness gaps or live beta evidence, not vector hype.

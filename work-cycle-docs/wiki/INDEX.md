@@ -157,7 +157,7 @@ or generated reports.
 
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/independent review manual testing in parallel.
-- [T847 Retrieval evidence and gold-context harness](../tickets/open/[T847-open-high]%20retrieval-evidence-and-gold-context-harness.md)
+- [T847 Retrieval evidence and gold-context harness](../tickets/done/[T847-done-high]%20retrieval-evidence-and-gold-context-harness.md) (done)
   - Retrieval/workspace-intelligence measurement track.
   - Deterministic implementation report:
     [T847 retrieval evidence and gold-context harness](../reports/t847-retrieval-evidence-and-gold-context-harness.md)
