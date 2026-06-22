@@ -4,6 +4,8 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.rag.RagService;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.XmlCompatTelemetry;
@@ -163,6 +165,57 @@ class InfraCommandsTest {
             assertTrue(text.contains("Embed     disabled/none"), text);
             assertFalse(text.contains("Host      http://127.0.0.1:11434"), text);
             assertFalse(text.contains("Embed     bge-m3"), text);
+        }
+
+        @Test void nonVerboseStatusUsesActiveBackendAfterSetModel() {
+            Config cfg = statusSwitchConfig();
+            LlmClient active = ScriptedNativeLlmClient
+                    .recordingWithContextWindow(cfg, java.util.List.of(new LlmClient.StreamResult("", java.util.List.of())), 8_192)
+                    .client();
+            active.setModel("ollama/gpt-oss:20b");
+            Context switched = Context.builder(cfg).llm(active).build();
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = assertInstanceOf(Result.TrustedInfo.class, cmd.execute("", switched)).text;
+
+            assertTrue(text.contains("ollama/gpt-oss:20b"), text);
+            assertTrue(text.contains("Engine      ollama"), text);
+            assertFalse(text.contains("Engine      llama.cpp (managed)"), text);
+        }
+
+        @Test void verboseStatusUsesActiveBackendHostAfterSetModel() {
+            Config cfg = statusSwitchConfig();
+            LlmClient active = ScriptedNativeLlmClient
+                    .recordingWithContextWindow(cfg, java.util.List.of(new LlmClient.StreamResult("", java.util.List.of())), 8_192)
+                    .client();
+            active.setModel("ollama/gpt-oss:20b");
+            Context switched = Context.builder(cfg).llm(active).build();
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = assertInstanceOf(Result.TrustedInfo.class, cmd.execute("--verbose", switched)).text;
+
+            assertTrue(text.contains("Model     ollama/gpt-oss:20b"), text);
+            assertTrue(text.contains("Host      http://127.0.0.1:11434"), text);
+            assertFalse(text.contains("Host      http://127.0.0.1:18116"), text);
+        }
+
+        private Config statusSwitchConfig() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                    "transport", "engine",
+                    "default_backend", "llama_cpp",
+                    "model", "qwen3.6-35b-a3b-q4km")));
+            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                    "llama_cpp", new LinkedHashMap<>(Map.of(
+                            "mode", "managed",
+                            "host", "http://127.0.0.1",
+                            "port", 18116,
+                            "model", "qwen3.6-35b-a3b-q4km")))));
+            cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
+                    "host", "http://127.0.0.1:11434",
+                    "model", "qwen2.5-coder:14b",
+                    "embed", "bge-m3")));
+            return cfg;
         }
     }
 

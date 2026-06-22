@@ -55,6 +55,7 @@ public final class StatusCommand implements Command {
         String activeModel = ctx.llm() == null
                 ? CliStatusDashboard.resolveModel(cfg)
                 : ctx.llm().getModel();
+        var activeRuntime = EngineRuntimeConfig.fromActiveModel(cfg, activeModel);
 
         if (!verbose) {
             var snapshot = CliStatusDashboard.snapshot(
@@ -63,7 +64,8 @@ public final class StatusCommand implements Command {
                     modes.getActiveName(),
                     activeModel,
                     ctx.session() == null ? "off" : ctx.session().getDebugLevel().label(),
-                    "/status --verbose for diagnostics");
+                    "/status --verbose for diagnostics",
+                    activeRuntime);
             return new Result.TrustedInfo(CliStatusDashboard.render(snapshot, terminalWidth));
         }
 
@@ -94,9 +96,8 @@ public final class StatusCommand implements Command {
             if (en instanceof Boolean b) vectors = b;
         }
 
-        var runtime = EngineRuntimeConfig.from(cfg);
-        String host = runtime.hostLabel();
-        String embedModel = runtime.embeddingLabel();
+        String host = activeRuntime.hostLabel();
+        String embedModel = activeRuntime.embeddingLabel();
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
         sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");

@@ -46,9 +46,22 @@ public final class CliStatusDashboard {
             String model,
             String debug,
             String next) {
+        return snapshot(workspace, cfg, mode, model, debug, next, null);
+    }
+
+    public static Snapshot snapshot(
+            Path workspace,
+            Config cfg,
+            String mode,
+            String model,
+            String debug,
+            String next,
+            EngineRuntimeConfig runtimeOverride) {
         Config safeCfg = cfg == null ? new Config() : cfg;
         Path ws = workspace == null ? Path.of(".") : workspace.toAbsolutePath().normalize();
-        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(safeCfg);
+        EngineRuntimeConfig runtime = runtimeOverride == null
+                ? EngineRuntimeConfig.from(safeCfg)
+                : runtimeOverride;
         return new Snapshot(
                 BuildInfo.version(),
                 CliUtil.shortenPath(ws),

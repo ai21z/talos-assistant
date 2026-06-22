@@ -16,6 +16,14 @@ public record EngineRuntimeConfig(
         String policyLabel
 ) {
     public static EngineRuntimeConfig from(Config cfg) {
+        return from(cfg, "");
+    }
+
+    public static EngineRuntimeConfig fromActiveModel(Config cfg, String activeModel) {
+        return from(cfg, activeModel);
+    }
+
+    private static EngineRuntimeConfig from(Config cfg, String activeModelOverride) {
         Config safeCfg = cfg == null ? new Config() : cfg;
         if (!safeCfg.data.containsKey("llm")
                 && !safeCfg.data.containsKey("engines")
@@ -31,12 +39,23 @@ public record EngineRuntimeConfig(
                     "network on; local engine only (unknown)");
         }
         Map<String, Object> llm = CfgUtil.map(safeCfg.data.get("llm"));
+        String activeModel = firstNonBlank(activeModelOverride);
+        String activeBackend = "";
+        if (activeModel.contains("/") && !activeModel.startsWith("/") && !activeModel.endsWith("/")) {
+            String[] parts = activeModel.split("/", 2);
+            if (parts.length == 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
+                activeBackend = parts[0];
+                activeModel = parts[1];
+            }
+        }
         String backend = firstNonBlank(
+                activeBackend,
                 env("TALOS_BACKEND"),
                 env("TALOS_LLM_BACKEND"),
                 stringAt(llm, "default_backend", "llama_cpp"));
 
         String model = firstNonBlank(
+                activeModel,
                 env("TALOS_MODEL"),
                 env("TALOS_LLM_MODEL"),
                 stringAt(llm, "model", ""),

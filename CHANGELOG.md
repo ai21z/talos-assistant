@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T854] REPL `/status` now uses the active backend-qualified model when a live
+  model is present, matching T853's `/context` diagnostic truth. After
+  `/set model ollama/...`, the dashboard and verbose status host row report
+  Ollama instead of mixing an Ollama model row with the configured managed
+  `llama.cpp` engine.
 - [T853] `/context` now prefers the active backend-qualified model after
   `/set model`, so switching to `ollama/...` reports the Ollama model and the
   runtime-enforced effective context window instead of the static configured
