@@ -23,10 +23,20 @@ This prints the tested managed profiles and example commands.
 
 ## Tested Managed Profiles
 
-| Profile | Source | File |
-| --- | --- | --- |
-| `qwen2.5-coder-14b` | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` | `qwen2.5-coder-14b-instruct-q4_k_m.gguf` |
-| `gpt-oss-20b` | `ggml-org/gpt-oss-20b-GGUF` | `gpt-oss-20b-mxfp4.gguf` |
+| Profile | Source | File | Tool mode |
+| --- | --- | --- | --- |
+| `qwen2.5-coder-14b` | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` | `qwen2.5-coder-14b-instruct-q4_k_m.gguf` | native/default |
+| `gpt-oss-20b` | `ggml-org/gpt-oss-20b-GGUF` | `gpt-oss-20b-mxfp4.gguf` | native/default |
+| `qwen36vf-q4km` | `tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF` | `Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf` | native/default |
+| `qwen36vf-q6k` | `tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF` | `Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf` | native/default |
+| `deepseek-v2lite-q4km` | `bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF` | `DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf` | text/tool-prompt |
+
+Tool-mode evidence is per profile and quant. Qwen3.6-VibeForged Q4/Q6 passed
+the initial Talos tool-call gate in native/default mode. DeepSeek-Coder-V2-Lite
+Q4 is Talos-usable in text/tool-prompt mode with
+`tools.native_calling:false`; native/default produced zero executable tool
+calls. Do not treat this profile as native/default compatible unless later
+evidence proves native/default tool-calling.
 
 Configure Qwen:
 
@@ -38,6 +48,18 @@ Configure GPT-OSS:
 
 ```powershell
 talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+```
+
+Configure a Qwen3.6-VibeForged profile:
+
+```powershell
+talos setup models --profile qwen36vf-q6k --server-path C:/path/to/llama-server.exe --write
+```
+
+Configure DeepSeek-Coder-V2-Lite in its tested text/tool-prompt mode:
+
+```powershell
+talos setup models --profile deepseek-v2lite-q4km --server-path C:/path/to/llama-server.exe --write
 ```
 
 ## Required Server Path
