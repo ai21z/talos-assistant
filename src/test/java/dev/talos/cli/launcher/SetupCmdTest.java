@@ -67,6 +67,10 @@ class SetupCmdTest {
         assertTrue(yaml.contains("hf_cache_dir: \"" + cache.toString().replace('\\', '/') + "\""));
         assertTrue(yaml.contains("tools:"));
         assertTrue(yaml.contains("native_calling: true"));
+        assertTrue(yaml.contains("provider: \"disabled\""), yaml);
+        assertTrue(yaml.contains("model: \"none\""), yaml);
+        assertFalse(yaml.contains("managed:"), yaml);
+        assertTrue(yaml.contains("vectors:\n    enabled: false"), yaml);
         assertFalse(yaml.contains("C:\\"));
     }
 

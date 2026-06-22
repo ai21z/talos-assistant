@@ -448,9 +448,11 @@ an explicit opt-in path. With T855 + T857 closed, no default or user-driven path
 probes or spawns Ollama unless the active backend is ollama or the user
 qualifies an `ollama/` model. Remaining Ollama-independence work is T856
 (managed `llama.cpp` embeddings) for the vector lane. T856 now has a Phase 1
-implementation awaiting review: opt-in `embed.managed` starts a separate
-embedding-mode `llama-server`, setup can write a `bge-m3` profile, and
+plus pass-2 implementation awaiting review: opt-in `embed.managed` starts a
+separate embedding-mode `llama-server`, setup can write a `bge-m3` profile, and
 doctor/status surfaces report BM25-only versus hybrid-if-probe-succeeds. The
+managed embedding endpoint is now registry-owned across short-lived query
+clients rather than tied to each transient `CompatEmbeddingsClient`. The
 2026-06-22 managed-model probes also opened T858 for per-model tool-mode
 compatibility and T859 for the managed-GGUF `/models` / profile-switching UX
 gap: downloaded GGUFs are not selectable until they are configured, and

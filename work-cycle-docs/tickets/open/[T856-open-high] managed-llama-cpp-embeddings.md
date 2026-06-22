@@ -87,6 +87,19 @@ Phase 1 is implemented and awaiting review:
 - `talos doctor` and `/status --verbose` report the effective embedding host
   and BM25-only versus hybrid-if-probe-succeeds mode from the active config.
 - The default bundled config remains BM25-only.
+
+Pass 2 is implemented and awaiting review:
+
+- Added shared managed embedding endpoint ownership so query-time
+  `CompatEmbeddingsClient` instances do not start and stop the managed
+  embedding server on every retrieval query.
+- Kept direct injected endpoints client-owned for focused tests while using a
+  registry lease for normal managed config.
+- Added deterministic registry shutdown, including a JVM shutdown hook for the
+  production registry and explicit `closeAll()` for tests.
+- Hardened the already-alive-but-not-ready readiness failure branch so it stops
+  the managed process before surfacing the error.
+- Pinned the no-embed-profile setup output as BM25-only.
 - T856 remains open pending code review and live local-embedding smoke.
 
 ## Scope
@@ -155,10 +168,11 @@ instance dedicated to embeddings, parallel to the chat server:
   `--embedding` instance), wire `CompatEmbeddingsClient` at its host, bge-m3
   tested profile, honest BM25-vs-hybrid diagnostics, BM25-only fallback
   preserved, and the no-Ollama gate.
-- Phase 2 (split to a follow-up ticket if it grows): embed-model profile
-  catalog, reindex/dim-mismatch handling, and the deferred T853
-  context-budget-meter reconciliation (the meter should reflect the active
-  embedding state too).
+- Phase 2 pass completed in this ticket: persistent managed endpoint ownership
+  across short-lived query clients and readiness-failure cleanup. Remaining
+  phase-2-sized follow-ups are embed-model profile catalog,
+  reindex/dim-mismatch handling, and the deferred T853 context-budget-meter
+  reconciliation (the meter should reflect the active embedding state too).
 - Process: trust-adjacent (privacy + diagnostic-truth surfaces). GPT implements,
   independent review verifies (code + tests + a live local-embedding smoke), no self-close.
 
