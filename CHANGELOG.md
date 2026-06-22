@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T847] Added a measurement-only retrieval gold-context harness with 20
+  deterministic tasks, BM25-only and synthetic-hybrid runs, expected
+  files/symbols/line ranges/related tests, and protected-path/private-mode
+  negative cases. This is evaluation infrastructure only: no production
+  retrieval ranking, vector, graph, RAG indexing, or prompt-assembly behavior
+  changed.
 - [T852] Multi-document read-only turns now stop more constructively when the
   model has already read every requested target but keeps repeating read calls.
   Instead of falling through to the generic no-progress failure policy, Talos

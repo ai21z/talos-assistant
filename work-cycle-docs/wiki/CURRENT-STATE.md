@@ -199,12 +199,11 @@ confidence_histogram:
   T844 RAG/vector and beta best-practices docs, T845 model/hardware range
   evidence, and T846 doctor diagnostics are done. T845 records the accepted
   one-machine, managed-`llama.cpp`, BM25-only beta-range evidence and does not
-  validate hybrid/vector retrieval. T847 remains open as the retrieval
-  gold-context harness track, but it is paused behind the T842
-  beta-correctness triage tickets: T848 mutation-intent fix-file prompts, T849
-  absent named-target guard, T850 read-only path/name grounding, T851
-  read-display write containment, and T852 GPT-OSS multi-document no-progress
-  synthesis. T850 is closed after the qwen scn-10 live rerun proved Talos no
+  validate hybrid/vector retrieval. The T842 beta-correctness triage tickets
+  are closed: T848 mutation-intent fix-file prompts, T849 absent named-target
+  guard, T850 read-only path/name grounding, T851 read-display write
+  containment, and T852 GPT-OSS multi-document no-progress synthesis. T850 is
+  closed after the qwen scn-10 live rerun proved Talos no
   longer infers `loqj-cli` from the workspace path when no inspected file states
   it. T851 is closed after the live two-model scn-14 rerun and a
   target-present GPT-OSS corruption probe proved the read-display containment
@@ -213,8 +212,9 @@ confidence_histogram:
   when every requested file has already been read and the model keeps repeating
   reads, Talos returns a bounded evidence-complete failure instead of the generic
   no-progress failure. The beta-correctness triage queue from T848 through T852
-  is now closed; T847 retrieval evidence and gold-context measurement can resume
-  while T842 owner/independent review manual audit remains parallel.
+  is now closed. T847 retrieval evidence and gold-context measurement has a
+  deterministic 20-task harness implementation awaiting review, while T842
+  owner/independent review manual audit remains parallel.
 
 ```talos-wiki-claims
 {

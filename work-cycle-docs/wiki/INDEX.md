@@ -158,8 +158,10 @@ or generated reports.
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/independent review manual testing in parallel.
 - [T847 Retrieval evidence and gold-context harness](../tickets/open/[T847-open-high]%20retrieval-evidence-and-gold-context-harness.md)
-  - Retrieval/workspace-intelligence measurement track; paused behind the
-    current beta-correctness triage.
+  - Retrieval/workspace-intelligence measurement track.
+  - Deterministic implementation report:
+    [T847 retrieval evidence and gold-context harness](../reports/t847-retrieval-evidence-and-gold-context-harness.md)
+  - Status: implemented, awaiting review.
 - [T848 Mutation intent fix-file prompts](../tickets/done/[T848-done-high]%20mutation-intent-fix-file-prompts.md) (done)
 - [T849 Absent named-target mutation guard](../tickets/done/[T849-done-high]%20absent-named-target-mutation-guard.md) (done)
 - [T850 Read-only grounding path-name non-invention](../tickets/done/[T850-done-medium]%20read-only-grounding-path-name-non-invention.md) (done)
