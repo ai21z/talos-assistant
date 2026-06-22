@@ -223,6 +223,7 @@ class EmbeddingsFactoryTest {
         assertInstanceOf(DisabledEmbeddings.class, emb);
         var ex = assertThrows(UnsupportedOperationException.class, () -> emb.embed("hello"));
         assertTrue(ex.getMessage().contains("disabled"));
+        assertTrue(ex.getMessage().contains("llama_cpp"));
     }
 
     @Test

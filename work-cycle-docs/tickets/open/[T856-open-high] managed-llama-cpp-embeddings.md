@@ -5,6 +5,9 @@ Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Opened from: T855/T857 Ollama-independence follow-up
+Review state: implemented-awaiting-review
+Implementation commit: containing commit for the implementation report
+Implementation report: `work-cycle-docs/reports/t856-managed-llama-cpp-embeddings.md`
 
 ## Problem
 
@@ -12,18 +15,18 @@ T855 and T857 closed the default chat/model-selection paths that could
 surprisingly probe or spawn Ollama while managed `llama_cpp` is active. The
 remaining independence gap is the vector retrieval lane.
 
-Current truth:
+Pre-implementation truth:
 
 - The beta default path is managed `llama_cpp` chat plus BM25-only retrieval
   unless a local embedding endpoint is explicitly configured.
-- `llama_cpp` appears as a supported embedding provider through the compatible
-  OpenAI-style embedding client, but Talos does not yet manage an embedding
+- `llama_cpp` appeared as a supported embedding provider through the compatible
+  OpenAI-style embedding client, but Talos did not yet manage an embedding
   server as part of the managed `llama_cpp` setup.
 - The managed chat `llama_cpp` engine does not implement embeddings itself:
   `LlamaCppEngine.embed(...)` throws unsupported.
-- Therefore a user who wants hybrid/vector retrieval still needs a separately
-  configured local embedding endpoint. That endpoint can be local and
-  Ollama-free, but Talos does not yet make that path first-class.
+- Therefore a user who wanted hybrid/vector retrieval still needed a separately
+  configured local embedding endpoint. That endpoint could be local and
+  Ollama-free, but Talos did not yet make that path first-class.
 
 This is a product-truth and beta-readiness gap: Talos should not imply vector
 retrieval is ready through managed `llama_cpp` until the embedding server path
@@ -37,8 +40,8 @@ is configured, diagnosed, and tested.
   aliases include `compat`, `openai_compat`, and `llama_cpp`, which route to a
   compatible embedding HTTP endpoint.
 - `docs/architecture/23-embedding-provider-architecture.md`: documents that
-  the managed Talos `llama_cpp` chat server does not yet start with embeddings
-  enabled.
+  managed `llama_cpp` embeddings are opt-in and use a separate embedding-mode
+  server, not the chat server.
 - T855/T857 closeout: no default or user-driven chat/model path should touch
   Ollama unless active backend is `ollama` or the user explicitly qualifies an
   `ollama/` model.
@@ -69,6 +72,22 @@ is configured, diagnosed, and tested.
 Make the Ollama-free vector lane first-class by adding managed `llama.cpp`
 embedding-server support or an equivalent local-compatible embedding profile
 that Talos can configure, diagnose, and document honestly.
+
+## Implementation State
+
+Phase 1 is implemented and awaiting review:
+
+- Added an opt-in `embed.managed` config view for a separate managed
+  embedding-mode `llama-server`.
+- `CompatEmbeddingsClient` can start that endpoint before sending
+  `/v1/embeddings` requests when `embed.provider: "llama_cpp"` and
+  `embed.managed.enabled: true`.
+- `talos setup models --embed-profile bge-m3` writes a tested local
+  `bge-m3` embedding profile with 1024 dimensions and a separate port.
+- `talos doctor` and `/status --verbose` report the effective embedding host
+  and BM25-only versus hybrid-if-probe-succeeds mode from the active config.
+- The default bundled config remains BM25-only.
+- T856 remains open pending code review and live local-embedding smoke.
 
 ## Scope
 
@@ -200,4 +219,3 @@ Add focused tests proving:
 - Verification profile: config, endpoint locality, dimension probe, and
   retrieval-mode diagnostics.
 - Allowed refactor scope: embedding setup/config/diagnostics only.
-

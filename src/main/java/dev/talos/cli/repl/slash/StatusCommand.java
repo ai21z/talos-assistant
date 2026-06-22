@@ -7,14 +7,18 @@ import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.IndexPathResolver;
+import dev.talos.core.embed.ManagedLlamaCppEmbeddingConfig;
 import dev.talos.core.extract.DocumentExtractionPreflight;
 import dev.talos.runtime.XmlCompatTelemetry;
+import dev.talos.safety.ProtectedContentSanitizer;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.IntSupplier;
 
 public final class StatusCommand implements Command {
@@ -98,6 +102,8 @@ public final class StatusCommand implements Command {
 
         String host = activeRuntime.hostLabel();
         String embedModel = activeRuntime.embeddingLabel();
+        String embedHost = embeddingHost(cfg, activeRuntime);
+        String retrievalMode = retrievalMode(cfg, vectors, activeRuntime.embeddingProvider(), embedHost);
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
         sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");
@@ -106,6 +112,8 @@ public final class StatusCommand implements Command {
 
         sb.append(AnsiColor.grey("  Host      ")).append(host).append("\n");
         sb.append(AnsiColor.grey("  Embed     ")).append(embedModel).append("\n");
+        sb.append(AnsiColor.grey("  EmbedHost ")).append(ProtectedContentSanitizer.sanitizeText(embedHost)).append("\n");
+        sb.append(AnsiColor.grey("  Retrieval ")).append(retrievalMode).append("\n");
         sb.append(AnsiColor.grey("  Concurr.  ")).append(CfgUtil.intAt(rag, "embed_concurrency", 4)).append("\n");
 
         sb.append("\n").append(AnsiColor.grey("  Limits")).append("\n");
@@ -186,5 +194,33 @@ public final class StatusCommand implements Command {
 
         sb.append("\n");
         return new Result.TrustedInfo(sb.toString());
+    }
+
+    private static String embeddingHost(dev.talos.core.Config cfg, EngineRuntimeConfig runtime) {
+        var embed = CfgUtil.map(cfg.data.get("embed"));
+        String configured = Objects.toString(embed.getOrDefault("host", "")).trim();
+        if (!configured.isBlank()) return configured;
+        ManagedLlamaCppEmbeddingConfig managed = ManagedLlamaCppEmbeddingConfig.from(cfg);
+        if (managed.enabled()) return managed.baseUrl();
+        if ("ollama".equals(runtime.embeddingProvider())) {
+            return Objects.toString(CfgUtil.map(cfg.data.get("ollama"))
+                    .getOrDefault("host", "http://127.0.0.1:11434"));
+        }
+        return runtime.hostLabel();
+    }
+
+    private static String retrievalMode(
+            dev.talos.core.Config cfg,
+            boolean vectorsEnabled,
+            String provider,
+            String embedHost) {
+        if (!vectorsEnabled) return "BM25-only (vectors disabled)";
+        if ("disabled".equals(provider)) return "BM25-only (embedding provider disabled)";
+        var embed = CfgUtil.map(cfg.data.get("embed"));
+        boolean allowRemote = CfgUtil.boolAt(embed, "allow_remote", false);
+        if (!HostLocalityPolicy.isLoopback(embedHost) && !allowRemote) {
+            return "BM25-only fallback likely (embedding host rejected)";
+        }
+        return "hybrid if embedding probe succeeds";
     }
 }

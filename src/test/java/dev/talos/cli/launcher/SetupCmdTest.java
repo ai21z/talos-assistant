@@ -123,6 +123,32 @@ class SetupCmdTest {
     }
 
     @Test
+    void generatedProfileConfigCanOptIntoManagedBgeM3Embeddings() {
+        Path server = tempDir.resolve("engines").resolve("llama-cpp").resolve("llama-server.exe");
+        Path cache = tempDir.resolve(".talos").resolve("models").resolve("huggingface");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen2.5-coder-14b",
+                server,
+                null,
+                cache,
+                18115,
+                "bge-m3",
+                18116);
+
+        assertTrue(yaml.contains("provider: \"llama_cpp\""), yaml);
+        assertTrue(yaml.contains("model: \"bge-m3\""), yaml);
+        assertTrue(yaml.contains("host: \"http://127.0.0.1:18116\""), yaml);
+        assertTrue(yaml.contains("dimensions: 1024"), yaml);
+        assertTrue(yaml.contains("managed:"), yaml);
+        assertTrue(yaml.contains("enabled: true"), yaml);
+        assertTrue(yaml.contains("hf_repo: \"ggml-org/bge-m3-Q8_0-GGUF\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"bge-m3-q8_0.gguf\""), yaml);
+        assertTrue(yaml.contains("pooling: \"mean\""), yaml);
+        assertTrue(yaml.contains("vectors:\n    enabled: true"), yaml);
+    }
+
+    @Test
     void generatedUserOwnedModelConfigRejectsProfileThatBecomesBlankAfterSanitizing() {
         Path server = tempDir.resolve("llama-server.exe");
         Path model = tempDir.resolve("models").resolve("agent.gguf");

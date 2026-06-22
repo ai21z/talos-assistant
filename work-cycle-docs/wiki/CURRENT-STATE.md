@@ -446,8 +446,11 @@ explicit optional backend, not a default dependency. T857 is done
 `EngineRegistry.resolve(...)` scans, while qualified `ollama/<model>` remains
 an explicit opt-in path. With T855 + T857 closed, no default or user-driven path
 probes or spawns Ollama unless the active backend is ollama or the user
-qualifies an `ollama/` model. Remaining Ollama-independence work is T856 (managed
-`llama.cpp` embeddings) for the vector lane. T856 is now ticketed. The
+qualifies an `ollama/` model. Remaining Ollama-independence work is T856
+(managed `llama.cpp` embeddings) for the vector lane. T856 now has a Phase 1
+implementation awaiting review: opt-in `embed.managed` starts a separate
+embedding-mode `llama-server`, setup can write a `bge-m3` profile, and
+doctor/status surfaces report BM25-only versus hybrid-if-probe-succeeds. The
 2026-06-22 managed-model probes also opened T858 for per-model tool-mode
 compatibility and T859 for the managed-GGUF `/models` / profile-switching UX
 gap: downloaded GGUFs are not selectable until they are configured, and
@@ -461,7 +464,8 @@ DeepSeek is native-tool capable. T859 is done (independent review-verified): the
 managed `llama.cpp` exposes the configured/running GGUF only, and
 `/set model llama_cpp/<name>` points users to `talos setup models --profile
 <name> --write --force` plus restart instead of implying a hot-swap. T856
-(managed embeddings) is the last open ticket of the model-truth/independence arc.
+(managed embeddings) remains open pending external review and live local
+embedding smoke.
 
 ## Wave 5 Readiness Status
 

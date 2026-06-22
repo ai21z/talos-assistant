@@ -70,6 +70,17 @@ rag:
     enabled: true
 ```
 
+For managed `llama.cpp`, Talos can write a tested local embedding profile:
+
+```powershell
+talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-path C:/path/to/llama-server.exe --write
+```
+
+This keeps chat and embeddings separate. The chat profile starts the managed
+chat server, while `--embed-profile bge-m3` configures a second local
+embedding-mode `llama-server` on a separate port. The vector lane is still
+active only when that local endpoint starts and returns usable vectors.
+
 `embed.provider: "disabled"` or `rag.vectors.enabled: false` means BM25-only
 retrieval. Remote embedding hosts are rejected unless `embed.allow_remote` is
 explicitly enabled.

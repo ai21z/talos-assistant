@@ -1,10 +1,10 @@
 # 23 - Embedding Provider Architecture
 
 **Status:** Current bounded reference
-**Updated:** 2026-06-22
+**Updated:** 2026-06-23
 **Branch:** `v0.9.0-beta-dev`
-**Scope:** RAG vector configuration, embedding transports, and deferred managed
-embedding work
+**Scope:** RAG vector configuration, embedding transports, and opt-in managed
+`llama.cpp` embedding work
 
 ---
 
@@ -28,9 +28,10 @@ rag:
     enabled: false
 ```
 
-This is deliberate. Managed `llama.cpp` chat is the default beta path, but
-managed `llama.cpp` embeddings are not wired yet. Until that work lands, Talos
-must not imply that a fresh install has a working vector lane.
+This is deliberate. Managed `llama.cpp` chat is the default beta path. Managed
+`llama.cpp` embeddings are available as an explicit opt-in path that starts a
+separate embedding-mode `llama-server`; a fresh install remains BM25-only until
+that profile is configured and the local embedding endpoint works.
 
 ## Implemented Transports
 
@@ -39,7 +40,7 @@ must not imply that a fresh install has a working vector lane.
 | `disabled` | `DisabledEmbeddings` | Default/BM25-only path. |
 | `compat` | `CompatEmbeddingsClient` | OpenAI-compatible local `/v1/embeddings` endpoint. User must configure host/model. |
 | `openai_compat` | `CompatEmbeddingsClient` | Alias for the same local-compatible endpoint shape. |
-| `llama_cpp` | `CompatEmbeddingsClient` | Alias for a local server exposing `/v1/embeddings`; the managed Talos `llama_cpp` chat server does not yet start with embeddings enabled. |
+| `llama_cpp` | `CompatEmbeddingsClient` | OpenAI-compatible local `/v1/embeddings` endpoint. When `embed.managed.enabled=true`, Talos can start a separate managed embedding-mode `llama-server`; this is distinct from the chat server. |
 | `ollama` | `EmbeddingsClient` | Explicit legacy Ollama embedding path. |
 
 Unsupported providers fail clearly instead of silently falling back to another
@@ -60,6 +61,18 @@ RAG is not a cloud search path and does not use a vector database.
 `EmbeddingProfile` still defines known model profiles such as `bge-m3` and
 `Qwen/Qwen3-Embedding-8B`. Those profiles describe vector-space parameters and
 cache identity. They do not mean those models are the default.
+
+The tested managed embedding setup profile is `bge-m3` with 1024 dimensions.
+Setup can write it alongside a managed chat profile:
+
+```powershell
+talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-path C:/path/to/llama-server.exe --write
+```
+
+That writes `embed.provider: "llama_cpp"`, `rag.vectors.enabled: true`, and an
+`embed.managed` block pointing at a dedicated embedding server. The embedding
+server uses the same local `llama-server.exe` binary, but a separate port and a
+separate embedding GGUF.
 
 Explicit Ollama users can still select:
 
@@ -87,8 +100,8 @@ rag:
 
 | Gap | Status |
 | --- | --- |
-| Managed `llama.cpp` embeddings | Deferred to a separate ticket. Requires starting/probing a local embedding-capable server path without relying on Ollama. |
-| Embedding model download/setup UX | Deferred. Do not claim automatic embedding setup until implemented. |
+| Managed `llama.cpp` embeddings | Phase 1 implemented as an opt-in `embed.managed` path with a dedicated embedding-mode server. Still requires review and live smoke before broad beta claims. |
+| Embedding model download/setup UX | Implemented for the tested `bge-m3` profile through `talos setup models --embed-profile bge-m3`; broader embedding profile catalog remains deferred. |
 | Hybrid retrieval quality validation | Requires measured retrieval harness evidence, not just configuration. |
 | Index/profile mismatch enforcement | Still needed: persist profile fingerprint in index metadata and warn/refuse incompatible reuse. |
 | Multi-profile indexing | Not supported. One vector profile per workspace index. |

@@ -88,12 +88,16 @@ public class DiagnoseCmd implements Runnable {
             System.out.println("  Model:    " + runtime.embeddingModel());
             try {
                 Embeddings embedClient = EmbeddingsFactory.forQuery(cfg);
-                float[] probe = embedClient.embed("hello world");
-                if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingsClient.isValidVector(probe)) {
-                    System.out.println("  Status:    OK");
-                    System.out.println("  Dimension: " + probe.length);
-                } else {
-                    System.out.println(term("  Status:    WARN — probe returned invalid vector (NaN/zero)", unicodeSafe));
+                try {
+                    float[] probe = embedClient.embed("hello world");
+                    if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingsClient.isValidVector(probe)) {
+                        System.out.println("  Status:    OK");
+                        System.out.println("  Dimension: " + probe.length);
+                    } else {
+                        System.out.println(term("  Status:    WARN — probe returned invalid vector (NaN/zero)", unicodeSafe));
+                    }
+                } finally {
+                    closeEmbeddingProbe(embedClient);
                 }
             } catch (Exception embErr) {
                 System.out.println(term("  Status:    ERROR — " + embErr.getMessage(), unicodeSafe));
@@ -231,6 +235,12 @@ public class DiagnoseCmd implements Runnable {
 
     private static String term(String text, boolean unicodeSafe) {
         return Sanitize.sanitizeForTerminalOutput(text, unicodeSafe);
+    }
+
+    private static void closeEmbeddingProbe(Embeddings embedClient) throws Exception {
+        if (embedClient instanceof AutoCloseable closeable) {
+            closeable.close();
+        }
     }
 
     static String criticalDiagnosisFailure(Config.Report report, String answerText, int retrievedCount) {

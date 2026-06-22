@@ -8,10 +8,12 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -93,6 +95,43 @@ class CompatEmbeddingsClientTest {
         assertDoesNotThrow(() -> new CompatEmbeddingsClient(cfg));
     }
 
+    @Test
+    void managedLlamaCppEndpointStartsBeforeCompatEmbeddingRequest() throws Exception {
+        AtomicReference<String> pathRef = new AtomicReference<>("");
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        AtomicBoolean started = new AtomicBoolean(false);
+        HttpServer server = server(pathRef, bodyRef, """
+                {"data":[{"embedding":[0.1,0.2,0.3]}]}
+                """);
+        try {
+            Config cfg = config(server, "bge-m3");
+            Map<String, Object> embed = mutableMap(cfg.data.get("embed"));
+            embed.put("provider", "llama_cpp");
+            embed.put("host", "");
+            embed.put("managed", new LinkedHashMap<>(Map.of(
+                    "enabled", true,
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort())));
+            cfg.data.put("embed", embed);
+            CompatEmbeddingsClient client = new CompatEmbeddingsClient(
+                    cfg,
+                    new dev.talos.core.cache.CacheDb(),
+                    HttpClient.newHttpClient(),
+                    MAPPER,
+                    () -> started.set(true));
+
+            float[] vec = client.embed("hello");
+
+            assertTrue(started.get(), "managed embedding endpoint must start before the HTTP request");
+            assertArrayEquals(new float[]{0.1f, 0.2f, 0.3f}, vec, 0.0001f);
+            assertEquals("/v1/embeddings", pathRef.get());
+            JsonNode body = MAPPER.readTree(bodyRef.get());
+            assertEquals("bge-m3", body.path("model").asText());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static Config config(HttpServer server, String model) {
         Config cfg = new Config();
         Map<String, Object> embed = new LinkedHashMap<>();
@@ -101,6 +140,11 @@ class CompatEmbeddingsClientTest {
         embed.put("host", "http://127.0.0.1:" + server.getAddress().getPort());
         cfg.data.put("embed", embed);
         return cfg;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> mutableMap(Object value) {
+        return new LinkedHashMap<>((Map<String, Object>) value);
     }
 
     private static HttpServer server(

@@ -115,6 +115,14 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
 
     @Override
     public void close() {
-        db.close();
+        try {
+            if (delegate instanceof AutoCloseable closeable) {
+                closeable.close();
+            }
+        } catch (Exception ignored) {
+            // Transport close is best-effort; cache close must still happen.
+        } finally {
+            db.close();
+        }
     }
 }

@@ -44,6 +44,16 @@ Configure Qwen:
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
 ```
 
+Configure Qwen plus the tested managed embedding profile:
+
+```powershell
+talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-path C:/path/to/llama-server.exe --write
+```
+
+`--embed-profile bge-m3` configures a separate local embedding-mode
+`llama-server` on a separate port. It does not reuse the chat server for
+embeddings.
+
 Configure GPT-OSS:
 
 ```powershell
@@ -105,6 +115,9 @@ For tested managed profiles, Talos configures the Hugging Face cache directory:
 The directory is created when the managed llama.cpp server starts. The model is
 downloaded through llama.cpp on first model start when the configured Hugging
 Face source is reachable.
+
+The managed `bge-m3` embedding profile uses the same cache root and is also
+downloaded by llama.cpp when the embedding endpoint starts.
 
 ## User-Owned GGUF Model
 

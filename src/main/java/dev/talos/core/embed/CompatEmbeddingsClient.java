@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /** OpenAI-compatible embedding transport for local model servers. */
-public final class CompatEmbeddingsClient implements BatchEmbeddings {
+public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoCloseable {
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
 
     private final ObjectMapper mapper;
@@ -30,6 +30,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings {
     private final CacheDb cache;
     private final String host;
     private final String model;
+    private final ManagedEmbeddingEndpoint managedEndpoint;
     private volatile Integer dim;
 
     public CompatEmbeddingsClient(Config cfg) {
@@ -37,16 +38,34 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings {
     }
 
     CompatEmbeddingsClient(Config cfg, CacheDb cache, HttpClient http, ObjectMapper mapper) {
+        this(cfg, cache, http, mapper, null);
+    }
+
+    CompatEmbeddingsClient(
+            Config cfg,
+            CacheDb cache,
+            HttpClient http,
+            ObjectMapper mapper,
+            ManagedEmbeddingEndpoint managedEndpoint) {
         Config safeCfg = cfg == null ? new Config() : cfg;
         this.cache = cache == null ? new CacheDb() : cache;
         this.http = http == null ? HttpClient.newHttpClient() : http;
         this.mapper = mapper == null ? new ObjectMapper() : mapper;
 
         Map<String, Object> embed = CfgUtil.map(safeCfg.data.get("embed"));
+        ManagedLlamaCppEmbeddingConfig managedConfig = ManagedLlamaCppEmbeddingConfig.from(safeCfg);
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(safeCfg);
         String configuredHost = Objects.toString(embed.getOrDefault("host", "")).trim();
-        this.host = trimTrailingSlash(configuredHost.isBlank() ? runtime.hostLabel() : configuredHost);
+        String effectiveHost = configuredHost.isBlank() && managedConfig.enabled()
+                ? managedConfig.baseUrl()
+                : (configuredHost.isBlank() ? runtime.hostLabel() : configuredHost);
+        this.host = trimTrailingSlash(effectiveHost);
         this.model = Objects.toString(embed.getOrDefault("model", runtime.embeddingModel()));
+        this.managedEndpoint = managedEndpoint != null
+                ? managedEndpoint
+                : (managedConfig.enabled()
+                ? new ManagedLlamaCppEmbeddingServerManager(managedConfig)
+                : ManagedEmbeddingEndpoint.NOOP);
 
         boolean allowRemote = CfgUtil.boolAt(embed, "allow_remote", false);
         HostLocalityPolicy.enforceLocalOrAllowed(
@@ -93,6 +112,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings {
     @Override public int preferredBatchSize() { return 16; }
 
     private List<float[]> embedInputs(List<String> inputs) throws Exception {
+        managedEndpoint.ensureStarted();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("input", inputs.size() == 1 ? inputs.get(0) : inputs);
@@ -171,5 +191,14 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings {
     private static String truncate(String value, int max) {
         if (value == null) return "";
         return value.length() <= max ? value : value.substring(0, max) + "...";
+    }
+
+    @Override
+    public void close() throws Exception {
+        try {
+            managedEndpoint.close();
+        } finally {
+            cache.close();
+        }
     }
 }
