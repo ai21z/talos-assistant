@@ -1,10 +1,10 @@
 # T857 EngineRegistry resolve Ollama-Catalog Symmetry
 
-Status: open
+Status: done
 Priority: medium
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
-Implementation state: implemented, awaiting review
+Implementation state: reviewed and closed (independent review-verified)
 
 ## Problem
 
@@ -120,3 +120,33 @@ Verification:
 
 Result: red before implementation on the new bare-name test, then green after
 the one-line filter was added.
+
+## Closeout Evidence
+
+Verified by independent review (code + tests + full-check delta). Implementation commit
+`67891703`. All acceptance criteria met:
+
+- Code: the `includeCatalogInDefaultInstalled` filter is added to the bare-name
+  scan only (`EngineRegistry.resolve` line ~128); the qualified branch
+  (`needle.contains("/")` -> `catalogs.get(parts[0]).find(...)`) is untouched, so
+  `resolve("ollama/<model>")` still resolves directly. Matches the ticket's
+  critical design nuance exactly. Minimal (one production line).
+- Tests: the stronger stub-catalog coverage the ticket preferred (not the
+  predicate-only fallback). `CountingCatalog` records `find()` calls; the new
+  tests assert `ollama.findCalls == 0` on a bare resolve while the `llama_cpp`
+  and `compat` catalogs are scanned (proves the skip AND that the scan continues
+  past it), that qualified `ollama/X` still hits the ollama catalog
+  (`findCalls == 1`), and that bare resolve includes ollama when it is the active
+  backend. All four acceptance criteria pinned.
+- Verification: focused suite green (incl. the `/set model` slash path that
+  consumes `resolve()`); compiles clean (the `StubProvider` record satisfies
+  `ModelEngineProvider`). Full `check`: 5309 tests (= prior 5306 + the 3 new
+  tests), only the 2 pre-existing terminal/PTY environmental failures
+  (`RootCmdTest.shortHelpOptionShowsUsage`,
+  `StatusRowPresenterTest.dumbTerminalIsNotSupportedAndStartIsANoOp`, reproduce
+  on parent `b462b168`), confirmed via the JUnit XML; zero new failures.
+
+The Ollama-independence default-path truth gate (T855 + T857) is now complete:
+no default or user-driven path probes/spawns Ollama unless the active backend is
+ollama or the user qualifies an `ollama/` model. Next: T856 managed `llama.cpp`
+embeddings (separate vector-independence feature).
