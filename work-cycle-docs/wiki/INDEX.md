@@ -160,13 +160,16 @@ or generated reports.
 - [T856 Managed llama.cpp embeddings](../tickets/open/[T856-open-high]%20managed-llama-cpp-embeddings.md)
   - Remaining Ollama-independence/vector-lane work: make local managed
     embeddings first-class, or keep BM25-only diagnostics honest when absent.
-- [T858 Model tool-mode profile compatibility](../tickets/open/[T858-open-high]%20model-tool-mode-profile-compatibility.md)
+- [T858 Model tool-mode profile compatibility](../tickets/done/[T858-done-high]%20model-tool-mode-profile-compatibility.md) (done)
   - Records the Qwen/DeepSeek probe finding: DeepSeek is Talos-usable in
     text/tool-prompt mode with `tools.native_calling:false`; native/default
     produced zero executable tool calls.
   - Deterministic implementation report:
     [T858 model tool-mode profile compatibility](../reports/t858-model-tool-mode-profile-compatibility.md)
-  - Status: implemented, awaiting review.
+  - Status: done (Opus-verified: SetupCmd per-profile `tools.native_calling`
+    (DeepSeek `false`), bounded docs wording, honesty test forbids
+    "DeepSeek native-tool capable"; full check only the 2 pre-existing
+    environmental failures, zero new).
 - [T859 Managed GGUF profile switching UX](../tickets/open/[T859-open-high]%20managed-gguf-profile-switching-ux.md)
   - Addresses the `/models` expectation gap: managed `llama_cpp` currently
     exposes the configured/running model, not every downloaded GGUF in cache.
