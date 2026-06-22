@@ -214,9 +214,9 @@ confidence_histogram:
   no-progress failure. The beta-correctness triage queue from T848 through T852
   is now closed. T847 retrieval evidence and gold-context measurement has a
   deterministic 20-task harness implementation awaiting review, while T842
-  owner/Opus manual audit remains parallel. T853 is open and implemented for
-  review after fixing `/context` active-backend diagnostic truth and grouped
-  `/models` output.
+  owner/Opus manual audit remains parallel. T853 is done after live
+  `/set model ollama/...` -> `/context` review. T854 is open and implemented
+  for review after fixing `/status` active-backend diagnostic truth.
 
 ```talos-wiki-claims
 {

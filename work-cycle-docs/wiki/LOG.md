@@ -1017,5 +1017,16 @@ mechanically.
   runtime context, while preserving the existing llama.cpp divergence warning
   fallback. `/models` now groups recommended managed `llama.cpp` entries apart
   from legacy/optional Ollama entries.
-- T853 remains open pending external review and a real installed
+- T853 was later closed after external review and a real installed
   `/set model ollama/...` then `/context` check.
+
+## [2026-06-22] diagnostic-truth | Implement T854 status active backend diagnostics
+
+- Added T854 after live T853 review showed `/status` could mix the live
+  `ollama/...` model row with the configured managed `llama.cpp` engine row.
+- Resolved REPL `/status` and `/status --verbose` runtime fields from the live
+  active model/backend when a live `LlmClient` is present.
+- Preserved top-level `talos status` as config-derived because it has no live
+  REPL model context.
+- T854 remains open pending external review and a real installed
+  `/set model ollama/...`, `/status`, and `/status --verbose` check.
