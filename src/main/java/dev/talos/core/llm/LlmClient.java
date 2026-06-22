@@ -269,6 +269,26 @@ public final class LlmClient implements AutoCloseable {
         return (mode == TransportMode.ENGINE ? backend + "/" + model : model);
     }
 
+    /**
+     * Diagnostic view of the context window that this client actually enforces.
+     * The values come from the same calculation used before sending an engine
+     * request, so REPL diagnostics cannot drift from runtime budgeting.
+     */
+    public ContextWindowDiagnostics contextWindowDiagnostics() {
+        int configured = TokenBudget.fromConfig(cfg).contextMaxTokens();
+        int engineWindow = engineContextWindowTokens();
+        int effective = effectiveContextWindowTokens(configured, engineWindow);
+        return new ContextWindowDiagnostics(getModel(), backend, configured, engineWindow, effective);
+    }
+
+    public record ContextWindowDiagnostics(
+            String model,
+            String backend,
+            int configuredWindowTokens,
+            int engineWindowTokens,
+            int effectiveWindowTokens
+    ) {}
+
     /** Accepts "backend/model" or just "model" (in PLACEHOLDER, backend is ignored). */
     public void setModel(String name) {
         String sanitized = sanitizeModelName(Objects.toString(name, ""));
@@ -1034,8 +1054,7 @@ public final class LlmClient implements AutoCloseable {
         return List.copyOf(trimmed);
     }
 
-    private int effectiveContextWindowTokens() {
-        int configured = TokenBudget.fromConfig(cfg).contextMaxTokens();
+    private int engineContextWindowTokens() {
         int engineWindow = 0;
         try {
             if (engineResolver != null && engineResolver.capabilities() != null) {
@@ -1044,6 +1063,16 @@ public final class LlmClient implements AutoCloseable {
         } catch (Exception ignored) {
             engineWindow = 0;
         }
+        return engineWindow;
+    }
+
+    private int effectiveContextWindowTokens() {
+        int configured = TokenBudget.fromConfig(cfg).contextMaxTokens();
+        int engineWindow = engineContextWindowTokens();
+        return effectiveContextWindowTokens(configured, engineWindow);
+    }
+
+    private static int effectiveContextWindowTokens(int configured, int engineWindow) {
         if (engineWindow > 0) {
             return Math.max(256, Math.min(configured, engineWindow));
         }

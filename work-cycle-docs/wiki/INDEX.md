@@ -157,6 +157,12 @@ or generated reports.
 
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/Opus manual testing in parallel.
+- [T853 Active backend diagnostic truth and model list grouping](../tickets/open/[T853-open-high]%20active-backend-diagnostic-truth-and-model-list-grouping.md)
+  - Diagnostics/product-truth fix for `/context` after `/set model` and
+    grouped `/models` output.
+  - Deterministic implementation report:
+    [T853 active backend diagnostic truth and model list grouping](../reports/t853-active-backend-diagnostic-truth-and-model-list-grouping.md)
+  - Status: implemented, awaiting review.
 - [T847 Retrieval evidence and gold-context harness](../tickets/done/[T847-done-high]%20retrieval-evidence-and-gold-context-harness.md) (done)
   - Retrieval/workspace-intelligence measurement track.
   - Deterministic implementation report:

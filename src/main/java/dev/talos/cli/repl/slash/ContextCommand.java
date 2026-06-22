@@ -11,6 +11,8 @@ import dev.talos.runtime.Result;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.IntSupplier;
 
 /**
@@ -129,19 +131,94 @@ public final class ContextCommand implements Command {
      * so and name the unsafe direction. Reconciliation is deliberately
      * out of scope (deferred); this row makes the divergence visible.
      */
-    private java.util.Optional<String> engineRow(Context ctx, ContextMeter meter) {
+    private Optional<String> engineRow(Context ctx, ContextMeter meter) {
+        Optional<String> live = liveEngineRow(ctx);
+        if (live.isPresent()) {
+            return live;
+        }
+
         String backend = EngineRuntimeConfig.from(ctx.cfg()).backend();
         if ("ollama".equals(backend)) {
-            return java.util.Optional.of("context managed by Ollama");
+            return Optional.of("context managed by Ollama");
         }
         if (!"llama_cpp".equals(backend)) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
-        var engines = CfgUtil.map(ctx.cfg().data.get("engines"));
-        var llamaCpp = CfgUtil.map(engines.get("llama_cpp"));
-        long engineContext = CfgUtil.longAt(llamaCpp, "context", 8192L);
+        return Optional.of(renderLlamaCppConfigRow(ctx, meter, "engines.llama_cpp.context"));
+    }
+
+    private Optional<String> liveEngineRow(Context ctx) {
+        if (ctx == null || ctx.llm() == null) {
+            return Optional.empty();
+        }
+        var diagnostics = ctx.llm().contextWindowDiagnostics();
+        String activeModel = Objects.toString(diagnostics.model(), "").trim();
+        int slash = activeModel.indexOf('/');
+        if (slash <= 0 || slash == activeModel.length() - 1) {
+            return Optional.empty();
+        }
+        String backend = activeModel.substring(0, slash);
+        if ("ollama".equals(backend)) {
+            return Optional.of(renderActiveOllamaRow(activeModel, diagnostics));
+        }
+        if ("llama_cpp".equals(backend)) {
+            return Optional.of(renderActiveLlamaCppRow(ctx, diagnostics, activeModel));
+        }
+        return Optional.of(activeModel + " effective context "
+                + num(diagnostics.effectiveWindowTokens())
+                + " tokens (active model; limits.llm_context_max_tokens="
+                + num(diagnostics.configuredWindowTokens()) + ")");
+    }
+
+    private static String renderActiveOllamaRow(
+            String activeModel,
+            dev.talos.core.llm.LlmClient.ContextWindowDiagnostics diagnostics) {
+        StringBuilder row = new StringBuilder(activeModel)
+                .append(" effective context ")
+                .append(num(diagnostics.effectiveWindowTokens()))
+                .append(" tokens (active model; limits.llm_context_max_tokens=")
+                .append(num(diagnostics.configuredWindowTokens()));
+        if (diagnostics.engineWindowTokens() > 0) {
+            row.append("; engine-reported context=")
+                    .append(num(diagnostics.engineWindowTokens()));
+        } else {
+            row.append("; engine context unavailable");
+        }
+        row.append(')');
+        if (diagnostics.engineWindowTokens() > 0
+                && diagnostics.effectiveWindowTokens() < diagnostics.configuredWindowTokens()) {
+            row.append("\n               WARNING: runtime enforces the smaller active model window");
+        }
+        return row.toString();
+    }
+
+    private String renderActiveLlamaCppRow(
+            Context ctx,
+            dev.talos.core.llm.LlmClient.ContextWindowDiagnostics diagnostics,
+            String activeModel) {
+        int configured = diagnostics.configuredWindowTokens();
+        int engine = diagnostics.engineWindowTokens() > 0
+                ? diagnostics.engineWindowTokens()
+                : configuredLlamaCppContext(ctx);
+        StringBuilder row = new StringBuilder("llama.cpp context ")
+                .append(num(engine))
+                .append(" tokens (active model ")
+                .append(activeModel)
+                .append("; engines.llama_cpp.context)");
+        if (engine < configured) {
+            row.append("\n               WARNING: smaller than limits.llm_context_max_tokens - ")
+                    .append("the budget assumes more room than the engine provides (overflow risk)");
+        } else if (engine > configured) {
+            row.append("\n               note: larger than limits.llm_context_max_tokens - ")
+                    .append("safe, but the extra engine context goes unused");
+        }
+        return row.toString();
+    }
+
+    private static String renderLlamaCppConfigRow(Context ctx, ContextMeter meter, String sourceLabel) {
+        long engineContext = configuredLlamaCppContext(ctx);
         StringBuilder row = new StringBuilder("llama.cpp context ").append(num((int) engineContext))
-                .append(" tokens (engines.llama_cpp.context)");
+                .append(" tokens (").append(sourceLabel).append(")");
         if (engineContext < meter.contextMaxTokens()) {
             row.append("\n               WARNING: smaller than limits.llm_context_max_tokens - ")
                     .append("the budget assumes more room than the engine provides (overflow risk)");
@@ -149,7 +226,13 @@ public final class ContextCommand implements Command {
             row.append("\n               note: larger than limits.llm_context_max_tokens - ")
                     .append("safe, but the extra engine context goes unused");
         }
-        return java.util.Optional.of(row.toString());
+        return row.toString();
+    }
+
+    private static int configuredLlamaCppContext(Context ctx) {
+        var engines = CfgUtil.map(ctx.cfg().data.get("engines"));
+        var llamaCpp = CfgUtil.map(engines.get("llama_cpp"));
+        return (int) CfgUtil.longAt(llamaCpp, "context", 8192L);
     }
 
     private static String num(int value) {

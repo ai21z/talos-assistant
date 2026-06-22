@@ -1006,3 +1006,16 @@ mechanically.
   BM25/hybrid lane contribution, file recall, precision, MRR, nDCG, junk
   context, missing-core-evidence, and line-range hits.
 - No production retrieval behavior changed. T847 remains open pending review.
+
+## [2026-06-22] diagnostic-truth | Implement T853 active backend diagnostics
+
+- Added T853 after beta model testing showed `/context` could continue
+  reporting the configured `llama.cpp` row after `/set model ollama/...`.
+- `LlmClient` now exposes context-window diagnostics backed by the same
+  effective-window calculation used before engine requests.
+- `/context` now reports active backend-qualified models and their effective
+  runtime context, while preserving the existing llama.cpp divergence warning
+  fallback. `/models` now groups recommended managed `llama.cpp` entries apart
+  from legacy/optional Ollama entries.
+- T853 remains open pending external review and a real installed
+  `/set model ollama/...` then `/context` check.
