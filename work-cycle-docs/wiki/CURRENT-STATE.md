@@ -457,11 +457,11 @@ proves native/default tool-calling. T858 is done (Opus-verified): managed setup
 profiles now generate explicit `tools.native_calling` values for tested profiles
 (including `false` for `deepseek-v2lite-q4km`), the setup docs carry the bounded
 tool-mode wording, and a TrustClaimsHonestyTest gate forbids any doc claiming
-DeepSeek is native-tool capable. T859 is implemented and awaiting review: the
-REPL now says managed `llama.cpp` exposes the configured/running GGUF only, and
+DeepSeek is native-tool capable. T859 is done (Opus-verified): the REPL now says
+managed `llama.cpp` exposes the configured/running GGUF only, and
 `/set model llama_cpp/<name>` points users to `talos setup models --profile
 <name> --write --force` plus restart instead of implying a hot-swap. T856
-(managed embeddings) remains open.
+(managed embeddings) is the last open ticket of the model-truth/independence arc.
 
 ## Wave 5 Readiness Status
 
