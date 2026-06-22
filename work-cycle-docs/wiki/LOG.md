@@ -1101,3 +1101,18 @@ mechanically.
 - Added focused tests for `/models`, `/set model`, and setup `--force` backup
   behavior.
 - T859 remains open pending review.
+
+## [2026-06-23] retrieval | Implement T856 managed llama.cpp embeddings
+
+- Added an opt-in managed embedding server path under `embed.managed` for
+  `llama_cpp` embeddings. The managed vector lane starts a separate
+  embedding-mode `llama-server` rather than reusing the chat server.
+- Added `talos setup models --embed-profile bge-m3` to write the tested local
+  embedding profile, 1024 dimensions, and a separate embedding port.
+- Wired `CompatEmbeddingsClient` to start the managed endpoint before
+  `/v1/embeddings` requests while preserving host-locality enforcement and
+  BM25-only fallback when vectors are disabled or the endpoint is unavailable.
+- Extended doctor and `/status --verbose` diagnostics with effective embedding
+  host and BM25-only versus hybrid-if-probe-succeeds wording.
+- T856 remains open pending external review and live local-embedding smoke; no
+  retrieval-quality claim is made before the T847 gold-context harness.

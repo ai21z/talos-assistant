@@ -167,6 +167,38 @@ class InfraCommandsTest {
             assertFalse(text.contains("Embed     bge-m3"), text);
         }
 
+        @Test void verboseShowsManagedEmbeddingHostAndRetrievalMode() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                    "transport", "engine",
+                    "default_backend", "llama_cpp",
+                    "model", "qwen2.5-coder:14b")));
+            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                    "llama_cpp", new LinkedHashMap<>(Map.of(
+                            "mode", "managed",
+                            "host", "http://127.0.0.1",
+                            "port", 18115,
+                            "model", "qwen2.5-coder:14b")))));
+            cfg.data.put("embed", new LinkedHashMap<>(Map.of(
+                    "provider", "llama_cpp",
+                    "model", "bge-m3",
+                    "host", "",
+                    "managed", new LinkedHashMap<>(Map.of(
+                            "enabled", true,
+                            "host", "http://127.0.0.1",
+                            "port", 18116)))));
+            cfg.data.put("rag", new LinkedHashMap<>(Map.of(
+                    "vectors", new LinkedHashMap<>(Map.of("enabled", Boolean.TRUE)))));
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
+
+            assertTrue(text.contains("Embed     llama_cpp/bge-m3"), text);
+            assertTrue(text.contains("EmbedHost http://127.0.0.1:18116"), text);
+            assertTrue(text.contains("Retrieval hybrid if embedding probe succeeds"), text);
+            assertFalse(text.contains("EmbedHost http://127.0.0.1:11434"), text);
+        }
+
         @Test void nonVerboseStatusUsesActiveBackendAfterSetModel() {
             Config cfg = statusSwitchConfig();
             LlmClient active = ScriptedNativeLlmClient

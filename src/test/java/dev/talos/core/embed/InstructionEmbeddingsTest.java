@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -137,6 +138,17 @@ class InstructionEmbeddingsTest {
         assertSame(inner, wrapped.delegate());
     }
 
+    @Test
+    void closeClosesAutoCloseableDelegate() throws Exception {
+        AtomicBoolean closed = new AtomicBoolean(false);
+        Embeddings inner = new CloseableStubEmbeddings(closed);
+
+        InstructionEmbeddings wrapped = new InstructionEmbeddings(inner, "prefix: ");
+        wrapped.close();
+
+        assertTrue(closed.get(), "managed embedding delegates must not leak through instruction wrappers");
+    }
+
     // ── Constructor validation ──────────────────────────────────────────
 
     @Test
@@ -158,6 +170,18 @@ class InstructionEmbeddingsTest {
     private static class StubEmbeddings implements Embeddings {
         @Override public int dimension() { return 1; }
         @Override public float[] embed(String text) { return new float[]{0f}; }
+    }
+
+    private static final class CloseableStubEmbeddings extends StubEmbeddings implements AutoCloseable {
+        private final AtomicBoolean closed;
+
+        private CloseableStubEmbeddings(AtomicBoolean closed) {
+            this.closed = closed;
+        }
+
+        @Override public void close() {
+            closed.set(true);
+        }
     }
 }
 

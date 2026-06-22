@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** T784: per-probe decision coverage for the doctor preflight. */
@@ -298,6 +299,29 @@ class DoctorProbesTest {
         assertTrue(result.detail().contains("mode=hybrid if embedding probe succeeds"), result.detail());
         assertTrue(result.detail().contains("model=embedder"), result.detail());
         assertTrue(!result.detail().contains("sk-test-secretsecretsecretsecret"), result.detail());
+    }
+
+    @Test
+    void retrievalStateUsesManagedLlamaCppEmbeddingHostWhenEmbedHostIsBlank() {
+        Config cfg = new Config();
+        cfg.data.put("embed", Map.of(
+                "provider", "llama_cpp",
+                "model", "bge-m3",
+                "host", "",
+                "managed", Map.of(
+                        "enabled", true,
+                        "host", "http://127.0.0.1",
+                        "port", 18116)));
+        cfg.data.put("rag", Map.of("vectors", Map.of("enabled", true)));
+
+        ProbeResult result = new RetrievalStateProbe().run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.PASS, result.status());
+        assertTrue(result.detail().contains("embedding=llama_cpp/bge-m3"), result.detail());
+        assertTrue(result.detail().contains("host=http://127.0.0.1:18116"), result.detail());
+        assertTrue(result.detail().contains("locality=local"), result.detail());
+        assertTrue(result.detail().contains("mode=hybrid if embedding probe succeeds"), result.detail());
+        assertFalse(result.detail().contains("11434"), result.detail());
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

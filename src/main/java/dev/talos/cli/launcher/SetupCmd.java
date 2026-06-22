@@ -38,6 +38,12 @@ public class SetupCmd implements Callable<Integer> {
     @CommandLine.Option(names = "--port", description = "Managed llama.cpp localhost port")
     int port = 18115;
 
+    @CommandLine.Option(names = "--embed-profile", description = "Optional managed llama.cpp embedding profile, for example bge-m3")
+    String embedProfile;
+
+    @CommandLine.Option(names = "--embed-port", description = "Managed llama.cpp embedding localhost port")
+    int embedPort = 18116;
+
     @CommandLine.Option(names = "--write", description = "Write ~/.talos/config.yaml")
     boolean write;
 
@@ -70,6 +76,7 @@ public class SetupCmd implements Callable<Integer> {
                 Talos-managed download/cache:
                   talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
                   talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+                  talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-path C:/path/to/llama-server.exe --write
 
                 Talos sets HF_HOME to ~/.talos/models/huggingface for these profiles, so llama.cpp stores
                 Hugging Face downloads under .talos/models on first model start.
@@ -88,6 +95,17 @@ public class SetupCmd implements Callable<Integer> {
             Path modelPath,
             Path cacheDir,
             int port) {
+        return renderManagedLlamaCppProfileConfig(profileName, serverPath, modelPath, cacheDir, port, "", 18116);
+    }
+
+    public static String renderManagedLlamaCppProfileConfig(
+            String profileName,
+            Path serverPath,
+            Path modelPath,
+            Path cacheDir,
+            int port,
+            String embedProfile,
+            int embedPort) {
         String normalizedProfile = normalizeProfile(profileName);
         boolean userOwnedModel = modelPath != null;
         ModelProfile known = PROFILES.get(normalizedProfile);
@@ -100,6 +118,13 @@ public class SetupCmd implements Callable<Integer> {
         String modelPathValue = userOwnedModel ? yamlPath(modelPath) : "";
         String hfCacheDir = userOwnedModel ? "" : yamlPath(cacheDir == null ? defaultHfCacheDir() : cacheDir);
         boolean nativeCalling = userOwnedModel || known.nativeCalling();
+        EmbeddingSetupProfile embedding = embeddingProfile(embedProfile);
+        String embeddingYaml = renderEmbeddingYaml(
+                embedding,
+                serverPath,
+                cacheDir == null ? defaultHfCacheDir() : cacheDir,
+                Math.max(1, embedPort));
+        boolean vectorsEnabled = embedding != null;
 
         return """
                 llm:
@@ -125,15 +150,11 @@ public class SetupCmd implements Callable<Integer> {
                 tools:
                   native_calling: %s
 
-                embed:
-                  provider: "disabled"
-                  model: "none"
-                  host: ""
-                  allow_remote: false
+                %s
 
                 rag:
                   vectors:
-                    enabled: false
+                    enabled: %s
                 """.formatted(
                 yamlScalar(alias),
                 serverPath == null ? "" : yamlPath(serverPath),
@@ -143,7 +164,9 @@ public class SetupCmd implements Callable<Integer> {
                 hfCacheDir,
                 yamlScalar(alias),
                 Math.max(1, port),
-                nativeCalling);
+                nativeCalling,
+                embeddingYaml.stripTrailing(),
+                vectorsEnabled);
     }
  
     @Override public Integer call() {
@@ -207,7 +230,9 @@ public class SetupCmd implements Callable<Integer> {
                 serverPath,
                 modelPath,
                 cacheDir == null ? defaultHfCacheDir() : cacheDir,
-                port);
+                port,
+                embedProfile,
+                embedPort);
 
         Path parent = target.getParent();
         if (parent != null) {
@@ -226,6 +251,10 @@ public class SetupCmd implements Callable<Integer> {
             System.out.println("The model downloads through managed llama.cpp on first start.");
         } else {
             System.out.println("Model path: " + modelPath);
+        }
+        if (embeddingProfile(embedProfile) != null) {
+            System.out.println("Embedding profile: " + normalizeProfile(embedProfile));
+            System.out.println("Embedding server: http://127.0.0.1:" + Math.max(1, embedPort));
         }
     }
 
@@ -257,6 +286,65 @@ public class SetupCmd implements Callable<Integer> {
                 "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
                 false));
         return Map.copyOf(out);
+    }
+
+    private static EmbeddingSetupProfile embeddingProfile(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = normalizeProfile(value);
+        if ("bge-m3".equals(normalized)) {
+            return new EmbeddingSetupProfile(
+                    "bge-m3",
+                    "ggml-org/bge-m3-Q8_0-GGUF",
+                    "bge-m3-q8_0.gguf",
+                    1024,
+                    "mean");
+        }
+        throw new IllegalArgumentException("Unknown embedding profile: " + value);
+    }
+
+    private static String renderEmbeddingYaml(
+            EmbeddingSetupProfile embedding,
+            Path serverPath,
+            Path cacheDir,
+            int embedPort) {
+        if (embedding == null) {
+            return """
+                    embed:
+                      provider: "disabled"
+                      model: "none"
+                      host: ""
+                      allow_remote: false
+                    """;
+        }
+        Path effectiveCache = cacheDir == null ? defaultHfCacheDir() : cacheDir;
+        return """
+                embed:
+                  provider: "llama_cpp"
+                  model: "%s"
+                  host: "http://127.0.0.1:%d"
+                  allow_remote: false
+                  dimensions: %d
+                  managed:
+                    enabled: true
+                    server_path: "%s"
+                    model_path: ""
+                    hf_repo: "%s"
+                    hf_file: "%s"
+                    hf_cache_dir: "%s"
+                    host: "http://127.0.0.1"
+                    port: %d
+                    pooling: "%s"
+                    server_args: []
+                """.formatted(
+                yamlScalar(embedding.alias()),
+                embedPort,
+                embedding.dimensions(),
+                serverPath == null ? "" : yamlPath(serverPath),
+                yamlScalar(embedding.hfRepo()),
+                yamlScalar(embedding.hfFile()),
+                yamlPath(effectiveCache),
+                embedPort,
+                yamlScalar(embedding.pooling()));
     }
 
     private static String normalizeProfile(String value) {
@@ -293,4 +381,6 @@ public class SetupCmd implements Callable<Integer> {
     }
 
     private record ModelProfile(String alias, String hfRepo, String hfFile, boolean nativeCalling) {}
+
+    private record EmbeddingSetupProfile(String alias, String hfRepo, String hfFile, int dimensions, String pooling) {}
 }

@@ -14,7 +14,7 @@ import java.util.Objects;
  * Implements {@link BatchEmbeddings} so batch-capable delegates retain
  * their batch path.
  */
-public final class InstructionEmbeddings implements BatchEmbeddings {
+public final class InstructionEmbeddings implements BatchEmbeddings, AutoCloseable {
     private final Embeddings delegate;
     private final String prefix;
     public InstructionEmbeddings(Embeddings delegate, String prefix) {
@@ -54,4 +54,10 @@ public final class InstructionEmbeddings implements BatchEmbeddings {
     String prefix() { return prefix; }
     /** Visible for testing. */
     Embeddings delegate() { return delegate; }
+    @Override
+    public void close() throws Exception {
+        if (delegate instanceof AutoCloseable closeable) {
+            closeable.close();
+        }
+    }
 }

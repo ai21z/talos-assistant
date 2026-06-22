@@ -158,8 +158,10 @@ or generated reports.
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/Opus manual testing in parallel.
 - [T856 Managed llama.cpp embeddings](../tickets/open/[T856-open-high]%20managed-llama-cpp-embeddings.md)
-  - Remaining Ollama-independence/vector-lane work: make local managed
-    embeddings first-class, or keep BM25-only diagnostics honest when absent.
+  - Implemented-awaiting-review: opt-in managed `llama.cpp` embedding server
+    path, `bge-m3` setup profile, and honest BM25/hybrid diagnostics.
+  - Implementation report:
+    [T856 managed llama.cpp embeddings](../reports/t856-managed-llama-cpp-embeddings.md)
 - [T858 Model tool-mode profile compatibility](../tickets/done/[T858-done-high]%20model-tool-mode-profile-compatibility.md) (done)
   - Records the Qwen/DeepSeek probe finding: DeepSeek is Talos-usable in
     text/tool-prompt mode with `tools.native_calling:false`; native/default

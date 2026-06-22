@@ -5,6 +5,7 @@ import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.IndexPathResolver;
+import dev.talos.core.embed.ManagedLlamaCppEmbeddingConfig;
 import dev.talos.safety.ProtectedContentSanitizer;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.store.FSDirectory;
@@ -63,6 +64,8 @@ public final class RetrievalStateProbe implements DoctorProbe {
     private static String embeddingHost(Config cfg, EngineRuntimeConfig runtime, String provider, Map<String, Object> embed) {
         String configured = stringAt(embed, "host", "");
         if (!configured.isBlank()) return configured;
+        ManagedLlamaCppEmbeddingConfig managed = ManagedLlamaCppEmbeddingConfig.from(cfg);
+        if (managed.enabled()) return managed.baseUrl();
         if ("ollama".equals(provider)) {
             return stringAt(CfgUtil.map(cfg.data.get("ollama")), "host", "http://127.0.0.1:11434");
         }
