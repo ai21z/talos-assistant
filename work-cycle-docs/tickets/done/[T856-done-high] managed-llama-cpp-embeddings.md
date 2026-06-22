@@ -1,11 +1,11 @@
 # T856 Managed llama.cpp Embeddings
 
-Status: open
+Status: done
 Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Opened from: T855/T857 Ollama-independence follow-up
-Review state: implemented-awaiting-review
+Review state: reviewed and closed (independent review-verified incl. live smoke)
 Implementation commit: containing commit for the implementation report
 Implementation report: `work-cycle-docs/reports/t856-managed-llama-cpp-embeddings.md`
 
@@ -233,3 +233,40 @@ Add focused tests proving:
 - Verification profile: config, endpoint locality, dimension probe, and
   retrieval-mode diagnostics.
 - Allowed refactor scope: embedding setup/config/diagnostics only.
+
+## Closeout Evidence
+
+Verified by independent review (pass 1 commit `35cfd759` + pass 2 commit `e61f785c`): 6-agent
+adversarial code review, own reads of the core files, focused tests, a live
+local-embedding smoke, and a full-check delta.
+
+- Design (matches the refined ticket): a SEPARATE managed `llama-server`
+  embedding instance (`--embedding --pooling`, distinct port 18116, NO chat
+  flags), opt-in (`embed.managed.enabled`), default stays BM25-only
+  (default-config zero-diff). `CompatEmbeddingsClient` targets the managed
+  endpoint, host-locality fail-closed, lazy start, embed failure -> BM25
+  fallback (chat never broken, separate path).
+- Pass-1 HOLD findings both fixed in pass 2: (a) per-query server CHURN fixed via
+  `ManagedEmbeddingEndpointRegistry` (shared endpoint keyed by the value-equal
+  config record, no-op-close `SharedLease`, stopped on JVM shutdown hook) --
+  pinned by a genuine test asserting one endpoint creation, not-closed by
+  short-lived clients, closed on `closeAll()`; (b) the alive-but-not-ready
+  readiness-failure path now stops the process. New `SetupCmdTest` pins the
+  negative opt-in default (no `--embed-profile` -> disabled/none/no managed
+  block/vectors:false).
+- LIVE SMOKE (isolated home, qwen2.5-coder chat + managed bge-m3 embed):
+  `rag-index` -> "Index complete"; two REPL queries answered correctly from the
+  indexed files (login->auth.py/verify, billing->"three times"); the embedding
+  server log shows ONE start serving MULTIPLE `POST /v1/embeddings 200` requests
+  then ONE stop (CHURN FIX PROVEN LIVE); ZERO `:11434`/ollama in any log.
+  Fully Ollama-free vector retrieval.
+- Full `check`: only the 2 pre-existing terminal/PTY environmental failures
+  (`RootCmdTest`, `StatusRowPresenterTest`, via JUnit XML; the build compiled
+  cleanly incl. the unrelated uncommitted T860 JavaFX removal); zero new.
+
+Non-blocking follow-ups (optional): `health()` on the manager is dead code (not
+wired into diagnostics -- DiagnoseCmd's live probe keeps diagnostics honest); no
+T856-specific chat-never-broken test (invariant covered by the pre-existing
+`KnnEmbeddingFailureTest`); the Phase-2 items in this ticket (embed-model profile
+catalog, reindex/dim-mismatch handling, budget-meter reconciliation) remain for a
+future ticket. The Ollama-independence arc (T855/T857/T858/T859/T856) is complete.
