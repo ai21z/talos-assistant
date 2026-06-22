@@ -157,16 +157,16 @@ or generated reports.
 
 - [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
   - Owner/Opus manual testing in parallel.
-- [T857 EngineRegistry resolve Ollama-catalog symmetry](../tickets/done/[T857-done-medium]%20engine-registry-resolve-ollama-catalog-symmetry.md) (done)
-  - T855 follow-up: gate the bare-name `resolve()` catalog scan like
-    `installed()`, so `/set model <bare>` stops probing/spawning Ollama on a
-    non-ollama backend.
-  - Deterministic implementation report:
-    [T857 EngineRegistry resolve Ollama-catalog symmetry](../reports/t857-engine-registry-resolve-ollama-catalog-symmetry.md)
-  - Status: done (Opus-verified: one-line bare-name catalog gate; qualified
-    `ollama/<model>` opt-in preserved; stub-catalog tests assert the Ollama
-    catalog is not probed on bare resolve; full check only the 2 pre-existing
-    environmental failures, zero new). Completes the T855 default-path truth gate.
+- [T856 Managed llama.cpp embeddings](../tickets/open/[T856-open-high]%20managed-llama-cpp-embeddings.md)
+  - Remaining Ollama-independence/vector-lane work: make local managed
+    embeddings first-class, or keep BM25-only diagnostics honest when absent.
+- [T858 Model tool-mode profile compatibility](../tickets/open/[T858-open-high]%20model-tool-mode-profile-compatibility.md)
+  - Records the Qwen/DeepSeek probe finding: DeepSeek is Talos-usable in
+    text/tool-prompt mode with `tools.native_calling:false`; native/default
+    produced zero executable tool calls.
+- [T859 Managed GGUF profile switching UX](../tickets/open/[T859-open-high]%20managed-gguf-profile-switching-ux.md)
+  - Addresses the `/models` expectation gap: managed `llama_cpp` currently
+    exposes the configured/running model, not every downloaded GGUF in cache.
 - [T855 Ollama independence truth and default-path gate](../tickets/done/[T855-done-high]%20ollama-independence-truth-and-default-path-gate.md) (done)
   - Product-truth/default-path hardening for managed `llama.cpp` beta posture.
   - Deterministic implementation report:

@@ -447,7 +447,13 @@ explicit optional backend, not a default dependency. T857 is done
 an explicit opt-in path. With T855 + T857 closed, no default or user-driven path
 probes or spawns Ollama unless the active backend is ollama or the user
 qualifies an `ollama/` model. Remaining Ollama-independence work is T856 (managed
-`llama.cpp` embeddings) for the vector lane.
+`llama.cpp` embeddings) for the vector lane. T856 is now ticketed. The
+2026-06-22 managed-model probes also opened T858 for per-model tool-mode
+compatibility and T859 for the managed-GGUF `/models` / profile-switching UX
+gap: downloaded GGUFs are not selectable until they are configured, and
+DeepSeek-Coder-V2-Lite Q4 should be described as Talos-usable only in
+text/tool-prompt mode with `tools.native_calling:false` unless later evidence
+proves native/default tool-calling.
 
 ## Wave 5 Readiness Status
 

@@ -1060,3 +1060,21 @@ mechanically.
   that active `ollama` preserves legacy bare-name resolution.
 - T857 remains open pending external review; T856 managed `llama.cpp`
   embeddings remain separate.
+
+## [2026-06-22] model-profiles | Open T856, T858, and T859 follow-ups
+
+- Added T856 because the wiki already named managed `llama.cpp` embeddings as
+  the remaining Ollama-independence vector-lane work, but no ticket file
+  existed.
+- Added T858 after live scn-06 model probes showed Qwen3.6-VibeForged Q4/Q6
+  can produce executable tool calls in native/default mode, while
+  DeepSeek-Coder-V2-Lite Q4 produced zero executable tool calls in
+  native/default mode and passed only with `tools.native_calling:false`.
+- Recorded the precise DeepSeek claim: it is Talos-usable in text/tool-prompt
+  mode with `tools.native_calling:false`; the native-template mismatch is a
+  strong inference, not hard proof, because the successful provider body still
+  carried OpenAI-compatible `tools` and `tool_choice:"required"`.
+- Added T859 after `/models` review confirmed that managed `llama_cpp` exposes
+  the running server's `/v1/models` or one configured fallback model. It does
+  not scan Hugging Face cache directories, so downloaded-but-unconfigured GGUFs
+  cannot be selected from `/models` or `/set model`.
