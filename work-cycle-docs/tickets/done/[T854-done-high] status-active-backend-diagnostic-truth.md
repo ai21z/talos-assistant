@@ -1,6 +1,6 @@
 # T854 Status Active Backend Diagnostic Truth
 
-Status: open
+Status: done
 Priority: high
 Owner: Codex
 Branch: `v0.9.0-beta-dev`
@@ -67,3 +67,36 @@ dashboard renders the engine from static config.
 - `talos status` remains config-derived and still works without a live REPL
   model.
 - T854 remains open until external/live review confirms the installed flow.
+
+## Closeout evidence
+
+Verified by independent review (code + tests + live installed `/status` + full-check causation
+analysis). Implementation commit `35d2f86a`.
+
+- Code: `EngineRuntimeConfig.fromActiveModel(cfg, activeModel)` parses the live
+  backend-qualified `LlmClient.getModel()` ref (ENGINE mode returns
+  `backend/model`; `setModel("ollama/gpt-oss:20b")` splits to backend `ollama`,
+  model `gpt-oss:20b`). The parsed backend feeds the box `Engine` row
+  (`CliStatusDashboard.engineState`) and the verbose `Host`/`Embed` labels
+  (`hostForBackend`/`embeddingLabel`). `EngineRuntimeConfig.from(cfg)` and the
+  6-arg `CliStatusDashboard.snapshot(...)` are unchanged, so top-level
+  `talos status` and the startup banner stay config-derived (correct: at those
+  points active == config). Additive and backward compatible; no trust-surface
+  weakening (this strengthens outcome/diagnostic truth).
+- Tests: `InfraCommandsTest` two new genuine tests
+  (`nonVerboseStatusUsesActiveBackendAfterSetModel`,
+  `verboseStatusUsesActiveBackendHostAfterSetModel`),
+  `CliStatusDashboardTest`, `StartupBannerRendererTest` all green.
+- Live (installed image, isolated config with llama_cpp + ollama blocks):
+  BEFORE `/set model` -> `Model llama_cpp/...` | `Engine llama.cpp (managed)`
+  (consistent). AFTER `/set model ollama/gpt-oss:20b` ->
+  `Model ollama/gpt-oss:20b` | `Engine ollama`; `/status --verbose` ->
+  `Host http://127.0.0.1:11434`. The pre-T854 stale-`Engine` contradiction is
+  gone. Acceptance criteria 1-4 met live; criterion 5 (this review) satisfied.
+- Full `check`: 5302 tests, 2 failures
+  (`RootCmdTest.shortHelpOptionShowsUsage:42`,
+  `StatusRowPresenterTest.dumbTerminalIsNotSupportedAndStartIsANoOp:40`). Both
+  reproduce on the pre-T854 parent `b462b168`, so they are pre-existing
+  terminal/PTY-sensitive environmental failures on this host, NOT T854
+  regressions. T854 adds zero new failures. (The host `check`-red condition is
+  flagged separately for a hygiene look before any candidate cut.)
