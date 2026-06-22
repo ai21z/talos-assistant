@@ -170,11 +170,15 @@ or generated reports.
     (DeepSeek `false`), bounded docs wording, honesty test forbids
     "DeepSeek native-tool capable"; full check only the 2 pre-existing
     environmental failures, zero new).
-- [T859 Managed GGUF profile switching UX](../tickets/open/[T859-open-high]%20managed-gguf-profile-switching-ux.md)
+- [T859 Managed GGUF profile switching UX](../tickets/done/[T859-done-high]%20managed-gguf-profile-switching-ux.md) (done)
   - Addresses the `/models` expectation gap: managed `llama_cpp` currently
     exposes the configured/running model, not every downloaded GGUF in cache.
   - [T859 implementation report](../reports/t859-managed-gguf-profile-switching-ux.md)
-  - Status: implemented, awaiting review.
+  - Status: done (independent review-verified: minimal safe path -- honest `/models` +
+    `/set model` messaging pointing to `talos setup models --profile … --write
+    --force` + restart, no hot-swap, no new config-write risk; tests green incl
+    a no-hot-swap assertion; full check only the 2 pre-existing environmental
+    failures, zero new).
 - [T855 Ollama independence truth and default-path gate](../tickets/done/[T855-done-high]%20ollama-independence-truth-and-default-path-gate.md) (done)
   - Product-truth/default-path hardening for managed `llama.cpp` beta posture.
   - Deterministic implementation report:

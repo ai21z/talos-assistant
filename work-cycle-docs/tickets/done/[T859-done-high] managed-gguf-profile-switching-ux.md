@@ -1,11 +1,11 @@
 # T859 Managed GGUF Profile Switching UX
 
-Status: open
+Status: done
 Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Opened from: 2026-06-22 `/models` user pain review
-Implementation state: implemented, awaiting review
+Implementation state: reviewed and closed (independent review-verified)
 
 ## Problem
 
@@ -147,4 +147,29 @@ Focused verification:
 
 Result: passed after a red compile/test failure was observed first.
 
-T859 remains open pending review.
+## Closeout Evidence
+
+Verified by independent review (code + tests + full-check delta). Implementation commit
+`1706cf49`. GPT chose the ticket's **minimal product-safe path** (option 1):
+honest messaging, no hot-swap, no new config-write path.
+
+- Code: `ModelsCommand` `/models` tip now states managed llama.cpp lists the
+  configured/running model only and that downloaded GGUFs are not selectable
+  until configured, pointing to `talos setup models --profile <name> --write
+  --force` + restart. `SetModelCommand.modelNotFoundMessage` gives a
+  llama_cpp-specific explanation pointing to the same workflow (generic hint
+  preserved for other backends). Reuses the EXISTING setup `--force` backup, so
+  no new config-mutation risk. `SetupCmd` modelsHelp documents the
+  rewrite+restart.
+- Tests: `SetModelCommandTest` (new) pins the managed-limitation message AND the
+  non-goal `assertFalse(contains("hot-swap"))`; `ModelsCommandTest` asserts the
+  new honest `/models` messaging; `SetupCmdTest` green. All focused suites pass.
+- Verification: full `check` recompiled the project (incl. the unrelated
+  uncommitted T860 JavaFX-removal in the tree -- it COMPILED cleanly, no javafx
+  error) and failed only on the 2 pre-existing terminal/PTY environmental tests
+  (`RootCmdTest`, `StatusRowPresenterTest`, via JUnit XML); zero new failures.
+
+Acceptance criteria met: `/models` no longer implies all GGUFs selectable;
+`/set model llama_cpp/<name>` failure explains the limitation + points to the
+switch command (no impossible hot-swap suggested); documented workflow; existing
+config-backup behavior preserved. Next: T856 managed llama.cpp embeddings.
