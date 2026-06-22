@@ -1,11 +1,11 @@
 # T858 Model Tool-Mode Profile Compatibility
 
-Status: open
+Status: done
 Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Opened from: 2026-06-22 managed-model probe review
-Implementation state: implemented, awaiting review
+Implementation state: reviewed and closed (independent review-verified)
 
 ## Problem
 
@@ -146,4 +146,33 @@ Focused verification:
 
 Result: both passed after red tests were observed failing.
 
-T858 remains open for review.
+## Closeout Evidence
+
+Verified by independent review (code + tests + full-check delta). Implementation commit
+`ec584568`. All acceptance criteria met, with the trust-critical no-overclaim
+requirement enforced both ways:
+
+- Code: `ModelProfile` gained `boolean nativeCalling`; generated config writes
+  explicit `tools.native_calling`. Profiles match the 2026-06-22 probe evidence
+  exactly -- `deepseek-v2lite-q4km` -> `false` (text/tool-prompt), qwen2.5-coder/
+  gpt-oss/qwen36vf-q4km/qwen36vf-q6k -> `true`; user-owned models default `true`
+  (preserves the global default, NPE-safe short-circuit). Repos/filenames are the
+  ones I downloaded and disk-verified.
+- Tests: `SetupCmdTest` pins `deepseek-v2lite-q4km` -> `native_calling: false`,
+  qwen36vf -> `true`, user-owned -> `true`, plus the help tool-mode strings.
+  `TrustClaimsHonestyTest.modelSetupDocsBoundPerModelToolModeCompatibility` PINS
+  the bounded DeepSeek wording present in both setup docs AND FORBIDS any
+  "DeepSeek ... native-tool capable / works natively / native/default tool
+  capable" claim across README/AGENTS/docs (`DEEPSEEK_NATIVE_TOOL_CAPABLE_CLAIM`
+  asserted absent). Verified the forbidding regex does not false-positive on the
+  honest wording.
+- Docs (setup-managed-models.md, model-setup.md): DeepSeek shown as
+  text/tool-prompt with the explicit "do not treat this profile as
+  native/default compatible unless later evidence proves it" guard; Qwen framed
+  as "passed the INITIAL tool-call gate" (no daily-driver overclaim).
+- Verification: focused SetupCmdTest + TrustClaimsHonestyTest green; full `check`
+  only the 2 pre-existing terminal/PTY environmental failures (`RootCmdTest`,
+  `StatusRowPresenterTest`, confirmed via JUnit XML), zero new.
+
+Recommended next: T859 (managed GGUF switching UX), then T856 (managed
+llama.cpp embeddings).

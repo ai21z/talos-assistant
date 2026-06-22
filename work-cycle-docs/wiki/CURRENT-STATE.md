@@ -453,9 +453,12 @@ compatibility and T859 for the managed-GGUF `/models` / profile-switching UX
 gap: downloaded GGUFs are not selectable until they are configured, and
 DeepSeek-Coder-V2-Lite Q4 should be described as Talos-usable only in
 text/tool-prompt mode with `tools.native_calling:false` unless later evidence
-proves native/default tool-calling. T858 is implemented and awaiting review:
-managed setup profiles now generate explicit `tools.native_calling` values for
-tested profiles, including `false` for `deepseek-v2lite-q4km`.
+proves native/default tool-calling. T858 is done (independent review-verified): managed setup
+profiles now generate explicit `tools.native_calling` values for tested profiles
+(including `false` for `deepseek-v2lite-q4km`), the setup docs carry the bounded
+tool-mode wording, and a TrustClaimsHonestyTest gate forbids any doc claiming
+DeepSeek is native-tool capable. T859 (managed-GGUF switching UX) and T856
+(managed embeddings) remain open.
 
 ## Wave 5 Readiness Status
 
