@@ -33,6 +33,9 @@ class TrustClaimsHonestyTest {
     private static final String VECTOR_OPTIONAL_BOUNDARY =
             "Vector retrieval requires a local embedding endpoint. When embeddings are disabled "
                     + "or fail, Talos falls back to BM25-only retrieval.";
+    private static final String DEEPSEEK_TOOL_MODE_BOUNDARY =
+            "DeepSeek-Coder-V2-Lite Q4 is Talos-usable in text/tool-prompt mode with "
+                    + "`tools.native_calling:false`; native/default produced zero executable tool calls.";
     private static final String RETRIEVAL_PERMISSION_BOUNDARY =
             "Retrieval is evidence, not permission to inspect everything.";
     private static final String COMMAND_OUTPUT_BOUNDARY =
@@ -94,6 +97,9 @@ class TrustClaimsHonestyTest {
                     |provider:\\s*"?ollama"?\\s*\\#\\s*only\\s+"?ollama"?\\s+supported
                     |Use\\s+Ollama's\\s+native\\s+tool\\s+API)\\b
                     """, Pattern.CASE_INSENSITIVE | Pattern.COMMENTS);
+    private static final Pattern DEEPSEEK_NATIVE_TOOL_CAPABLE_CLAIM =
+            Pattern.compile("DeepSeek.{0,160}(native-tool capable|native tool capable|native/default tool capable|works natively)",
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     @Test
     void readmeAndPolicyDocsBoundTrustClaimsToCurrentCode() throws Exception {
@@ -197,6 +203,19 @@ class TrustClaimsHonestyTest {
         assertPatternAbsent(currentSurfaces, DEFAULT_OLLAMA_EMBEDDING_CLAIM);
         assertContainsNormalized(currentSurfaces,
                 "Vector retrieval requires a local embedding endpoint. When embeddings are disabled or fail, Talos falls back to BM25-only retrieval.");
+    }
+
+    @Test
+    void modelSetupDocsBoundPerModelToolModeCompatibility() throws Exception {
+        String modelSetup = read("docs/user/model-setup.md");
+        String managedSetup = read("docs/setup-managed-models.md");
+        String publicDocs = read("README.md") + "\n" + read("AGENTS.md") + "\n" + readMarkdownTree("docs");
+
+        assertContainsNormalized(modelSetup, DEEPSEEK_TOOL_MODE_BOUNDARY);
+        assertContainsNormalized(managedSetup, DEEPSEEK_TOOL_MODE_BOUNDARY);
+        assertContains(modelSetup, "Qwen3.6-VibeForged Q4/Q6");
+        assertContains(managedSetup, "Qwen3.6-VibeForged Q4/Q6");
+        assertPatternAbsent(publicDocs, DEEPSEEK_NATIVE_TOOL_CAPABLE_CLAIM);
     }
 
     @Test

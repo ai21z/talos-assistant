@@ -23,7 +23,7 @@ public class SetupCmd implements Callable<Integer> {
     @CommandLine.Parameters(index = "0", arity = "0..1", description = "Setup topic. Use 'models' for model setup.")
     String topic;
 
-    @CommandLine.Option(names = "--profile", description = "Managed llama.cpp profile: qwen2.5-coder-14b or gpt-oss-20b")
+    @CommandLine.Option(names = "--profile", description = "Managed llama.cpp profile, for example qwen2.5-coder-14b, gpt-oss-20b, qwen36vf-q6k, or deepseek-v2lite-q4km")
     String profile;
 
     @CommandLine.Option(names = "--server-path", description = "Path to llama-server.exe")
@@ -61,8 +61,11 @@ public class SetupCmd implements Callable<Integer> {
                 Talos managed llama.cpp model setup
 
                 Tested profiles:
-                  qwen2.5-coder-14b  Qwen/Qwen2.5-Coder-14B-Instruct-GGUF q4_k_m
-                  gpt-oss-20b         ggml-org/gpt-oss-20b-GGUF mxfp4
+                  qwen2.5-coder-14b     Qwen/Qwen2.5-Coder-14B-Instruct-GGUF q4_k_m        tool mode: native/default
+                  gpt-oss-20b            ggml-org/gpt-oss-20b-GGUF mxfp4                   tool mode: native/default
+                  qwen36vf-q4km          tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF Q4_K_M tool mode: native/default
+                  qwen36vf-q6k           tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF Q6_K   tool mode: native/default
+                  deepseek-v2lite-q4km   bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF Q4_K_M tool mode: text/tool-prompt
 
                 Talos-managed download/cache:
                   talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
@@ -95,6 +98,7 @@ public class SetupCmd implements Callable<Integer> {
         String hfFile = userOwnedModel ? "" : known.hfFile();
         String modelPathValue = userOwnedModel ? yamlPath(modelPath) : "";
         String hfCacheDir = userOwnedModel ? "" : yamlPath(cacheDir == null ? defaultHfCacheDir() : cacheDir);
+        boolean nativeCalling = userOwnedModel || known.nativeCalling();
 
         return """
                 llm:
@@ -117,6 +121,9 @@ public class SetupCmd implements Callable<Integer> {
                     jinja: true
                     server_args: []
 
+                tools:
+                  native_calling: %s
+
                 embed:
                   provider: "disabled"
                   model: "none"
@@ -134,7 +141,8 @@ public class SetupCmd implements Callable<Integer> {
                 yamlScalar(hfFile),
                 hfCacheDir,
                 yamlScalar(alias),
-                Math.max(1, port));
+                Math.max(1, port),
+                nativeCalling);
     }
  
     @Override public Integer call() {
@@ -225,11 +233,28 @@ public class SetupCmd implements Callable<Integer> {
         out.put("qwen2.5-coder-14b", new ModelProfile(
                 "qwen2.5-coder-14b",
                 "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
-                "qwen2.5-coder-14b-instruct-q4_k_m.gguf"));
+                "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+                true));
         out.put("gpt-oss-20b", new ModelProfile(
                 "gpt-oss-20b",
                 "ggml-org/gpt-oss-20b-GGUF",
-                "gpt-oss-20b-mxfp4.gguf"));
+                "gpt-oss-20b-mxfp4.gguf",
+                true));
+        out.put("qwen36vf-q4km", new ModelProfile(
+                "qwen36vf-q4km",
+                "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf",
+                true));
+        out.put("qwen36vf-q6k", new ModelProfile(
+                "qwen36vf-q6k",
+                "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf",
+                true));
+        out.put("deepseek-v2lite-q4km", new ModelProfile(
+                "deepseek-v2lite-q4km",
+                "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
+                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+                false));
         return Map.copyOf(out);
     }
 
@@ -266,5 +291,5 @@ public class SetupCmd implements Callable<Integer> {
         return Instant.now().toString().replace(":", "").replace(".", "");
     }
 
-    private record ModelProfile(String alias, String hfRepo, String hfFile) {}
+    private record ModelProfile(String alias, String hfRepo, String hfFile, boolean nativeCalling) {}
 }

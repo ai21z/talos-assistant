@@ -5,6 +5,7 @@ Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Opened from: 2026-06-22 managed-model probe review
+Implementation state: implemented, awaiting review
 
 ## Problem
 
@@ -119,3 +120,30 @@ and read-fix pass on the installed build.
 - Verification profile: generated YAML, help output, diagnostics, and docs.
 - Allowed refactor scope: setup profile model only; no broad engine rewrite.
 
+## Implementation Evidence
+
+Implementation report:
+`work-cycle-docs/reports/t858-model-tool-mode-profile-compatibility.md`.
+
+Implemented behavior:
+
+- Managed setup profiles now carry a `nativeCalling` flag.
+- Generated managed `llama_cpp` config writes `tools.native_calling`.
+- `qwen2.5-coder-14b`, `gpt-oss-20b`, `qwen36vf-q4km`, and `qwen36vf-q6k`
+  generate `native_calling: true`.
+- `deepseek-v2lite-q4km` generates `native_calling: false`.
+- User-owned `--model-path` custom profiles keep the existing native/default
+  behavior and generate `native_calling: true`.
+- Tracked setup docs pin the bounded DeepSeek wording and do not call DeepSeek
+  native/default compatible.
+
+Focused verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.launcher.SetupCmdTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.docs.TrustClaimsHonestyTest" --no-daemon
+```
+
+Result: both passed after red tests were observed failing.
+
+T858 remains open for review.

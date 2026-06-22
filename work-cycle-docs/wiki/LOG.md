@@ -1078,3 +1078,15 @@ mechanically.
   the running server's `/v1/models` or one configured fallback model. It does
   not scan Hugging Face cache directories, so downloaded-but-unconfigured GGUFs
   cannot be selected from `/models` or `/set model`.
+
+## [2026-06-22] model-profiles | Implement T858 tool-mode profiles
+
+- Added `nativeCalling` metadata to managed setup profiles and generated
+  `tools.native_calling` in `talos setup models` YAML.
+- Added Qwen3.6-VibeForged Q4/Q6 and DeepSeek-Coder-V2-Lite Q4 managed profile
+  entries.
+- Pinned DeepSeek-Coder-V2-Lite Q4 to `tools.native_calling:false` based on the
+  scn-06 probe evidence. The docs keep the bounded wording: DeepSeek is
+  Talos-usable in text/tool-prompt mode; native/default produced zero executable
+  tool calls.
+- T858 remains open pending review.

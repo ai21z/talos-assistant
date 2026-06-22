@@ -39,6 +39,10 @@ class SetupCmdTest {
 
         assertTrue(help.contains("qwen2.5-coder-14b"));
         assertTrue(help.contains("gpt-oss-20b"));
+        assertTrue(help.contains("qwen36vf-q6k"));
+        assertTrue(help.contains("deepseek-v2lite-q4km"));
+        assertTrue(help.contains("native/default"));
+        assertTrue(help.contains("text/tool-prompt"));
         assertTrue(help.contains("talos setup models --profile"));
         assertTrue(help.contains(".talos/models"));
     }
@@ -61,7 +65,43 @@ class SetupCmdTest {
         assertTrue(yaml.contains("hf_repo: \"Qwen/Qwen2.5-Coder-14B-Instruct-GGUF\""));
         assertTrue(yaml.contains("hf_file: \"qwen2.5-coder-14b-instruct-q4_k_m.gguf\""));
         assertTrue(yaml.contains("hf_cache_dir: \"" + cache.toString().replace('\\', '/') + "\""));
+        assertTrue(yaml.contains("tools:"));
+        assertTrue(yaml.contains("native_calling: true"));
         assertFalse(yaml.contains("C:\\"));
+    }
+
+    @Test
+    void qwenVibeForgedProfileUsesNativeToolCalling() {
+        Path server = tempDir.resolve("llama-server.exe");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen36vf-q6k",
+                server,
+                null,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen36vf-q6k\""));
+        assertTrue(yaml.contains("hf_repo: \"tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF\""));
+        assertTrue(yaml.contains("hf_file: \"Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf\""));
+        assertTrue(yaml.contains("native_calling: true"));
+    }
+
+    @Test
+    void deepSeekProfileUsesTextToolPromptMode() {
+        Path server = tempDir.resolve("llama-server.exe");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "deepseek-v2lite-q4km",
+                server,
+                null,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"deepseek-v2lite-q4km\""));
+        assertTrue(yaml.contains("hf_repo: \"bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF\""));
+        assertTrue(yaml.contains("hf_file: \"DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf\""));
+        assertTrue(yaml.contains("native_calling: false"));
     }
 
     @Test
@@ -79,6 +119,7 @@ class SetupCmdTest {
         assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""));
         assertTrue(yaml.contains("hf_repo: \"\""));
         assertTrue(yaml.contains("hf_file: \"\""));
+        assertTrue(yaml.contains("native_calling: true"));
     }
 
     @Test

@@ -164,6 +164,9 @@ or generated reports.
   - Records the Qwen/DeepSeek probe finding: DeepSeek is Talos-usable in
     text/tool-prompt mode with `tools.native_calling:false`; native/default
     produced zero executable tool calls.
+  - Deterministic implementation report:
+    [T858 model tool-mode profile compatibility](../reports/t858-model-tool-mode-profile-compatibility.md)
+  - Status: implemented, awaiting review.
 - [T859 Managed GGUF profile switching UX](../tickets/open/[T859-open-high]%20managed-gguf-profile-switching-ux.md)
   - Addresses the `/models` expectation gap: managed `llama_cpp` currently
     exposes the configured/running model, not every downloaded GGUF in cache.
