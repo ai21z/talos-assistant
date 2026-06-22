@@ -433,10 +433,16 @@ and add a docs honesty regression test. It does not authorize the five HIGH code
 fixes, production `src/main` changes, capability work, compaction Phase 2,
 candidate cut, or `site/` edits.
 
-T855 is open for review. It hardens Talos's Ollama-independence truth boundary:
-the default beta path is managed `llama.cpp` chat plus BM25-only retrieval
-unless a local embedding endpoint is explicitly configured. Ollama remains an
-explicit optional backend, not a default dependency.
+T855 is done (Opus-verified). It hardens Talos's Ollama-independence truth
+boundary: the default beta path is managed `llama.cpp` chat plus BM25-only
+retrieval unless a local embedding endpoint is explicitly configured (bundled
+`default-config.yaml` now matches the `SetupCmd`-generated config). `/models`
+no longer probes or spawns Ollama while managed `llama.cpp` is active, the REPL
+bootstrap syncs the active model into `llm.*` (not the legacy `ollama` block),
+the stale embedding architecture doc is rewritten to current truth, and a docs
+honesty gate forbids "embeddings via Ollama" surfaces. Ollama remains an
+explicit optional backend, not a default dependency. Recommended follow-up:
+apply the `/models` catalog gate to the bare-name `resolve()` scan as well.
 
 ## Wave 5 Readiness Status
 
