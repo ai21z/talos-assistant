@@ -1046,3 +1046,17 @@ mechanically.
   available.
 - T855 remains open pending review. T856 managed `llama.cpp` embeddings are
   deliberately not implemented by this ticket.
+
+## [2026-06-22] product-truth | Implement T857 EngineRegistry resolve symmetry
+
+- Added T857 as the small follow-up to T855 after review found that
+  `EngineRegistry.installed()` was gated but bare-name `resolve()` still scanned
+  the Ollama catalog on a non-Ollama active backend.
+- Applied the existing `includeCatalogInDefaultInstalled(...)` policy only to
+  the bare-name `resolve()` multi-catalog scan. Qualified `ollama/<model>`
+  remains an explicit opt-in and is not filtered.
+- Added stub-catalog tests proving that bare resolve on active `llama_cpp` does
+  not call the Ollama catalog, that qualified Ollama resolution still works, and
+  that active `ollama` preserves legacy bare-name resolution.
+- T857 remains open pending external review; T856 managed `llama.cpp`
+  embeddings remain separate.

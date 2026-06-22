@@ -160,7 +160,12 @@ or generated reports.
 - [T857 EngineRegistry resolve Ollama-catalog symmetry](../tickets/open/[T857-open-medium]%20engine-registry-resolve-ollama-catalog-symmetry.md)
   - T855 follow-up: gate the bare-name `resolve()` catalog scan like
     `installed()`, so `/set model <bare>` stops probing/spawning Ollama on a
-    non-ollama backend. Execute before T856. GPT implements, independent review verifies.
+    non-ollama backend. Execute before T856.
+  - Deterministic implementation report:
+    [T857 EngineRegistry resolve Ollama-catalog symmetry](../reports/t857-engine-registry-resolve-ollama-catalog-symmetry.md)
+  - Status: implemented, awaiting review. Qualified `ollama/<model>` remains
+    an explicit opt-in; bare-name resolution skips Ollama unless active backend
+    is `ollama`.
 - [T855 Ollama independence truth and default-path gate](../tickets/done/[T855-done-high]%20ollama-independence-truth-and-default-path-gate.md) (done)
   - Product-truth/default-path hardening for managed `llama.cpp` beta posture.
   - Deterministic implementation report:

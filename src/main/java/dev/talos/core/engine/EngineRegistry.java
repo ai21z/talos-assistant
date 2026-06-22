@@ -127,6 +127,7 @@ public final class EngineRegistry implements AutoCloseable {
         }
 
         return providers.entrySet().stream()
+                .filter(e -> includeCatalogInDefaultInstalled(e.getKey(), activeBackend))
                 .map(e -> {
                     ModelCatalog c = catalogs.get(e.getKey());
                     return (c == null) ? Optional.<ModelRef>empty()

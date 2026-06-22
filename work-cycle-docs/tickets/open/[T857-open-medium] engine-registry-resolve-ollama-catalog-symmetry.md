@@ -4,6 +4,7 @@ Status: open
 Priority: medium
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
+Implementation state: implemented, awaiting review
 
 ## Problem
 
@@ -95,3 +96,27 @@ feature and remains separate.
 
 Trust-adjacent product-truth change. GPT implements, independent review verifies (code +
 tests + the bare-name resolve behavior). No self-close.
+
+## Implementation Evidence
+
+Implementation report:
+`work-cycle-docs/reports/t857-engine-registry-resolve-ollama-catalog-symmetry.md`.
+
+Implemented behavior:
+
+- `EngineRegistry.resolve(String)` now applies
+  `includeCatalogInDefaultInstalled(backend, activeBackend)` only to the
+  bare-name multi-catalog scan.
+- Qualified `backend/model` resolution is unchanged, so
+  `resolve("ollama/<model>")` remains an explicit Ollama opt-in.
+- Stub-catalog regression tests prove that bare resolve on active `llama_cpp`
+  does not call the Ollama catalog, while active `ollama` still includes it.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.engine.EngineRegistryInstalledCatalogPolicyTest" --no-daemon
+```
+
+Result: red before implementation on the new bare-name test, then green after
+the one-line filter was added.
