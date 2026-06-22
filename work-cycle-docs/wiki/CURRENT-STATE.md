@@ -441,8 +441,10 @@ no longer probes or spawns Ollama while managed `llama.cpp` is active, the REPL
 bootstrap syncs the active model into `llm.*` (not the legacy `ollama` block),
 the stale embedding architecture doc is rewritten to current truth, and a docs
 honesty gate forbids "embeddings via Ollama" surfaces. Ollama remains an
-explicit optional backend, not a default dependency. Recommended follow-up:
-apply the `/models` catalog gate to the bare-name `resolve()` scan as well.
+explicit optional backend, not a default dependency. T857 is now implemented
+and awaiting review: the same catalog gate is applied to bare-name
+`EngineRegistry.resolve(...)` scans, while qualified `ollama/<model>` remains
+an explicit opt-in path.
 
 ## Wave 5 Readiness Status
 
