@@ -200,4 +200,31 @@ class SetupCmdTest {
         assertEquals(2, exit);
         assertEquals("existing: true\n", Files.readString(config, StandardCharsets.UTF_8));
     }
+
+    @Test
+    void setupModelsForceWritesBackupBeforeReplacingConfig() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, "existing: true\n", StandardCharsets.UTF_8);
+
+        int exit = new CommandLine(new SetupCmd()).execute(
+                "models",
+                "--profile", "qwen36vf-q6k",
+                "--server-path", server.toString(),
+                "--write",
+                "--force",
+                "--config", config.toString());
+
+        assertEquals(0, exit);
+        assertTrue(Files.readString(config, StandardCharsets.UTF_8).contains("model: \"qwen36vf-q6k\""));
+        try (var stream = Files.list(config.getParent())) {
+            Path backup = stream
+                    .filter(path -> path.getFileName().toString().startsWith("config.yaml.bak-"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("existing: true\n", Files.readString(backup, StandardCharsets.UTF_8));
+        }
+    }
 }

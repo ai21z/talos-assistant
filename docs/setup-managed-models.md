@@ -53,6 +53,22 @@ talos setup models --profile qwen36vf-q6k --server-path C:/path/to/llama-server.
 talos setup models --profile deepseek-v2lite-q4km --server-path C:/path/to/llama-server.exe --write
 ```
 
+## Switching Managed GGUF Profiles
+
+Managed `llama.cpp` exposes the currently configured or running GGUF. `/models`
+does not scan every downloaded Hugging Face cache entry, and `/set model
+llama_cpp/<name>` cannot hot-swap a downloaded-but-unconfigured GGUF.
+
+To switch from one managed profile to another, rewrite the active config and
+restart Talos:
+
+```powershell
+talos setup models --profile qwen36vf-q6k --server-path C:/path/to/llama-server.exe --write --force
+```
+
+`--force` writes a backup beside the existing config before replacing it. After
+restart, `/models` should show the newly configured managed `llama.cpp` model.
+
 The generated config sets:
 
 ```yaml

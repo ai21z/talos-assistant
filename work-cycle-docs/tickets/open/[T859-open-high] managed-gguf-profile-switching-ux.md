@@ -5,6 +5,7 @@ Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
 Opened from: 2026-06-22 `/models` user pain review
+Implementation state: implemented, awaiting review
 
 ## Problem
 
@@ -121,3 +122,29 @@ Add tests that pin:
 - Allowed refactor scope: model catalog/setup UX only; no engine rewrite unless
   strictly required.
 
+## Implementation Evidence
+
+Implementation report:
+`work-cycle-docs/reports/t859-managed-gguf-profile-switching-ux.md`.
+
+Implemented path: minimal beta truth/UX path.
+
+- `/models` now states that managed `llama.cpp` lists the configured/running
+  model only, and that downloaded GGUFs are not selectable until configured.
+- `/set model llama_cpp/<name>` not-found output explains the managed
+  `llama.cpp` limitation and points to
+  `talos setup models --profile <name> --write --force` plus restart.
+- Setup help and tracked user docs document profile switching by config rewrite
+  plus restart.
+- `SetupCmdTest` pins existing config backup creation before `--force`
+  replacement.
+
+Focused verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.repl.slash.ModelsCommandTest" --tests "dev.talos.cli.repl.slash.SetModelCommandTest" --tests "dev.talos.cli.launcher.SetupCmdTest" --no-daemon
+```
+
+Result: passed after a red compile/test failure was observed first.
+
+T859 remains open pending review.
