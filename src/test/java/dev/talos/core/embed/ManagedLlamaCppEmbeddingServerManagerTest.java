@@ -1,9 +1,11 @@
 package dev.talos.core.embed;
 
 import dev.talos.core.Config;
+import dev.talos.spi.EngineException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Field;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -12,9 +14,11 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ManagedLlamaCppEmbeddingServerManagerTest {
@@ -89,6 +93,34 @@ class ManagedLlamaCppEmbeddingServerManagerTest {
         assertEquals(cache.toString(), manager.buildEnvironment().get("HF_HOME"));
     }
 
+    @Test
+    void aliveButNotReadyProcessIsStoppedWhenReadinessFails() throws Exception {
+        Path server = touch("llama-server.exe");
+        Path model = touch("bge-m3-q8_0.gguf");
+        Config cfg = config(Map.of(
+                "enabled", true,
+                "server_path", server.toString(),
+                "model_path", model.toString(),
+                "host", "http://127.0.0.1",
+                "port", 18116));
+        ManagedLlamaCppEmbeddingConfig managed = ManagedLlamaCppEmbeddingConfig.from(cfg);
+        ManagedLlamaCppEmbeddingServerManager manager = new ManagedLlamaCppEmbeddingServerManager(
+                managed,
+                (command, logPath, environment) -> {
+                    throw new AssertionError("existing process should be reused, not relaunched");
+                },
+                HttpClient.newHttpClient(),
+                Duration.ofMillis(5),
+                Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+        FakeProcess process = new FakeProcess();
+        setProcess(manager, process);
+
+        assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
+
+        assertTrue(process.destroyed.get(), "failed readiness on an existing process must stop the managed process");
+    }
+
     private Config config(Map<String, Object> managed) {
         Config cfg = new Config(null);
         Map<String, Object> embed = new LinkedHashMap<>();
@@ -105,8 +137,22 @@ class ManagedLlamaCppEmbeddingServerManagerTest {
         return path;
     }
 
+    private static void setProcess(
+            ManagedLlamaCppEmbeddingServerManager manager,
+            ManagedLlamaCppEmbeddingServerManager.ManagedProcess process) throws Exception {
+        Field field = ManagedLlamaCppEmbeddingServerManager.class.getDeclaredField("process");
+        field.setAccessible(true);
+        field.set(manager, process);
+    }
+
     private static final class FakeProcess implements ManagedLlamaCppEmbeddingServerManager.ManagedProcess {
-        @Override public boolean isAlive() { return true; }
-        @Override public void destroy() {}
+        private final AtomicBoolean alive = new AtomicBoolean(true);
+        private final AtomicBoolean destroyed = new AtomicBoolean(false);
+
+        @Override public boolean isAlive() { return alive.get(); }
+        @Override public void destroy() {
+            destroyed.set(true);
+            alive.set(false);
+        }
     }
 }

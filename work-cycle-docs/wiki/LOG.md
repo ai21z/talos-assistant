@@ -1116,3 +1116,18 @@ mechanically.
   host and BM25-only versus hybrid-if-probe-succeeds wording.
 - T856 remains open pending external review and live local-embedding smoke; no
   retrieval-quality claim is made before the T847 gold-context harness.
+
+## [2026-06-23] retrieval | Harden T856 managed embedding lifecycle
+
+- Added shared managed embedding endpoint ownership so short-lived query-time
+  embedding clients no longer start and stop the local embedding server on
+  every retrieval query.
+- Kept direct injected endpoints client-owned for focused tests, while normal
+  managed config receives no-op-close registry leases and deterministic
+  registry shutdown.
+- Hardened the already-running-but-not-ready embedding process branch so
+  readiness failure stops the managed process before reporting the error.
+- Pinned setup output without `--embed-profile` as BM25-only: disabled
+  embedding provider, `model=none`, no managed embedding block, and vectors
+  disabled.
+- T856 remains open pending external review and live local-embedding smoke.

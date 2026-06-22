@@ -31,6 +31,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
     private final String host;
     private final String model;
     private final ManagedEmbeddingEndpoint managedEndpoint;
+    private final boolean closeManagedEndpoint;
     private volatile Integer dim;
 
     public CompatEmbeddingsClient(Config cfg) {
@@ -38,7 +39,7 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
     }
 
     CompatEmbeddingsClient(Config cfg, CacheDb cache, HttpClient http, ObjectMapper mapper) {
-        this(cfg, cache, http, mapper, null);
+        this(cfg, cache, http, mapper, ManagedEmbeddingEndpointRegistry.global());
     }
 
     CompatEmbeddingsClient(
@@ -47,6 +48,25 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
             HttpClient http,
             ObjectMapper mapper,
             ManagedEmbeddingEndpoint managedEndpoint) {
+        this(cfg, cache, http, mapper, managedEndpoint, null);
+    }
+
+    CompatEmbeddingsClient(
+            Config cfg,
+            CacheDb cache,
+            HttpClient http,
+            ObjectMapper mapper,
+            ManagedEmbeddingEndpointRegistry managedEndpointRegistry) {
+        this(cfg, cache, http, mapper, null, managedEndpointRegistry);
+    }
+
+    private CompatEmbeddingsClient(
+            Config cfg,
+            CacheDb cache,
+            HttpClient http,
+            ObjectMapper mapper,
+            ManagedEmbeddingEndpoint managedEndpoint,
+            ManagedEmbeddingEndpointRegistry managedEndpointRegistry) {
         Config safeCfg = cfg == null ? new Config() : cfg;
         this.cache = cache == null ? new CacheDb() : cache;
         this.http = http == null ? HttpClient.newHttpClient() : http;
@@ -61,11 +81,19 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
                 : (configuredHost.isBlank() ? runtime.hostLabel() : configuredHost);
         this.host = trimTrailingSlash(effectiveHost);
         this.model = Objects.toString(embed.getOrDefault("model", runtime.embeddingModel()));
-        this.managedEndpoint = managedEndpoint != null
-                ? managedEndpoint
-                : (managedConfig.enabled()
-                ? new ManagedLlamaCppEmbeddingServerManager(managedConfig)
-                : ManagedEmbeddingEndpoint.NOOP);
+        if (managedEndpoint != null) {
+            this.managedEndpoint = managedEndpoint;
+            this.closeManagedEndpoint = true;
+        } else if (managedConfig.enabled()) {
+            ManagedEmbeddingEndpointRegistry registry = managedEndpointRegistry == null
+                    ? ManagedEmbeddingEndpointRegistry.global()
+                    : managedEndpointRegistry;
+            this.managedEndpoint = registry.acquire(managedConfig);
+            this.closeManagedEndpoint = false;
+        } else {
+            this.managedEndpoint = ManagedEmbeddingEndpoint.NOOP;
+            this.closeManagedEndpoint = false;
+        }
 
         boolean allowRemote = CfgUtil.boolAt(embed, "allow_remote", false);
         HostLocalityPolicy.enforceLocalOrAllowed(
@@ -196,7 +224,9 @@ public final class CompatEmbeddingsClient implements BatchEmbeddings, AutoClosea
     @Override
     public void close() throws Exception {
         try {
-            managedEndpoint.close();
+            if (closeManagedEndpoint) {
+                managedEndpoint.close();
+            }
         } finally {
             cache.close();
         }

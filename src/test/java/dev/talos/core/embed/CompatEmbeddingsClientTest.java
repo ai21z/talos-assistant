@@ -14,11 +14,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -132,6 +134,53 @@ class CompatEmbeddingsClientTest {
         }
     }
 
+    @Test
+    void managedLlamaCppEndpointIsSharedAcrossShortLivedCompatClients() throws Exception {
+        AtomicReference<String> pathRef = new AtomicReference<>("");
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        AtomicInteger endpointCreations = new AtomicInteger();
+        FakeManagedEndpoint endpoint = new FakeManagedEndpoint();
+        ManagedEmbeddingEndpointRegistry registry = new ManagedEmbeddingEndpointRegistry(config -> {
+            endpointCreations.incrementAndGet();
+            return endpoint;
+        });
+        HttpServer server = server(pathRef, bodyRef, """
+                {"data":[{"embedding":[0.1,0.2,0.3]}]}
+                """);
+        try {
+            Config cfg = config(server, "bge-m3");
+            Map<String, Object> embed = mutableMap(cfg.data.get("embed"));
+            embed.put("provider", "llama_cpp");
+            embed.put("host", "");
+            embed.put("managed", new LinkedHashMap<>(Map.of(
+                    "enabled", true,
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort())));
+            cfg.data.put("embed", embed);
+
+            try (CompatEmbeddingsClient first = new CompatEmbeddingsClient(
+                    cfg, new dev.talos.core.cache.CacheDb(), HttpClient.newHttpClient(), MAPPER, registry)) {
+                first.embed("alpha");
+            }
+
+            assertFalse(endpoint.closed.get(), "short-lived query clients must not stop the shared embed server");
+
+            try (CompatEmbeddingsClient second = new CompatEmbeddingsClient(
+                    cfg, new dev.talos.core.cache.CacheDb(), HttpClient.newHttpClient(), MAPPER, registry)) {
+                second.embed("beta");
+            }
+
+            assertEquals(1, endpointCreations.get(), "same managed config should reuse one endpoint owner");
+            assertEquals(2, endpoint.ensureStartedCalls.get(), "each request may ensure readiness without recreating the server");
+
+            registry.closeAll();
+
+            assertTrue(endpoint.closed.get(), "registry shutdown must still stop the shared endpoint deterministically");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static Config config(HttpServer server, String model) {
         Config cfg = new Config();
         Map<String, Object> embed = new LinkedHashMap<>();
@@ -164,5 +213,18 @@ class CompatEmbeddingsClientTest {
         });
         server.start();
         return server;
+    }
+
+    private static final class FakeManagedEndpoint implements ManagedEmbeddingEndpoint {
+        private final AtomicInteger ensureStartedCalls = new AtomicInteger();
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+
+        @Override public void ensureStarted() {
+            ensureStartedCalls.incrementAndGet();
+        }
+
+        @Override public void close() {
+            closed.set(true);
+        }
     }
 }

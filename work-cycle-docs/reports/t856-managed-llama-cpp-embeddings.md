@@ -18,6 +18,12 @@ OpenAI-compatible embedding transport at that endpoint.
 This is intentionally separate from the managed chat server. `llama-server`
 embedding mode is not treated as a shared chat-plus-embedding process.
 
+Pass 2 fixes the review-blocking lifecycle issue found after the first
+implementation: query-time retrieval creates short-lived embedding clients, but
+the managed embedding server is now owned by a shared registry instead of each
+client. Closing a transient query client no longer stops the local embedding
+server after every query. The registry owns deterministic shutdown.
+
 ## Code Changes
 
 - `src/main/java/dev/talos/core/embed/ManagedLlamaCppEmbeddingConfig.java`
@@ -31,14 +37,24 @@ embedding mode is not treated as a shared chat-plus-embedding process.
   - Excludes chat command flags such as `--jinja`, chat-template flags, and
     `--alias`.
   - Writes a bounded local lifecycle log under `.talos/logs`.
+  - Stops an already-running but not-ready managed process if readiness fails,
+    matching the cold-start cleanup path.
+- `src/main/java/dev/talos/core/embed/ManagedEmbeddingEndpointRegistry.java`
+  - Owns shared managed embedding endpoints across short-lived clients.
+  - Returns no-op-close leases to transient clients.
+  - Provides explicit `closeAll()` ownership and a JVM shutdown hook for the
+    production registry.
 - `src/main/java/dev/talos/core/embed/CompatEmbeddingsClient.java`
   - Uses the managed endpoint when `embed.host` is blank and
     `embed.managed.enabled=true`.
   - Starts the managed endpoint before embedding requests.
   - Keeps host-locality enforcement.
+  - Uses the shared registry for normal managed config and keeps direct injected
+    endpoints client-owned for focused tests.
 - `src/main/java/dev/talos/core/embed/CachingEmbeddings.java`
-  - Closes AutoCloseable delegates so managed endpoint lifecycle is released
-    by existing indexing/query try-with-resources paths.
+  - Still closes AutoCloseable delegates and cache handles, but registry-backed
+    managed endpoint leases are no-op-close so query-time try-with-resources
+    does not stop the shared process.
 - `src/main/java/dev/talos/core/embed/InstructionEmbeddings.java`
   - Closes AutoCloseable delegates so future instruction-wrapped managed
     endpoints do not leak.
@@ -82,12 +98,17 @@ talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-p
 - `ManagedLlamaCppEmbeddingServerManagerTest`
   - pins embedding-mode command construction;
   - pins Hugging Face source and `HF_HOME`;
-  - pins absence of chat command flags.
+  - pins absence of chat command flags;
+  - pins cleanup when an already-running process fails readiness.
 - `CompatEmbeddingsClientTest`
   - proves managed endpoint startup happens before the first compatible
-    embedding request.
+    embedding request;
+  - proves short-lived managed clients share one endpoint owner and registry
+    shutdown stops it deterministically.
 - `SetupCmdTest`
-  - pins the generated `bge-m3` managed embedding YAML.
+  - pins the generated `bge-m3` managed embedding YAML;
+  - pins the no-embed-profile default as BM25-only (`provider=disabled`,
+    `model=none`, no managed block, vectors disabled).
 - `DoctorProbesTest`
   - pins the managed embedding host in retrieval diagnostics.
 - `InfraCommandsTest`
@@ -97,8 +118,18 @@ talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-p
 
 ## Review Status
 
-Focused implementation tests passed locally before this report was written.
-Full project and wiki gates still need the final post-report run.
+Pass 2 adds deterministic lifecycle coverage for the review blocker.
+
+Local verification after pass 2:
+
+- `.\gradlew.bat test --tests "dev.talos.core.embed.*" --tests "dev.talos.cli.launcher.SetupCmdTest" --no-daemon`
+  - pass.
+- `.\gradlew.bat check --no-daemon`
+  - pass.
+- `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon`
+  - pass.
+- `git diff --check -- . ':!site'`
+  - clean.
 
 T856 remains open for review and live local-embedding smoke. The live smoke
 should prove an Ollama-free index/query path where vectors are generated, the

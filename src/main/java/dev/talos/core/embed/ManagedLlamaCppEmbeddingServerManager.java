@@ -70,7 +70,13 @@ final class ManagedLlamaCppEmbeddingServerManager implements ManagedEmbeddingEnd
         if (!config.enabled()) return;
         if (process != null && process.isAlive()) {
             if (ready) return;
-            waitForReadiness(logPath());
+            Path logPath = logPath();
+            try {
+                waitForReadiness(logPath);
+            } catch (RuntimeException e) {
+                stopManagedProcess(logPath, "readiness failed");
+                throw e;
+            }
             return;
         }
         ready = false;

@@ -159,7 +159,8 @@ or generated reports.
   - Owner/Opus manual testing in parallel.
 - [T856 Managed llama.cpp embeddings](../tickets/open/[T856-open-high]%20managed-llama-cpp-embeddings.md)
   - Implemented-awaiting-review: opt-in managed `llama.cpp` embedding server
-    path, `bge-m3` setup profile, and honest BM25/hybrid diagnostics.
+    path, `bge-m3` setup profile, honest BM25/hybrid diagnostics, and shared
+    managed endpoint ownership across short-lived query clients.
   - Implementation report:
     [T856 managed llama.cpp embeddings](../reports/t856-managed-llama-cpp-embeddings.md)
 - [T858 Model tool-mode profile compatibility](../tickets/done/[T858-done-high]%20model-tool-mode-profile-compatibility.md) (done)
