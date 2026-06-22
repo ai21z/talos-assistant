@@ -44,6 +44,13 @@ public final class ScriptedNativeLlmClient {
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens) {
         Config config = new Config();
+        return recordingWithContextWindow(config, responses, contextWindowTokens);
+    }
+
+    public static RecordedClient recordingWithContextWindow(
+            Config config,
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens) {
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
             @SuppressWarnings("unchecked")

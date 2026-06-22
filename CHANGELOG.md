@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T853] `/context` now prefers the active backend-qualified model after
+  `/set model`, so switching to `ollama/...` reports the Ollama model and the
+  runtime-enforced effective context window instead of the static configured
+  `llama.cpp` row. `/models` now groups recommended managed `llama.cpp` models
+  separately from legacy/optional Ollama entries.
 - [T847] Added a measurement-only retrieval gold-context harness with 20
   deterministic tasks, BM25-only and synthetic-hybrid runs, expected
   files/symbols/line ranges/related tests, and protected-path/private-mode

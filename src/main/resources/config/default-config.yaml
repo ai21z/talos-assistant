@@ -135,6 +135,8 @@ embed:
   host: ""
   allow_remote: false
 
+# Optional legacy/provider backend. Managed llama.cpp is the default beta path;
+# this block is used only when the active backend/model selects ollama.
 ollama:
   host: "http://127.0.0.1:11434"
   model: "qwen2.5-coder:14b"

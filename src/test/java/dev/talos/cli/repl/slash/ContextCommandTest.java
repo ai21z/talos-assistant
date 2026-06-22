@@ -5,6 +5,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.runtime.Result;
 import dev.talos.runtime.SessionMemory;
 import org.junit.jupiter.api.AfterEach;
@@ -32,6 +34,14 @@ class ContextCommandTest {
         return Context.builder(cfg)
                 .memory(new SessionMemory())
                 .conversationManager(cm)
+                .build();
+    }
+
+    private static Context ctxWith(ConversationManager cm, Config cfg, LlmClient llm) {
+        return Context.builder(cfg)
+                .memory(new SessionMemory())
+                .conversationManager(cm)
+                .llm(llm)
                 .build();
     }
 
@@ -141,6 +151,57 @@ class ContextCommandTest {
                 .execute("", ctxWith(managerWithOneTurn(), cfg))).text;
 
         assertTrue(text.contains("Engine:      context managed by Ollama"));
+    }
+
+    @Test
+    void activeOllamaModelRowUsesLiveEffectiveWindowAfterModelSwitch() {
+        Config cfg = cleanConfig();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "engine");
+        llm.put("default_backend", "llama_cpp");
+        cfg.data.put("llm", llm);
+        Map<String, Object> limits = new LinkedHashMap<>();
+        limits.put("llm_context_max_tokens", 32_768);
+        cfg.data.put("limits", limits);
+        LlmClient active = ScriptedNativeLlmClient
+                .recordingWithContextWindow(cfg, List.of(new LlmClient.StreamResult("", List.of())), 8_192)
+                .client();
+        active.setModel("ollama/gpt-oss:20b");
+
+        String text = ((Result.TrustedInfo) new ContextCommand(null, true)
+                .execute("", ctxWith(managerWithOneTurn(), cfg, active))).text;
+
+        assertTrue(text.contains("Engine:      ollama/gpt-oss:20b effective context 8,192 tokens"),
+                text);
+        assertTrue(text.contains("limits.llm_context_max_tokens=32,768"), text);
+        assertTrue(text.contains("runtime enforces the smaller active model window"), text);
+        assertFalse(text.contains("llama.cpp context 32,768 tokens"),
+                "after /set model ollama/... the row must not keep reporting the configured llama.cpp backend");
+    }
+
+    @Test
+    void activeLlamaCppModelRowKeepsEngineContextDivergenceWarning() {
+        Config cfg = cleanConfig();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "engine");
+        llm.put("default_backend", "llama_cpp");
+        cfg.data.put("llm", llm);
+        Map<String, Object> limits = new LinkedHashMap<>();
+        limits.put("llm_context_max_tokens", 1_000);
+        cfg.data.put("limits", limits);
+        LlmClient active = ScriptedNativeLlmClient
+                .recordingWithContextWindow(cfg, List.of(new LlmClient.StreamResult("", List.of())), 32_768)
+                .client();
+        active.setModel("llama_cpp/qwen2.5-coder-14b");
+
+        String text = ((Result.TrustedInfo) new ContextCommand(null, true)
+                .execute("", ctxWith(managerWithOneTurn(), cfg, active))).text;
+
+        assertTrue(text.contains("Engine:      llama.cpp context 32,768 tokens"), text);
+        assertTrue(text.contains("active model llama_cpp/qwen2.5-coder-14b"), text);
+        assertTrue(text.contains("note: larger than limits.llm_context_max_tokens"), text);
+        assertFalse(text.contains("runtime enforces the smaller active model window"),
+                "that warning is specific to active Ollama rows");
     }
 
     @Test
