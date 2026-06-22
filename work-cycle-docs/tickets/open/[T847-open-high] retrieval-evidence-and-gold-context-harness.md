@@ -72,3 +72,24 @@ Expected retrieval follow-up themes remain:
 - Results are written as local/tracked evidence only after leak review.
 - The first implementation ticket after T847 is selected from measured failure
   modes, not from vector hype.
+
+## Implementation Pass
+
+Status: implemented awaiting review.
+
+Added:
+
+- `src/test/java/dev/talos/core/retrieval/RetrievalGoldContextHarnessTest.java`
+- `work-cycle-docs/reports/t847-retrieval-evidence-and-gold-context-harness.md`
+
+Scope:
+
+- 20 deterministic gold-context tasks.
+- 18 retrieval tasks and 2 privacy/trust negative tasks.
+- Expected files, expected symbols, expected line ranges, and related tests.
+- BM25-only run over `LuceneStore` with no vectors.
+- Hybrid synthetic-vector run over `LuceneStore` with deterministic vectors.
+- Metrics for file recall, file precision, MRR, nDCG, junk context,
+  missing-core-evidence, line-range hits, and lane contributions.
+
+No production retrieval behavior changed. T847 remains open pending review.

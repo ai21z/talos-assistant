@@ -996,3 +996,13 @@ mechanically.
 - Closed T852. The T848-T852 beta-correctness triage queue is complete; T847
   retrieval evidence and gold-context measurement can resume while T842 remains
   the parallel manual audit track.
+
+## [2026-06-22] eval-harness | Implement T847 gold-context retrieval harness
+
+- Added a deterministic `RetrievalGoldContextHarnessTest` with 20 synthetic
+  gold-context tasks: 18 retrieval tasks plus protected-path and private-mode
+  negative cases.
+- The harness records expected files, symbols, line ranges, related tests,
+  BM25/hybrid lane contribution, file recall, precision, MRR, nDCG, junk
+  context, missing-core-evidence, and line-range hits.
+- No production retrieval behavior changed. T847 remains open pending review.
