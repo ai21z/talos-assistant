@@ -215,8 +215,11 @@ confidence_histogram:
   is now closed. T847 retrieval evidence and gold-context measurement has a
   deterministic 20-task harness implementation awaiting review, while T842
   owner/Opus manual audit remains parallel. T853 is done after live
-  `/set model ollama/...` -> `/context` review. T854 is open and implemented
-  for review after fixing `/status` active-backend diagnostic truth.
+  `/set model ollama/...` -> `/context` review. T854 is closed after Opus live
+  review of the installed `/status` flow: after `/set model ollama/gpt-oss:20b`
+  the box `Engine` row reads `ollama` (not the stale `llama.cpp (managed)`) and
+  `/status --verbose` reports the Ollama host, fixing the active-backend
+  diagnostic-truth bug on the `/status` surface.
 
 ```talos-wiki-claims
 {
