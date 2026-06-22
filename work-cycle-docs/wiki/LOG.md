@@ -1090,3 +1090,14 @@ mechanically.
   Talos-usable in text/tool-prompt mode; native/default produced zero executable
   tool calls.
 - T858 remains open pending review.
+
+## [2026-06-22] model-profiles | Implement T859 managed GGUF switching UX
+
+- Updated `/models` to state that managed `llama_cpp` lists the
+  configured/running GGUF only, not every downloaded cache entry.
+- Updated `/set model llama_cpp/<name>` not-found guidance to point to
+  `talos setup models --profile <name> --write --force` and restart.
+- Documented the same managed-GGUF switching workflow in tracked user docs.
+- Added focused tests for `/models`, `/set model`, and setup `--force` backup
+  behavior.
+- T859 remains open pending review.

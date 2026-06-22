@@ -173,6 +173,8 @@ or generated reports.
 - [T859 Managed GGUF profile switching UX](../tickets/open/[T859-open-high]%20managed-gguf-profile-switching-ux.md)
   - Addresses the `/models` expectation gap: managed `llama_cpp` currently
     exposes the configured/running model, not every downloaded GGUF in cache.
+  - [T859 implementation report](../reports/t859-managed-gguf-profile-switching-ux.md)
+  - Status: implemented, awaiting review.
 - [T855 Ollama independence truth and default-path gate](../tickets/done/[T855-done-high]%20ollama-independence-truth-and-default-path-gate.md) (done)
   - Product-truth/default-path hardening for managed `llama.cpp` beta posture.
   - Deterministic implementation report:

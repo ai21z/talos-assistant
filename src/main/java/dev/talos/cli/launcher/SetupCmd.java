@@ -78,6 +78,7 @@ public class SetupCmd implements Callable<Integer> {
                   talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe --model-path D:/models/agent.gguf --write
 
                 Existing configs are backed up when --force is used.
+                Switching managed GGUF profiles rewrites the active config; restart Talos after the write.
                 """;
     }
 

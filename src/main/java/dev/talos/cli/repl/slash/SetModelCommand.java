@@ -30,10 +30,21 @@ public final class SetModelCommand implements Command {
         try (var reg = new EngineRegistry(ctx.cfg())) {
             var cat = reg.compositeCatalog();
             var mref = cat.find(sanitized);
-            if (mref.isEmpty()) return new Result.Error("Model not found: " + sanitized + "\nTip: /models", 404);
+            if (mref.isEmpty()) return new Result.Error(modelNotFoundMessage(sanitized), 404);
             var chosen = mref.get();
             ctx.llm().setModel(chosen.backend() + "/" + chosen.name());
             return new Result.Info("Model: " + ctx.llm().getModel());
         }
+    }
+
+    static String modelNotFoundMessage(String sanitized) {
+        String base = "Model not found: " + sanitized;
+        if (sanitized != null && sanitized.startsWith("llama_cpp/")) {
+            return base + "\nManaged llama.cpp can only select the configured/running GGUF."
+                    + "\nDownloaded GGUFs must be configured before they appear in /models."
+                    + "\nTo switch managed GGUF profiles, run `talos setup models --profile <name> --write --force`,"
+                    + " then restart Talos and check /models.";
+        }
+        return base + "\nTip: /models";
     }
 }

@@ -50,7 +50,12 @@ public final class ModelsCommand implements Command {
         appendGroup(sb, "Recommended managed llama.cpp", managed);
         appendGroup(sb, "Legacy/optional Ollama", ollama);
         appendGroup(sb, "Other configured backends", other);
-        sb.append("\nTip: use /set model <backend/model> to switch.\n");
+        sb.append("""
+
+Tip: use /set model <backend/model> to switch among models visible above.
+Managed llama.cpp lists the configured/running model only. Downloaded GGUFs are not selectable until configured.
+To switch managed GGUF profiles, run `talos setup models --profile <name> --write --force`, then restart Talos.
+""");
         return sb.toString();
     }
 

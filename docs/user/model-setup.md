@@ -62,6 +62,20 @@ Configure DeepSeek-Coder-V2-Lite in its tested text/tool-prompt mode:
 talos setup models --profile deepseek-v2lite-q4km --server-path C:/path/to/llama-server.exe --write
 ```
 
+## Switch Between Managed GGUF Profiles
+
+Managed `llama.cpp` shows only the currently configured or running GGUF in
+`/models`. Downloading a GGUF does not make it selectable by `/set model`.
+
+To switch profiles, rewrite the active config and restart Talos:
+
+```powershell
+talos setup models --profile qwen36vf-q6k --server-path C:/path/to/llama-server.exe --write --force
+```
+
+`--force` creates a backup before replacing the existing config. After restart,
+use `/models` to confirm the configured profile.
+
 ## Required Server Path
 
 `--server-path` must point to an existing local `llama-server.exe` file.
@@ -118,4 +132,6 @@ Check:
 - user config status
 
 Inside the REPL, use `/models` to list visible models and
-`/set model <backend/model>` to switch the active chat model.
+`/set model <backend/model>` to switch among visible active/catalog models.
+For managed `llama.cpp`, use the setup workflow above to switch the configured
+GGUF before relying on `/set model`.

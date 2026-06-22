@@ -49,8 +49,8 @@ Show REPL help:
 | `/show` | Show an indexed snippet or small workspace file. |
 | `/reindex` | Rebuild or update index. |
 | `/tools` | List AI-callable tools. |
-| `/models` | List installed models visible to the engine catalog. |
-| `/set model <backend/model>` | Switch the active chat model. |
+| `/models` | List models visible to the engine catalog. Managed `llama.cpp` shows the configured/running GGUF, not every downloaded cache entry. |
+| `/set model <backend/model>` | Switch among visible active/catalog models. For managed GGUF profile changes, use `talos setup models ... --write --force` and restart. |
 | `/mode <mode>` | Switch mode; available modes include `auto`, `rag`, `chat`, `dev`, `ask`, and reserved `web`. Reserved `web` performs no external network calls in this build. |
 | `/privacy status` | Show privacy settings. |
 | `/privacy private on` | Enable private mode. |

@@ -29,6 +29,8 @@ class ModelsCommandTest {
         assertTrue(ollama > legacy, text);
         assertTrue(other > ollama, text);
         assertTrue(compat > other, text);
-        assertTrue(text.contains("/set model <backend/model>"), text);
+        assertTrue(text.contains("Managed llama.cpp lists the configured/running model only"), text);
+        assertTrue(text.contains("Downloaded GGUFs are not selectable until configured"), text);
+        assertTrue(text.contains("talos setup models --profile <name> --write --force"), text);
     }
 }
