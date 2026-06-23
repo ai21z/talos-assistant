@@ -1,6 +1,6 @@
 # T865 Deterministic Terminal Tests For Portable Green Check
 
-Status: open
+Status: done
 Priority: high
 Branch: `v0.9.0-beta-dev`
 Talos version: `0.10.5`
@@ -59,11 +59,18 @@ Test-only determinism fixes. No production behavior change.
 - A full `check` on a clean worktree at the fix commit is GREEN on this host
   (zero failures), making the green check portable.
 
-## Verification
+## Verification (done)
 
-- Reproduced both failures focused (RED), applied the fixes, reran focused
-  (GREEN).
-- Clean-worktree full `check` at the fix commit: GREEN.
+Fix commit `7b8876bd` (test-only: 2 files). Verified by Opus:
+
+- Reproduced both failures focused in this host's Bash-tool environment
+  (`RootCmdTest:42` expected true was false; `StatusRowPresenterTest:40` expected
+  false was true), applied the fixes, reran focused -> GREEN.
+- Clean detached worktree at `7b8876bd`, fresh full `check` in the SAME
+  environment that was previously RED -> `BUILD SUCCESSFUL`, zero failing classes
+  (JUnit XML). The green check is now portable: the candidate-cut blocker the
+  earlier "2 environmental failures" represented is cleared.
+- No `src/main` change; neither assertion weakened.
 
 ## Architecture Metadata
 
