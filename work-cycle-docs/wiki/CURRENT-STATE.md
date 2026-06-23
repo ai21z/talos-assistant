@@ -455,7 +455,11 @@ managed embedding endpoint is registry-owned across short-lived query clients
 (started once, reused, stopped on JVM shutdown). The live smoke proved
 Ollama-free index/query with real bge-m3 vectors, one embed server reused across
 a multi-query session, and zero `:11434` contact; the shipped default stays
-BM25-only. The
+BM25-only. T865 (done) made the two environment-flaky terminal tests
+(`RootCmdTest.shortHelpOptionShowsUsage`, `StatusRowPresenterTest`) deterministic
+by pinning ANSI off and the JLine terminal type, so a clean-worktree full `check`
+is now reliably green on this host -- the candidate-cut "green check is not
+portable" blocker is cleared. The
 2026-06-22 managed-model probes also opened T858 for per-model tool-mode
 compatibility and T859 for the managed-GGUF `/models` / profile-switching UX
 gap: downloaded GGUFs are not selectable until they are configured, and
