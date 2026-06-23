@@ -18,7 +18,11 @@ class RootCmdTest {
         StringWriter err = new StringWriter();
         CommandLine cmd = new CommandLine(new RootCmd())
                 .setOut(new PrintWriter(out))
-                .setErr(new PrintWriter(err));
+                .setErr(new PrintWriter(err))
+                // Pin ANSI off so help text is asserted deterministically: with ANSI auto-on
+                // (a console-attached test JVM) picocli styles the command name, turning
+                // "Usage: talos" into "Usage: \e[1mtalos\e[21m" and breaking the substring match.
+                .setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
 
         int exit = cmd.execute("--help");
 
@@ -34,7 +38,11 @@ class RootCmdTest {
         StringWriter err = new StringWriter();
         CommandLine cmd = new CommandLine(new RootCmd())
                 .setOut(new PrintWriter(out))
-                .setErr(new PrintWriter(err));
+                .setErr(new PrintWriter(err))
+                // Pin ANSI off so help text is asserted deterministically: with ANSI auto-on
+                // (a console-attached test JVM) picocli styles the command name, turning
+                // "Usage: talos" into "Usage: \e[1mtalos\e[21m" and breaking the substring match.
+                .setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
 
         int exit = cmd.execute("-h");
 

@@ -22,6 +22,11 @@ class StatusRowPresenterTest {
         return TerminalBuilder.builder()
                 .system(false)
                 .dumb(true)
+                // Pin the type to "dumb" so capability lookup is deterministic: with explicit
+                // streams + system(false), JLine builds an external terminal whose type otherwise
+                // defaults to the ambient TERM, which on an xterm-like host exposes scroll-region
+                // capabilities and makes supports() flip to true. A real dumb terminal has none.
+                .type(Terminal.TYPE_DUMB)
                 .encoding(StandardCharsets.UTF_8)
                 .streams(new ByteArrayInputStream(new byte[0]), sink)
                 .build();
