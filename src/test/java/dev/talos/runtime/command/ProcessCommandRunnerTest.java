@@ -145,6 +145,38 @@ class ProcessCommandRunnerTest {
         assertEquals("/tmp/talos", environment.get("TMPDIR"));
         assertEquals("/opt/jdk-21", environment.get("JAVA_HOME"));
         assertEquals("/usr/bin", environment.get("PATH"));
+        assertEquals(6, environment.size(), "POSIX command environment must stay narrowly allowlisted");
+        assertFalse(environment.containsKey("AWS_SECRET_ACCESS_KEY"));
+        assertFalse(environment.containsKey("TALOS_FAKE_SECRET"));
+    }
+
+    @Test
+    void windowsEnvironmentAllowlistKeepsProcessBasicsWithoutBroadLeak() {
+        Map<String, String> source = new LinkedHashMap<>();
+        source.put("SystemRoot", "C:\\Windows");
+        source.put("WINDIR", "C:\\Windows");
+        source.put("ComSpec", "C:\\Windows\\System32\\cmd.exe");
+        source.put("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+        source.put("TEMP", "C:\\Users\\talos\\AppData\\Local\\Temp");
+        source.put("TMP", "C:\\Users\\talos\\AppData\\Local\\Temp");
+        source.put("JAVA_HOME", "C:\\jdk-21");
+        source.put("PATH", "C:\\Windows\\System32;C:\\jdk-21\\bin");
+        source.put("AWS_SECRET_ACCESS_KEY", "do-not-forward");
+        source.put("TALOS_FAKE_SECRET", "do-not-forward");
+
+        Map<String, String> environment = ProcessCommandRunner.filteredEnvironment(
+                source,
+                CommandRuntimePlatform.windows());
+
+        assertEquals("C:\\Windows", environment.get("SystemRoot"));
+        assertEquals("C:\\Windows", environment.get("WINDIR"));
+        assertEquals("C:\\Windows\\System32\\cmd.exe", environment.get("ComSpec"));
+        assertEquals(".COM;.EXE;.BAT;.CMD", environment.get("PATHEXT"));
+        assertEquals("C:\\Users\\talos\\AppData\\Local\\Temp", environment.get("TEMP"));
+        assertEquals("C:\\Users\\talos\\AppData\\Local\\Temp", environment.get("TMP"));
+        assertEquals("C:\\jdk-21", environment.get("JAVA_HOME"));
+        assertEquals("C:\\Windows\\System32;C:\\jdk-21\\bin", environment.get("PATH"));
+        assertEquals(8, environment.size(), "Windows command environment must stay narrowly allowlisted");
         assertFalse(environment.containsKey("AWS_SECRET_ACCESS_KEY"));
         assertFalse(environment.containsKey("TALOS_FAKE_SECRET"));
     }

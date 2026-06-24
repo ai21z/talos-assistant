@@ -627,6 +627,7 @@ describe("Talos in-site documentation contract", () => {
   it("does not publish unsupported install or capability claims in docs surface", () => {
     const surface = [read("docs.html"), read("src/docs.js"), ...userDocSlugs.map((slug) => readFileSync(join(root, "..", "docs", "user", `${slug}.md`), "utf8"))].join("\n");
     for (const banned of [
+      "Windows-first",
       "winget install works now",
       "Linux public install is supported",
       "macOS public install is supported",

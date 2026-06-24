@@ -374,6 +374,22 @@ Result:
 All commands passed locally on Windows.
 ```
 
+## Review Follow-Up - 2026-06-24
+
+independent review held closeout on two proof/honesty gaps:
+
+- the POSIX environment allowlist was tested, but the Windows allowlist was not;
+- the in-site documentation surface still contained stale `Windows-first public
+  beta` wording after the landing page moved to the Windows-packaged /
+  Linux-source-developer framing.
+
+Follow-up implementation:
+
+- added Windows environment allowlist coverage with exact cardinality, and
+  cardinality-pinned the POSIX allowlist test;
+- updated the stale in-site docs copy;
+- added a site honesty guard banning `Windows-first` on the docs surface.
+
 ## Known Follow-Ups
 
 - JReleaser/SDKMAN/JBang distribution strategy.
