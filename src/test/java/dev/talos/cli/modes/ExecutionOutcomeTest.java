@@ -395,6 +395,83 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void fabricatedGitStatusOutputWithoutRunCommandIsWithheldAfterReadOnlyToolUse() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("what is the git status of this workspace?"));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                new dev.talos.runtime.task.TaskContract(
+                        dev.talos.runtime.task.TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        java.util.Set.of(),
+                        java.util.Set.of(),
+                        "what is the git status of this workspace?",
+                        "read-only-command-status-question"),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file", "talos.grep"),
+                List.of("talos.list_dir", "talos.read_file", "talos.grep"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                """
+                        On branch main
+                        Your branch is up to date with 'origin/main'.
+
+                        Changes not staged for commit:
+                          modified: src/App.java
+                        """,
+                1,
+                1,
+                List.of("talos.list_dir"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("."),
+                0,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "README.md\nsrc", "", null, "")));
+
+        LocalTurnTraceCapture.begin(
+                "trc-t866-command-output-truth",
+                "sid-t866",
+                1,
+                "2026-06-24T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama.cpp",
+                "gpt-oss:20b",
+                "what is the git status of this workspace?");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Command output truth check:"), outcome.finalAnswer());
+            String lower = outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("on branch main"), outcome.finalAnswer());
+            assertFalse(lower.contains("changes not staged"), outcome.finalAnswer());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.UNSUPPORTED_COMMAND_OUTPUT_CLAIM));
+            assertNotNull(trace);
+            assertTrue(trace.warnings().stream().anyMatch(warning ->
+                    "UNSUPPORTED_COMMAND_OUTPUT_CLAIM".equals(warning.code())
+                            && warning.message().contains("without a successful talos.run_command")),
+                    trace.warnings().toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void explicitCommandRequestWithoutAnyToolIsBlockedAndSanitized() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

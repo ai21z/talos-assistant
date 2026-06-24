@@ -16,6 +16,7 @@ public final class TaskOutcomeWarningBuilder {
             boolean failedActionObligation,
             boolean commandFailed,
             boolean commandDenied,
+            boolean unsupportedCommandOutputClaim,
             boolean invalidMutation,
             boolean partialMutation,
             boolean falseMutationClaim,
@@ -70,6 +71,11 @@ public final class TaskOutcomeWarningBuilder {
             warnings.add(TruthWarning.of(
                     TruthWarningType.COMMAND_DENIED,
                     "A requested verification command was not run because approval or policy blocked it."));
+        }
+        if (facts.unsupportedCommandOutputClaim()) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.UNSUPPORTED_COMMAND_OUTPUT_CLAIM,
+                    "The answer asserted command output without a successful talos.run_command outcome."));
         }
         if (facts.deniedProtectedRead()) {
             warnings.add(TruthWarning.of(

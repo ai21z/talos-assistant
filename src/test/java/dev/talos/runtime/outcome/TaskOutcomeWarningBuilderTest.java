@@ -28,6 +28,7 @@ class TaskOutcomeWarningBuilderTest {
                         true,
                         true,
                         true,
+                        true,
                         TaskVerificationStatus.FAILED,
                         true,
                         true));
@@ -45,6 +46,9 @@ class TaskOutcomeWarningBuilderTest {
                 new TruthWarning(
                         TruthWarningType.COMMAND_DENIED,
                         "A requested verification command was not run because approval or policy blocked it."),
+                new TruthWarning(
+                        TruthWarningType.UNSUPPORTED_COMMAND_OUTPUT_CLAIM,
+                        "The answer asserted command output without a successful talos.run_command outcome."),
                 new TruthWarning(
                         TruthWarningType.DENIED_PROTECTED_READ,
                         "A protected read was blocked because approval was denied."),
@@ -89,6 +93,7 @@ class TaskOutcomeWarningBuilderTest {
         List<TruthWarning> warnings = TaskOutcomeWarningBuilder.toolLoopWarnings(
                 new TaskOutcomeWarningBuilder.ToolLoopFacts(
                         true,
+                        false,
                         false,
                         false,
                         false,

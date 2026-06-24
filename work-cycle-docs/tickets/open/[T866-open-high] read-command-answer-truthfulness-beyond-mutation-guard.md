@@ -3,6 +3,20 @@
 Status: open
 Priority: high
 
+## Implementation Checkpoint — 2026-06-24
+
+Status: implemented, awaiting independent review/owner review.
+
+Implemented a deterministic outcome-layer guard for structured command-output
+claims without a successful `talos.run_command` ledger entry. The first covered
+shape is the T842 `git status` fabrication class: `On branch ...`, `Your branch
+is ...`, `Changes not staged for commit:`, `Changes to be committed:`,
+`Untracked files:`, and `nothing to commit, working tree clean`. The guard
+withholds the unsupported command-style output, emits
+`UNSUPPORTED_COMMAND_OUTPUT_CLAIM`, and leaves successful command outcomes,
+honest "command unavailable" answers, and correctly labeled read-tool evidence
+unchanged. The ticket remains open for review and live/manual confirmation.
+
 ## Evidence Summary
 
 - Source: manual prompt (T842 Part A semi-automated capability bank + Part B interactive PTY)
