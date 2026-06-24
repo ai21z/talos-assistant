@@ -169,7 +169,7 @@ class TurnProcessorCommandPolicyTest {
                 approvals.incrementAndGet();
                 assertTrue(description.contains("talos.run_command"));
                 assertTrue(detail.contains("profile: gradle_test"));
-                assertTrue(detail.contains("argv: .\\gradlew.bat --no-daemon test"));
+                assertTrue(detail.contains("argv: " + gradleWrapperExecutable() + " --no-daemon test"));
                 return response;
             }
         };
@@ -188,7 +188,15 @@ class TurnProcessorCommandPolicyTest {
     }
 
     private static void createGradleWrapper(Path workspace) throws Exception {
-        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
+        String executable = gradleWrapperExecutable();
+        String fileName = executable.endsWith("gradlew.bat") ? "gradlew.bat" : "gradlew";
+        String content = executable.endsWith("gradlew.bat") ? "@echo off\r\n" : "#!/bin/sh\n";
+        Files.writeString(workspace.resolve(fileName), content);
+    }
+
+    private static String gradleWrapperExecutable() {
+        String osName = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        return osName.contains("win") ? ".\\gradlew.bat" : "./gradlew";
     }
 
     private static final class RecordingRunner implements CommandRunner {

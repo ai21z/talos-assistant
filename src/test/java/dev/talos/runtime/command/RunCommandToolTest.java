@@ -174,7 +174,9 @@ class RunCommandToolTest {
 
         assertFalse(result.success());
         assertEquals(ToolError.INVALID_PARAMS, result.error().code());
-        assertTrue(result.errorMessage().contains("Gradle command profiles require a Gradle wrapper"),
+        assertTrue(result.errorMessage().contains("Gradle command profile requires selected wrapper"),
+                result.errorMessage());
+        assertTrue(result.errorMessage().contains(CommandRuntimePlatform.current().gradleWrapperExecutable()),
                 result.errorMessage());
         assertTrue(result.errorMessage().contains("No approval was requested and no command was executed"),
                 result.errorMessage());
@@ -255,7 +257,10 @@ class RunCommandToolTest {
     }
 
     private void createGradleWrapper() throws Exception {
-        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
+        String executable = CommandRuntimePlatform.current().gradleWrapperExecutable();
+        String fileName = executable.endsWith("gradlew.bat") ? "gradlew.bat" : "gradlew";
+        String content = executable.endsWith("gradlew.bat") ? "@echo off\r\n" : "#!/bin/sh\n";
+        Files.writeString(workspace.resolve(fileName), content);
     }
 
     private static CommandResult success(CommandPlan plan, String stdout, String stderr) {

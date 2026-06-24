@@ -39,11 +39,14 @@ elsewhere in the repository, but it is not the normal path for learning Talos.
 
 Read the current user-facing docs with these limits:
 
-- Talos is Windows-first in the current beta path.
+- Talos has a Windows packaged beta target and a Linux source/developer beta
+  path.
 - Public package-manager installation is planned, not live.
-- The current reliable install path is source/developer setup.
-- The planned public installer does not include model weights or a llama.cpp
-  server.
+- The current reliable install path is source/developer setup on Windows or
+  Linux.
+- Linux source/developer beta support is not a native package-manager promise.
+- The planned Windows public installer does not include model weights or a
+  llama.cpp server.
 - Local model setup is explicit and user-controlled.
 - Talos is not positioned for private paperwork such as tax, health, legal,
   family, or administrative folders.

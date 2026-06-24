@@ -7,32 +7,51 @@ planned for public beta?"
 
 Current supported user path:
 
-- Source/developer setup from the repository.
-- Windows-first workflow.
+- Source/developer setup from the repository on Windows or Linux.
+- Windows remains the packaged installer target.
 - Java 21 required for the current source setup.
 
 Planned public beta path:
 
 - Windows x64 package installation.
+- Linux source/developer beta install from a checkout.
 - Private Java runtime included with the installed app.
 - Talos installed without model weights.
 - Model setup remains a separate user action.
 
 ## Current Source Install
 
-Build:
+Build on Windows:
 
 ```powershell
 .\gradlew.bat clean installDist
 ```
 
-Install the development distribution:
+Install the Windows development distribution:
 
 ```powershell
 pwsh .\tools\install-windows.ps1 -Force
 ```
 
-Open a new PowerShell window and verify:
+Build on Linux:
+
+```bash
+./gradlew clean installDist
+```
+
+If needed:
+
+```bash
+chmod +x ./gradlew
+```
+
+Install the Linux source/developer distribution:
+
+```bash
+bash tools/install-unix.sh --force
+```
+
+Open a new terminal and verify:
 
 ```powershell
 talos --version
@@ -61,6 +80,9 @@ Vissarion Zounarakis
 
 Do not treat the public package path as live until release artifacts and package
 manifests are published.
+
+Linux beta support is source/developer support only. There is no current
+DEB/RPM/Homebrew/SDKMAN/JBang package promise.
 
 ## What The Installer Will And Will Not Install
 

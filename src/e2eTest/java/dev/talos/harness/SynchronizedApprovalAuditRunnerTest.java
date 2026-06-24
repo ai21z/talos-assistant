@@ -332,10 +332,10 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(result.approvals().isEmpty(), result.approvals().toString());
         assertTrue(result.modelTranscript().contains("Invalid talos.run_command call"),
                 result.modelTranscript());
-        assertTrue(result.modelTranscript().contains("Gradle command profiles require a Gradle wrapper"),
+        assertTrue(result.modelTranscript().contains("Gradle command profile requires selected wrapper"),
                 result.modelTranscript());
         assertTrue(result.finalAnswer().contains("Invalid talos.run_command call"), result.finalAnswer());
-        assertTrue(result.finalAnswer().contains("Gradle command profiles require a Gradle wrapper"),
+        assertTrue(result.finalAnswer().contains("Gradle command profile requires selected wrapper"),
                 result.finalAnswer());
     }
 

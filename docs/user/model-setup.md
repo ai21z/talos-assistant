@@ -88,7 +88,8 @@ use `/models` to confirm the configured profile.
 
 ## Required Server Path
 
-`--server-path` must point to an existing local `llama-server.exe` file.
+`--server-path` must point to an existing local `llama-server` binary. Windows
+paths usually end in `llama-server.exe`; Linux paths usually do not.
 
 If the file does not exist, setup fails instead of writing a broken
 configuration.

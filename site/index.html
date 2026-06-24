@@ -145,7 +145,7 @@
               </div>
               <ul class="evidence-row" aria-label="Talos runtime facts">
                 <li class="evidence-tag">java_21</li>
-                <li class="evidence-tag">windows_first</li>
+                <li class="evidence-tag">linux_source</li>
                 <li class="evidence-tag">approved_writes</li>
                 <li class="evidence-tag">local_trace</li>
               </ul>
@@ -156,7 +156,9 @@ talos setup models
 talos status --verbose
 talos</code></pre>
                 <p>
-                  Planned public beta support: Windows x64. Exact future ID: <code>TalosProject.TalosCLI</code>.
+                  Planned packaged public beta support: Windows x64. Linux source/developer beta support
+                  is a checkout-based install, not a native package-manager package. Exact future ID:
+                  <code>TalosProject.TalosCLI</code>.
                   Searchable package name and friendly install copy: <code>winget install talos-cli</code>.
                   Publisher: <code>Vissarion Zounarakis</code>. The installer
                   uses a bundled Java runtime and does not bundle a llama.cpp server or model weights.
@@ -466,7 +468,7 @@ talos</code></pre>
               <span>Talos</span>
             </a>
             <p class="footer-line">
-              Local-first CLI workspace operator. Java 21. Planned Windows-first public beta.
+              Local-first CLI workspace operator. Java 21. Windows packaged beta; Linux source/developer beta.
             </p>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">

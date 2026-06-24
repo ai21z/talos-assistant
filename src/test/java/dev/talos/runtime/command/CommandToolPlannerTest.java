@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -28,16 +29,18 @@ class CommandToolPlannerTest {
         Path workspace = tempDir.resolve("ws");
         Files.createDirectories(workspace);
         Files.writeString(workspace.resolve("gradlew.bat"), "rem wrapper", StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("gradlew"), "#!/bin/sh\n", StandardCharsets.UTF_8);
         ToolCall call = new ToolCall("talos.run_command", Map.of("profile", "gradle_test"));
 
         String detail = CommandToolPlanner.approvalDetail(call, workspace);
 
         Path cwd = workspace.toAbsolutePath().normalize();
+        String executable = CommandRuntimePlatform.current().gradleWrapperExecutable();
         assertEquals(
                 "profile: gradle_test\n"
                         + "    risk: BUILD_OR_TEST\n"
                         + "    cwd: " + cwd + "\n"
-                        + "    argv: .\\gradlew.bat --no-daemon test\n"
+                        + "    argv: " + executable + " --no-daemon test\n"
                         + "    timeoutMs: 120000\n"
                         + "    outputCaps: stdout=65536 bytes, stderr=65536 bytes\n"
                         + "    expectedWrites: build/, .gradle/\n"
@@ -164,6 +167,7 @@ class CommandToolPlannerTest {
         Path workspace = tempDir.resolve("ws-gradle");
         Files.createDirectories(workspace);
         Files.writeString(workspace.resolve("gradlew.bat"), "rem wrapper", StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("gradlew"), "#!/bin/sh\n", StandardCharsets.UTF_8);
         ToolCall call = new ToolCall("talos.run_command", Map.of("profile", "gradle_test"));
 
         CommandPlan viaDispatch = CommandToolPlanner.plan(
@@ -173,6 +177,38 @@ class CommandToolPlannerTest {
 
         assertEquals(CommandToolPlanner.approvalDetail(viaGradleV1),
                 CommandToolPlanner.approvalDetail(viaDispatch));
+    }
+
+    @Test
+    void posixGradleApprovalDetailUsesPosixWrapper() throws Exception {
+        Path workspace = tempDir.resolve("ws-posix");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("gradlew"), "#!/bin/sh\n", StandardCharsets.UTF_8);
+        ToolCall call = new ToolCall("talos.run_command", Map.of("profile", "gradle_test"));
+
+        String detail = CommandToolPlanner.approvalDetail(
+                call,
+                workspace,
+                CommandProfileRegistry.defaultRegistry(CommandRuntimePlatform.posix()));
+
+        assertTrue(detail.contains("argv: ./gradlew --no-daemon test"), detail);
+    }
+
+    @Test
+    void posixGradleProfileRequiresTheSelectedWrapperBeforeApproval() throws Exception {
+        Path workspace = tempDir.resolve("ws-posix-missing-selected-wrapper");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("gradlew.bat"), "rem windows wrapper", StandardCharsets.UTF_8);
+        ToolCall call = new ToolCall("talos.run_command", Map.of("profile", "gradle_test"));
+
+        Optional<String> rejection = CommandToolPlanner.validateBeforeApproval(
+                call,
+                workspace,
+                CommandProfileRegistry.defaultRegistry(CommandRuntimePlatform.posix()));
+
+        assertTrue(rejection.isPresent());
+        assertTrue(rejection.get().contains("./gradlew"), rejection.get());
+        assertFalse(rejection.get().contains(".\\gradlew.bat --no-daemon test"), rejection.get());
     }
 
     private Path workspaceWithDeclaredProfile() throws Exception {

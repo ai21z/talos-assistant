@@ -149,7 +149,7 @@ class RunCommandOutputHandoffTest {
     }
 
     private StageHarness harness(CommandResult result) throws Exception {
-        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
+        createGradleWrapper();
         AtomicInteger approvals = new AtomicInteger();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new RunCommandTool(plan -> new CommandResult(
@@ -198,6 +198,18 @@ class RunCommandOutputHandoffTest {
                 5,
                 0);
         return new StageHarness(new ToolCallExecutionStage(new TurnProcessor(null, gate, registry), null, false), state);
+    }
+
+    private void createGradleWrapper() throws Exception {
+        String executable = gradleWrapperExecutable();
+        String fileName = executable.endsWith("gradlew.bat") ? "gradlew.bat" : "gradlew";
+        String content = executable.endsWith("gradlew.bat") ? "@echo off\r\n" : "#!/bin/sh\n";
+        Files.writeString(workspace.resolve(fileName), content);
+    }
+
+    private static String gradleWrapperExecutable() {
+        String osName = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        return osName.contains("win") ? ".\\gradlew.bat" : "./gradlew";
     }
 
     private record StageHarness(ToolCallExecutionStage stage, LoopState state) {}
