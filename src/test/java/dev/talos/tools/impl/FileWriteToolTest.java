@@ -107,6 +107,21 @@ class FileWriteToolTest {
     }
 
     @Test
+    void invalidJsonWriteStillWritesButSurfacesStructuralVerificationFailure() throws IOException {
+        String invalidJson = "{\"broken\": true";
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "bad.json",
+                "content", invalidJson));
+
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertEquals(VerificationStatus.FAIL, r.verification());
+        assertTrue(r.output().contains("Warning: JSON parse failed"), r.output());
+        assertEquals(invalidJson, Files.readString(workspace.resolve("bad.json")));
+    }
+
+    @Test
     void resultReportsLineCount() {
         ToolCall call = new ToolCall("talos.write_file", Map.of(
                 "path", "lines.txt",

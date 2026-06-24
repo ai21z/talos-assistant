@@ -26,6 +26,11 @@ class ToolResultFormatterTest {
                 write,
                 ToolResult.ok(longOutput, VerificationStatus.WARN));
         String failed = ToolResultFormatter.formatToolResult(write, ToolResult.fail("write failed"));
+        String failedWithVerification = ToolResultFormatter.formatToolResult(
+                write,
+                ToolResult.fail(
+                        dev.talos.tools.ToolError.internal("read-back mismatch"),
+                        VerificationStatus.INTEGRITY_FAIL));
 
         assertAll(
                 () -> assertEquals("""
@@ -43,7 +48,12 @@ class ToolResultFormatterTest {
                 () -> assertEquals("""
                         [tool_result: talos.write_file]
                         [error] write failed
-                        [/tool_result]""", failed));
+                        [/tool_result]""", failed),
+                () -> assertEquals("""
+                        [tool_result: talos.write_file]
+                        [error] read-back mismatch
+                        [verification_status: INTEGRITY_FAIL]
+                        [/tool_result]""", failedWithVerification));
     }
 
     @Test

@@ -357,3 +357,32 @@ Commands:
 - Broader run-command verification and false-success coverage remains separate.
 - Live audit should include at least one file-verification failure prompt once
   this ticket lands.
+
+## Implementation Checkpoint - 2026-06-24
+
+Status: implemented, awaiting review. Keep this ticket open until independent review/owner
+review verifies the trust-surface behavior and closes it.
+
+Implementation summary:
+
+- Added `VerificationStatus.INTEGRITY_FAIL` for read-back I/O failure or
+  byte mismatch, leaving structural JSON/YAML/XML `FAIL` for byte-matched
+  content-invalid cases.
+- Added failed `ToolResult` support for verification metadata.
+- Added a package-private write/edit result mapper so `FileWriteTool` and
+  `FileEditTool` return failed results for integrity failure, while preserving
+  successful write semantics for structural `FAIL`, `WARN`, `PASS`, and
+  `UNKNOWN`.
+- Preserved verification metadata through `ToolOutcomeFactory` and failed
+  tool-result formatting.
+- Added regression coverage for verifier split, write/edit structural failure
+  behavior, failed result metadata, outcome classification, mutation-state
+  accounting, and readback verifier problem reporting.
+
+Local verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.tools.VerificationStatusTest" --tests "dev.talos.tools.impl.*" --tests "dev.talos.runtime.ToolCallLoopTest" --tests "dev.talos.runtime.toolcall.ToolOutcomeFactoryTest" --tests "dev.talos.runtime.toolcall.ToolResultFormatterTest" --tests "dev.talos.runtime.toolcall.ToolMutationStateAccountingTest" --tests "dev.talos.runtime.outcome.MutationOutcomeTest" --tests "dev.talos.runtime.verification.*" --no-daemon
+```
+
+Result: PASS.

@@ -33,6 +33,9 @@ final class ToolResultFormatter {
             }
         } else {
             sb.append("[error] ").append(ProtectedContentPolicy.sanitizeText(result.errorMessage()));
+            if (result.verification() != null) {
+                sb.append("\n[verification_status: ").append(result.verification().name()).append("]");
+            }
         }
         sb.append("\n[/tool_result]");
         return sb.toString();

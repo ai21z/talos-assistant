@@ -1,7 +1,9 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
+import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -95,6 +97,30 @@ class ToolMutationStateAccountingTest {
         assertFalse(readOnlyState.mutationSinceStart);
         assertEquals(0, readOnlyState.mutatingToolSuccesses);
         assertTrue(readOnlyState.pathsMutatedSinceRead.isEmpty());
+    }
+
+    @Test
+    void integrityFailedMutationWithVerificationMetadataDoesNotRecordSuccessfulMutation() {
+        LoopState state = loopState();
+        state.successfulReadCalls.put("talos.read_file:path=README.md;", "1 | old");
+        ToolCall write = new ToolCall("talos.write_file", Map.of("path", "README.md", "content", "new"));
+        ToolResult result = ToolResult.fail(
+                ToolError.internal("File verification failed: read-back mismatch"),
+                VerificationStatus.INTEGRITY_FAIL);
+
+        ToolMutationStateAccounting.Result recorded =
+                ToolMutationStateAccounting.recordSuccessfulMutation(
+                        state,
+                        write,
+                        "README.md",
+                        result);
+
+        assertFalse(recorded.mutationRecorded());
+        assertFalse(state.mutationSinceStart);
+        assertEquals(0, state.mutatingToolSuccesses);
+        assertTrue(state.pathsMutatedSinceRead.isEmpty());
+        assertEquals(1, state.successfulReadCalls.size());
+        assertTrue(state.pendingMutationSummaries.isEmpty());
     }
 
     @Test

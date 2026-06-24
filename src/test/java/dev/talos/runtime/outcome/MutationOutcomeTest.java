@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -89,6 +90,48 @@ class MutationOutcomeTest {
 
         assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.status());
         assertEquals(1, outcome.successCount());
+    }
+
+    @Test
+    void integrityFailedMutationIsFailedNotSucceeded() {
+        var contract = TaskContractResolver.fromUserRequest("Edit index.html.");
+
+        MutationOutcome outcome = MutationOutcome.from(contract, loopResult(List.of(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file",
+                        "index.html",
+                        false,
+                        true,
+                        false,
+                        "",
+                        "File verification failed: read-back mismatch",
+                        VerificationStatus.INTEGRITY_FAIL)
+        )), 0);
+
+        assertEquals(MutationOutcomeStatus.FAILED, outcome.status());
+        assertEquals(0, outcome.successCount());
+        assertEquals(1, outcome.failureCount());
+    }
+
+    @Test
+    void structuralVerificationFailureAfterSuccessfulWriteStillCountsAsSucceededMutation() {
+        var contract = TaskContractResolver.fromUserRequest("Edit config.json.");
+
+        MutationOutcome outcome = MutationOutcome.from(contract, loopResult(List.of(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.write_file",
+                        "config.json",
+                        true,
+                        true,
+                        false,
+                        "Updated config.json. Warning: JSON parse failed",
+                        "",
+                        VerificationStatus.FAIL)
+        )), 0);
+
+        assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.status());
+        assertEquals(1, outcome.successCount());
+        assertEquals(0, outcome.failureCount());
     }
 
     @Test

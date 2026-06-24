@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T864] Write/edit read-back integrity failures now fail closed instead of
+  being represented as clean successful mutations. `ContentVerifier` now splits
+  read-back I/O or byte-mismatch failures into a distinct
+  `INTEGRITY_FAIL` status while keeping byte-matched structural JSON/YAML/XML
+  `FAIL` as a successful write with failed verification surfaced. Failed
+  `ToolResult`s can preserve verification metadata, write/edit tools share the
+  mapping contract, and tool-result formatting/outcome tests pin the failed
+  result plus verification-status handoff.
 - [T861] Made built-in Gradle command profiles platform-aware for the Linux
   source/developer beta path: Windows still plans `.\gradlew.bat`, POSIX plans
   `./gradlew`, the pre-approval wrapper guard now checks the selected
