@@ -155,8 +155,13 @@ or generated reports.
 
 ## Active Tickets
 
-- [T842 Pre-beta full E2E audit](../tickets/open/[T842-open-high]%20wave6-pre-beta-full-e2e-audit.md)
-  - Owner/Opus manual testing in parallel.
+- [T842 Pre-beta full E2E audit](../tickets/done/[T842-done-high]%20wave6-pre-beta-full-e2e-audit.md) (done)
+  - Owner-run Part B at a real PTY plus Opus Part A / verification / findings
+    review; owner cross-verified against disk. Trust surface HELD: no protected
+    leak, no false/unapproved mutation, destructive rewrite denied, `.env`
+    fail-closed. Findings ticketed T866-T872 (T866 read/command fabrication and
+    T872 run_command coverage are before-public-beta gates). Report:
+    [FINDINGS T842](../reports/FINDINGS-T842-capability-live-audit-20260624.md).
 - [T856 Managed llama.cpp embeddings](../tickets/done/[T856-done-high]%20managed-llama-cpp-embeddings.md) (done)
   - Opus-verified (incl. live smoke): opt-in managed `llama.cpp` embedding server
     path, `bge-m3` setup profile, honest BM25/hybrid diagnostics, and shared

@@ -195,7 +195,9 @@ confidence_histogram:
   tracked README/AGENTS/docs honesty guard against unqualified competitor
   exclusivity claims while keeping competitor-matrix evidence local-only.
 - Pre-release work after Wave 6 trust fixes is now ticketed from T842 onward:
-  T842 owner-run full manual audit remains parallel. T843 site honesty fixes,
+  T842 owner-run full manual audit is DONE (2026-06-24): trust surface held with
+  no hard-fail gate, findings ticketed T866-T872 (T866 read/command-claim
+  fabrication and T872 run_command coverage are before-public-beta gates). T843 site honesty fixes,
   T844 RAG/vector and beta best-practices docs, T845 model/hardware range
   evidence, and T846 doctor diagnostics are done. T845 records the accepted
   one-machine, managed-`llama.cpp`, BM25-only beta-range evidence and does not
@@ -213,8 +215,8 @@ confidence_histogram:
   reads, Talos returns a bounded evidence-complete failure instead of the generic
   no-progress failure. The beta-correctness triage queue from T848 through T852
   is now closed. T847 retrieval evidence and gold-context measurement has a
-  deterministic 20-task harness implementation awaiting review, while T842
-  owner/Opus manual audit remains parallel. T853 is done after live
+  deterministic 20-task harness implementation awaiting review; the T842
+  owner/Opus manual audit is now done (findings T866-T872). T853 is done after live
   `/set model ollama/...` -> `/context` review. T854 is closed after Opus live
   review of the installed `/status` flow: after `/set model ollama/gpt-oss:20b`
   the box `Engine` row reads `ollama` (not the stale `llama.cpp (managed)`) and
