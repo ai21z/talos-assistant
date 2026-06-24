@@ -75,6 +75,21 @@ class MutationTargetReadbackVerifierTest {
                 result.problems().toString());
     }
 
+    @Test
+    void successfulMutationWithIntegrityFailureStatusRecordsVerificationProblem() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Talos\n");
+
+        MutationTargetReadbackVerifier.Result result = MutationTargetReadbackVerifier.verify(
+                workspace,
+                List.of(successfulWrite("README.md", VerificationStatus.INTEGRITY_FAIL)));
+
+        assertTrue(result.facts().isEmpty(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains(
+                                "README.md: file-level verification reported read-back integrity failed")),
+                result.problems().toString());
+    }
+
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {
         return new ToolCallLoop.ToolOutcome(
                 "talos.write_file", path, true, true, false,

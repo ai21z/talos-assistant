@@ -48,12 +48,12 @@ final class ContentVerifier {
         } catch (IOException e) {
             String reason = SafeLogFormatter.throwableMessage(e);
             LOG.warn("Read-back failed for {}: {}", SafeLogFormatter.value(file), reason);
-            return new VerifyResult(VerificationStatus.FAIL, "read-back failed: " + reason);
+            return new VerifyResult(VerificationStatus.INTEGRITY_FAIL, "read-back failed: " + reason);
         }
         if (!readBack.equals(writtenContent)) {
             LOG.warn("Read-back mismatch for {}: wrote {} chars, read {} chars",
                     SafeLogFormatter.value(file), writtenContent.length(), readBack.length());
-            return new VerifyResult(VerificationStatus.FAIL,
+            return new VerifyResult(VerificationStatus.INTEGRITY_FAIL,
                     "read-back mismatch (wrote " + writtenContent.length()
                     + " chars, read " + readBack.length() + " chars)");
         }

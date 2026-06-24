@@ -9,6 +9,7 @@ package dev.talos.tools;
  *   <li>{@link #PASS} — mutation succeeded, verification passed</li>
  *   <li>{@link #WARN} — mutation succeeded, verification found non-fatal issues</li>
  *   <li>{@link #FAIL} — mutation succeeded at filesystem level, but content is invalid</li>
+ *   <li>{@link #INTEGRITY_FAIL} — mutation read-back failed or did not match approved bytes</li>
  *   <li>{@link #UNKNOWN} — mutation succeeded, no semantic validator available</li>
  * </ul>
  *
@@ -25,6 +26,9 @@ public enum VerificationStatus {
     /** File mutation succeeded at filesystem level but content is semantically invalid (e.g., broken JSON). */
     FAIL,
 
+    /** File mutation could not prove approved bytes landed by read-back. */
+    INTEGRITY_FAIL,
+
     /** File mutation succeeded; no semantic validator exists for this file type (read-back only). */
     UNKNOWN;
 
@@ -34,6 +38,7 @@ public enum VerificationStatus {
             case PASS    -> "verified";
             case WARN    -> "warning";
             case FAIL    -> "verification failed";
+            case INTEGRITY_FAIL -> "read-back integrity failed";
             case UNKNOWN -> "unverified";
         };
     }

@@ -5,7 +5,7 @@ package dev.talos.tools;
  * or an error. Created by tool implementations and returned to callers.
  *
  * <p>For write/edit tools, {@link #verification} carries structured verification
- * status (PASS/WARN/FAIL/UNKNOWN). For all other tools it is null.
+ * status (PASS/WARN/FAIL/INTEGRITY_FAIL/UNKNOWN). For all other tools it is null.
  */
 public record ToolResult(
         boolean success,
@@ -45,6 +45,11 @@ public record ToolResult(
     /** Create a failed result with a structured ToolError. */
     public static ToolResult fail(ToolError error) {
         return new ToolResult(false, null, error, null);
+    }
+
+    /** Create a failed result with a structured ToolError and verification metadata. */
+    public static ToolResult fail(ToolError error, VerificationStatus verification) {
+        return new ToolResult(false, null, error, verification);
     }
 
     /** Convenience: error message or null. */

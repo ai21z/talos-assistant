@@ -32,6 +32,10 @@ class VerificationStatusTest {
         @Test void fail_is_not_acceptable() {
             assertFalse(VerificationStatus.FAIL.acceptable());
         }
+
+        @Test void integrity_fail_is_not_acceptable() {
+            assertFalse(VerificationStatus.INTEGRITY_FAIL.acceptable());
+        }
     }
 
     @Nested
@@ -48,6 +52,10 @@ class VerificationStatusTest {
 
         @Test void fail_label() {
             assertEquals("verification failed", VerificationStatus.FAIL.label());
+        }
+
+        @Test void integrity_fail_label() {
+            assertEquals("read-back integrity failed", VerificationStatus.INTEGRITY_FAIL.label());
         }
 
         @Test void unknown_label() {
@@ -105,6 +113,18 @@ class VerificationStatusTest {
             ToolResult r = ToolResult.fail("something broke");
             assertNull(r.verification());
             assertTrue(r.verificationAcceptable(), "Failed results with null verification are 'acceptable' (no verification was attempted)");
+        }
+
+        @Test
+        @DisplayName("fail result can preserve verification metadata")
+        void fail_can_preserve_verification() {
+            ToolResult r = ToolResult.fail(
+                    ToolError.internal("read-back mismatch"),
+                    VerificationStatus.INTEGRITY_FAIL);
+            assertFalse(r.success());
+            assertEquals(VerificationStatus.INTEGRITY_FAIL, r.verification());
+            assertFalse(r.verificationAcceptable());
+            assertEquals("read-back mismatch", r.errorMessage());
         }
 
         @Test

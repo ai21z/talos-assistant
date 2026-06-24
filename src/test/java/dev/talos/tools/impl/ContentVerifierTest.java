@@ -309,7 +309,7 @@ class ContentVerifierTest {
             assertFalse(vr.ok(), "Should detect mismatch");
             assertTrue(vr.summary().contains("read-back mismatch"),
                     "Should report mismatch: " + vr.summary());
-            assertEquals(VerificationStatus.FAIL, vr.status());
+            assertEquals(VerificationStatus.INTEGRITY_FAIL, vr.status());
         }
 
         @Test
@@ -320,6 +320,7 @@ class ContentVerifierTest {
             assertFalse(vr.ok(), "Should fail for non-existent file");
             assertTrue(vr.summary().contains("read-back failed"),
                     "Should report read-back failure: " + vr.summary());
+            assertEquals(VerificationStatus.INTEGRITY_FAIL, vr.status());
         }
     }
 

@@ -163,12 +163,7 @@ public final class FileEditTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, updated);
-            String statusTag = "[verification: " + vr.status().name() + "]";
-            if (vr.ok()) {
-                return ToolResult.ok(base + ". Verified: " + vr.summary() + ". " + statusTag, vr.status());
-            } else {
-                return ToolResult.ok(base + ". Warning: " + vr.summary() + ". " + statusTag, vr.status());
-            }
+            return FileVerificationToolResult.from(base, vr);
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()));
         }

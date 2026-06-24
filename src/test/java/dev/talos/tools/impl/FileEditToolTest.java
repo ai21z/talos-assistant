@@ -74,6 +74,23 @@ class FileEditToolTest {
     }
 
     @Test
+    void invalidJsonEditStillWritesButSurfacesStructuralVerificationFailure() throws IOException {
+        Files.writeString(workspace.resolve("data.json"), "{\"valid\": true}");
+        String invalidJson = "{\"valid\": ";
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "data.json",
+                "old_string", "{\"valid\": true}",
+                "new_string", invalidJson));
+
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertEquals(VerificationStatus.FAIL, r.verification());
+        assertTrue(r.output().contains("Warning: JSON parse failed"), r.output());
+        assertEquals(invalidJson, Files.readString(workspace.resolve("data.json")));
+    }
+
+    @Test
     void newStringIsAppliedVerbatimWithoutSanitization() throws IOException {
         // T755: sanitization happens once, pre-approval, in the runtime's call
         // normalization. The tool must apply exactly the bytes it receives.

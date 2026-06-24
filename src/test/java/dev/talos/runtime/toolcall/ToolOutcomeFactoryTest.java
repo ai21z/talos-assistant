@@ -115,6 +115,30 @@ class ToolOutcomeFactoryTest {
     }
 
     @Test
+    void executedFailurePreservesVerificationMetadata() {
+        ToolCall write = new ToolCall("talos.write_file", Map.of(
+                "path", "README.md",
+                "content", "new"));
+        ToolResult result = ToolResult.fail(
+                ToolError.internal("File verification failed: read-back mismatch"),
+                VerificationStatus.INTEGRITY_FAIL);
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(write, result, "README.md");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(write, "README.md", result, classification, writePlan(), null);
+
+        assertFalse(outcome.success());
+        assertTrue(outcome.mutating());
+        assertFalse(outcome.denied());
+        assertEquals("", outcome.summary());
+        assertEquals("File verification failed: read-back mismatch", outcome.errorMessage());
+        assertEquals(ToolError.INTERNAL_ERROR, outcome.errorCode());
+        assertEquals(VerificationStatus.INTEGRITY_FAIL, outcome.fileVerificationStatus());
+        assertEquals(ToolMutationEvidence.none(), outcome.mutationEvidence());
+    }
+
+    @Test
     void listDirSuccessSummaryPreservesExistingLargeOutputTruncation() {
         ToolCall listDir = new ToolCall("talos.list_dir", Map.of("path", "."));
         String output = "x".repeat(4_001);
