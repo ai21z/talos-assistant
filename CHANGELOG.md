@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- [T860] Removed the dead JavaFX runtime dependency. The build no longer declares
+  `org.openjfx:javafx-base/graphics/controls` or the `javafxVersion` /
+  `javafxPlatform` properties. JavaFX was a leftover from the original LOQ-J
+  first-run-wizard UI and is unreferenced by current code: no imports, no
+  `module-info` requires, no FXML, no reflection, and no jpackage/jlink module
+  arguments. The Windows `installDist` `lib` and the jpackage app-image no longer
+  bundle the JavaFX runtime, shrinking the install payload. No production or test
+  behavior changed; `check` is green and the jpackage Windows app-image still
+  assembles cleanly.
 - [T854] REPL `/status` now uses the active backend-qualified model when a live
   model is present, matching T853's `/context` diagnostic truth. After
   `/set model ollama/...`, the dashboard and verbose status host row report
