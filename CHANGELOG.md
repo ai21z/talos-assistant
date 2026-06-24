@@ -28,6 +28,21 @@
   bundle the JavaFX runtime, shrinking the install payload. No production or test
   behavior changed; `check` is green and the jpackage Windows app-image still
   assembles cleanly.
+- [T859] `talos setup models` now groups managed GGUF model profiles and makes
+  switching between them explicit, so `/models` shows the available managed
+  models and the active selection honestly.
+- [T858] Model setup profiles now declare each model's tool-calling mode and
+  write `tools.native_calling` into the generated config, so a model without
+  native tool-call support is configured for the text/tool-prompt path instead
+  of silently failing tool calls.
+- [T856] `talos setup models` can provision a managed llama.cpp embedding server
+  (for example `bge-m3`) on a dedicated port for Ollama-free hybrid retrieval.
+  The managed embedding endpoint is shared through a process-lifetime registry
+  rather than restarted per query.
+- [T855] Talos no longer depends on Ollama on the default path. The default
+  backend is managed llama.cpp and default embeddings are disabled (BM25-only
+  retrieval out of the box), and `/models` no longer surfaces or scans Ollama
+  models unless the active backend is explicitly `ollama`.
 - [T854] REPL `/status` now uses the active backend-qualified model when a live
   model is present, matching T853's `/context` diagnostic truth. After
   `/set model ollama/...`, the dashboard and verbose status host row report
@@ -76,8 +91,7 @@
   `name()`-in-file edit requests, requires complete same-turn read evidence
   before approval, and blocks both `write_file` and `edit_file` attempts from
   retargeting another function. Add/create requests such as "Add a function
-  foo() to helper.py" are not blocked by this guard. T849 remains open for
-  owner/independent review live scn-14 review before closeout.
+  foo() to helper.py" are not blocked by this guard.
 - [T848] Direct "fix <problem> in <file>" prompts and file-scoped defect
   prompts such as "There is a bug in calc.py... Fix multiply..." now resolve
   to a mutation-capable file-edit contract instead of a read-only turn. The
