@@ -93,12 +93,19 @@ public final class CommandProfileRegistry {
     }
 
     public static CommandProfileRegistry defaultRegistry() {
+        return defaultRegistry(CommandRuntimePlatform.current());
+    }
+
+    static CommandProfileRegistry defaultRegistry(CommandRuntimePlatform platform) {
+        CommandRuntimePlatform effectivePlatform = platform == null
+                ? CommandRuntimePlatform.current()
+                : platform;
         return new CommandProfileRegistry(List.of(
-                gradle("gradle_test", "Gradle test", "test"),
-                gradle("gradle_check", "Gradle check", "check"),
-                gradle("gradle_build", "Gradle build", "build"),
-                gradle("gradle_install_dist", "Gradle installDist", "installDist"),
-                gradle("gradle_e2e_test", "Gradle e2eTest", "e2eTest"),
+                gradle("gradle_test", "Gradle test", "test", effectivePlatform),
+                gradle("gradle_check", "Gradle check", "check", effectivePlatform),
+                gradle("gradle_build", "Gradle build", "build", effectivePlatform),
+                gradle("gradle_install_dist", "Gradle installDist", "installDist", effectivePlatform),
+                gradle("gradle_e2e_test", "Gradle e2eTest", "e2eTest", effectivePlatform),
                 diagnostic("git_status", "Git status", "git", List.of("status", "--short")),
                 diagnostic("git_diff", "Git diff", "git", List.of("diff", "--")),
                 diagnostic("git_log", "Git log", "git", List.of("log", "--oneline", "-20")),
@@ -139,11 +146,16 @@ public final class CommandProfileRegistry {
                 profile.outputLimits());
     }
 
-    private static CommandProfile gradle(String id, String displayName, String task) {
+    private static CommandProfile gradle(
+            String id,
+            String displayName,
+            String task,
+            CommandRuntimePlatform platform
+    ) {
         return new CommandProfile(
                 id,
                 displayName,
-                ".\\gradlew.bat",
+                platform.gradleWrapperExecutable(),
                 List.of("--no-daemon", task),
                 CommandRisk.BUILD_OR_TEST,
                 false,

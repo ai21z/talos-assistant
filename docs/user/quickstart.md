@@ -6,20 +6,22 @@ Jump to [Current Support](#current-support) if you need the current install stat
 
 ## Current Support
 
-The current reliable path is source/developer setup. A public package-manager
-installer is planned, but do not present it as available until a signed release
-artifact and package manifest exist.
+The current reliable path is source/developer setup. Windows packaged install is
+planned, but do not present it as available until a signed release artifact and
+package manifest exist. Linux beta support is source/developer support from a
+checkout, not a DEB/RPM/Homebrew/SDKMAN package.
 
 ## 1. Check Prerequisites
 
-Use a Windows PowerShell session for the current beta path.
+Use a Windows PowerShell session or a Linux shell for the current source setup.
 
 Required for source setup:
 
 - Java 21.
 - Gradle through the repository wrapper.
 - A local checkout of the Talos repository.
-- A local `llama-server.exe` when configuring managed llama.cpp.
+- A local `llama-server.exe` on Windows, or `llama-server` on Linux, when
+  configuring managed llama.cpp.
 
 Verify Java:
 
@@ -37,6 +39,18 @@ From the repository root:
 .\gradlew.bat clean installDist
 ```
 
+On Linux:
+
+```bash
+./gradlew clean installDist
+```
+
+If the wrapper is not executable:
+
+```bash
+chmod +x ./gradlew
+```
+
 This creates the development distribution under:
 
 ```text
@@ -51,7 +65,13 @@ From the repository root:
 pwsh .\tools\install-windows.ps1 -Force
 ```
 
-Open a new PowerShell window after PATH changes.
+On Linux:
+
+```bash
+bash tools/install-unix.sh --force
+```
+
+Open a new terminal after PATH changes.
 
 Verify:
 
@@ -69,7 +89,9 @@ Show model setup help:
 talos setup models
 ```
 
-Write a managed llama.cpp profile after you have a valid `llama-server.exe`:
+Write a managed llama.cpp profile after you have a valid local `llama-server`
+binary. Windows paths usually end in `llama-server.exe`; Linux paths usually do
+not.
 
 ```powershell
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write

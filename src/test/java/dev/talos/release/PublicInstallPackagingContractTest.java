@@ -102,7 +102,9 @@ class PublicInstallPackagingContractTest {
             assertTrue(text.contains("Vissarion Zounarakis"),
                     "public install copy must name the winget publisher");
             assertTrue(text.contains("Windows x64"),
-                    "public beta install support must be Windows x64 only");
+                    "public beta install copy must keep the packaged Windows x64 lane explicit");
+            assertTrue(text.contains("Linux source/developer"),
+                    "public beta install copy must describe the Linux source/developer lane explicitly");
             assertTrue(text.contains("bundled Java runtime"),
                     "public users must not be told to install Java manually");
             assertTrue(text.contains("llama.cpp server or model weights"),
@@ -111,8 +113,12 @@ class PublicInstallPackagingContractTest {
                     "model setup must remain a post-install Talos command");
         }
 
-        assertTrue(readme.contains("tools/install-unix.sh is source/developer-only"),
-                "Unix script must not be positioned as a public beta installer");
+        String normalizedReadme = readme.replaceAll("\\s+", " ");
+
+        assertTrue(readme.contains("Linux source/developer beta path"),
+                "README must name Linux as source/developer beta support, not package-manager support");
+        assertTrue(normalizedReadme.contains("no DEB/RPM/Homebrew/SDKMAN package claim"),
+                "README must not imply native Linux package-manager support");
         assertTrue(doc.contains("GitHub Release is the canonical artifact host"),
                 "public installation doc must name the release artifact host");
         assertTrue(doc.contains("WiX"),

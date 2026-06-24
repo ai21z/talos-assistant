@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -15,9 +16,6 @@ import java.util.concurrent.TimeUnit;
 
 /** Bounded argv-only process runner. This class is internal and not a tool surface. */
 public final class ProcessCommandRunner implements CommandRunner {
-    private static final List<String> ENV_ALLOWLIST = List.of(
-            "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP", "JAVA_HOME", "PATH");
-
     @Override
     public CommandResult run(CommandPlan plan) {
         long start = System.nanoTime();
@@ -91,14 +89,28 @@ public final class ProcessCommandRunner implements CommandRunner {
     }
 
     private static void configureEnvironment(Map<String, String> environment) {
-        Map<String, String> source = System.getenv();
         environment.clear();
-        for (String key : ENV_ALLOWLIST) {
+        environment.putAll(filteredEnvironment(System.getenv(), CommandRuntimePlatform.current()));
+    }
+
+    static Map<String, String> filteredEnvironment(
+            Map<String, String> source,
+            CommandRuntimePlatform platform
+    ) {
+        Map<String, String> filtered = new LinkedHashMap<>();
+        if (source == null) {
+            return filtered;
+        }
+        CommandRuntimePlatform effectivePlatform = platform == null
+                ? CommandRuntimePlatform.current()
+                : platform;
+        for (String key : effectivePlatform.environmentAllowlist()) {
             String value = source.get(key);
             if (value != null && !value.isBlank()) {
-                environment.put(key, value);
+                filtered.put(key, value);
             }
         }
+        return Map.copyOf(filtered);
     }
 
     private static Callable<Capture> captureTask(InputStream stream, int limitBytes) {

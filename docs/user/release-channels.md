@@ -21,7 +21,16 @@ until release artifacts exist.
 
 ## Planned Public Beta
 
-The planned public beta install target is Windows x64.
+The planned packaged public beta install target is Windows x64.
+
+The Linux source/developer beta path is a checkout-based install:
+
+```bash
+./gradlew clean installDist
+bash tools/install-unix.sh --force
+```
+
+That is not a DEB/RPM/Homebrew/SDKMAN/JBang package promise.
 
 The planned package identity is:
 
@@ -35,9 +44,9 @@ The planned public package name and moniker are:
 talos-cli
 ```
 
-The planned public installer target includes Talos and a private Java runtime.
-Model weights and the llama.cpp server remain separate user-controlled setup
-steps.
+The planned Windows public installer target includes Talos and a private Java
+runtime. Model weights and the llama.cpp server remain separate user-controlled
+setup steps on both Windows and Linux.
 
 ## Release Artifacts
 
@@ -52,6 +61,9 @@ checksums.txt
 
 Until those artifacts exist in a signed release, do not present public package
 installation as available.
+
+Linux beta evidence is source/developer evidence unless a future ticket adds a
+native package lane.
 
 ## Verification Expectations
 
@@ -80,5 +92,6 @@ limits, and upgrade notes.
 
 ## Other Platforms
 
-Other operating systems are source/developer-only until packaging, install,
-smoke testing, and support boundaries are completed for those targets.
+macOS and other operating systems are source/developer-only experiments until
+packaging, install, smoke testing, and support boundaries are completed for
+those targets.

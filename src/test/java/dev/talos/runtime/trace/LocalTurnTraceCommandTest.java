@@ -48,7 +48,7 @@ class LocalTurnTraceCommandTest {
 
     @Test
     void recordsCommandLifecycleWithoutRawOutput(@TempDir Path workspace) throws Exception {
-        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
+        createGradleWrapper(workspace);
         AtomicInteger approvals = new AtomicInteger();
         TurnProcessor processor = processor(
                 approvals,
@@ -182,6 +182,18 @@ class LocalTurnTraceCommandTest {
                 "test",
                 "model",
                 request);
+    }
+
+    private static void createGradleWrapper(Path workspace) throws Exception {
+        String executable = gradleWrapperExecutable();
+        String fileName = executable.endsWith("gradlew.bat") ? "gradlew.bat" : "gradlew";
+        String content = executable.endsWith("gradlew.bat") ? "@echo off\r\n" : "#!/bin/sh\n";
+        Files.writeString(workspace.resolve(fileName), content);
+    }
+
+    private static String gradleWrapperExecutable() {
+        String osName = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        return osName.contains("win") ? ".\\gradlew.bat" : "./gradlew";
     }
 
     private static void assertCommandEvent(

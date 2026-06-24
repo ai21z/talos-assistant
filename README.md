@@ -335,7 +335,7 @@ runtime policy keeps each turn bounded.
 
 ### Public beta install target
 
-The first public beta install target is Windows x64 only:
+The packaged public beta install target is Windows x64:
 
 ```powershell
 winget install --id TalosProject.TalosCLI -e
@@ -354,16 +354,26 @@ Model setup remains an explicit post-install command through
 `talos setup models`.
 
 Until the public release exists, use the source/developer path below.
-`tools/install-unix.sh is source/developer-only` and is not a supported
-Linux/macOS public beta installer.
+
+Linux source/developer beta path:
+
+```bash
+./gradlew installDist
+bash tools/install-unix.sh --force
+```
+
+This is a checkout-based Linux source/developer install; no
+DEB/RPM/Homebrew/SDKMAN package claim exists for this beta. macOS is not a
+public beta support claim until separate smoke evidence exists.
 
 ### 1. Install source/developer prerequisites
 
 Current practical setup:
 
-- Windows
+- Windows or Linux source/developer setup
 - Java 21+
-- `llama-server.exe` from llama.cpp, or another configured local backend
+- `llama-server.exe` from llama.cpp on Windows, `llama-server` on Linux, or
+  another configured local backend
 - a configured managed llama.cpp model profile or a local GGUF chat model
 - an embeddings model when vector retrieval is needed
 
@@ -389,6 +399,8 @@ talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe 
 
 Existing configs can be replaced with `--force`; Talos writes a backup first.
 Ollama can still be selected explicitly as a legacy backend when needed.
+On Linux, use the real path to the local `llama-server` binary instead of the
+Windows `.exe` example path.
 
 ### 2. Build Talos
 
@@ -396,10 +408,22 @@ Ollama can still be selected explicitly as a legacy backend when needed.
 .\gradlew.bat installDist
 ```
 
+On Linux:
+
+```bash
+./gradlew installDist
+```
+
 ### 3. Install on Windows
 
 ```powershell
 pwsh tools\install-windows.ps1
+```
+
+### 3b. Install on Linux
+
+```bash
+bash tools/install-unix.sh --force
 ```
 
 ### 4. Run Talos
@@ -524,7 +548,8 @@ Practical guidance:
 
 Current practical setup:
 
-- Windows as the best-supported day-to-day path in this repo
+- Windows as the packaged public-beta target
+- Linux source/developer beta support from a checkout
 - Java 21+
 - managed llama.cpp for the primary local model path
 - `talos setup models` for tested Qwen and GPT-OSS profiles
@@ -583,10 +608,11 @@ and evidence-oriented developer workflows. The beta line is still being hardened
 around model reliability, command profiles, semantic verification, binary file
 support, and broader capability growth.
 
-The strongest current path is Windows plus managed llama.cpp with explicit local
-model configuration. File and workspace operations are gated and traceable.
-Command execution is bounded to approved profiles. Unsupported or unverified
-results are reported as such.
+The strongest current path is Windows packaged/source setup or Linux
+source/developer setup plus managed llama.cpp with explicit local model
+configuration. File and workspace operations are gated and traceable. Command
+execution is bounded to approved profiles. Unsupported or unverified results
+are reported as such.
 
 ## Repo Layout
 

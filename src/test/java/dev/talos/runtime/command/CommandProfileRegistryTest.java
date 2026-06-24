@@ -38,7 +38,7 @@ class CommandProfileRegistryTest {
                 ".");
 
         assertEquals("gradle_test", plan.profileId());
-        assertTrue(plan.executable().endsWith("gradlew.bat"), plan.executable());
+        assertEquals(CommandRuntimePlatform.current().gradleWrapperExecutable(), plan.executable());
         assertEquals(List.of("--no-daemon", "test", "--tests", "dev.talos.runtime.SomeTest"),
                 plan.argv());
         assertEquals(workspace.toAbsolutePath().normalize(), plan.cwd());
@@ -51,6 +51,28 @@ class CommandProfileRegistryTest {
         assertEquals(120_000, plan.timeoutMs());
         assertEquals(65_536, plan.outputLimits().stdoutLimitBytes());
         assertEquals(65_536, plan.outputLimits().stderrLimitBytes());
+    }
+
+    @Test
+    void gradleProfilesResolveWindowsWrapperForWindowsPlatform(@TempDir Path workspace) {
+        CommandPlan plan = CommandProfileRegistry.defaultRegistry(CommandRuntimePlatform.windows()).plan(
+                "gradle_check",
+                List.of(),
+                workspace,
+                ".");
+
+        assertEquals(".\\gradlew.bat", plan.executable());
+    }
+
+    @Test
+    void gradleProfilesResolvePosixWrapperForPosixPlatform(@TempDir Path workspace) {
+        CommandPlan plan = CommandProfileRegistry.defaultRegistry(CommandRuntimePlatform.posix()).plan(
+                "gradle_check",
+                List.of(),
+                workspace,
+                ".");
+
+        assertEquals("./gradlew", plan.executable());
     }
 
     @Test

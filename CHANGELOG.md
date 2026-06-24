@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- [T861] Made built-in Gradle command profiles platform-aware for the Linux
+  source/developer beta path: Windows still plans `.\gradlew.bat`, POSIX plans
+  `./gradlew`, the pre-approval wrapper guard now checks the selected
+  executable instead of accepting either wrapper, and command execution forwards
+  a minimal POSIX environment (`HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `JAVA_HOME`,
+  `PATH`) without reopening broad environment leakage. Added focused command
+  portability tests, a Linux command-portability CI smoke lane, and updated
+  public docs to distinguish Windows packaged install from Linux
+  source/developer support.
 - [T860] Removed the dead JavaFX runtime dependency. The build no longer declares
   `org.openjfx:javafx-base/graphics/controls` or the `javafxVersion` /
   `javafxPlatform` properties. JavaFX was a leftover from the original LOQ-J

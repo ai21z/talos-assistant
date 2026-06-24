@@ -70,7 +70,7 @@ Show setup help:
 talos setup models
 ```
 
-Write a model profile after locating `llama-server.exe`:
+Write a model profile after locating the local `llama-server` binary:
 
 ```powershell
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
@@ -83,7 +83,7 @@ file:
 %USERPROFILE%\.talos\config.yaml
 ```
 
-## `llama-server.exe` Path Is Invalid
+## `llama-server` Path Is Invalid
 
 The setup command requires `--server-path` to point to a regular file.
 

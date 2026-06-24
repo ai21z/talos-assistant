@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -119,6 +121,32 @@ class ProcessCommandRunnerTest {
         assertFalse(result.errorMessage().contains("\\protected\\"), result.errorMessage());
         assertFalse(result.errorMessage().contains("/protected/"), result.errorMessage());
         assertTrue(result.errorMessage().contains("<protected-path>"), result.errorMessage());
+    }
+
+    @Test
+    void posixEnvironmentAllowlistKeepsGradleBasicsWithoutBroadLeak() {
+        Map<String, String> source = new LinkedHashMap<>();
+        source.put("HOME", "/home/talos");
+        source.put("LANG", "C.UTF-8");
+        source.put("LC_ALL", "C.UTF-8");
+        source.put("TMPDIR", "/tmp/talos");
+        source.put("JAVA_HOME", "/opt/jdk-21");
+        source.put("PATH", "/usr/bin");
+        source.put("AWS_SECRET_ACCESS_KEY", "do-not-forward");
+        source.put("TALOS_FAKE_SECRET", "do-not-forward");
+
+        Map<String, String> environment = ProcessCommandRunner.filteredEnvironment(
+                source,
+                CommandRuntimePlatform.posix());
+
+        assertEquals("/home/talos", environment.get("HOME"));
+        assertEquals("C.UTF-8", environment.get("LANG"));
+        assertEquals("C.UTF-8", environment.get("LC_ALL"));
+        assertEquals("/tmp/talos", environment.get("TMPDIR"));
+        assertEquals("/opt/jdk-21", environment.get("JAVA_HOME"));
+        assertEquals("/usr/bin", environment.get("PATH"));
+        assertFalse(environment.containsKey("AWS_SECRET_ACCESS_KEY"));
+        assertFalse(environment.containsKey("TALOS_FAKE_SECRET"));
     }
 
     private static CommandPlan plan(

@@ -238,11 +238,32 @@ public final class CommandToolPlanner {
         if (plan == null || plan.cwd() == null) {
             throw new CommandPlanRejectedException("Command working directory is unavailable.");
         }
-        if (!Files.isRegularFile(plan.cwd().resolve("gradlew.bat"))
-                && !Files.isRegularFile(plan.cwd().resolve("gradlew"))) {
+        Path wrapper = selectedGradleWrapper(plan.cwd(), plan.executable());
+        if (!Files.isRegularFile(wrapper)) {
             throw new CommandPlanRejectedException(
-                    "Gradle command profiles require a Gradle wrapper in the selected workspace/cwd "
-                            + "(`gradlew.bat` on Windows or `gradlew`).");
+                    "Gradle command profile requires selected wrapper `" + plan.executable()
+                            + "` in the selected workspace/cwd.");
+        }
+    }
+
+    private static Path selectedGradleWrapper(Path cwd, String executable) {
+        if (executable == null || executable.isBlank()) {
+            throw new CommandPlanRejectedException("Gradle command executable is unavailable.");
+        }
+        String normalized = executable.strip().replace('\\', '/');
+        if ("./gradlew.bat".equals(normalized) || "gradlew.bat".equals(normalized)) {
+            return cwd.resolve("gradlew.bat").toAbsolutePath().normalize();
+        }
+        if ("./gradlew".equals(normalized) || "gradlew".equals(normalized)) {
+            return cwd.resolve("gradlew").toAbsolutePath().normalize();
+        }
+        try {
+            Path requested = Path.of(executable.strip());
+            return requested.isAbsolute()
+                    ? requested.toAbsolutePath().normalize()
+                    : cwd.resolve(requested).toAbsolutePath().normalize();
+        } catch (RuntimeException e) {
+            throw new CommandPlanRejectedException("Invalid Gradle command executable: " + executable);
         }
     }
 
