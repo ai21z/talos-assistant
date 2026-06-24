@@ -1,6 +1,6 @@
-# [T864-open-medium] Write-Layer Verification Fail-Closed
+# [T864-done-medium] Write-Layer Verification Fail-Closed
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -396,3 +396,42 @@ Review follow-up:
   tool, proves no successful mutation state is recorded, and proves the existing
   `FailurePolicy` stops after the generic repeated-failure threshold rather than
   allowing an unbounded retry path.
+
+## Closeout - 2026-06-24 (independent review verified)
+
+Closed by independent review after independent verification (not a self-report acceptance).
+This is the trust-surface anti-overclaim headline ticket, so the boundary was
+checked in BOTH directions and the propagation traced end to end.
+
+Production logic read directly: `ContentVerifier` emits `INTEGRITY_FAIL` only for
+read-back I/O error and byte mismatch (structural JSON/YAML/XML parse failure
+stays `FAIL`); the shared `FileVerificationToolResult` mapper fails closed
+(`ToolResult.fail`) ONLY on `INTEGRITY_FAIL` and returns `ToolResult.ok` for
+PASS/structural-FAIL/WARN/UNKNOWN; both write and edit tools route through it.
+`ToolOutcomeFactory` preserves `verification()` even on failed results (success
+not gated); `MutationOutcome.from()` classifies the integrity-failed-only outcome
+as `FAILED` (never `SUCCEEDED`) via the existing `success()==false` path;
+`VerificationStatus.acceptable()` is a `PASS||UNKNOWN` whitelist so
+`INTEGRITY_FAIL` is non-acceptable and `MutationTargetReadbackVerifier` flags it;
+the formatter surfaces `[verification_status: INTEGRITY_FAIL]`. Bounded retry holds
+by construction: nothing in `failure/`, `repair/`, or the loop branches on
+verification status, so an integrity-failed write is a generic `success()==false`
+failure bounded by the existing per-path/per-tool/no-progress thresholds.
+
+Evidence:
+- Clean detached-worktree full `check` at `c6ca9fe8`: BUILD SUCCESSFUL, zero
+  failing classes.
+- 3-agent test review: boundary held BOTH ways (fail-closed on `INTEGRITY_FAIL`;
+  structural `FAIL`/`WARN`/`UNKNOWN` stay successful, with the inverse-false-failure
+  guard covered end-to-end through the real write/edit tools), propagation and
+  metadata-preservation pinned, no weakened assertions.
+- Review-hold follow-up `89c80114` verified on this host: the bounded-retry
+  regression `integrityFailedWriteRecordsGenericFailureAndStopsUnderExistingFailurePolicy`
+  (`ToolFailureStateAccountingTest` 7/0/0) drives an `INTEGRITY_FAIL` write through
+  the failure accounting, proving failure counts increment by path and tool, no
+  successful mutation state is recorded, and `FailurePolicy` stops at the generic
+  repeated-failure threshold (`ASK_USER`) -- no unbounded retry.
+
+The one review-hold gap (the bounded-retry acceptance criterion was checked off
+without its required regression test) is resolved. Live-audit follow-up (one
+file-verification-failure prompt) remains tracked in Known Follow-Ups.
