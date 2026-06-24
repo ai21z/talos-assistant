@@ -83,6 +83,8 @@ test-remote-config.yaml
 
 # ---- Local test data
 /local/
+# External research scratch (e.g. fetched Hacker News API JSON); not Talos artifacts
+/.hnscratch/
 # /corpus/
 # /sandbox/
 # .talos/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
