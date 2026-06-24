@@ -1,6 +1,6 @@
-# [T866-open-high] Read/Command Answer Truthfulness Beyond the Mutation Guard
+# [T866-done-high] Read/Command Answer Truthfulness Beyond the Mutation Guard
 
-Status: open
+Status: done
 Priority: high
 
 ## Implementation Checkpoint — 2026-06-24
@@ -286,3 +286,42 @@ Add broader commands if runtime code changes:
 - Release-doc pass: keep the public truthfulness claim precise (deterministic no-change/no-success correction strongest for file-mutation turns) until this guard lands; revisit wording once read/command grounding is deterministic.
 - Extend coverage to other fabricated-result shapes beyond git status (test runs, process lists, file contents claimed without a successful read).
 - Consider whether off-surface tools should yield an explicit "tool unavailable" affordance the model can cite, reducing the incentive to fabricate.
+- Broader command-output truthfulness (non-git-status shapes: test runs, process
+  lists, ls/cat, file contents claimed without a successful read) is tracked as
+  the follow-up ticket T873. This ticket (T866) closes the confirmed audit repro
+  (git-status) only.
+
+## Closeout - 2026-06-24 (Opus verified)
+
+Closed by Opus after independent verification (the confirmed T842 git-status
+fabrication repro is fixed; the broad goal is intentionally incremental, tracked
+as T873).
+
+Production read directly: `CommandOutputTruthfulnessGuard` is DETERMINISTIC and
+LEDGER-GROUNDED -- it withholds only when (a) no successful `talos.run_command` is
+in the turn's executed-tool ledger (`hasSuccessfulRunCommand`), AND (b) the answer
+is not honest-unavailable wording, AND (c) the request/answer is a git-status
+context, AND (d) the answer contains git-status-shaped output. The ledger is the
+primary mechanism (the T834 structural precedent); the git-status regex bounds the
+scope, not the decision. `ExecutionOutcome` wiring is additive and behavior-
+preserving (returns the answer unchanged when the guard does not fire; ORs the
+`unsupportedCommandOutputClaim` flag into the outcome + warning). NO LLM classifier.
+
+Evidence:
+- Clean detached-worktree full `check` at `c4e0374f`: BUILD SUCCESSFUL, zero failures.
+- `CommandOutputTruthfulnessGuardTest` 5/0/0 pins the boundary BOTH ways:
+  fabrication (git-status output, no run_command) -> withheld; same output WITH a
+  successful run_command -> untouched (ledger-grounded); honest "did not run" ->
+  untouched; labeled `list_dir` listing -> untouched; and the critical false-positive
+  case -- git-status-LOOKING text from reading a fixture file (no git-status request)
+  -> untouched. `ExecutionOutcomeTest` 88/0/0 (wiring).
+- T834 mutation path UNREGRESSED: `NoToolAnswerTruthfulnessGuardTest` 4/0/0,
+  `MutationOutcomeTest` 11/0/0.
+
+Acceptance met: the git-status fabrication is deterministically withheld; honest /
+grounded / labeled answers pass unchanged (no over-fire); the verdict is
+ledger-derived with no LLM classifier; the mutation path is unchanged; the decision
+is recorded via the `UNSUPPORTED_COMMAND_OUTPUT_CLAIM` warning + trace. Public-claim
+precision retained: the deterministic no-change/no-success correction is strongest
+for FILE-MUTATION turns, now extended to the git-status command-output shape;
+broader read/command shapes remain (T873).
