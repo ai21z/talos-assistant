@@ -424,3 +424,23 @@ Remaining release-truth (NOT a code-review blocker, tracked here honestly): the
 stripped to exactly the POSIX allowlist, no soft-fail) but has not yet been
 observed green remotely. One green lane run is a release-evidence step, separate
 from this implementation review.
+
+## Local Linux Proof - 2026-06-24 (independent review)
+
+The Linux command-portability SUBSTANCE was proven locally without a push (the
+literal GitHub Actions green still waits on a deliberate origin publish; local is
+227 commits ahead of `origin/v0.9.0-beta-dev`). Ran the exact lane steps on a real
+Linux host: Ubuntu 26.04 LTS (WSL2) + Eclipse Temurin JDK 21.0.11, clean shallow
+checkout of the `v0.9.0-beta-dev` tip `fb382bb8` on the native filesystem.
+
+- Step 1 `chmod +x ./gradlew`: gradlew checked out non-executable (644); chmod made
+  it runnable -- the lane's first step is load-bearing, not ceremony.
+- Step 2 `env -i HOME PATH JAVA_HOME LANG LC_ALL TMPDIR ./gradlew --no-daemon help`:
+  exit 0. The minimal POSIX env allowlist is sufficient for Gradle on Linux.
+- Step 3 `./gradlew test --tests "dev.talos.runtime.command.*" --no-daemon`: BUILD
+  SUCCESSFUL, 61 command-package tests, ZERO failures/errors. On a real Linux JVM
+  `CommandRuntimePlatform.current()` returns posix, so the posix wrapper selection
+  (`./gradlew`), the env allowlist, and the pre-approval guard were exercised for
+  real, not just via injected `posix()` in unit tests.
+
+Remaining: the literal GitHub Actions lane run, gated on a deliberate origin push.
