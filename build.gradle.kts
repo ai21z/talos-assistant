@@ -598,17 +598,9 @@ repositories {
 
 /* ---------- Dependencies ---------- */
 
-val javafxVersion = project.property("javafxVersion")
-val javafxPlatform = project.property("javafxPlatform")
-
 dependencies {
     implementation("info.picocli:picocli:${project.property("picocliVersion")}")
     annotationProcessor("info.picocli:picocli-codegen:${project.property("picocliVersion")}")
-
-    // JavaFX (Windows artifacts)
-    implementation("org.openjfx:javafx-base:$javafxVersion:$javafxPlatform")
-    implementation("org.openjfx:javafx-graphics:$javafxVersion:$javafxPlatform")
-    implementation("org.openjfx:javafx-controls:$javafxVersion:$javafxPlatform")
 
     // Lucene 10
     implementation("org.apache.lucene:lucene-core:${project.property("luceneVersion")}")
