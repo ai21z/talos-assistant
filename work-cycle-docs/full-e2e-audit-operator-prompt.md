@@ -74,7 +74,9 @@ Procedure:
 - Create fresh manual-workspaces under that audit id.
 - Use one fresh workspace per model.
 - Use one isolated Talos home per model.
-- Run /session clear before natural prompts.
+- Run /session clear once at the start of each model run, before the first
+  natural prompt. Do not clear before every turn; if a mid-run clear is
+  required, save the current /session evidence first.
 - Run /debug prompt on before natural prompts.
 - After every natural-language assistant answer, run:
   - /last trace
