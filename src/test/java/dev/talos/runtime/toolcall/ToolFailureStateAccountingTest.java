@@ -1,13 +1,18 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.failure.FailureAction;
+import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
+import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -128,6 +133,55 @@ class ToolFailureStateAccountingTest {
     }
 
     @Test
+    void integrityFailedWriteRecordsGenericFailureAndStopsUnderExistingFailurePolicy() {
+        LoopState state = loopState();
+        FailurePolicy policy = FailurePolicy.defaults(10);
+        ToolCall write = new ToolCall("talos.write_file", Map.of(
+                "path", "README.md",
+                "content", "new"));
+        ToolResult result = ToolResult.fail(
+                ToolError.internal("File verification failed: read-back mismatch"),
+                VerificationStatus.INTEGRITY_FAIL);
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(write, result, "README.md");
+
+        FailureDecision decision = FailureDecision.continueLoop();
+        for (int i = 1; i <= 3; i++) {
+            ToolMutationStateAccounting.Result mutation =
+                    ToolMutationStateAccounting.recordSuccessfulMutation(
+                            state,
+                            write,
+                            "README.md",
+                            result);
+            ToolFailureStateAccounting.Result failure =
+                    ToolFailureStateAccounting.recordFailure(
+                            state,
+                            write,
+                            classification,
+                            "README.md",
+                            false);
+
+            assertFalse(mutation.mutationRecorded());
+            assertTrue(failure.failureRecorded());
+            assertEquals(i, state.failedCalls);
+            assertEquals(i, state.failureCountsByTool.get("talos.write_file"));
+            assertEquals(i, state.failureCountsByPath.get("README.md"));
+            assertFalse(state.mutationSinceStart);
+            assertEquals(0, state.mutatingToolSuccesses);
+            assertTrue(state.pathsMutatedSinceRead.isEmpty());
+
+            decision = policy.afterIteration(state, failedIteration());
+            if (i < 3) {
+                assertFalse(decision.shouldStop(), decision.reason());
+            }
+        }
+
+        assertTrue(decision.shouldStop());
+        assertEquals(FailureAction.ASK_USER, decision.action());
+        assertTrue(decision.reason().contains("path `README.md`"), decision.reason());
+    }
+
+    @Test
     void executionStageDelegatesGenericFailureStateAccounting() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
@@ -140,5 +194,9 @@ class ToolFailureStateAccountingTest {
 
     private static LoopState loopState() {
         return new LoopState("", java.util.List.of(), java.util.List.of(), null, null, null, 5, 0);
+    }
+
+    private static ToolCallExecutionStage.IterationOutcome failedIteration() {
+        return new ToolCallExecutionStage.IterationOutcome(0, List.of(), 1, false, false, false, 0);
     }
 }

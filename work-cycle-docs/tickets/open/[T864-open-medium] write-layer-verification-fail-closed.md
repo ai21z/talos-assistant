@@ -377,7 +377,8 @@ Implementation summary:
   tool-result formatting.
 - Added regression coverage for verifier split, write/edit structural failure
   behavior, failed result metadata, outcome classification, mutation-state
-  accounting, and readback verifier problem reporting.
+  accounting, failure-policy bounded retry, and readback verifier problem
+  reporting.
 
 Local verification:
 
@@ -386,3 +387,12 @@ Local verification:
 ```
 
 Result: PASS.
+
+Review follow-up:
+
+- Added the missing bounded-retry / failure-accounting regression required by
+  this ticket. The test drives an `INTEGRITY_FAIL` write result through
+  `ToolFailureStateAccounting`, proves failure counts increment by path and
+  tool, proves no successful mutation state is recorded, and proves the existing
+  `FailurePolicy` stops after the generic repeated-failure threshold rather than
+  allowing an unbounded retry path.
