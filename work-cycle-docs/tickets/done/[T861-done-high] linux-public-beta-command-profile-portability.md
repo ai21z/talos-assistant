@@ -1,6 +1,6 @@
-# [T861-in-progress-high] Linux Public Beta Command Profile Portability
+# [T861-done-high] Linux Public Beta Command Profile Portability
 
-Status: in-progress
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -394,3 +394,33 @@ Follow-up implementation:
 
 - JReleaser/SDKMAN/JBang distribution strategy.
 - OS-backed key custody for Linux secret-store master keys remains separate.
+
+## Closeout - 2026-06-24 (Opus verified)
+
+Closed by Opus after independent verification (not a self-report acceptance).
+
+Trust core read directly: the `CommandRuntimePlatform` OS seam; the
+clear-then-allowlist env forwarding in `ProcessCommandRunner` (no broad leakage
+reopened, minimal POSIX/Windows sets); and the fail-closed pre-approval wrapper
+guard in `CommandToolPlanner` (validates the selected wrapper -- a POSIX
+`./gradlew` plan rejects when only `gradlew.bat` exists). Tests are genuine:
+every removed assertion has an equal-or-stronger replacement; both guard branches
+pinned by unit and e2e.
+
+Evidence:
+- Clean detached-worktree full `check` at `b98a401a`: BUILD SUCCESSFUL, zero
+  failing classes.
+- Review-hold follow-up `a1878d6a` verified on this host: `ProcessCommandRunnerTest`
+  9/0/0 including the new Windows env-allowlist non-leak test (8 keys + `size()==8`
+  + secret-drop) and the POSIX `size()==6` cardinality pin; `npm test --prefix site`
+  33/0 including the new `Windows-first` docs-surface ban.
+
+Both review-hold gaps are resolved: the env non-leak privacy invariant is now
+proven on both platforms with exact cardinality, and the in-site `Windows-first`
+contradiction is removed and gated.
+
+Remaining release-truth (NOT a code-review blocker, tracked here honestly): the
+`linux-command-portability` CI lane is correctly designed (ubuntu-latest, `env -i`
+stripped to exactly the POSIX allowlist, no soft-fail) but has not yet been
+observed green remotely. One green lane run is a release-evidence step, separate
+from this implementation review.
