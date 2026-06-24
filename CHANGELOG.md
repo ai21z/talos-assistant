@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T866] Added a deterministic command-output truthfulness guard in the outcome
+  layer. If an answer presents structured command output such as `git status`
+  text without a successful `talos.run_command` outcome in the current turn's
+  ledger, Talos now withholds that unsupported command-style output and records
+  an `UNSUPPORTED_COMMAND_OUTPUT_CLAIM` warning in the turn outcome/trace while
+  leaving real command outcomes and honest "command unavailable" answers
+  unchanged.
 - [T864] Write/edit read-back integrity failures now fail closed instead of
   being represented as clean successful mutations. `ContentVerifier` now splits
   read-back I/O or byte-mismatch failures into a distinct

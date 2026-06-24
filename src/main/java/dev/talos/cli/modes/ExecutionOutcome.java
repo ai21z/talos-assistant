@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
+import dev.talos.runtime.outcome.CommandOutputTruthfulnessGuard;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
@@ -267,6 +268,11 @@ record ExecutionOutcome(
         } else if (unsupportedPythonCommandRequiredButNotRun) {
             current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
         }
+        CommandOutputTruthfulnessGuard.Result commandOutputTruthfulness =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        current, safePlan, loopResult);
+        boolean unsupportedCommandOutputClaim = commandOutputTruthfulness.unsupportedCommandOutputClaim();
+        current = commandOutputTruthfulness.answer();
 
         EvidenceObligationAssessment evidenceAssessment =
                 EvidenceObligationAssessment.assess(safePlan, loopResult, workspace);
@@ -327,7 +333,7 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer,
+                readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -412,7 +418,7 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                readOnlyToolLimitWithoutRuntimeAnswer,
+                readOnlyToolLimitWithoutRuntimeAnswer || unsupportedCommandOutputClaim,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -433,6 +439,7 @@ record ExecutionOutcome(
                                 failedAnyActionObligation,
                                 commandFailed,
                                 commandDenied,
+                                unsupportedCommandOutputClaim,
                                 invalidMutation,
                                 partialMutation,
                                 falseMutationClaim,
