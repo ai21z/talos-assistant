@@ -129,7 +129,7 @@ the deterministic command policy / CommandToolPlanner, never an LLM judge.
 Likely code/document areas:
 
 - `work-cycle-docs/blended-manual-audit-scenario-bank.md` (add the re-probe arm)
-- `work-cycle-docs/tickets/open/[T842-open-high] wave6-pre-beta-full-e2e-audit.md` (runbook: stop clearing /session before each turn)
+- `work-cycle-docs/tickets/done/[T842-done-high] wave6-pre-beta-full-e2e-audit.md` (runbook: stop clearing /session before each turn)
 - the isolated audit config template under `local/manual-workspaces/` / the audit runbook script (wire command profiles + an approvable protected target)
 - `dev.talos.runtime.command.CommandToolPlanner` and the command-policy/approval surface (read-only reference; pre-approval fail-closed guard already validates the selected wrapper)
 - `talos.apply_workspace_batch` tool surface and its single-approval batch path (read-only reference)
