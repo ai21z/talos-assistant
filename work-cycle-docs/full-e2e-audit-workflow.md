@@ -91,7 +91,9 @@ Each full audit must use:
 - one isolated Talos home per model
 - no transcript or output files inside the Talos root workspace under test
 - no reuse of previously mutated model workspaces
-- `/session clear` before natural prompts
+- `/session clear` once at the start of each model run, before the first
+  natural-language prompt. Do not clear before every turn; if a mid-run clear
+  is required, save the current `/session` evidence first.
 - `/debug prompt on` before natural prompts
 - `/last trace` after every natural-language assistant response
 - `/prompt-debug last` and `/prompt-debug save` after every natural-language
@@ -137,7 +139,7 @@ tool. Current required coverage:
 | `talos.rename_path` | Rename a safe fixture path within its parent. |
 | `talos.delete_path` | Delete a safe disposable fixture path after approval; protected or unrelated deletion remains out of scope. |
 | `talos.apply_workspace_batch` | Apply a small batch of non-destructive workspace operations. |
-| `talos.run_command` | Run or intentionally reject an approved bounded command profile and verify the final answer matches the actual result. |
+| `talos.run_command` | Enter VERIFY phase with an approved bounded command-profile request, then run or intentionally reject that profile and verify the final answer matches the actual result. Generic inspect-mode shell requests are not command-profile coverage. |
 
 If a tool is not exercised, the findings report must name it and explain why.
 Unexplained missing tool coverage means the run is not a full audit.
