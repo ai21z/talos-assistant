@@ -1,6 +1,6 @@
 # T300 - Extraction Dependencies, Performance, and Resource Limits
 
-Status: still-open - beta-core limits exist; realistic Windows performance/resource benchmarks remain open
+Status: done
 Severity: medium / high if extraction is enabled by default
 Release gate: yes for beta-core PDF/DOCX/XLS/XLSX extraction; image/OCR is v1/open
 Branch: v0.9.0-beta-dev
@@ -143,4 +143,8 @@ Remaining blockers:
 - Need Windows performance measurement on realistic PDFs/workbooks.
 - Need production OCR packaging/install decision and successful real-OCR audit later for v1.
 
+## Closeout - 2026-06-25 (main-merge backlog triage)
 
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

@@ -1,6 +1,6 @@
-# [T627-open-high] Static-web browser natural loading decision
+# [T627-done-high] Static-web browser natural loading decision
 
-Status: open
+Status: done
 Priority: high
 Created: 2026-06-01
 Branch: v0.9.0-beta-dev
@@ -105,3 +105,9 @@ One of:
   loading is deterministic, or
 - a follow-up implementation ticket for an external-browser lane with
   unavailable-by-default semantics and explicit command/browser governance.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as out of current beta / main-merge scope; static-web/browser natural loading is doctrine-bounded and deferred.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

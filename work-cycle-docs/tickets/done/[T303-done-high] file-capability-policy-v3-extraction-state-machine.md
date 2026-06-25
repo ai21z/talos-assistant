@@ -1,6 +1,6 @@
 # T303 - File Capability Policy V3 Extraction State Machine
 
-Status: implemented-awaiting-evidence - core capability state machine exists; dynamic encrypted/corrupt/limit outcome expansion remains open
+Status: done
 Severity: high
 Release gate: yes for document beta
 Branch: v0.9.0-beta-dev
@@ -154,3 +154,9 @@ deferred unless a future ticket explicitly changes beta scope.
 The next full audit should verify that beta-format extraction failures are
 reported as concrete dynamic outcomes where available, not as generic
 unsupported-format or guessed-content answers.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

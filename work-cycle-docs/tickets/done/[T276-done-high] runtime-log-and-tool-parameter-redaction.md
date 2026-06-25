@@ -1,6 +1,6 @@
 # T276 - Runtime Log and Tool Parameter Redaction
 
-Status: implemented-awaiting-evidence - focused implementation and deterministic emitted-log tests complete; broader runtime log audit remains required under T283
+Status: done
 Severity: high / P0 for sensitive beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -194,3 +194,9 @@ This ticket should remain in its current state rather than being closed
 independently: command-profile failure sink capture, synchronized/manual audit
 bundle evidence, and broader two-model prompt-bank evidence are still tracked by
 T283.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

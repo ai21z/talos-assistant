@@ -1,6 +1,6 @@
 # T274 - Source-Crosscheck and Release-Gate Discipline
 
-Status: still-open - release-gate source-crosscheck discipline remains process work
+Status: done
 Severity: high
 Release gate: yes for security/privacy/harness changes
 Branch: v0.9.0-beta-dev
@@ -85,3 +85,9 @@ Still open:
 
 - If project policy requires that article, add it explicitly to project sources or remove it from required-source lists.
 - Consider CI/report existence checks for future release-gate tickets.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as process discipline now codified in the work-cycle docs, ticket hygiene, and the candidate-cut process.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

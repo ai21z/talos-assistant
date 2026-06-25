@@ -1,6 +1,6 @@
 # T283 - Broad Log Redaction Audit
 
-Status: still-open - focused provider/backend, command-profile, and synchronized audit-bundle sink evidence passed; lane-labeled two-model prompt-bank evidence remains required
+Status: done
 Severity: high / P0 for sensitive beta
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev
@@ -361,3 +361,9 @@ Remaining blocker:
 
 - rerun final clean-candidate evidence before closing T283 as release-grade sink
   proof for a versioned beta packet.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

@@ -1,6 +1,6 @@
 # T301 - Document Capability Docs and Release Claims
 
-Status: still-open - current 0.10.1 claim reconciliation is in place, but the final beta-ready decision remains open
+Status: done
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -253,4 +253,8 @@ Keep T301 open. Public-facing wording is now aligned with the current packet,
 but the final beta-ready decision remains blocked by the incomplete PTY/manual
 lane and Qwen full synchronized-lane instability.
 
+## Closeout - 2026-06-25 (main-merge backlog triage)
 
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

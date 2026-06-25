@@ -1,6 +1,6 @@
 # T299 - Document Extraction Fixtures, BDD, and Live Audit
 
-Status: still-open - narrow beta-core extraction claim is supported; larger maintained document corpus remains open
+Status: done
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -294,4 +294,8 @@ Ticket decision:
 Keep T299 open with that narrowed scope. Do not treat this ticket as a hard
 blocker for the narrow `0.10.1` beta extraction claim.
 
+## Closeout - 2026-06-25 (main-merge backlog triage)
 
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

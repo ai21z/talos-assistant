@@ -1,6 +1,6 @@
-# [T863-open-medium] Tamper-Evident Local Trace Chain
+# [T863-done-medium] Tamper-Evident Local Trace Chain
 
-Status: open - deferred-beyond-beta
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -219,3 +219,9 @@ Commands:
 - Optional OS-backed signing.
 - Optional append-only storage integration.
 - Optional release/audit packet receipt verification.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

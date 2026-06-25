@@ -1,6 +1,6 @@
 # T286 - Two-Model Local Backend Setup For Release Audit
 
-Status: implemented-awaiting-evidence - backend setup/smoke works; full prompt bank still needs execution
+Status: done
 Severity: high / release gate
 Release gate: yes - private-document beta and broad beta evidence
 Branch: v0.9.0-beta-dev
@@ -108,3 +108,9 @@ Should approval-sensitive prompts remain human-operated, or should Talos add a s
 - `scripts/run-t267-live-audit.ps1`
 - `work-cycle-docs/reports/t267-live-two-model-audit.md`
 - `work-cycle-docs/reports/t267-live-two-model-audit-results.md`
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by independent review as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.
