@@ -1,6 +1,6 @@
 # T296 - Extraction RAG Index Integration
 
-Status: implemented-awaiting-evidence - private-document RAG policy gate is done; richer extraction chunk/citation provenance remains open
+Status: done
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -119,3 +119,9 @@ Changing extraction/index metadata should force rebuild. If rebuild is unsafe or
 - `src/main/java/dev/talos/core/rag/RagService.java`
 - `src/main/java/dev/talos/cli/repl/slash/ReindexCommand.java`
 - `src/main/java/dev/talos/core/context/ContextPacker.java`
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by Opus as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

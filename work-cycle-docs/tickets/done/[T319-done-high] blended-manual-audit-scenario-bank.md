@@ -1,6 +1,6 @@
 # T319 - Blended Manual Audit Scenario Bank
 
-Status: still-open - first scenario bank exists; automation and live-model expansion remain open
+Status: done
 Severity: high
 Release gate: yes for broad manual beta confidence
 Branch: v0.9.0-beta-dev
@@ -75,3 +75,9 @@ The T719/T720 focused P21 audit surfaced a useful blended-scenario variant:
 This is not a T720 regression. It belongs in blended/manual scenario design as
 evidence that deictic prompts without sufficient session/workspace context can
 probe model/tool-loop convergence separately from deterministic policy wording.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as superseded by the blended-manual-audit scenario bank (now expanded with Sequence G); future scenario additions are new tickets.
+
+Closed by Opus as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

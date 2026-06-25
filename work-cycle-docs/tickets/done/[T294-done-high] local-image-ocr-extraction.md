@@ -1,6 +1,6 @@
 # T294 - Local Image OCR Extraction
 
-Status: deferred-beyond-beta - v1 image/OCR candidate, not current beta scope
+Status: done
 Severity: High
 Release gate: no for beta; yes for any v1 image/OCR claim
 Branch: v0.9.0-beta-dev
@@ -124,3 +124,9 @@ Remaining blockers:
 ## 2026-05-20 backlog reconciliation
 
 This ticket is not a current beta P0 because Talos must not claim image/OCR support in the beta. It remains open as a high-severity v1 capability gate. If a future release claims image/OCR, this ticket becomes release-blocking again.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by Opus as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

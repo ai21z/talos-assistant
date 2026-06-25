@@ -1,6 +1,6 @@
 # T281 - Private Mode User-Facing UX and Sensitive Folder Warning
 
-Status: implemented-awaiting-evidence - private-mode UX exists; broader sensitive-folder user-facing proof remains open
+Status: done
 Severity: high / P0 for private-document beta
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev
@@ -88,3 +88,9 @@ Expand `/privacy` integration into general status/help surfaces and add e2e/live
 - Focused two-model beta-core capability audit `capability-live-audit-20260516-210854` ran against GPT-OSS and Qwen.
 - Private-mode search/status prompts passed the script heuristics.
 - This does not make Talos private-document ready; broader tax/health/legal/admin fixtures remain required.
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by Opus as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.

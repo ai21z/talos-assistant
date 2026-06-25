@@ -1,6 +1,6 @@
 # T304 - Extraction Cache and Invalidation
 
-Status: deferred-beyond-beta - add extraction cache only if performance evidence proves direct extraction too slow
+Status: done
 Severity: medium / high if extraction is slow in live audit
 Release gate: conditional for document beta
 Branch: v0.9.0-beta-dev
@@ -94,3 +94,9 @@ Cache can remain unimplemented for initial beta if direct extraction and RAG ind
 - `src/main/java/dev/talos/core/cache/CacheDb.java`
 - `src/main/java/dev/talos/core/index/Indexer.java`
 - `src/main/java/dev/talos/core/util/Hash.java`
+
+## Closeout - 2026-06-25 (main-merge backlog triage)
+
+Closed as deferred out of this main-merge line: future private-document / document-beta / v1 / future-capability scope, not current main-merge work.
+
+Closed by Opus as part of the v0.9.0-beta-dev -> main merge preparation (owner + Codex triage: close open tickets not on the current main-merge line). No deferred implementation is claimed; remaining work, if pursued, is re-opened as a new ticket for the relevant milestone.
