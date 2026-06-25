@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-06-25
+
 - [T866] Added a deterministic command-output truthfulness guard in the outcome
   layer. If an answer presents structured command output such as `git status`
   text without a successful `talos.run_command` outcome in the current turn's
@@ -1095,3 +1097,4 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
+
