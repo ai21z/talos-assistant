@@ -142,9 +142,9 @@ confidence_histogram:
 
 ## Last Verified Evidence Identity
 
-- Branch: `v0.9.0-beta-dev`
-- Commit: `141d787269e1d21baaf42435623bbe80b14a94c2`
-- Talos version: `0.10.5`
+- Branch: `v0.10.6-beta-release`
+- Commit: `302170de4826359bc31a19dc0294d100de48e5df`
+- Talos version: `0.10.6`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
