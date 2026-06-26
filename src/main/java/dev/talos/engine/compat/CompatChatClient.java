@@ -598,7 +598,7 @@ public final class CompatChatClient {
             if (partial == null) return Map.of();
             Map<String, Object> out = new LinkedHashMap<>();
             String raw = partial.arguments.toString();
-            if (raw != null && !raw.isBlank()) {
+            if (!raw.isBlank()) {
                 out.putAll(parseArguments(raw));
             }
             out.putAll(partial.structuredArguments);

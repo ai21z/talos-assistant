@@ -91,7 +91,7 @@ public final class EngineRegistry implements AutoCloseable {
                 .flatMap(e -> {
                     String backend = e.getKey();
                     ModelCatalog c = catalogs.get(backend);
-                    if (c == null) return Stream.<ModelRef>empty();
+                    if (c == null) return Stream.empty();
                     return c.installed().stream()
                             .map(m -> m.backend() == null
                                     ? new ModelRef(backend, m.name(), m.dims(), m.note())
@@ -126,13 +126,13 @@ public final class EngineRegistry implements AutoCloseable {
                     : m);
         }
 
-        return providers.entrySet().stream()
-                .filter(e -> includeCatalogInDefaultInstalled(e.getKey(), activeBackend))
-                .map(e -> {
-                    ModelCatalog c = catalogs.get(e.getKey());
+        return providers.keySet().stream()
+                .filter(backend -> includeCatalogInDefaultInstalled(backend, activeBackend))
+                .map(backend -> {
+                    ModelCatalog c = catalogs.get(backend);
                     return (c == null) ? Optional.<ModelRef>empty()
                             : c.find(needle).map(m -> m.backend() == null
-                            ? new ModelRef(e.getKey(), m.name(), m.dims(), m.note())
+                            ? new ModelRef(backend, m.name(), m.dims(), m.note())
                             : m);
                 })
                 .filter(Optional::isPresent)

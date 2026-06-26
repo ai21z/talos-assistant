@@ -140,7 +140,7 @@ class SynchronizedCliPtyManualAuditMainTest {
 
         String runbookText = Files.readString(packet.runbook());
         assertTrue(runbookText.contains(copiedConfig.toAbsolutePath().normalize().toString()), runbookText);
-        assertFalse(runbookText.contains(configPath.toAbsolutePath().normalize().toString() + " before recording evidence."),
+        assertFalse(runbookText.contains(configPath.toAbsolutePath().normalize() + " before recording evidence."),
                 runbookText);
 
         String statusText = Files.readString(packet.statusJson());

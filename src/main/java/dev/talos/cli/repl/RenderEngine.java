@@ -31,7 +31,6 @@ public final class RenderEngine {
     /** Fixed answer-pane width for paths without a live terminal (pre-T772 value). */
     private static final int ANSWER_PANE_DEFAULT_WIDTH = 96;
 
-    private final Config cfg;
     private final Redactor redactor;
     private final PrintStream out;
     private final CliTheme theme;
@@ -105,7 +104,7 @@ public final class RenderEngine {
 
     RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme,
                  IntSupplier terminalWidth, org.jline.terminal.Terminal terminal) {
-        this.cfg = (cfg == null ? new Config() : cfg);
+        Config resolvedCfg = (cfg == null ? new Config() : cfg);
         this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
         this.interactive = interactive;
@@ -117,7 +116,7 @@ public final class RenderEngine {
                 : null;
 
         // UI config
-        Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
+        Map<String, Object> ui = CfgUtil.map(resolvedCfg.data.get("ui"));
         String rawLabel = ui == null ? "Thinking" : String.valueOf(ui.getOrDefault("status_label", "Thinking"));
         this.statusLabel = terminalText(rawLabel);
         this.showStatusDuringAnswer = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;

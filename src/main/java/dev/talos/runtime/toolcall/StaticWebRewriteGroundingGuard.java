@@ -29,9 +29,9 @@ final class StaticWebRewriteGroundingGuard {
         if (!StaticWebCapabilityProfile.isSmallWebFile(path)) return null;
         if (!contract.mutationAllowed() || !contract.verificationRequired()) return null;
         if (contract.type() != TaskType.FILE_EDIT && contract.type() != TaskType.FILE_CREATE) return null;
-        if (!contract.expectedTargets().stream()
+        if (contract.expectedTargets().stream()
                 .map(ToolCallSupport::normalizePath)
-                .anyMatch(path::equalsIgnoreCase)) {
+                .noneMatch(path::equalsIgnoreCase)) {
             return null;
         }
         if (!looksLikeStaticWebRedesign(contract.originalUserRequest())) return null;

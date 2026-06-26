@@ -59,7 +59,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -465,7 +464,7 @@ public final class SynchronizedApprovalAuditRunner {
                     .filter(Files::isRegularFile)
                     .map(path -> workspace.relativize(path).toString().replace('\\', '/'))
                     .sorted()
-                    .collect(Collectors.toList());
+                    .toList();
             if (files.isEmpty()) {
                 out.append("(none)\n");
             } else {
@@ -589,7 +588,7 @@ public final class SynchronizedApprovalAuditRunner {
     private static boolean rawProtectedReadMayHaveEnteredModelContext(Request request, Result result) {
         if (request == null || result == null) return false;
         if (!ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(request.config())) return false;
-        if (!result.approvals().stream().anyMatch(event -> event.response().isApproved())) return false;
+        if (result.approvals().stream().noneMatch(event -> event.response().isApproved())) return false;
         return TraceRedactor.looksLikeProtectedReadRequest(request.userPrompt());
     }
 

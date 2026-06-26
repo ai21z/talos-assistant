@@ -108,20 +108,19 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Create the requested source-derived output."
                 : userTask.strip();
-        StringBuilder frame = new StringBuilder();
-        frame.append("[SourceEvidenceReadBeforeWriteRepair]\n")
-                .append("A source-derived write was blocked before approval because the source file(s) ")
-                .append("were not read in this turn. No approval was requested and no file was changed.\n")
-                .append("Missing source target(s): ").append(missing).append('\n')
-                .append("Call talos.read_file for the missing source target(s) first. ")
-                .append("Do not call write_file or edit_file until the source read succeeds.\n");
+        String frame = "[SourceEvidenceReadBeforeWriteRepair]\n"
+                + "A source-derived write was blocked before approval because the source file(s) "
+                + "were not read in this turn. No approval was requested and no file was changed.\n"
+                + "Missing source target(s): " + missing + "\n"
+                + "Call talos.read_file for the missing source target(s) first. "
+                + "Do not call write_file or edit_file until the source read succeeds.\n";
         return List.of(
                 ChatMessage.system("""
                         You are Talos, a local-first workspace assistant.
                         This is a source-evidence read-before-write repair.
                         Call talos.read_file for the missing source target first; do not mutate files in this repair step.
                         """),
-                ChatMessage.system(frame.toString()),
+                ChatMessage.system(frame),
                 ChatMessage.user("Current user request:\n" + currentTask
                         + "\n\nRead the missing source target(s) now: " + missing));
     }

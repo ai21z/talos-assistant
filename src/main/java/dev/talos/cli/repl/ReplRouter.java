@@ -5,7 +5,6 @@ import dev.talos.runtime.Result;
 import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.modes.PromptClassifier;
-import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Config;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.TurnProcessor;

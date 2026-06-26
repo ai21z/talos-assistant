@@ -254,7 +254,7 @@ public final class RagMode implements Mode {
             "\\b(LICENSE|README|NOTICE|COPYRIGHT|AUTHORS|CHANGELOG|CONTRIBUTING|MAKEFILE|Dockerfile)\\b" +
             "|" +
             // Branch 4: Dotfiles (e.g., .editorconfig, .env, .npmrc)
-            "(\\.[A-Za-z0-9_][A-Za-z0-9_.\\-]{1,})",
+            "(\\.[A-Za-z0-9_][A-Za-z0-9_.\\-]+)",
         Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS
     );
 
@@ -370,7 +370,7 @@ public final class RagMode implements Mode {
         answer = ToolCallParser.stripToolCalls(answer);
 
         // Remove model-added Sources/Citations blocks
-        answer = answer.replaceAll("(?is)\\n\\s*\\[?\\s*(?:citations?|sources?)\\s*\\]?\\s*:?\\s*\\n(?:\\s*[-*]\\s+[^\\n]+\\n)*", "");
+        answer = answer.replaceAll("(?is)\\n\\s*\\[?\\s*(?:citations?|sources?)\\s*]?\\s*:?\\s*\\n(?:\\s*[-*]\\s+[^\\n]+\\n)*", "");
 
         return answer.trim();
     }

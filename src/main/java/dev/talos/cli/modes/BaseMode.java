@@ -44,8 +44,7 @@ abstract class BaseMode {
     protected static Path secureResolve(Path workspace, Path candidate) {
         if (candidate == null) return null;
         Path base = toRealOrNorm(workspace);
-        Path cand = toRealOrNorm(candidate.isAbsolute() ? candidate : base.resolve(candidate));
-        return cand;
+        return toRealOrNorm(candidate.isAbsolute() ? candidate : base.resolve(candidate));
     }
 
     /**
@@ -119,9 +118,10 @@ abstract class BaseMode {
         Matcher f = FILE_TOKEN.matcher(line);
         if (f.find()) {
             String token = f.group(1);
-            Path cand = secureResolve(ws, Path.of(token));
+            Path tokenPath = Path.of(token);
+            Path cand = secureResolve(ws, tokenPath);
             if (Files.exists(cand)) return cand;
-            String base = Path.of(token).getFileName().toString();
+            String base = tokenPath.getFileName().toString();
             try (var walk = Files.walk(ws, maxDepth)) {
                 return walk.filter(Files::isRegularFile)
                         .filter(fp -> fp.getFileName().toString().equalsIgnoreCase(base))

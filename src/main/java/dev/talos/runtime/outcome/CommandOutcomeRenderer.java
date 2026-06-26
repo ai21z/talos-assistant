@@ -6,8 +6,6 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.ToolAliasPolicy;
 
-import java.util.Locale;
-
 /**
  * Runtime-owned command verification result selection and final-answer text.
  */

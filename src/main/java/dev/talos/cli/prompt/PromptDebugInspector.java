@@ -181,7 +181,7 @@ public final class PromptDebugInspector {
     private static String expectedTargetCoverage(TaskContract contract, String frame) {
         Set<String> expectedTargets = contract == null ? Set.of() : contract.expectedTargets();
         if (expectedTargets == null || expectedTargets.isEmpty()) return "N/A";
-        if (contract != null && !contract.mutationAllowed()) return "N/A (read-only task)";
+        if (!contract.mutationAllowed()) return "N/A (read-only task)";
         if (frame == null || frame.isBlank() || !frame.contains("[ExpectedTargets]")) {
             return "MISSING";
         }
@@ -206,7 +206,7 @@ public final class PromptDebugInspector {
 
     private static String debugTags(List<String> tags) {
         if (tags == null || tags.isEmpty()) return "(none)";
-        return tags.stream().collect(Collectors.joining(", "));
+        return String.join(", ", tags);
     }
 
     private static String joinOrNone(TaskContract contract) {

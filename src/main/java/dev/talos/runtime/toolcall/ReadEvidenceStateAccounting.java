@@ -21,17 +21,18 @@ public final class ReadEvidenceStateAccounting {
         if (state == null || call == null || result == null || !result.success()) {
             return;
         }
+        String output = result.output() == null ? "" : result.output();
         if (isReadFileTool(call) && pathHint != null) {
             recordSuccessfulReadFile(state, pathHint);
             state.readFileBodiesThisTurn.put(
                     ToolCallSupport.normalizePath(pathHint),
-                    result.output() == null ? "" : result.output());
+                    output);
             TurnSourceEvidenceCapture.recordRead(pathHint);
         }
         if (ToolCallSupport.isReadOnlyTool(call.toolName())) {
             String readSignature = ToolCallSupport.buildReadCallSignature(call);
             state.successfulReadCalls.put(readSignature, ToolCallSupport.truncateForLog(result.output()));
-            state.successfulReadCallBodies.put(readSignature, result.output() == null ? "" : result.output());
+            state.successfulReadCallBodies.put(readSignature, output);
         }
     }
 

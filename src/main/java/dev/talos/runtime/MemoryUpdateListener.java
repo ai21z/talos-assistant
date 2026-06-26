@@ -163,8 +163,7 @@ public final class MemoryUpdateListener implements SessionListener {
         if (lower.startsWith(UiChrome.ENGINE_ERROR_PREFIX.toLowerCase(java.util.Locale.ROOT))) return false;
         if (lower.startsWith(UiChrome.MODEL_NOT_FOUND_OPEN.toLowerCase(java.util.Locale.ROOT))
                 && lower.contains(UiChrome.MODEL_NOT_FOUND_MARKER.toLowerCase(java.util.Locale.ROOT))) return false;
-        if (looksLikeToolRefusal(lower)) return false;
-        return true;
+        return !looksLikeToolRefusal(lower);
     }
 
     private static boolean looksLikeToolRefusal(String lower) {

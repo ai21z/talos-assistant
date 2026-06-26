@@ -220,7 +220,7 @@ public final class StreamingMarkdownShaper implements StreamShaper {
                         : (inFence ? MarkdownLineStyler.LineClass.FENCE_CONTENT
                                    : MarkdownLineStyler.LineClass.PROSE);
             }
-            if (len >= 2 && prefix.charAt(1) != '`') {
+            if (len == 2 && prefix.charAt(1) != '`') {
                 return inFence ? MarkdownLineStyler.LineClass.FENCE_CONTENT
                                : MarkdownLineStyler.LineClass.PROSE;
             }

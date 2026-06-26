@@ -151,7 +151,7 @@ public final class TerminalReadOnlyStopAnswer {
                 .sorted()
                 .toList();
         if (targets.size() < 2) return null;
-        if (!targets.stream().allMatch(target -> state.pathsReadThisTurn.contains(target))) {
+        if (!state.pathsReadThisTurn.containsAll(targets)) {
             return null;
         }
 

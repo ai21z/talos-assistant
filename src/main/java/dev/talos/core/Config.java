@@ -65,14 +65,8 @@ public class Config implements EngineConfig {
         }
     }
 
-    private String loadedFrom = "(none)";
-    private String userConfigPath = "(none)";
-    private boolean userConfigPresent = false;
-    private boolean userConfigLoaded = false;
-    private String userConfigError = "";
     private final List<String> defaulted = new ArrayList<>();
-    private int envOverridesCount = 0;
-    private Report snapshot;
+    private final Report snapshot;
 
     public Config() {
         this(getUserConfigPath());
@@ -83,6 +77,13 @@ public class Config implements EngineConfig {
      */
     public Config(Path explicitUserConfigPath) {
         boolean strict = envTrue(STRICT_ENV);
+
+        String loadedFrom = "(none)";
+        String userConfigPath = "(none)";
+        boolean userConfigPresent = false;
+        boolean userConfigLoaded = false;
+        String userConfigError = "";
+        int envOverridesCount = 0;
 
         // 1) Load classpath default config
         Map<String, Object> loaded = new LinkedHashMap<>();
@@ -102,24 +103,23 @@ public class Config implements EngineConfig {
         ensureDefaults();
 
         // 2) Load user config overlay from ~/.talos/config.yaml
-        Path userConfig = explicitUserConfigPath;
-        if (userConfig != null) {
-            userConfigPath = userConfig.toString();
+        if (explicitUserConfigPath != null) {
+            userConfigPath = explicitUserConfigPath.toString();
         }
-        if (userConfig != null && Files.exists(userConfig) && Files.isRegularFile(userConfig)) {
+        if (explicitUserConfigPath != null && Files.exists(explicitUserConfigPath) && Files.isRegularFile(explicitUserConfigPath)) {
             userConfigPresent = true;
             try {
                 ObjectMapper om = new ObjectMapper(new YAMLFactory());
                 @SuppressWarnings("unchecked")
-                Map<String, Object> userMap = om.readValue(userConfig.toFile(), Map.class);
+                Map<String, Object> userMap = om.readValue(explicitUserConfigPath.toFile(), Map.class);
                 if (userMap != null && !userMap.isEmpty()) {
                     CfgUtil.deepMerge(data, userMap);
                 }
                 userConfigLoaded = true;
                 userConfigError = "";
-            } catch (Exception ignored) {
+            } catch (Exception e) {
                 userConfigLoaded = false;
-                userConfigError = summarizeConfigError(ignored);
+                userConfigError = summarizeConfigError(e);
             }
         }
 
@@ -376,7 +376,7 @@ public class Config implements EngineConfig {
     @SuppressWarnings("unchecked")
     private static Map<String,Object> map(Object o) {
         if (o instanceof Map<?,?> m) {
-            return new LinkedHashMap<>((Map<String,Object>) (Map<?,?>) m);
+            return new LinkedHashMap<>((Map<String,Object>) m);
         }
         return null;
     }

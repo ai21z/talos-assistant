@@ -6,7 +6,6 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ChatMessage;
 
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;

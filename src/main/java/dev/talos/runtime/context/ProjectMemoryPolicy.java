@@ -3,7 +3,6 @@ package dev.talos.runtime.context;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 
-import java.nio.file.Path;
 import java.util.Locale;
 import java.util.regex.Pattern;
 

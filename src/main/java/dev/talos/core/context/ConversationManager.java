@@ -228,7 +228,7 @@ public final class ConversationManager {
      *   <li>The total stored history exceeds the history budget</li>
      * </ol>
      *
-     * @param llm            the LLM client to use for summarization
+     * @param compactor      the compaction function used to summarize older turns
      * @param pairThreshold  minimum turn pairs before compaction is considered
      * @param budgetFraction fraction of context window used as the history budget
      * @return true if compaction was performed
@@ -297,9 +297,8 @@ public final class ConversationManager {
         }
 
         int historyBudget = (int) (budget.contextMaxTokens() * budgetFraction);
-        int totalTokens = beforeTokens;
 
-        if (!forced && totalTokens <= historyBudget) {
+        if (!forced && beforeTokens <= historyBudget) {
             return CompactionOutcome.noOp("within-budget", beforeTokens, pairs);
         }
 
@@ -318,7 +317,7 @@ public final class ConversationManager {
         }
 
         LOG.info("Compaction triggered: {} pairs, {} tokens > {} budget (fraction={})",
-                pairs, totalTokens, historyBudget, budgetFraction);
+                pairs, beforeTokens, historyBudget, budgetFraction);
 
         // Identify which turns don't fit (the "old" ones)
         List<ChatMessage> oldTurns = new ArrayList<>();

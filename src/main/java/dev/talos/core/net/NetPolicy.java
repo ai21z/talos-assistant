@@ -29,13 +29,12 @@ public final class NetPolicy {
     /** Constructor expected by NetCmd: build directly from Config. */
     @SuppressWarnings("unchecked")
     public NetPolicy(Config cfg) {
-        Map<String,Object> root = (Map<String,Object>) cfg.data;
+        Map<String,Object> root = cfg.data;
         Map<String,Object> m = asMap(root.get("net"));
 
         this.enabled = asBool(m.get("enabled"), false);
         // If config has explicit read_only, use it; otherwise infer from enabled
-        boolean roCfg = asBool(m.get("read_only"), !this.enabled);
-        this.readOnly = roCfg;
+        this.readOnly = asBool(m.get("read_only"), !this.enabled);
 
         this.allowDomains = asStrList(m.get("allow_domains"));
         this.contentTypes = asStrList(m.get("content_types"));

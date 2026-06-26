@@ -187,7 +187,7 @@ public class Indexer {
         boolean vecEnabled = true;
         Object vectorsObj = rag.get("vectors");
         if (vectorsObj instanceof Map<?,?> vm) {
-            Object en = ((Map<?,?>) vm).get("enabled");
+            Object en = vm.get("enabled");
             if (en instanceof Boolean b) vecEnabled = b;
         }
 

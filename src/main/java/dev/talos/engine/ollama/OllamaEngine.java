@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.spi.ModelEngine;
 import dev.talos.spi.types.*;
-import dev.talos.spi.types.ChatMessage.NativeToolCall;
 
 import java.net.http.*;
 import java.time.Duration;
@@ -19,11 +18,6 @@ import java.util.stream.Stream;
  * Supports native tool calling via Ollama's tools API field.
  */
 final class OllamaEngine implements ModelEngine {
-    private final String host;
-    private final String defaultModel;
-    private final boolean nativeToolCalling;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-    private final ObjectMapper mapper = new ObjectMapper();
     private final OllamaChatClient chatClient;
     private final OllamaEmbedClient embedClient;
     private final OllamaHealthProbe healthProbe;
@@ -33,12 +27,12 @@ final class OllamaEngine implements ModelEngine {
     }
 
     OllamaEngine(String host, String defaultModel, boolean nativeToolCalling) {
-        this.host = (host == null || host.isBlank()) ? "http://127.0.0.1:11434" : host.trim();
-        this.defaultModel = defaultModel;
-        this.nativeToolCalling = nativeToolCalling;
-        this.chatClient = new OllamaChatClient(this.host, this.defaultModel, this.nativeToolCalling, http, mapper);
+        String resolvedHost = (host == null || host.isBlank()) ? "http://127.0.0.1:11434" : host.trim();
+        HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        ObjectMapper mapper = new ObjectMapper();
+        this.chatClient = new OllamaChatClient(resolvedHost, defaultModel, nativeToolCalling, http, mapper);
         this.embedClient = new OllamaEmbedClient();
-        this.healthProbe = new OllamaHealthProbe(this.host, this.defaultModel, this.nativeToolCalling, http, mapper);
+        this.healthProbe = new OllamaHealthProbe(resolvedHost, defaultModel, nativeToolCalling, http, mapper);
     }
 
     @Override public String id() { return OllamaCatalog.BACKEND; }

@@ -3,7 +3,6 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 
 /** Deterministically maps a current turn to the action shape Talos must enforce. */

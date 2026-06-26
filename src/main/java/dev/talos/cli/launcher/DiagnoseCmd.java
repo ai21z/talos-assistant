@@ -168,7 +168,7 @@ public class DiagnoseCmd implements Runnable {
 
                     System.out.println("Prompt Head (first 400 chars):");
                     System.out.println(term(
-                            promptSample.toString().substring(0, Math.min(400, promptSample.length())),
+                            promptSample.substring(0, Math.min(400, promptSample.length())),
                             unicodeSafe));
                     System.out.println("...");
                     System.out.println();
@@ -259,13 +259,11 @@ public class DiagnoseCmd implements Runnable {
 
     static String renderEngineSection(Config cfg, boolean unicodeSafe) {
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
-        StringBuilder out = new StringBuilder();
-        out.append("Engine:\n");
-        out.append("  Backend: ").append(runtime.backend()).append("\n");
-        out.append("  Model:   ").append(runtime.model()).append("\n");
-        out.append("  Host:    ").append(runtime.hostLabel()).append("\n");
-        out.append("  Policy:  ").append(term(runtime.policyLabel(), unicodeSafe)).append("\n");
-        return out.toString();
+        return "Engine:\n"
+                + "  Backend: " + runtime.backend() + "\n"
+                + "  Model:   " + runtime.model() + "\n"
+                + "  Host:    " + runtime.hostLabel() + "\n"
+                + "  Policy:  " + term(runtime.policyLabel(), unicodeSafe) + "\n";
     }
 }
 

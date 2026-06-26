@@ -252,14 +252,14 @@ final class OllamaChatClient {
 
     static void appendSystem(StringBuilder buf, String content) {
         if (content == null || content.isBlank()) return;
-        if (buf.length() > 0) buf.append("\n\n");
+        if (!buf.isEmpty()) buf.append("\n\n");
         buf.append(content);
     }
 
     static String mergeSystemMessages(List<String> contents) {
         StringBuilder b = new StringBuilder();
         for (String c : contents) appendSystem(b, c);
-        return b.length() == 0 ? null : b.toString();
+        return b.isEmpty() ? null : b.toString();
     }
 
     private String chatViaMessages(ChatRequest req) throws Exception {
@@ -274,7 +274,7 @@ final class OllamaChatClient {
                 conversationMsgs.add(serializeChatMessage(m));
             }
         }
-        String systemPrompt = systemBuf.length() == 0 ? null : systemBuf.toString();
+        String systemPrompt = systemBuf.isEmpty() ? null : systemBuf.toString();
 
         LOG.debug("chat: {} conversation messages (system prompt: {} chars)",
                 conversationMsgs.size(), systemPrompt == null ? 0 : systemPrompt.length());
@@ -328,7 +328,7 @@ final class OllamaChatClient {
                 conversationMsgs.add(serializeChatMessage(m));
             }
         }
-        String systemPrompt = systemBuf.length() == 0 ? null : systemBuf.toString();
+        String systemPrompt = systemBuf.isEmpty() ? null : systemBuf.toString();
 
         LOG.debug("chatStream: {} conversation messages (system prompt: {} chars)",
                 conversationMsgs.size(), systemPrompt == null ? 0 : systemPrompt.length());

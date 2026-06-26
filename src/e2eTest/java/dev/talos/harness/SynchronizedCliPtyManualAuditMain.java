@@ -118,7 +118,7 @@ public final class SynchronizedCliPtyManualAuditMain {
         }
 
         Path allowlist = args.artifactsRoot().resolve("artifact-scan-allowlist.txt");
-        Files.writeString(allowlist, env.toAbsolutePath().normalize().toString() + System.lineSeparator(),
+        Files.writeString(allowlist, env.toAbsolutePath().normalize() + System.lineSeparator(),
                 StandardCharsets.UTF_8);
 
         Path transcript = args.artifactsRoot().resolve("TRANSCRIPT-TEMPLATE.md");

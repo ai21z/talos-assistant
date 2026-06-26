@@ -1,13 +1,11 @@
 package dev.talos.harness;
 
-import dev.talos.cli.modes.AssistantTurnExecutor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end executor-path scenarios — the N4 seam in action.

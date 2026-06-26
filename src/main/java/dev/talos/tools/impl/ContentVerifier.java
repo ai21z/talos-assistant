@@ -20,7 +20,7 @@ import java.util.Locale;
  * <p>Supported: JSON (Jackson), YAML (Jackson YAML), XML (SAX),
  * HTML (tag-balance), other (read-back only).
  *
- * <p>Stateless and thread-safe. Same pattern as {@link ContentSanitizer}.
+ * <p>Stateless and thread-safe. Same pattern as {@link dev.talos.tools.ContentSanitizer}.
  */
 final class ContentVerifier {
 

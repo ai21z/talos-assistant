@@ -12,13 +12,13 @@ public sealed interface Result
 
     /* -------- Simple text results -------- */
 
-    public static final class Ok implements Result {
+    final class Ok implements Result {
         public final String text;
         public Ok(String text) { this.text = text == null ? "" : text; }
         @Override public String toString() { return text; }
     }
 
-    public static final class Info implements Result {
+    final class Info implements Result {
         public final String text;
         public Info(String text) { this.text = text == null ? "" : text; }
         @Override public String toString() { return text; }
@@ -27,13 +27,13 @@ public sealed interface Result
     /**
      * Trusted information that bypasses path redaction (for workspace commands).
      */
-    public static final class TrustedInfo implements Result {
+    final class TrustedInfo implements Result {
         public final String text;
         public TrustedInfo(String text) { this.text = text == null ? "" : text; }
         @Override public String toString() { return text; }
     }
 
-    public static final class Error implements Result {
+    final class Error implements Result {
         public final String message;
         public final int code; // 2xx: user error, 3xx: recoverable mode error, 5xx: unexpected
         public Error(String message, int code) {
@@ -45,7 +45,7 @@ public sealed interface Result
 
     /* -------- Structured results -------- */
 
-    public static final class Table implements Result {
+    final class Table implements Result {
         public final String title;
         public final java.util.List<String> columns;
         public final java.util.List<java.util.List<String>> rows;
@@ -60,17 +60,17 @@ public sealed interface Result
 
     /* -------- Streaming lifecycle -------- */
 
-    public static final class StreamStart implements Result {
+    final class StreamStart implements Result {
         public final String preface;
         public StreamStart(String preface) { this.preface = preface == null ? "" : preface; }
     }
 
-    public static final class StreamChunk implements Result {
+    final class StreamChunk implements Result {
         public final String text;
         public StreamChunk(String text) { this.text = text == null ? "" : text; }
     }
 
-    public static final class StreamEnd implements Result {
+    final class StreamEnd implements Result {
         @Override public String toString() { return "<end>"; }
     }
 
@@ -79,7 +79,7 @@ public sealed interface Result
      * The {@code suffix} (e.g., citations, metadata) is rendered after the streamed body.
      * The {@code fullText} is kept for memory/listener updates but NOT re-rendered.
      */
-    public static final class Streamed implements Result {
+    final class Streamed implements Result {
         public final String fullText;
         public final String suffix;
         public Streamed(String fullText, String suffix) {
@@ -97,7 +97,7 @@ public sealed interface Result
      *
      * @see dev.talos.tools.ToolProgressSink
      */
-    public static final class ToolProgress implements Result {
+    final class ToolProgress implements Result {
         public final String toolName;
         public final String action;
         public final String detail;

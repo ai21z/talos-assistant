@@ -125,7 +125,7 @@ final class TurnModelDispatcher {
                 messages,
                 ctx.streamSink(),
                 ctx.nativeToolSpecs(),
-                chatControlsForTurn(ctx, plan, ctx == null ? List.of() : ctx.nativeToolSpecs()));
+                chatControlsForTurn(ctx, plan, ctx.nativeToolSpecs()));
     }
 
     private static LlmClient.StreamResult dispatchBuffered(

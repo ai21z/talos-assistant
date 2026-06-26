@@ -232,9 +232,8 @@ final class CompactMutationContinuationPlanner {
     }
 
     private static List<String> compactMutationReadbackTargets(LoopState state, TaskContract contract) {
-        LinkedHashSet<String> out = new LinkedHashSet<>();
         List<String> expected = compactMutationTargets(state, contract);
-        out.addAll(expected);
+        LinkedHashSet<String> out = new LinkedHashSet<>(expected);
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success()) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;

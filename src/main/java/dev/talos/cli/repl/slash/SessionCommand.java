@@ -89,11 +89,9 @@ public final class SessionCommand implements Command {
         String sub = (space < 0 ? trimmed : trimmed.substring(0, space)).toLowerCase();
         String rest = space < 0 ? "" : trimmed.substring(space + 1).trim();
         return switch (sub) {
-            case ""       -> info(ctx);
-            case "info"   -> info(ctx);
+            case "", "info"   -> info(ctx);
             case "list"   -> list();
-            case "resume" -> resume(rest, ctx);
-            case "load"   -> resume(rest, ctx);
+            case "resume", "load" -> resume(rest, ctx);
             case "save"   -> save(ctx);
             case "clear"  -> clear();
             case "export" -> export(rest);
@@ -319,7 +317,7 @@ public final class SessionCommand implements Command {
         Instant created = null;
         String model = "";
         String sketch = "";
-        int exchanges = 0;
+        int exchanges;
 
         if (data != null && data.turns() != null && !data.turns().isEmpty()) {
             created = data.createdAt();

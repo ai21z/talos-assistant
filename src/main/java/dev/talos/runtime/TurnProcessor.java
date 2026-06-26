@@ -23,7 +23,6 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
-import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;
@@ -1391,12 +1390,12 @@ public final class TurnProcessor {
         return normalized.toLowerCase(java.util.Locale.ROOT);
     }
 
-    /**
+    /*
      * Build a detailed approval message for write/edit operations.
      * Shows the target path, content size/line count, and a preview
      * of the first few lines so the user can make an informed decision.
      *
-     * <p>If a {@code scopeWarning} is present, it is prepended on its own
+     * If a scopeWarning is present, it is prepended on its own
      * line so the user sees the scope concern before the approval choice.
      */
     /**

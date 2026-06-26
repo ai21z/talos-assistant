@@ -26,7 +26,7 @@ public final class DebugCommand implements Command {
         if (parts.length == 1) {
             if ("on".equals(parts[0])) return usageError();
             return DebugLevel.parse(parts[0])
-                    .<Result>map(this::setLevel)
+                    .map(this::setLevel)
                     .orElseGet(DebugCommand::usageError);
         }
 

@@ -59,7 +59,7 @@ public class FilesCommand implements Command {
                             StringBuilder dirPath = new StringBuilder();
                             for (String part : parts) {
                                 if (!part.isEmpty()) {
-                                    if (dirPath.length() > 0) dirPath.append('/');
+                                    if (!dirPath.isEmpty()) dirPath.append('/');
                                     dirPath.append(part);
                                     directories.add(dirPath.toString());
                                 }

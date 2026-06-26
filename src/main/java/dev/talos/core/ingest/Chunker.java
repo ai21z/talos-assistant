@@ -43,7 +43,7 @@ public class Chunker {
             // If adding this block exceeds budget, emit current buffer (with overlap)
             // BEFORE updating heading context — the buffered content was accumulated
             // under the previous heading, not the heading from block b.
-            if (buf.length() > 0 && buf.length() + b.length() > chunkChars) {
+            if (!buf.isEmpty() && buf.length() + b.length() > chunkChars) {
                 emit(relPath, fileHash, cid++, buf.toString(), language, lastHeading,
                         bufStartChar, bufStartChar + buf.length(), lineOffsets, sourceId, out);
                 // keep overlap chars at end of buffer
@@ -73,7 +73,7 @@ public class Chunker {
                 bufStartChar += consumed;
                 buf.delete(0, chunkChars - keep);
                 // ensure progress
-                if (buf.length() == 0) break;
+                if (buf.isEmpty()) break;
             }
         }
         if (!buf.isEmpty()) {

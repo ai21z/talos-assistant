@@ -172,9 +172,7 @@ public final class DocumentExtractionPreflight {
                 if (ext != null && !ext.isBlank()) extensions.add(ext.trim());
             }
         }
-        List<String> out = new ArrayList<>();
-        for (String ext : extensions) out.add(ext);
-        return out;
+        return new ArrayList<>(extensions);
     }
 
     private static boolean containsPathSeparator(String value) {

@@ -83,7 +83,7 @@ public record StaticWebRequirements(
     private static void addExplicitFacts(Set<String> out, Matcher matcher) {
         while (matcher.find()) {
             String span = firstFactSentence(matcher.group(1));
-            for (String piece : span.split("\\s*(?:,|;)\\s*")) {
+            for (String piece : span.split("\\s*[,;]\\s*")) {
                 String fact = cleanFact(piece);
                 if (isUsefulFact(fact)) out.add(fact);
                 if (out.size() >= MAX_FACTS) return;

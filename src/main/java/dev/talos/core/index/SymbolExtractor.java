@@ -4,7 +4,6 @@ import dev.talos.core.ingest.SourceClassifier;
 import dev.talos.spi.types.SourceFormat;
 import dev.talos.spi.types.SourceType;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,7 +79,6 @@ public final class SymbolExtractor {
         var typeMatcher = JAVA_TYPE.matcher(scanLine);
         if (typeMatcher.find()) {
             SymbolKind kind = switch (typeMatcher.group(1)) {
-                case "class" -> SymbolKind.CLASS;
                 case "interface" -> SymbolKind.INTERFACE;
                 case "record" -> SymbolKind.RECORD;
                 case "enum" -> SymbolKind.ENUM;
@@ -202,12 +200,10 @@ public final class SymbolExtractor {
             out.append(ch);
         }
 
-        if (quote != 0 && quote != '`') {
-            // Java/Python/JS single-line string literals cannot carry comment state
-            // across lines. Template literals are also kept local here; this extractor
-            // is line-oriented and intentionally does not attempt full language parsing.
-            quote = 0;
-        }
+        // Java/Python/JS single-line string literals cannot carry comment state
+        // across lines. Template literals are also kept local here; this extractor
+        // is line-oriented and intentionally does not attempt full language parsing.
+        // (No state reset needed: 'quote' is not read after this point.)
         return new CommentStripped(out.toString(), block);
     }
 
