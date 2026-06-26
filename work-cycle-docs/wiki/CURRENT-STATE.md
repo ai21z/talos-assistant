@@ -173,9 +173,11 @@ confidence_histogram:
   only. T807 generated reports remain ignored build evidence, Qodana stays a
   read-only input for architecture reporting, and the wiki evidence-liveness lint
   is limited to generated JSON report claims. The branch is local-only; no push.
-- Next move: finish merge-plan step 3.1 (prune stale docs/research/reports and
-  condense this page), then merge `improvement/qodana-cleanup` into main as the
-  v0.10.6 line.
+- Next move: merge-plan step 3.1 (the docs/report prune and this page's
+  condensation) is done, and the 2026-06-26 manual-testing findings are captured as
+  tickets T874-T880. The only remaining move is to merge
+  `improvement/qodana-cleanup` into main as the v0.10.6 line -- a deliberate
+  non-fast-forward merge, since main carries 4 governance commits the branch lacks.
 
 ```talos-wiki-claims
 {
@@ -264,8 +266,9 @@ BM25-only retrieval; hybrid/vector retrieval is shipped but unvalidated.
 The v0.10.6 main-merge plan on `improvement/qodana-cleanup`: step 1 (close 16
 off-line tickets) and step 2 (cut the 0.10.6 candidate on the release branch) are
 done; step 3.2 (resolve Qodana) is done with a committed Ultimate-scan baseline
-and a clean security verdict; step 3.1 (this docs/wiki prune and CURRENT-STATE
-condensation) is in progress. The remaining move is the merge into main.
+and a clean security verdict; step 3.1 (the docs/report prune and CURRENT-STATE
+condensation) is done (commit bb8b659a). The only remaining move is the merge into
+main.
 
 ## Operating Boundaries
 
