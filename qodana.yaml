@@ -4,12 +4,14 @@
 #-------------------------------------------------------------------------------#
 version: "1.0"
 
-# Specify inspection profile for code analysis.
+# Inspection profile. `qodana.recommended` is the full recommended set (the
+# "resolve everything" depth), deliberately broader than `qodana.starter`.
 profile:
-  name: qodana.starter
+  name: qodana.recommended
 
-# Project-owned scope rules. Qodana should inspect source/config/docs, not
-# generated evidence, local scratch material, or previous Qodana reports.
+# Project-owned scope rules. Qodana inspects source/config, not generated
+# evidence, local scratch material, previous Qodana reports, or the frozen
+# marketing site (which carries its own test suite).
 exclude:
   - name: All
     paths:
@@ -17,45 +19,46 @@ exclude:
       - .qodana
       - local
       - .gradle
-  # T753 triaged noise families (2026-06-11 fresh scan, 169 findings):
-  # MutationIntent's regex banks intentionally use non-capturing groups for
-  # readability/uniformity; the style nag drowned real signal (51 findings,
-  # 44 in one file).
+      - site
+      - build.gradle.kts
+  # T753 triaged noise families (intentional patterns, not defects):
+  # MutationIntent's regex banks use non-capturing groups for readability;
+  # the style nag drowned real signal (51 findings, 44 in one file).
   - name: RegExpUnnecessaryNonCapturingGroup
     paths:
       - src/main/java/dev/talos/runtime/MutationIntent.java
   # The shared LlmClient lifecycle is intentional (one client per session,
-  # closed by the owner; harness runs close via try-with-resources). The
-  # remaining hits are this accepted pattern (37 findings). Real lifecycle
-  # defects were fixed under T752 (ProcessCommandRunner executor).
+  # closed by the owner; the harness closes via try-with-resources). Real
+  # lifecycle defects were fixed under T752 (ProcessCommandRunner executor).
   - name: AutoCloseableResource
 
-# Optional quality gate for local Qodana runs. Qodana remains highly
-# recommended, not part of the hard Gradle `check` gate. If a developer runs
-# Qodana, critical findings should fail the Qodana command immediately.
+# Quality gate for Qodana runs (not part of the hard Gradle `check`): any
+# critical finding fails the Qodana command immediately.
 failureConditions:
   severityThresholds:
     critical: 0
 
-#Enable inspections
-#include:
-#  - name: <SomeEnabledInspectionId>
-
-#Disable inspections
-#exclude:
-#  - name: <SomeDisabledInspectionId>
-#    paths:
-#      - <path/where/not/run/inspection>
-
 projectJDK: "21" #(Applied in CI/CD pipeline)
 
-#Execute shell command before Qodana execution (Applied in CI/CD pipeline)
-#bootstrap: sh ./prepare-qodana.sh
+# Linter. The full jetbrains/qodana-jvm image (deeper dataflow, security/taint,
+# vulnerable-dependency + license audit) runs on the cloud-connected project
+# with its Qodana token. The local `qodanaNativeFreshLocal` Gradle task still
+# pins the free jetbrains/qodana-jvm-community linter for a token-free preview.
+linter: jetbrains/qodana-jvm:2026.1
 
-#Install IDE plugins before Qodana execution (Applied in CI/CD pipeline)
-#plugins:
-#  - id: <plugin.id> #(plugin id can be found at https://plugins.jetbrains.com)
-
-# Specify the free Community linter for local-first analysis.
-# The paid jetbrains/qodana-jvm image requires a Qodana token.
-linter: jetbrains/qodana-jvm-community:2026.1
+# Force-enable these cleanup inspections on top of the profile.
+include:
+  - name: SizeReplaceableByIsEmpty
+  - name: JavaExistingMethodCanBeUsed
+  - name: FieldCanBeLocal
+  - name: ExtractMethodRecommender
+  - name: TrivialIf
+  - name: RegExpRedundantEscape
+  - name: UnnecessaryLocalVariable
+  - name: RedundantCast
+  - name: RegExpSimplifiable
+  - name: SimplifyStreamApiCallChains
+  - name: UNUSED_IMPORT
+  - name: ConditionCoveredByFurtherCondition
+  - name: DuplicateBranchesInSwitch
+  - name: DuplicateExpressions

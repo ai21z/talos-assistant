@@ -1,0 +1,61 @@
+#-------------------------------------------------------------------------------#
+#               Qodana analysis is configured by qodana.yaml file               #
+#             https://www.jetbrains.com/help/qodana/qodana-yaml.html            #
+#-------------------------------------------------------------------------------#
+version: "1.0"
+
+# Specify inspection profile for code analysis.
+profile:
+  name: qodana.starter
+
+# Project-owned scope rules. Qodana should inspect source/config/docs, not
+# generated evidence, local scratch material, or previous Qodana reports.
+exclude:
+  - name: All
+    paths:
+      - build
+      - .qodana
+      - local
+      - .gradle
+  # T753 triaged noise families (2026-06-11 fresh scan, 169 findings):
+  # MutationIntent's regex banks intentionally use non-capturing groups for
+  # readability/uniformity; the style nag drowned real signal (51 findings,
+  # 44 in one file).
+  - name: RegExpUnnecessaryNonCapturingGroup
+    paths:
+      - src/main/java/dev/talos/runtime/MutationIntent.java
+  # The shared LlmClient lifecycle is intentional (one client per session,
+  # closed by the owner; harness runs close via try-with-resources). The
+  # remaining hits are this accepted pattern (37 findings). Real lifecycle
+  # defects were fixed under T752 (ProcessCommandRunner executor).
+  - name: AutoCloseableResource
+
+# Optional quality gate for local Qodana runs. Qodana remains highly
+# recommended, not part of the hard Gradle `check` gate. If a developer runs
+# Qodana, critical findings should fail the Qodana command immediately.
+failureConditions:
+  severityThresholds:
+    critical: 0
+
+#Enable inspections
+#include:
+#  - name: <SomeEnabledInspectionId>
+
+#Disable inspections
+#exclude:
+#  - name: <SomeDisabledInspectionId>
+#    paths:
+#      - <path/where/not/run/inspection>
+
+projectJDK: "21" #(Applied in CI/CD pipeline)
+
+#Execute shell command before Qodana execution (Applied in CI/CD pipeline)
+#bootstrap: sh ./prepare-qodana.sh
+
+#Install IDE plugins before Qodana execution (Applied in CI/CD pipeline)
+#plugins:
+#  - id: <plugin.id> #(plugin id can be found at https://plugins.jetbrains.com)
+
+# Specify the free Community linter for local-first analysis.
+# The paid jetbrains/qodana-jvm image requires a Qodana token.
+linter: jetbrains/qodana-jvm-community:2026.1
