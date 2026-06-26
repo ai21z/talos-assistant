@@ -148,13 +148,18 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: eight open live-findings tickets carried into the main-merge
-  line -- T862 (Maven workspace-profile docs), T867 (protected-path alias
-  classification), T868 (private-mode retrieve tool-surface narrowing), T869
-  (failed/denied mutation outcome label), T870 (redacted-search rendering), T871
-  (qwen grounding / edit-shape steering), T872 (run_command + batch coverage
-  reprobe), and T873 (broader command-output truthfulness shapes). T866
-  (git-status fabrication) is done; the T834 mutation anti-overclaim path is done.
+- Active tickets: fifteen open live-findings tickets carried into the main-merge
+  line. Eight trust/behaviour findings: T862 (Maven workspace-profile docs), T867
+  (protected-path alias classification), T868 (private-mode retrieve tool-surface
+  narrowing), T869 (failed/denied mutation outcome label), T870 (redacted-search
+  rendering), T871 (qwen grounding / edit-shape steering), T872 (run_command +
+  batch coverage reprobe), and T873 (broader command-output truthfulness shapes).
+  Seven help/CLI-surface findings from 2026-06-26 manual testing, deferred
+  post-merge: T874 (mode help/correctness), T875 (/help all usage rendering), T876
+  (models help accuracy), T877 (REPL model discoverability), T878 (profiles naming
+  collision), T879 (help-text accuracy + undocumented synonyms), and T880 (UTF-8
+  stdout glyph encoding). T866 (git-status fabrication) is done; the T834 mutation
+  anti-overclaim path is done.
 - Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
   the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.
   The current phase is the v0.10.6 main-merge preparation on
