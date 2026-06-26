@@ -104,7 +104,6 @@ public final class ActiveTaskContextUpdater {
         if (!targets.isEmpty()
                 && facts.mutationAllowed()
                 && !facts.anySuccessfulMutation()
-                && !facts.approvalDeniedMutationAttempt()
                 && looksLikeStaticWebTargets(targets)
                 && !looksLikeProposalIntent(userInput)) {
             ActiveTaskContext context = ActiveTaskContext.pendingMutation(
@@ -125,7 +124,6 @@ public final class ActiveTaskContextUpdater {
         if (!targets.isEmpty()
                 && !facts.mutationAllowed()
                 && !facts.successfulMutation()
-                && !facts.approvalDeniedMutationAttempt()
                 && looksLikeProposalIntent(userInput)) {
             ActiveTaskContext context = ActiveTaskContext.proposedChanges(
                     result.turnNumber(),

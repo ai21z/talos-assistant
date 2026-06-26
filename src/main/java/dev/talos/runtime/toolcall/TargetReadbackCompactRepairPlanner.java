@@ -44,7 +44,7 @@ final class TargetReadbackCompactRepairPlanner {
             List<ToolSpec> baseTools,
             String userTask
     ) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+        if (state == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
         List<String> remainingExpectedTargets =
@@ -93,7 +93,7 @@ final class TargetReadbackCompactRepairPlanner {
             List<ToolSpec> baseTools,
             String userTask
     ) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+        if (state == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
         List<String> remainingExpectedTargets =

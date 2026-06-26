@@ -226,7 +226,7 @@ public record TurnPolicyTrace(
                     if (!activeExpected.contains(ref.path())) {
                         continue;
                     }
-                    if (contract != null && !contract.mutationAllowed()) {
+                    if (!contract.mutationAllowed()) {
                         continue;
                     }
                 }

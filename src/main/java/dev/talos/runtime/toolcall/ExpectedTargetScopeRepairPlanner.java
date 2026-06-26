@@ -74,7 +74,7 @@ final class ExpectedTargetScopeRepairPlanner {
     }
 
     private static Optional<ExpectedTargetRepair> nextExpectedTargetScopeRepair(LoopState state) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+        if (state == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
         String failureReason = state.failureDecision == null ? "" : state.failureDecision.reason();
@@ -238,7 +238,7 @@ final class ExpectedTargetScopeRepairPlanner {
             LoopState state,
             StringBuilder readbacks
     ) {
-        if (state == null || state.workspace == null || state.toolOutcomes == null || readbacks == null) return;
+        if (state == null || state.workspace == null || readbacks == null) return;
         Path root = state.workspace.toAbsolutePath().normalize();
         LinkedHashSet<String> paths = new LinkedHashSet<>();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {

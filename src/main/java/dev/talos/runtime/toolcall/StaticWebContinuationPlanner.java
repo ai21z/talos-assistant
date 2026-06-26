@@ -145,7 +145,7 @@ final class StaticWebContinuationPlanner {
     }
 
     private static boolean shouldContinueAfterDirectoryOnlyMutation(LoopState state) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) return false;
+        if (state == null || state.toolOutcomes.isEmpty()) return false;
         TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
         if (!StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return false;
@@ -227,7 +227,7 @@ final class StaticWebContinuationPlanner {
                 .append("Static verification found the current web artifact incomplete after a successful mutation.\n")
                 .append("Continue the same user request with file mutation tools. Do not answer in prose.\n");
         if (!targets.isEmpty()) {
-            frame.append(continuation != null && continuation.fullRewriteRepair()
+            frame.append(continuation.fullRewriteRepair()
                             ? "Static web repair target files: "
                             : "Missing or unmutated target files: ")
                     .append(String.join(", ", targets))
@@ -320,7 +320,7 @@ final class StaticWebContinuationPlanner {
     }
 
     private static String successfulDirectoryMutationSummary(LoopState state) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) return "";
+        if (state == null || state.toolOutcomes.isEmpty()) return "";
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
             if (!successfulDirectoryMutation(outcome)) continue;
@@ -423,8 +423,7 @@ final class StaticWebContinuationPlanner {
 
     private static boolean looksContinuationEligibleStaticWebTask(TaskContract contract) {
         if (StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return true;
-        return contract != null
-                && StaticWebInteractionVerifier.detectBinding(contract.originalUserRequest()).isPresent();
+        return StaticWebInteractionVerifier.detectBinding(contract.originalUserRequest()).isPresent();
     }
 
     private static boolean hasCssProblem(TaskVerificationResult verification) {
@@ -476,7 +475,7 @@ final class StaticWebContinuationPlanner {
 
     private static Set<String> addLinkedMissingStaticWebAssetsFromMutatedHtml(LoopState state, Set<String> targets) {
         LinkedHashSet<String> added = new LinkedHashSet<>();
-        if (state == null || state.workspace == null || state.toolOutcomes == null || targets == null) return added;
+        if (state == null || state.workspace == null || targets == null) return added;
         Path root = state.workspace.toAbsolutePath().normalize();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (!mutatedSmallWebFile(outcome)) continue;
@@ -652,7 +651,7 @@ final class StaticWebContinuationPlanner {
     }
 
     private static boolean hasSuccessfulSmallWebFileMutation(LoopState state) {
-        if (state == null || state.toolOutcomes == null) return false;
+        if (state == null) return false;
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (mutatedSmallWebFile(outcome)) return true;
         }
@@ -661,7 +660,7 @@ final class StaticWebContinuationPlanner {
 
     private static Set<String> successfulSmallWebMutationKeys(LoopState state) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
-        if (state == null || state.toolOutcomes == null) return out;
+        if (state == null) return out;
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (!mutatedSmallWebFile(outcome)) continue;
             addSmallWebMutationKey(out, outcome.pathHint());

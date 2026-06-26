@@ -67,7 +67,7 @@ public final class DocumentExtractionService {
             return new DocumentExtractionResult(
                     sourcePath,
                     request.intent(),
-                    info == null ? FileCapabilityPolicy.Capability.SUPPORTED_TEXT : info.capability(),
+                    FileCapabilityPolicy.Capability.SUPPORTED_TEXT,
                     DocumentExtractionStatus.SUCCESS,
                     safe,
                     List.of(),
@@ -77,7 +77,7 @@ public final class DocumentExtractionService {
             return new DocumentExtractionResult(
                     sourcePath,
                     request.intent(),
-                    info == null ? FileCapabilityPolicy.Capability.UNKNOWN_TEXT_ATTEMPT_ALLOWED : info.capability(),
+                    FileCapabilityPolicy.Capability.UNKNOWN_TEXT_ATTEMPT_ALLOWED,
                     DocumentExtractionStatus.FAILED,
                     "",
                 List.of(new DocumentExtractionWarning("read-failed",

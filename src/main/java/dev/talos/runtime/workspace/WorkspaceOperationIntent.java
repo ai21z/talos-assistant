@@ -139,7 +139,7 @@ public final class WorkspaceOperationIntent {
             LinkedHashSet<String> names = new LinkedHashSet<>();
             names.add("talos.apply_workspace_batch");
             for (Kind kind : kinds == null ? List.<Kind>of() : kinds) {
-                if (kind == null || kind == Kind.COMPOUND) continue;
+                if (kind == Kind.COMPOUND) continue;
                 names.add(kind.toolName());
             }
             return new Intent(Kind.COMPOUND, List.copyOf(names), Kind.COMPOUND.surfaceReason());
