@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "141d787269e1d21baaf42435623bbe80b14a94c2"
+last_verified_commit: "b6ca07a9ffe0ab372a34bbfd90207b1927dc7340"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -142,86 +142,35 @@ confidence_histogram:
 
 ## Last Verified Evidence Identity
 
-- Branch: `v0.10.6-beta-release`
-- Commit: `302170de4826359bc31a19dc0294d100de48e5df`
+- Branch: `improvement/qodana-cleanup`
+- Commit: `b6ca07a9ffe0ab372a34bbfd90207b1927dc7340`
 - Talos version: `0.10.6`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none in the Wave 6 high trust-fix or cheap consolidation
-  follow-up track. T840 protected-path realpath-failure fail-closed is done;
-  T841 competitor-claim honesty guard hardening is done.
-- Active wave context: first Wave 5 lifecycle-ownership ticket completed the
-  turn-preparation extraction; T812 completed model-dispatch characterization;
-  T813 completed the model-dispatch extraction.
-- Known caveats: T807 generated reports are ignored build evidence; Qodana
-  remains read-only input for architecture reporting; wiki evidence-liveness
-  lint is limited to generated JSON report claims; T811 completed the first
-  behavior-preserving turn-preparation extraction but did not complete Wave 5;
-  T813 completed model-dispatch extraction while leaving outcome ownership in
-  `AssistantTurnExecutor`; T814 completed post-tool-loop outcome
-  characterization without production extraction; T815 completed the
-  post-tool-loop outcome extraction while leaving no-tool outcome ownership in
-  `AssistantTurnExecutor`; T816 completed characterization of that no-tool
-  outcome boundary without production extraction; T817 completed the no-tool
-  outcome extraction while leaving shaping, trace lifecycle, branch selection,
-  the tool-loop outcome path, and `TurnOutput` assembly in
-  `AssistantTurnExecutor`; T818 completed prompt-instruction adapter thinning;
-  T819 completed report-only `core-tools-cycle-edge-scoping`; T820 completed
-  the `ContextItem` tool-result adapter and neutral privacy seam; T821
-  completed the `SystemPromptBuilder` prompt-facing tool-catalog seam while
-  leaving the final `RagService` / `ToolProtocolText` production edge; T822
-  completed the final planned `core -> tools` cycle-break seam and cleared the
-  top-level `{core, tools}` SCC; T823 completed characterization-only
-  `ToolCallLoop` orchestration evidence and did not authorize extraction by
-  itself; T824 completed the behavior-preserving `ToolCallLoopEngine`
-  extraction while keeping `ToolCallLoop` as the public facade; T825 completed
-  scoping of the remaining `runtime.toolcall` internals; T826 completed direct
-  characterization of `ToolCallExecutionStage.execute(...)`; T828 completed
-  the first production `ToolCallExecutionStage` decomposition; T829 completed
-  `ToolCallSupport` boundary scoping and selected native-call conversion as
-  the first production seam; T830 completed that extraction; T831 completed
-  result-formatting extraction. T832 completed Phase 1 evidence and
-  characterization for in-turn compaction with no production `src/main`
-  behavior change.
-- Next move: Wave 5 structural-decomposition closeout is owner-ratified;
-  future Wave 5 follow-up work requires new scoped tickets. Wave 6 Tier 0
-  honest disclosure is complete through T833. The Wave 6 high trust-fix track
-  is closed: T834 strong redaction, T835 chat transport localhost guard, T836
-  Windows protected-path canonicalization, T837 `run_command` output handoff,
-  T838 master-key custody, and T839 embedding host locality policy are done.
-  T840 resolved the cheap consolidation follow-up for unresolved Windows
-  8.3-style short-name segments after realpath failure. T841 broadened the
-  tracked README/AGENTS/docs honesty guard against unqualified competitor
-  exclusivity claims while keeping competitor-matrix evidence local-only.
-- Pre-release work after Wave 6 trust fixes is now ticketed from T842 onward:
-  T842 owner-run full manual audit is DONE (2026-06-24): trust surface held with
-  no hard-fail gate, findings ticketed T866-T872 (T866 read/command-claim
-  fabrication and T872 run_command coverage are before-public-beta gates). T843 site honesty fixes,
-  T844 RAG/vector and beta best-practices docs, T845 model/hardware range
-  evidence, and T846 doctor diagnostics are done. T845 records the accepted
-  one-machine, managed-`llama.cpp`, BM25-only beta-range evidence and does not
-  validate hybrid/vector retrieval. The T842 beta-correctness triage tickets
-  are closed: T848 mutation-intent fix-file prompts, T849 absent named-target
-  guard, T850 read-only path/name grounding, T851 read-display write
-  containment, and T852 GPT-OSS multi-document no-progress synthesis. T850 is
-  closed after the qwen scn-10 live rerun proved Talos no
-  longer infers `loqj-cli` from the workspace path when no inspected file states
-  it. T851 is closed after the live two-model scn-14 rerun and a
-  target-present GPT-OSS corruption probe proved the read-display containment
-  guard blocks poisoned `N |` write payloads before they reach disk. T852 is
-  closed after the GPT-OSS scn-11 live rerun on the installed build proved that
-  when every requested file has already been read and the model keeps repeating
-  reads, Talos returns a bounded evidence-complete failure instead of the generic
-  no-progress failure. The beta-correctness triage queue from T848 through T852
-  is now closed. T847 retrieval evidence and gold-context measurement has a
-  deterministic 20-task harness implementation awaiting review; the T842
-  owner/Opus manual audit is now done (findings T866-T872). T853 is done after live
-  `/set model ollama/...` -> `/context` review. T854 is closed after Opus live
-  review of the installed `/status` flow: after `/set model ollama/gpt-oss:20b`
-  the box `Engine` row reads `ollama` (not the stale `llama.cpp (managed)`) and
-  `/status --verbose` reports the Ollama host, fixing the active-backend
-  diagnostic-truth bug on the `/status` surface.
+- Active tickets: eight open live-findings tickets carried into the main-merge
+  line -- T862 (Maven workspace-profile docs), T867 (protected-path alias
+  classification), T868 (private-mode retrieve tool-surface narrowing), T869
+  (failed/denied mutation outcome label), T870 (redacted-search rendering), T871
+  (qwen grounding / edit-shape steering), T872 (run_command + batch coverage
+  reprobe), and T873 (broader command-output truthfulness shapes). T866
+  (git-status fabrication) is done; the T834 mutation anti-overclaim path is done.
+- Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
+  the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.
+  The current phase is the v0.10.6 main-merge preparation on
+  `improvement/qodana-cleanup`: the 0.10.6 candidate is cut, the marketing site
+  is refreshed, and the Qodana cleanup (merge-plan step 3.2) is done -- 315 to 86
+  findings via behaviour-preserving fixes plus a committed Ultimate-scan baseline,
+  with the deep security scan clean.
+- Known caveats: the 86 residual Qodana findings are triaged and accepted via
+  `qodana-baseline.sarif.json` (style nits, intentional/trust-surface guards,
+  advisory refactors, and one non-exploitable taint flow); scans now gate on NEW
+  only. T807 generated reports remain ignored build evidence, Qodana stays a
+  read-only input for architecture reporting, and the wiki evidence-liveness lint
+  is limited to generated JSON report claims. The branch is local-only; no push.
+- Next move: finish merge-plan step 3.1 (prune stale docs/research/reports and
+  condense this page), then merge `improvement/qodana-cleanup` into main as the
+  v0.10.6 line.
 
 ```talos-wiki-claims
 {
@@ -275,283 +224,43 @@ confidence_histogram:
 }
 ```
 
-## Current Architecture Discipline State
+## Architecture and Wave History (closed)
 
-T807 is done. Its purpose was to make Wave 5 refactoring evidence-driven:
-package cycles, method hotspots, manual Java wiring, lifecycle ownership,
-approval/tool ownership, trace/privacy ownership, quality overlays, toolchain
-readiness, and sequencing must be visible before class movement begins.
+The Wave 5 structural-decomposition arc (T807-T832) is complete and the closeout
+is owner-ratified in
+`work-cycle-docs/reports/wave5-structural-decomposition-closeout-ratified.md`. It
+established evidence-driven refactoring (T807-T810: the architecture-intelligence
+report and the living-evidence wiki gate), decomposed `AssistantTurnExecutor`
+(T811-T818), broke the `core <-> tools` package cycle (T819-T822), and decomposed
+the tool-call loop and `ToolCallSupport` (T823-T832). Deferred follow-ups
+(`LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams, retry
+extraction, compaction Phase 2) require new scoped tickets.
 
-T808 is done. Its purpose was to create a small committed wiki layer that
-captures resolved, source-backed conclusions for future human and LLM
-collaboration.
+The Wave 6 trust-surface arc (T833-T841) is complete. Tier 0 honest disclosure
+(T833) bounded the README/AGENTS/docs trust claims to the audited wordings; the
+five HIGH code fixes landed (T834 strong redaction, T835 chat-transport localhost
+guard, T836 Windows protected-path canonicalization, T837 run_command output
+handoff, T838 master-key custody, T839 embedding host locality), and the cheap
+consolidation follow-ups closed (T840 protected-path realpath fail-closed, T841
+competitor-claim honesty guard). The Ollama-independence arc (T855-T859) shipped
+the managed-`llama.cpp` default with BM25-only retrieval and opt-in managed
+embeddings, and T865 made the environment-flaky terminal tests deterministic so a
+clean `check` is portably green on this host.
 
-T809 is done. Its purpose was to prove selected generated-report claims in the
-wiki are still live against generated JSON evidence.
+## Pre-release and Merge State
 
-T810 is done. Its purpose was to make the wiki evidence-liveness loop
-load-bearing through a close/candidate gate, evidence registry, and explicit
-Ingest/Query/Lint/Log/Reject operating rules.
+The pre-release arc (T842 onward) is done. The T842 owner-run full manual audit
+held the trust surface with no hard-fail gate (findings ticketed T866-T873; T866
+is fixed). T843-T846 (site honesty, RAG/beta docs, model/hardware-range evidence,
+doctor diagnostics) and the T848-T854 correctness and diagnostic-truth fixes are
+closed. The accepted beta range is one Windows machine, managed `llama.cpp`,
+BM25-only retrieval; hybrid/vector retrieval is shipped but unvalidated.
 
-T811 is done. Its purpose was to begin Wave 5 at
-`cli.modes.AssistantTurnExecutor` through characterization, lifecycle ownership
-mapping, and the first behavior-preserving turn-preparation extraction.
-
-T812 is done. Its purpose was to characterize the model-dispatch boundary before
-any production extraction: provider controls, escalated retry sampling,
-streaming versus buffered final-answer shape, and tool-only streaming
-completion ordering.
-
-T813 is done. Its purpose was to extract model-dispatch mechanics into a
-package-private `TurnModelDispatcher` without moving retry decisions, trace
-begin/set/clear, tool-loop/no-tool outcome resolution, answer shaping, or
-truthfulness repair out of `AssistantTurnExecutor`.
-
-T814 is done. Its purpose was to characterize post-tool-loop outcome behavior
-around `resolveToolLoopAnswer(...)` before any extraction into a future
-`AssistantToolLoopOutcomeResolver`.
-
-T815 is done. Its purpose was to extract the post-tool-loop outcome resolver
-into package-private `AssistantToolLoopOutcomeResolver` while keeping
-`ToolCallLoop.LoopResult`, `ToolOutcome`, no-tool outcome handling, trace
-begin/set/clear, branch selection, and `TurnOutput` assembly in
-`AssistantTurnExecutor`.
-
-T816 is done. Its purpose was to characterize the no-tool outcome boundary
-around `resolveNoToolAnswer(...)` before any future extraction into
-package-private `AssistantNoToolOutcomeResolver`.
-
-T817 is done. Its purpose was to extract no-tool outcome orchestration into
-package-private `AssistantNoToolOutcomeResolver` while keeping shaping, trace
-begin/set/clear, branch selection, the tool-loop outcome path, and `TurnOutput`
-assembly in `AssistantTurnExecutor`.
-
-T818 is done. Its purpose was to remove the remaining
-`AssistantTurnExecutor.inject*` prompt-instruction adapter surface by moving the
-owner to `runtime.policy.CurrentTurnPromptInstructions`, repointing callers, and
-moving direct helper tests to the runtime-policy owner.
-
-T819 is done. Its purpose was to scope the remaining top-level `core <-> tools`
-package cycle from current generated evidence before any production cycle-break
-work begins.
-
-T820 is done. Its purpose was to remove `core.context.ContextItem`
-dependencies on concrete `tools` types by introducing a neutral context privacy
-enum and a runtime-owned tool-result-to-context adapter. Generated evidence
-shows `core -> tools` reduced from 8 to 4 while the `{core, tools}` SCC
-remains.
-
-T821 is done. Its purpose was to remove the `core.llm.SystemPromptBuilder`
-dependency on executable tool registry types by introducing neutral
-prompt-facing descriptors and a runtime-owned registry adapter. Generated
-evidence shows `core -> tools` reduced to 1 while the `{core, tools}` SCC
-remains because `core.rag.RagService` still imports tool-protocol cleanup.
-
-T822 is done. Its purpose was to remove the final production `core -> tools`
-dependency by moving non-executing tool-protocol text cleanup and tool-name
-alias recognition behind neutral core owners while keeping compatibility
-wrappers in `tools`. Regenerated architecture evidence at implementation
-commit `916d0780bcb49da747e9894b34f3f5412a4b2f87` reports `core -> tools = 0`
-and no non-trivial top-level package SCCs.
-
-T823 is done. Its purpose was to characterize `runtime.ToolCallLoop`
-orchestration before extraction into package-private
-`dev.talos.runtime.ToolCallLoopEngine`. It was test/report/ticket work only and
-did not move production code.
-
-T824 is done. Its purpose was to extract `ToolCallLoop` orchestration into
-package-private `dev.talos.runtime.ToolCallLoopEngine` while keeping
-`ToolCallLoop` as the public facade with stable `LoopResult`, `ToolOutcome`,
-constructors, `run(...)` overloads, and static helper delegates. It preserved
-the package-private final-answer finalizer boundary and left `LoopState`,
-`ToolCallSupport`, `ToolCallExecutionStage`, `ToolCallParseStage`,
-`ToolCallRepromptStage`, `ExecutionOutcome`, and tool model types in place for
-later scoping.
-
-T825 is done. Its purpose was to scope the remaining `runtime.toolcall`
-internals after T824. It recorded the current `INFERRED_REVIEW` hotspot
-evidence for `ToolCallLoop`, `LoopState`, `ToolCallSupport`, and
-`ToolCallExecutionStage`; named deferred higher-ranked non-toolcall hotspots;
-selected T826 `ToolCallExecutionStage` characterization as the next step; and
-did not authorize production extraction.
-
-T826 is done. It characterized
-`runtime.toolcall.ToolCallExecutionStage.execute(...)` directly before any
-production decomposition. It pins text/native result-message shape, approval
-denial flags, private-document path-policy blocking, context-ledger decisions,
-successful execution accounting, failed edit accounting, and the public
-`IterationOutcome` surface.
-
-T827 is done. It hardened architecture intelligence / wiki-evidence ordering so
-`qodana-summary.json` is generated before report validation reads it.
-
-T828 is done. Its purpose was to extract the pre-execution guard chain from
-`ToolCallExecutionStage.execute(...)` into package-private
-`ToolCallPreExecutionGuardChain` while preserving the public stage API,
-result-message shape, approval/trace/ledger behavior, mutation/failure
-accounting, and edit-repair ordering.
-
-T829 is done. Its purpose was to characterize and scope the broad
-`ToolCallSupport` helper surface before choosing a T830 production extraction
-seam. It kept result formatting, retry/request extraction, path/call repair,
-and compaction as hypotheses, and selected native-call conversion as the first
-narrow T830 production extraction.
-
-T830 is done. Its purpose was to extract native-call conversion from
-`ToolCallSupport` into package-private `NativeToolCallConverter` while keeping
-public/static compatibility delegates stable and leaving result formatting,
-retry/request extraction, path/call repair, compaction, and trust-surface
-redaction deferred. Implementation commit
-`496799a46ca131a0d8164e49e2a6be130efe6e69` preserved container JSON
-rendering, legacy scalar stringification, null argument maps, and serialization
-fallback behavior.
-
-T831 is done. Its purpose was to extract prompt-visible result formatting from
-`ToolCallSupport` into package-private `ToolResultFormatter` while preserving
-public/static delegates and leaving compaction, retry/request extraction,
-path/call repair, stages, and `ExecutionOutcome` deferred.
-
-T832 is done. Its Phase 1 purpose was to characterize in-turn tool-loop
-compaction and measure existing local prompt-debug/provider-body evidence
-before any behavior change. It records that compaction is gated by
-`state.iterations >= 3`, keeps the last two tool results verbatim, replaces
-older tool results with char-count-only `[compacted:]` stubs, and does not
-rehydrate elided content back into later prompts. Phase 1 does not prove a
-measurable answer-quality regression, but it does show real artifact usage and
-same-turn re-read proxy signals. Report hygiene recorded the exact artifact
-scan script, original counts of 738 and 700, current hygiene rescan counts of
-740 and 702, and the live-corpus reason for the slight drift.
-
-The Wave 5 structural-decomposition closeout record is owner-ratified. It
-closes the executor, core/tools cycle, `ToolCallLoop` engine,
-`ToolCallExecutionStage` guard-chain, and highest-value `ToolCallSupport`
-structural seams as a deliberate diminishing-returns decision. It explicitly
-defers `LoopState`, `ExecutionOutcome`, remaining `ToolCallSupport` seams,
-retry extraction, and compaction quality work to separately scoped tickets.
-
-T833 is done. Its purpose was Wave 6 Tier 0 honest disclosure: update
-Talos-owned README, AGENTS, and docs trust-surface claims to match current code
-and add a docs honesty regression test. It does not authorize the five HIGH code
-fixes, production `src/main` changes, capability work, compaction Phase 2,
-candidate cut, or `site/` edits.
-
-T855 is done (Opus-verified). It hardens Talos's Ollama-independence truth
-boundary: the default beta path is managed `llama.cpp` chat plus BM25-only
-retrieval unless a local embedding endpoint is explicitly configured (bundled
-`default-config.yaml` now matches the `SetupCmd`-generated config). `/models`
-no longer probes or spawns Ollama while managed `llama.cpp` is active, the REPL
-bootstrap syncs the active model into `llm.*` (not the legacy `ollama` block),
-the stale embedding architecture doc is rewritten to current truth, and a docs
-honesty gate forbids "embeddings via Ollama" surfaces. Ollama remains an
-explicit optional backend, not a default dependency. T857 is done
-(Opus-verified): the same catalog gate is applied to bare-name
-`EngineRegistry.resolve(...)` scans, while qualified `ollama/<model>` remains
-an explicit opt-in path. With T855 + T857 closed, no default or user-driven path
-probes or spawns Ollama unless the active backend is ollama or the user
-qualifies an `ollama/` model. T856 (managed `llama.cpp` embeddings) for the vector lane is DONE
-(Opus-verified incl. live smoke), completing the Ollama-independence arc
-(T855/T857/T858/T859/T856): opt-in `embed.managed` starts a separate
-embedding-mode `llama-server`, setup can write a `bge-m3` profile, and
-doctor/status surfaces report BM25-only versus hybrid-if-probe-succeeds. The
-managed embedding endpoint is registry-owned across short-lived query clients
-(started once, reused, stopped on JVM shutdown). The live smoke proved
-Ollama-free index/query with real bge-m3 vectors, one embed server reused across
-a multi-query session, and zero `:11434` contact; the shipped default stays
-BM25-only. T865 (done) made the two environment-flaky terminal tests
-(`RootCmdTest.shortHelpOptionShowsUsage`, `StatusRowPresenterTest`) deterministic
-by pinning ANSI off and the JLine terminal type, so a clean-worktree full `check`
-is now reliably green on this host -- the candidate-cut "green check is not
-portable" blocker is cleared. The
-2026-06-22 managed-model probes also opened T858 for per-model tool-mode
-compatibility and T859 for the managed-GGUF `/models` / profile-switching UX
-gap: downloaded GGUFs are not selectable until they are configured, and
-DeepSeek-Coder-V2-Lite Q4 should be described as Talos-usable only in
-text/tool-prompt mode with `tools.native_calling:false` unless later evidence
-proves native/default tool-calling. T858 is done (Opus-verified): managed setup
-profiles now generate explicit `tools.native_calling` values for tested profiles
-(including `false` for `deepseek-v2lite-q4km`), the setup docs carry the bounded
-tool-mode wording, and a TrustClaimsHonestyTest gate forbids any doc claiming
-DeepSeek is native-tool capable. T859 is done (Opus-verified): the REPL now says
-managed `llama.cpp` exposes the configured/running GGUF only, and
-`/set model llama_cpp/<name>` points users to `talos setup models --profile
-<name> --write --force` plus restart instead of implying a hot-swap. T856
-(managed embeddings) remains open pending external review and live local
-embedding smoke.
-
-## Wave 5 Readiness Status
-
-Talos has entered the first Wave 5 refactor ticket after the T807-T810
-discipline batch was committed and fast-forwarded into `v0.9.0-beta-dev`.
-The readiness claim is limited: it means architecture planning evidence is
-current, wiki claim liveness is gated through `wikiEvidenceCloseGate`, and the
-normal local `check` gate does not depend on stale generated architecture report
-output.
-
-The first Wave 5 ticket started with `cli.modes.AssistantTurnExecutor` and
-completed the turn-preparation extraction into `AssistantTurnPreparation`.
-The invariant remains lifecycle ownership first, class movement second. The
-model-dispatch boundary was characterized by T812 and extracted by T813. T814
-completed the tool-loop outcome characterization, and T815 extracted the
-post-tool-loop outcome resolver. T816 completed no-tool outcome
-characterization, and T817 extracted the no-tool outcome resolver. T818
-completed adapter thinning. T819 completed report-only
-`core-tools-cycle-edge-scoping`. T820 completed the first production
-cycle-seam step for `ContextItem`; it did not clear the full `{core, tools}`
-SCC. T821 completed the `SystemPromptBuilder` tool-catalog seam. T822
-completed the final `RagService` / `ToolProtocolText` seam; local regenerated
-architecture evidence after implementation shows `core -> tools = 0` and no
-non-trivial top-level package SCCs. T823 completed `ToolCallLoop`
-orchestration characterization. T824 completed behavior-preserving extraction
-into package-private `dev.talos.runtime.ToolCallLoopEngine`. T825 completed
-remaining `runtime.toolcall` internals scoping and selected T826
-`ToolCallExecutionStage` characterization before any production decomposition.
-T826 is done. T827 completed Qodana-summary evidence-order hardening. T828
-completed the first production decomposition, focused on the pre-execution
-guard chain behind the stable public stage surface. T829 completed
-`ToolCallSupport` boundary scoping and selected native-call conversion as the
-T830 extraction seam. T830 completed that behavior-preserving extraction.
-T831 completed the next narrow `ToolCallSupport` seam: result formatting.
-T832 completed Phase 1 evidence and characterization for in-turn compaction.
-The Wave 5 structural-decomposition closeout is now owner-ratified. Future
-`LoopState`, `ExecutionOutcome`, retry, remaining `ToolCallSupport`, or
-compaction Phase 2 work must start from a new scoped ticket.
-
-## Wave 6 Trust Track Status
-
-T833 is complete. It records honest limits for anti-overclaim scope, secret
-redaction, command-output handoff, Windows protected-path matching, model-host
-locality, local secret encryption, and trace integrity. The tracked sanitized
-evidence record is
-`work-cycle-docs/reports/wave6-trust-overclaim-sanitized-evidence-20260619.md`;
-the raw audit remains local and untracked by design.
-
-Open Wave 6 high code-fix tickets:
-
-- None.
-
-Open Wave 6 consolidation follow-up tickets:
-
-- None.
-
-Completed Wave 6 consolidation follow-up tickets:
-
-- T840: protected-path realpath-failure fail-closed.
-- T841: competitor-claim honesty guard hardening.
-
-Completed Wave 6 high code-fix tickets:
-
-- T834: strong redaction across model context and durable sinks.
-- T835: chat transport localhost guard.
-- T836: Windows protected-path canonicalization.
-- T837: `run_command` output handoff boundary.
-- T838: master-key custody.
-- T839: embedding host locality policy.
-
-Trust tickets folded into the Wave 6 track for later re-scoping: T274, T276,
-T281, T283, T286, T301, T319.
-
-Capability tickets explicitly deferred and not the current Talos identity:
-T294, T296, T299, T300, T302, T303, T304, T627.
+The v0.10.6 main-merge plan on `improvement/qodana-cleanup`: step 1 (close 16
+off-line tickets) and step 2 (cut the 0.10.6 candidate on the release branch) are
+done; step 3.2 (resolve Qodana) is done with a committed Ultimate-scan baseline
+and a clean security verdict; step 3.1 (this docs/wiki prune and CURRENT-STATE
+condensation) is in progress. The remaining move is the merge into main.
 
 ## Operating Boundaries
 
@@ -568,9 +277,10 @@ T294, T296, T299, T300, T302, T303, T304, T627.
 
 ## Current Uncertainties
 
-- Lifecycle scope labels in T807 remain inferred unless explicitly marked
-  deterministic or observed runtime evidence.
-- JFR custom lifecycle events, CodeQL, nullness tooling, and evidence-liveness
-  checks beyond generated architecture report JSON remain follow-on work.
-- Qodana instability is remembered but intentionally not changed by T807 or
-  T808.
+- The 86 baselined Qodana findings are accepted, not resolved; the deep
+  (Ultimate) security verdict is clean but is a point-in-time scan.
+- Hybrid/vector retrieval is shipped but unvalidated; the beta is honestly scoped
+  to BM25-only.
+- The remaining before-public-beta gates (one Linux Actions green run, identifier
+  reconciliation, hybrid/vector validation, the T862/T301 release-doc pass) are
+  tracked but not yet met.
