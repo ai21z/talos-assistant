@@ -130,8 +130,7 @@ public final class RedactedAuditSnapshotWriter {
             throws IOException {
         long included = entries.stream().filter(FileEntry::included).count();
         long omitted = entries.size() - included;
-        String summary = ""
-                + "Redacted audit snapshot\n"
+        String summary = "Redacted audit snapshot\n"
                 + "label: " + ProtectedContentPolicy.sanitizeText(label) + "\n"
                 + "workspaceName: " + ProtectedContentPolicy.sanitizeText(
                         workspace.getFileName() == null ? "" : workspace.getFileName().toString()) + "\n"

@@ -169,7 +169,7 @@ public final class PromptClassifier {
             "sure|right|actually|cool|yeah|yep|yup),?\\s+" +
             "|" +
             // polite request framing (order: longer phrases first to avoid partial matches)
-            "(?:i['\u2018\u2019]?d like you to|i want you to|i need you to|" +
+            "(?:i['‘’]?d like you to|i want you to|i need you to|" +
             "can you(?: please)?|could you(?: please)?|would you(?: please)?|will you(?: please)?|" +
             "you should|go ahead and|try to|just|please)\\s+" +
         ")"

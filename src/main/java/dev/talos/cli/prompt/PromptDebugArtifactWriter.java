@@ -78,14 +78,14 @@ public final class PromptDebugArtifactWriter {
     public record LatestArtifact(Path renderPath, Optional<Path> providerBodyPath) {
         public LatestArtifact {
             Objects.requireNonNull(renderPath, "renderPath");
-            providerBodyPath = providerBodyPath == null ? Optional.empty() : providerBodyPath;
+            providerBodyPath = Objects.requireNonNullElse(providerBodyPath, Optional.empty());
         }
     }
 
     public record CaptureArtifact(Path renderPath, Optional<Path> providerBodyPath) {
         public CaptureArtifact {
             Objects.requireNonNull(renderPath, "renderPath");
-            providerBodyPath = providerBodyPath == null ? Optional.empty() : providerBodyPath;
+            providerBodyPath = Objects.requireNonNullElse(providerBodyPath, Optional.empty());
         }
     }
 

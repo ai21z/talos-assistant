@@ -40,8 +40,7 @@ public class Audit {
         // Optional: read defaults from config if available
         try {
             Config cfg = new Config();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> data = (Map<String, Object>) cfg.data;
+            Map<String, Object> data = cfg.data;
             Object auditObj = data.get("audit");
             @SuppressWarnings("unchecked")
             Map<String, Object> audit = (auditObj instanceof Map<?,?>) ? (Map<String, Object>) auditObj : Map.of();

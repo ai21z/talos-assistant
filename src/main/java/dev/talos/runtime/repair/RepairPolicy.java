@@ -622,7 +622,7 @@ public final class RepairPolicy {
     }
 
     private static void appendLine(StringBuilder out, String line) {
-        if (out.length() > 0) out.append('\n');
+        if (!out.isEmpty()) out.append('\n');
         out.append(line == null ? "" : line);
     }
 

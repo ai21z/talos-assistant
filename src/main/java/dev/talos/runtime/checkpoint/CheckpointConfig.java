@@ -44,7 +44,7 @@ public record CheckpointConfig(
         if (config == null) return Map.of();
         Object raw = config.data.get("checkpoint");
         if (raw instanceof Map<?, ?> map) {
-            return new LinkedHashMap<>((Map<String, Object>) (Map<?, ?>) map);
+            return new LinkedHashMap<>((Map<String, Object>) map);
         }
         return Map.of();
     }

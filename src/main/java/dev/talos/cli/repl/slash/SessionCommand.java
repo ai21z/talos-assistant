@@ -106,14 +106,13 @@ public final class SessionCommand implements Command {
         String sketch = ctx.conversationManager() != null
                 ? ctx.conversationManager().sketch() : null;
         boolean hasSaved = store.load(activeSessionId).isPresent();
-        StringBuilder sb = new StringBuilder();
-        sb.append("Session ID:  ").append(workspaceId, 0, Math.min(8, workspaceId.length())).append("…\n");
-        sb.append("Session:     ").append(displayId(activeSessionId)).append('\n');
-        sb.append("Workspace:   ").append(workspace.getFileName()).append('\n');
-        sb.append("Turns:       ").append(turns).append('\n');
-        sb.append("Has sketch:  ").append(sketch != null && !sketch.isBlank() ? "yes" : "no").append('\n');
-        sb.append("Saved file:  ").append(hasSaved ? "yes" : "no");
-        return new Result.Info(sb.toString());
+        String info = "Session ID:  " + workspaceId.substring(0, Math.min(8, workspaceId.length())) + "…\n"
+                + "Session:     " + displayId(activeSessionId) + '\n'
+                + "Workspace:   " + workspace.getFileName() + '\n'
+                + "Turns:       " + turns + '\n'
+                + "Has sketch:  " + (sketch != null && !sketch.isBlank() ? "yes" : "no") + '\n'
+                + "Saved file:  " + (hasSaved ? "yes" : "no");
+        return new Result.Info(info);
     }
     private Result list() {
         List<SessionSummary> sessions = store.listSessions(workspaceId);

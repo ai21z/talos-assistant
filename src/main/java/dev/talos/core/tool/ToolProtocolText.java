@@ -89,7 +89,7 @@ public final class ToolProtocolText {
      */
     public static boolean looksLikeStandaloneToolJson(String text) {
         String trimmed = text == null ? "" : text.strip();
-        if (trimmed.isEmpty() || !trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
             return false;
         }
         try {

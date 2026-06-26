@@ -1,5 +1,6 @@
 package dev.talos.runtime.repair;
 
+import java.util.Objects;
 import java.util.Optional;
 
 public record RepairDecision(
@@ -9,7 +10,7 @@ public record RepairDecision(
 ) {
     public RepairDecision {
         status = status == null ? RepairDecisionStatus.NOT_APPLICABLE : status;
-        plan = plan == null ? Optional.empty() : plan;
+        plan = Objects.requireNonNullElse(plan, Optional.empty());
         reason = reason == null ? "" : reason.strip();
     }
 

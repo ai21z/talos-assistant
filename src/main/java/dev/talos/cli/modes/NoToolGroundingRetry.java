@@ -49,7 +49,7 @@ final class NoToolGroundingRetry {
             LlmClient.StreamResult retry = chat.chat(messages);
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !retryText.equals(answer)) {
-                LOG.info("Grounding retry produced a different answer ({} \u2192 {} chars)",
+                LOG.info("Grounding retry produced a different answer ({} → {} chars)",
                         answer.length(), retryText.length());
                 return retryText;
             }

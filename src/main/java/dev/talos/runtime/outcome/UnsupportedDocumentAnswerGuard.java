@@ -89,11 +89,11 @@ public final class UnsupportedDocumentAnswerGuard {
                 for (String sentence : line.split("(?<=[.!?])\\s+")) {
                     if (isUnsupportedDocumentContentClaim(sentence, unsupportedPaths, successfulReadPaths)) continue;
                     if (!sentence.isBlank()) {
-                        if (sentenceKept.length() > 0) sentenceKept.append(' ');
+                        if (!sentenceKept.isEmpty()) sentenceKept.append(' ');
                         sentenceKept.append(sentence.strip());
                     }
                 }
-                if (sentenceKept.length() > 0) {
+                if (!sentenceKept.isEmpty()) {
                     kept.append(sentenceKept).append('\n');
                 }
                 continue;

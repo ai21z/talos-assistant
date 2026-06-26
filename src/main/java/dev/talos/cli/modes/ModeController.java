@@ -185,7 +185,7 @@ public final class ModeController implements TurnRouter {
     private static Optional<Result> tryMode(Mode mode, String rawLine, Path workspace, Context ctx) throws Exception {
         if (mode == null || !mode.canHandle(rawLine)) return Optional.empty();
         Optional<Result> r = mode.handle(rawLine, workspace, ctx);
-        return (r != null) ? r : Optional.empty();
+        return Objects.requireNonNullElse(r, Optional.empty());
     }
 
     private static Context requireCliContext(RuntimeTurnContext ctx) {

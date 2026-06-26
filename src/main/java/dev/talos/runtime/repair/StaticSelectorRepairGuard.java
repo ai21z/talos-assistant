@@ -45,9 +45,9 @@ public final class StaticSelectorRepairGuard {
 
         Set<String> fullRewriteTargets = fullRewriteTargetsFromContext(repairContext);
         if (fullRewriteTargets.isEmpty()
-                || !fullRewriteTargets.stream()
+                || fullRewriteTargets.stream()
                         .map(ToolCallSupport::normalizePath)
-                        .anyMatch(target::equals)) {
+                        .noneMatch(target::equals)) {
             return Optional.empty();
         }
         if (fullRewriteTargets.stream()

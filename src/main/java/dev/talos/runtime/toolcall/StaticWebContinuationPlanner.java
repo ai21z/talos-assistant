@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -46,9 +47,7 @@ final class StaticWebContinuationPlanner {
             tools = tools == null ? List.of() : List.copyOf(tools);
             controls = controls == null ? ChatRequestControls.defaults() : controls;
             retryName = retryName == null ? "" : retryName;
-            pendingActionObligation = pendingActionObligation == null
-                    ? Optional.empty()
-                    : pendingActionObligation;
+            pendingActionObligation = Objects.requireNonNullElse(pendingActionObligation, Optional.empty());
             missingTargets = missingTargets == null ? List.of() : List.copyOf(missingTargets);
         }
     }

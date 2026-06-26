@@ -126,12 +126,11 @@ public final class ProfilesCommand implements Command {
     }
 
     private static String trustDetail(WorkspaceCommandProfilesLoader.Loaded loaded) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Pin the workspace verification profile declaration at its current bytes.\n");
-        sb.append("    Any later change to the file returns it to untrusted.\n");
-        sb.append(renderProfiles(loaded.profiles().profiles()).indent(4).stripTrailing()).append('\n');
-        sb.append("    declaration sha256: ").append(loaded.declarationSha256());
-        return ProtectedContentPolicy.sanitizeText(sb.toString());
+        String detail = "Pin the workspace verification profile declaration at its current bytes.\n"
+                + "    Any later change to the file returns it to untrusted.\n"
+                + renderProfiles(loaded.profiles().profiles()).indent(4).stripTrailing() + '\n'
+                + "    declaration sha256: " + loaded.declarationSha256();
+        return ProtectedContentPolicy.sanitizeText(detail);
     }
 
     private static String renderProfiles(List<CommandProfile> profiles) {
