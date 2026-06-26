@@ -174,22 +174,32 @@ describe("Talos landing page static contract", () => {
     assert.match(css, /\.terminal-replay\b/);
   });
 
-  it("keeps the Greek identity as a single restrained inscription accent", () => {
+  it("leads the hero with the TALOS wordmark and a cycling acrostic word", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
-    const fonts = read("src/fonts.css");
-    const pkg = JSON.parse(read("package.json"));
+    const js = read("src/main.js");
     const hero = sectionSlice(html, "overview", "execution");
     const publicSurface = publicText();
 
-    assert.ok(pkg.devDependencies["@fontsource/gfs-neohellenic"], "missing self-hosted GFS Neohellenic package");
-    assert.match(fonts, /gfs-neohellenic-greek-700-normal\.woff2/);
-    assert.match(hero, /<span\s+class="hero-inscription-greek"\s+lang="el">\s*ΤΑΛΩΣ\s*<\/span>/);
-    assert.equal((publicSurface.match(/ΤΑΛΩΣ/g) ?? []).length, 1);
-    assert.doesNotMatch(publicSurface, /TAΛOS|TALΩS|TAΛΩS/);
+    // English TALOS wordmark replaces the former Greek inscription.
+    assert.match(hero, /<span\s+class="hero-inscription-mark">\s*TALOS\s*<\/span>/);
+    // No leftover Greek wordmark, and no mixed Latin/Greek letterforms.
+    assert.doesNotMatch(publicSurface, /ΤΑΛΩΣ|TAΛOS|TALΩS|TAΛΩS/);
+    // Rule plus the cycling acrostic slot, driven from main.js.
+    assert.match(hero, /class="hero-inscription-rule"/);
+    assert.match(hero, /data-inscription-cycle/);
+    assert.match(js, /function setupInscription/);
+    for (const word of ["TRACED", "APPROVED", "LOCAL", "OBSERVABLE", "SCOPED"]) {
+      assert.match(js, new RegExp(`"${word}"`));
+    }
+    // Honest subtitle replaces the old "bronze guardian" tag.
+    assert.match(hero, /hero-inscription-sub/);
+    assert.doesNotMatch(publicSurface, /bronze guardian/i);
+    // Styling hooks for the new inscription.
+    assert.match(css, /\.hero-inscription-mark\s*\{/);
+    assert.match(css, /\.hero-inscription-cycle\s*\{/);
+    // Fonts stay self-hosted, no third-party font CDNs.
     assert.doesNotMatch(publicSurface, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
-    assert.match(css, /\.hero-inscription-greek\s*\{[\s\S]*?font-family:\s*"GFS Neohellenic"/);
-    assert.match(css, /\.hero-inscription-greek\s*\{[\s\S]*?text-shadow/);
   });
 
   it("ships a linear execution flow with one compact tool evidence strip", () => {

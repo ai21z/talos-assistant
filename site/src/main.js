@@ -436,6 +436,24 @@ function setupAwakening() {
   window.setTimeout(finish, 1550);
 }
 
+// ---- Hero inscription, the TALOS acrostic cycles its guarantee word -------
+function setupInscription() {
+  const el = document.querySelector("[data-inscription-cycle]");
+  if (!el) return;
+  const words = ["TRACED", "APPROVED", "LOCAL", "OBSERVABLE", "SCOPED"];
+  let i = 0;
+  el.textContent = words[0];
+  if (reduceMotion.matches) return;
+  window.setInterval(() => {
+    el.style.opacity = "0";
+    window.setTimeout(() => {
+      i = (i + 1) % words.length;
+      el.textContent = words[i];
+      el.style.opacity = "1";
+    }, 350);
+  }, 1700);
+}
+
 // ---- The execution cycle dial, a pulse fires through the six stations ------
 function setupCycle() {
   const dial = document.querySelector(".dial");
@@ -872,6 +890,7 @@ setupVeinRail();
 setupRitualMenu();
 setupParallax();
 setupLiveTerminal();
+setupInscription();
 setupTurnTabs();
 setupSectionNav();
 setupReveal();
