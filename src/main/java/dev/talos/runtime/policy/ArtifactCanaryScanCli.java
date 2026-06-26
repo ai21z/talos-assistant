@@ -8,7 +8,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** CLI wrapper used by release tasks to scan generated runtime artifacts for raw canaries. */
+/**
+ * CLI wrapper used by release tasks to scan generated runtime artifacts for raw canaries.
+ *
+ * <p>Security note (Qodana JvmTaintAnalysis, accepted via the Qodana baseline): the scan roots
+ * flow from this CLI's own {@code args} into {@link Path} values read by the scanner. That argv
+ * is supplied by the release task or the operator who runs the scan (a trusted source), and
+ * scanning the directories you point it at is the entire purpose of the tool. There is no
+ * untrusted or remote input path here, so the flagged args -&gt; path-traversal flow is not a
+ * vulnerability; it is baselined rather than "fixed" (constraining the roots would break the tool).
+ */
 public final class ArtifactCanaryScanCli {
     private ArtifactCanaryScanCli() {}
 
