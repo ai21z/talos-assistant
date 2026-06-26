@@ -98,7 +98,7 @@ public final class StaticSelectorRepairGuard {
         if (facts == null || facts.isBlank() || labels == null || labels.isEmpty()) return List.of();
         Set<String> out = new LinkedHashSet<>();
         for (String rawLine : facts.split("\\R")) {
-            String line = rawLine == null ? "" : rawLine.strip();
+            String line = rawLine.strip();
             if (line.startsWith("-")) line = line.substring(1).strip();
             for (String label : labels) {
                 if (!startsWithIgnoreCase(line, label)) continue;
@@ -137,11 +137,11 @@ public final class StaticSelectorRepairGuard {
         if (repairContext == null || repairContext.isBlank()) return Set.of();
         Set<String> targets = new LinkedHashSet<>();
         for (String rawLine : repairContext.split("\\R")) {
-            String line = rawLine == null ? "" : rawLine.strip();
+            String line = rawLine.strip();
             if (!startsWithIgnoreCase(line, "Full-file replacement targets:")) continue;
             String values = line.substring(line.indexOf(':') + 1);
             for (String value : values.split(",")) {
-                String target = ToolCallSupport.normalizePath(value == null ? "" : value.strip());
+                String target = ToolCallSupport.normalizePath(value.strip());
                 if (!target.isBlank()) targets.add(target);
             }
         }

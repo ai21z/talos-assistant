@@ -146,7 +146,7 @@ final class SourceDerivedEvidenceGuard {
         if (readback == null || readback.isBlank()) return "";
         List<String> candidates = new ArrayList<>();
         for (String rawLine : readback.split("\\R")) {
-            String line = rawLine == null ? "" : rawLine.strip();
+            String line = rawLine.strip();
             if (line.isBlank()) continue;
             line = line.replaceFirst("^\\d+\\s*\\|\\s*", "").strip();
             if (line.isBlank()) continue;

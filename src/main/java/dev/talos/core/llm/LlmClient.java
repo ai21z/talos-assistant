@@ -1091,7 +1091,6 @@ public final class LlmClient implements AutoCloseable {
         TokenBudget estimator = new TokenBudget();
         int total = 64;
         for (ChatMessage message : messages == null ? List.<ChatMessage>of() : messages) {
-            if (message == null) continue;
             total += 8;
             total += estimator.estimateTokens(Objects.toString(message.role(), ""));
             total += estimator.estimateTokens(Objects.toString(message.content(), ""));
@@ -1109,7 +1108,6 @@ public final class LlmClient implements AutoCloseable {
             }
         }
         for (ToolSpec tool : tools == null ? List.<ToolSpec>of() : tools) {
-            if (tool == null) continue;
             total += 24;
             total += estimator.estimateTokens(tool.name());
             total += estimator.estimateTokens(tool.description());

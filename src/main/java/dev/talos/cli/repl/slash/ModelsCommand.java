@@ -36,7 +36,6 @@ public final class ModelsCommand implements Command {
         List<ModelRef> ollama = new ArrayList<>();
         List<ModelRef> other = new ArrayList<>();
         for (ModelRef model : models == null ? List.<ModelRef>of() : models) {
-            if (model == null) continue;
             if ("llama_cpp".equals(model.backend())) {
                 managed.add(model);
             } else if ("ollama".equals(model.backend())) {

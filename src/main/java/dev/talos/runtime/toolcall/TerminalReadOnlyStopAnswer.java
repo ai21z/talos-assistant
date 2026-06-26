@@ -147,7 +147,7 @@ public final class TerminalReadOnlyStopAnswer {
         }
         List<String> targets = contract.expectedTargets().stream()
                 .map(ToolCallSupport::normalizePath)
-                .filter(target -> target != null && !target.isBlank())
+                .filter(target -> !target.isBlank())
                 .sorted()
                 .toList();
         if (targets.size() < 2) return null;
@@ -290,7 +290,7 @@ public final class TerminalReadOnlyStopAnswer {
     }
 
     private static boolean readStaticWebDiagnosticSurface(LoopState state) {
-        if (state == null || state.pathsReadThisTurn == null || state.pathsReadThisTurn.isEmpty()) return false;
+        if (state == null || state.pathsReadThisTurn.isEmpty()) return false;
         boolean readHtml = false;
         boolean readScript = false;
         for (String path : state.pathsReadThisTurn) {

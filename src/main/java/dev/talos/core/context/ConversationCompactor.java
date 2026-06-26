@@ -194,10 +194,10 @@ public final class ConversationCompactor {
             };
             String content = safePromptText(msg.content());
             // Truncate very long individual messages
-            if (content != null && content.length() > 2000) {
+            if (content.length() > 2000) {
                 content = content.substring(0, 2000) + "…";
             }
-            sb.append(role).append(": ").append(content != null ? content : "").append("\n\n");
+            sb.append(role).append(": ").append(content).append("\n\n");
         }
 
         // Cap total input

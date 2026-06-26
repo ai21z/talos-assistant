@@ -34,7 +34,7 @@ final class SourceEvidenceExactRepairPlanner {
             List<ToolSpec> baseTools,
             String userTask
     ) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+        if (state == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
         TaskContract contract = TaskContractResolver.fromMessages(state.messages);
@@ -98,7 +98,7 @@ final class SourceEvidenceExactRepairPlanner {
                 ? ""
                 : sourceReadbacks.stream()
                 .map(sourceReadback -> SourceDerivedEvidenceGuard.evidenceSnippet(sourceReadback.readback()))
-                .filter(snippet -> snippet != null && !snippet.isBlank())
+                .filter(snippet -> !snippet.isBlank())
                 .collect(Collectors.joining("; "));
         return narrowed.stream()
                 .map(spec -> {

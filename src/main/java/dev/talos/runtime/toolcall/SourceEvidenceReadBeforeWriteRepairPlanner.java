@@ -31,7 +31,7 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
             List<ToolSpec> baseTools,
             String userTask
     ) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+        if (state == null || state.toolOutcomes.isEmpty()) {
             return java.util.Optional.empty();
         }
         TaskContract contract = TaskContractResolver.fromMessages(state.messages);
@@ -77,7 +77,7 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
     private static String repairKey(List<String> missingSources) {
         return missingSources.stream()
                 .map(ToolCallSupport::normalizePath)
-                .filter(path -> path != null && !path.isBlank())
+                .filter(path -> !path.isBlank())
                 .collect(Collectors.joining(","));
     }
 
@@ -89,7 +89,7 @@ final class SourceEvidenceReadBeforeWriteRepairPlanner {
         if (readTools.isEmpty()) return List.of();
         String enumValues = missingSources.stream()
                 .map(ToolCallSupport::normalizePath)
-                .filter(path -> path != null && !path.isBlank())
+                .filter(path -> !path.isBlank())
                 .map(path -> "\"" + jsonEscape(path) + "\"")
                 .collect(Collectors.joining(","));
         return readTools.stream()

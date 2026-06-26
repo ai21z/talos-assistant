@@ -136,7 +136,7 @@ public final class DocumentExtractionPreflight {
         if (pathEnv == null || pathEnv.isBlank()) return Optional.empty();
         List<String> extensions = commandExtensions(cleaned);
         for (String dir : pathEnv.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
-            if (dir == null || dir.isBlank()) continue;
+            if (dir.isBlank()) continue;
             Path base = Path.of(stripWrappingQuotes(dir.strip()));
             for (String ext : extensions) {
                 Optional<Path> hit = executableFile(base.resolve(cleaned + ext));
@@ -166,7 +166,7 @@ public final class DocumentExtractionPreflight {
             extensions.addAll(List.of(".COM", ".EXE", ".BAT", ".CMD"));
         } else {
             for (String ext : pathext.split(";")) {
-                if (ext != null && !ext.isBlank()) extensions.add(ext.trim());
+                if (!ext.isBlank()) extensions.add(ext.trim());
             }
         }
         return new ArrayList<>(extensions);
