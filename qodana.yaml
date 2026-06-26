@@ -38,6 +38,13 @@ failureConditions:
   severityThresholds:
     critical: 0
 
+# Baseline: qodana-baseline.sarif.json (repo root) records the 103 findings
+# triaged on 2026-06-26 from the full QDJVM/Ultimate cloud scan at commit
+# d96a4c73 as accepted/known, so scans report only NEW regressions. It holds
+# behavior-preserving style nits, intentional/trust-surface guards, and one
+# non-exploitable JvmTaintAnalysis flow in the local release-task canary CLI.
+# Run with `--baseline qodana-baseline.sarif.json`; the qodanaNativeFreshLocal
+# Gradle task already does, and cloud runs should pass the same flag.
 projectJDK: "21" #(Applied in CI/CD pipeline)
 
 # Linter. The full jetbrains/qodana-jvm image (deeper dataflow, security/taint,

@@ -1361,6 +1361,8 @@ tasks.register<Exec>("qodanaNativeFreshLocal") {
         "qodana-jvm-community",
         "--within-docker",
         "false",
+        "--baseline",
+        projectDir.resolve("qodana-baseline.sarif.json").absolutePath,
         "--results-dir",
         qodanaResultsDir.absolutePath,
         "--report-dir",
