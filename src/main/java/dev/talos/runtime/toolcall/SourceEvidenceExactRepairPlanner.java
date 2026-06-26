@@ -10,7 +10,6 @@ import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;

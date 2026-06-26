@@ -36,15 +36,12 @@ final class ToolRepromptOverlayContinuation {
                     staticRepairObligationActive,
                     remainingRepairTargets,
                     userTask));
-            if (!ToolRepromptChatExecutor.executeResult(
+            return ToolRepromptChatExecutor.executeResult(
                     state,
                     requestMessages,
                     repromptToolSpecs,
                     ToolRepromptRequestBuilder.controls(state),
-                    "(no answer from model after tool execution)")) {
-                return false;
-            }
-            return true;
+                    "(no answer from model after tool execution)");
         } catch (EngineException.ContextBudgetExceeded budget) {
             return ToolRepromptContextBudgetHandler.handle(state, budget, "tool-call loop continuation");
         } catch (EngineException.ConnectionFailed cf) {
@@ -63,15 +60,12 @@ final class ToolRepromptOverlayContinuation {
                     state.iterations, SafeLogFormatter.throwableMessage(tr));
             try {
                 Thread.sleep(400);
-                if (!ToolRepromptChatExecutor.executeRetryResult(
+                return ToolRepromptChatExecutor.executeRetryResult(
                         state,
                         requestMessages,
                         repromptToolSpecs,
                         ToolRepromptRequestBuilder.controls(state),
-                        "(no answer from model after retry)")) {
-                    return false;
-                }
-                return true;
+                        "(no answer from model after retry)");
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 state.finishWithAnswer("[Interrupted during tool-call loop]");

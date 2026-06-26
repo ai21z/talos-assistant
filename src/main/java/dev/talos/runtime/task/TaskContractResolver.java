@@ -1203,14 +1203,11 @@ public final class TaskContractResolver {
         if (lower == null || lower.isBlank()) return false;
         if (!containsAny(lower, NO_INSPECTION_MARKERS)) return false;
         if (asksForDirectoryListing(lower)) return false;
-        if (lower.contains("search")
+        return !(lower.contains("search")
                 || lower.contains("grep")
                 || lower.contains("read ")
                 || lower.contains("show me the files")
-                || lower.contains("what files")) {
-            return false;
-        }
-        return true;
+                || lower.contains("what files"));
     }
 
     private static boolean looksConversationalGreetingRequest(String lower) {

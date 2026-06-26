@@ -74,7 +74,7 @@ public final class ChatRequest {
                             m.getOrDefault("body",
                                     String.join("\n", m.values()))));
             if (!v.isBlank()) {
-                if (sb.length() > 0) sb.append("\n\n");
+                if (!sb.isEmpty()) sb.append("\n\n");
                 sb.append(v);
             }
         }

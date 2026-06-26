@@ -42,10 +42,11 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
     }
 
     private static Path nearestExisting(Path path) throws IOException {
-        Path current = path == null ? Path.of(".").toAbsolutePath().normalize() : path.toAbsolutePath().normalize();
+        Path cwd = Path.of(".").toAbsolutePath().normalize();
+        Path current = path == null ? cwd : path.toAbsolutePath().normalize();
         while (current != null && !Files.exists(current)) {
             current = current.getParent();
         }
-        return current == null ? Path.of(".").toAbsolutePath().normalize() : current;
+        return current == null ? cwd : current;
     }
 }

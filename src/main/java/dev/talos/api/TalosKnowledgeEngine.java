@@ -17,11 +17,10 @@ import java.util.Objects;
  */
 public final class TalosKnowledgeEngine {
 
-    private final Config cfg;
     private final RagService ragService;
 
     public TalosKnowledgeEngine(Config cfg) {
-        this.cfg = Objects.requireNonNull(cfg, "cfg must not be null");
+        Objects.requireNonNull(cfg, "cfg must not be null");
         this.ragService = new RagService(cfg);
     }
 

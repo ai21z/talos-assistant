@@ -18,14 +18,10 @@ import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.outcome.RuntimeVerificationStatusAnswer;
 import dev.talos.runtime.outcome.UnsupportedDocumentAnswerGuard;
 import dev.talos.runtime.phase.ExecutionPhase;
-import dev.talos.runtime.policy.ActionObligation;
-import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
-import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
-import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
@@ -44,7 +40,6 @@ import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugCapture;
-import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -269,10 +264,9 @@ public final class AssistantTurnExecutor {
                 // ── Non-streaming fallback (tests, non-interactive) ─────────
                 // Use chatFull() so native tool calls are captured too
                 // (chat() returns only String, losing native tool calls).
-                final List<ChatMessage> llmMessages = messages;
                 LlmClient.StreamResult streamResult = TurnModelDispatcher.dispatchBufferedWithTimeout(
                         turnContext,
-                        llmMessages,
+                        messages,
                         currentTurnPlan,
                         opts.llmTimeoutMs);
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
@@ -655,7 +649,7 @@ public final class AssistantTurnExecutor {
         if (EvidenceGate.requiresReadEvidenceHandoff(EvidenceGate.selectObligation(
                 plan,
                 workspace,
-                ctx == null ? null : ctx.cfg()))) return false;
+                ctx.cfg()))) return false;
         return !requiresWorkspaceEvidence(taskContract);
     }
 
@@ -975,7 +969,7 @@ public final class AssistantTurnExecutor {
         ChangeSummaryContext context = ctx == null || ctx.memory() == null
                 ? null
                 : ctx.memory().changeSummaryContext();
-        if (context == null || !hasSessionUncertaintyEvidence(context)) {
+        if (!hasSessionUncertaintyEvidence(context)) {
             return """
                     Uncertainty:
                     - No unresolved Talos runtime evidence is recorded for this session/audit.
@@ -2138,7 +2132,7 @@ public final class AssistantTurnExecutor {
      *   <li>The tool loop already ran and performed zero mutating tool
      *       successes this turn.</li>
      *   <li>The latest user request contains a mutation verb (see
-     *       {@link #MUTATION_REQUEST_MARKERS}).</li>
+     *       {@link TaskContractResolver#fromUserRequest}).</li>
      *   <li>A tool loop is configured (so the retry's follow-up tool
      *       calls can actually execute).</li>
      * </ol>
@@ -2342,11 +2336,8 @@ public final class AssistantTurnExecutor {
         }
         if (readHtml && readScript) return true;
         if (!readHtml && !readScript) return false;
-        if (!EvidenceObligationVerifier.missingLinkedScriptReadTargets(
-                workspace, linkedScriptEvidenceOutcomes(loopResult)).isEmpty()) {
-            return false;
-        }
-        return true;
+        return EvidenceObligationVerifier.missingLinkedScriptReadTargets(
+                workspace, linkedScriptEvidenceOutcomes(loopResult)).isEmpty();
     }
 
     private static List<ToolCallLoop.ToolOutcome> linkedScriptEvidenceOutcomes(ToolCallLoop.LoopResult loopResult) {
@@ -2493,7 +2484,7 @@ public final class AssistantTurnExecutor {
      */
     static final int UNGROUNDED_MIN_CHARS = NoToolAnswerTruthfulnessGuard.UNGROUNDED_MIN_CHARS;
 
-    /**
+    /*
      * Phrases in the <em>user request</em> that indicate the user wants the
      * answer grounded in inspected workspace contents. Kept conservative and
      * anchored to real transcript prompt wording — we explicitly do not want

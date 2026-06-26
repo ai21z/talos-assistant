@@ -144,7 +144,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
      * that never completed, the buffered content is emitted (it was not a tool call).
      */
     public void flush() {
-        if (buffer.length() > 0 || !fenceOpening.isEmpty()) {
+        if (!buffer.isEmpty() || !fenceOpening.isEmpty()) {
             switch (state) {
                 case PASSTHROUGH:
                     emitPendingProtocolPrefix(false);
@@ -157,7 +157,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                     } else {
                         // Never completed — emit opening fence + content as regular text
                         emitPendingProtocolPrefix(false);
-                        delegate.accept(fenceOpening + buffer.toString());
+                        delegate.accept(fenceOpening + buffer);
                     }
                     break;
                 case BUFFERING_BARE_JSON:
@@ -204,7 +204,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
     private void drain() {
         // Process buffer until no more progress can be made
-        while (buffer.length() > 0) {
+        while (!buffer.isEmpty()) {
             boolean progress = switch (state) {
                 case SUPPRESSING_XML -> drainSuppressingXml();
                 case SUPPRESSING_FENCE -> drainSuppressingFence();

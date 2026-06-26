@@ -417,7 +417,7 @@ public final class StartupBannerRenderer {
 
     private static String middleTruncatePath(String path, int width) {
         String normalized = path.replace('/', '\\');
-        String prefix = "";
+        String prefix;
         if (normalized.matches("^[A-Za-z]:\\\\.*")) {
             prefix = normalized.substring(0, 3) + "...\\";
             normalized = normalized.substring(3);

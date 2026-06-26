@@ -254,7 +254,7 @@ public class CacheDb implements AutoCloseable {
         } catch (SQLException e) { throw new RuntimeException(e); }
     }
 
-    public static record CacheStats(int embeddingCount, long embeddingSize, int answerCount, long answerSize) {
+    public record CacheStats(int embeddingCount, long embeddingSize, int answerCount, long answerSize) {
         public String summary() {
             return String.format("Embeddings: %d entries (%.1f KB), Answers: %d entries (%.1f KB)",
                 embeddingCount, embeddingSize / 1024.0, answerCount, answerSize / 1024.0);

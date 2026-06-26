@@ -318,8 +318,7 @@ public final class DocumentExtractionService {
                 FormulaError error = FormulaError.forInt(cell.getErrorCellValue());
                 yield error == null ? "ERROR" : "ERROR(" + error.getString() + ")";
             }
-            case BLANK, _NONE -> "";
-            case FORMULA -> "";
+            case BLANK, _NONE, FORMULA -> "";
         };
     }
 

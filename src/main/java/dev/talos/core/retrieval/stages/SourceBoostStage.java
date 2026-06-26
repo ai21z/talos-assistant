@@ -133,8 +133,7 @@ public final class SourceBoostStage implements RetrievalStage {
                 if (isProdPath(p)) yield PROD_BOOST;
                 yield 1.0f;
             }
-            case DOCUMENT -> DOCS_PENALTY;
-            case CONFIG   -> DOCS_PENALTY;
+            case DOCUMENT, CONFIG -> DOCS_PENALTY;
             case BUILD_FILE -> 1.0f; // build files are neutral
             case UNKNOWN  -> 1.0f;
         };

@@ -278,10 +278,10 @@ public final class TalosBootstrap {
         ToolCallLoop   toolCallLoop   = new ToolCallLoop(turnProcessor,
                 ToolCallLoop.DEFAULT_MAX_ITERATIONS, progressSink);
 
-        // ── onStreamComplete: unconditional spinner stop after chatStream ──
-        // Fixes the case where tool-call-only responses are fully suppressed by
-        // ToolCallStreamFilter, so the rawSink never fires stopSpinner().
-        final Runnable onStreamComplete = spinnerStopper;
+        // onStreamComplete (below, .onStreamComplete(spinnerStopper)) gives an
+        // unconditional spinner stop after chatStream. Fixes the case where
+        // tool-call-only responses are fully suppressed by ToolCallStreamFilter,
+        // so the rawSink never fires stopSpinner().
 
         if (sessionPersistenceEnabled) {
             // Auto-save session evidence on close. Saved evidence is not prompt
@@ -334,13 +334,12 @@ public final class TalosBootstrap {
         // input line ("talos [auto] >  user's prompt is '...") because
         // JLine never saw the bytes that had moved the cursor.
         final PrintStream stdout = out;
-        final RenderEngine renderRef = render;
         java.util.function.Consumer<String> terminalSink = chunk -> {
             stdout.print(chunk);
             stdout.flush();
         };
         java.util.function.Consumer<String> streamSink =
-                new ToolCallStreamFilter(renderRef.answerStreamSink(terminalSink));
+                new ToolCallStreamFilter(render.answerStreamSink(terminalSink));
 
         // ── Context (dependency bag for modes and commands) ──────────────
         Context ctx = Context.builder(cfg)
@@ -358,7 +357,7 @@ public final class TalosBootstrap {
                 .conversationManager(conversationManager)
                 .toolCallLoop(toolCallLoop)
                 .streamSink(streamSink)
-                .onStreamComplete(onStreamComplete)
+                .onStreamComplete(spinnerStopper)
                 .build();
 
         // ── Post-turn hooks ──────────────────────────────────────────────

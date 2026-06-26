@@ -204,7 +204,9 @@ public final class WindowsDpapiKeyCustody {
         if (message.length() > 240) {
             return message.substring(0, 240) + "...";
         }
-        return message.isBlank() ? e.getClass().getSimpleName() : message;
+        return message.isBlank()
+                ? (e == null ? "unknown error" : e.getClass().getSimpleName())
+                : message;
     }
 
     interface DpapiClient {

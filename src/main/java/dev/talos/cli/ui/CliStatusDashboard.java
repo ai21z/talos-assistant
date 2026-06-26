@@ -1,7 +1,6 @@
 package dev.talos.cli.ui;
 
 import dev.talos.cli.CliUtil;
-import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.IndexPathResolver;

@@ -286,7 +286,7 @@ public final class ToolCallParser {
      */
     private static void extractAdjacentStandaloneToolJsons(String text, List<ToolCall> calls) {
         String trimmed = text == null ? "" : text.strip();
-        if (trimmed.isEmpty() || !trimmed.startsWith("{")) {
+        if (!trimmed.startsWith("{")) {
             return;
         }
         try (var jp = MAPPER.createParser(trimmed)) {
@@ -344,7 +344,7 @@ public final class ToolCallParser {
 
     private static ToolCall tryParseStandaloneToolJson(String text) {
         String trimmed = text == null ? "" : text.strip();
-        if (trimmed.isEmpty() || !trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
             return null;
         }
         try {

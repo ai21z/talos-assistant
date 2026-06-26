@@ -245,14 +245,12 @@ public final class StaticWebCapabilityProfile {
     private static String preferredCssTarget(String evidence) {
         String lower = evidence == null ? "" : evidence.toLowerCase(Locale.ROOT);
         if (lower.contains("style.css")) return "style.css";
-        if (lower.contains("styles.css")) return "styles.css";
         return "styles.css";
     }
 
     private static String preferredScriptTarget(String evidence) {
         String lower = evidence == null ? "" : evidence.toLowerCase(Locale.ROOT);
         if (lower.contains("script.js")) return "script.js";
-        if (lower.contains("scripts.js")) return "scripts.js";
         return "scripts.js";
     }
 

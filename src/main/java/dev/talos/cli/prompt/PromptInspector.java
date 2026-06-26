@@ -2,7 +2,6 @@ package dev.talos.cli.prompt;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
-import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;

@@ -34,7 +34,7 @@ final class ToolMutationEvidenceBudgetGate {
 
     private static int readOnlyInspectionAttemptCount(LoopState state) {
         if (state == null) return 0;
-        return Math.max(0, state.toolNames.size()) + Math.max(0, state.cushionFiresRedundantRead);
+        return state.toolNames.size() + Math.max(0, state.cushionFiresRedundantRead);
     }
 
     private static boolean readOnlyProgressOnly(LoopState state) {

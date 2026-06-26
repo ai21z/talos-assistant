@@ -155,7 +155,7 @@ public final class FileCapabilityPolicy {
         return switch (template.family()) {
             case PDF -> extractable(template, enabled(cfg, "pdf"));
             case WORD_DOCX -> extractable(template, enabled(cfg, "word"));
-            case WORD_DOC_DEFERRED -> new FormatInfo(
+            case WORD_DOC_DEFERRED, POWERPOINT_DEFERRED -> new FormatInfo(
                     template.extension(),
                     template.label(),
                     template.contentName(),
@@ -175,14 +175,6 @@ public final class FileCapabilityPolicy {
                         enabled,
                         enabled ? ExtractionOutcome.NOT_ATTEMPTED : ExtractionOutcome.OCR_UNAVAILABLE);
             }
-            case POWERPOINT_DEFERRED -> new FormatInfo(
-                    template.extension(),
-                    template.label(),
-                    template.contentName(),
-                    Capability.DEFERRED_UNSUPPORTED,
-                    false,
-                    false,
-                    ExtractionOutcome.DEFERRED_UNSUPPORTED);
             case ARCHIVE -> new FormatInfo(
                     template.extension(),
                     template.label(),

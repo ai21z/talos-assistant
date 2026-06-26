@@ -131,7 +131,7 @@ public final class ToolCallExecutionStage {
             }
 
             ToolExecutionPathContext pathContext = ToolExecutionPathContext.from(effective);
-            WorkspaceOperationPlan workspaceOperationPlan = pathContext.workspaceOperationPlan();
+            WorkspaceOperationPlan workspaceOperationPlan;
             String pathHint = pathContext.pathHint();
             emitProgress(effective.toolName(), "executing", pathHint);
             LOG.debug("  Executing tool: {} (params: {})",

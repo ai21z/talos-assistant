@@ -64,7 +64,7 @@ public final class LlmClient implements AutoCloseable {
      * legacy path in {@code AssistantTurnExecutor} already wraps its call in
      * a {@code CompletableFuture.get(timeout)}, but the streaming path and
      * the tool-call-loop re-prompts had no equivalent. This field, plus
-     * {@link #withWallClockBudget}, closes that gap.
+     * {@link LlmCallBudget#run}, closes that gap.
      *
      * <p>Default 300_000 ms (5 min), overridable via
      * {@code limits.llm_timeout_ms} in config or per-call via the
@@ -808,7 +808,7 @@ public final class LlmClient implements AutoCloseable {
      * Best-effort close of the currently-active engine stream handle, as
      * installed by the worker inside {@link #engineAssembledWithMessagesFull}.
      * Called from the watchdog thread (or the abort {@code catch} blocks in
-     * {@link #withWallClockBudget}) to force the worker's blocked socket
+     * {@link LlmCallBudget#run}) to force the worker's blocked socket
      * read to throw and unwind — no interrupt alone can do that.
      *
      * <p>Uses {@code getAndSet(null)} so repeated callers (e.g. watchdog then
@@ -1061,7 +1061,7 @@ public final class LlmClient implements AutoCloseable {
                 engineWindow = engineResolver.capabilities().contextWindow();
             }
         } catch (Exception ignored) {
-            engineWindow = 0;
+            // engineWindow already 0; capability probe is best-effort
         }
         return engineWindow;
     }
@@ -1144,9 +1144,7 @@ public final class LlmClient implements AutoCloseable {
                 end = consecutiveToolResultsEnd(messages, i + 1, anchor);
             }
 
-            for (int j = end - 1; j >= start; j--) {
-                messages.remove(j);
-            }
+            messages.subList(start, end).clear();
             return end - start;
         }
         return 0;

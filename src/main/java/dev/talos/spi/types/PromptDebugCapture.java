@@ -32,7 +32,7 @@ public final class PromptDebugCapture {
                 LATEST_USER_FACING.set(enriched);
                 USER_FACING_HISTORY.updateAndGet(existing -> {
                     var copy = new java.util.ArrayList<>(
-                            existing == null ? List.<PromptDebugSnapshot>of() : existing);
+                            existing == null ? List.of() : existing);
                     copy.add(enriched);
                     return List.copyOf(copy);
                 });
@@ -56,7 +56,7 @@ public final class PromptDebugCapture {
         }
         TURN_DIAGNOSTICS.updateAndGet(existing -> {
             java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>(
-                    existing == null ? Map.<String, String>of() : existing);
+                    existing == null ? Map.of() : existing);
             merged.put(key.strip(), value.strip());
             return Map.copyOf(merged);
         });

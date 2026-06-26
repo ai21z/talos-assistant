@@ -1,6 +1,5 @@
 package dev.talos.core.util;
 
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -265,7 +264,7 @@ public final class Sanitize {
     public static String stripThinkTags(String s) {
         if (s == null || s.isEmpty()) return s;
 
-        // First, Unicode escapes are decoded (\u003c -> <, \u003e -> >)
+        // First, Unicode escapes are decoded (< -> <, > -> >)
         s = s.replace("\\u003c", "<").replace("\\u003e", ">");
 
         // Then <think>...</think> blocks are removed (case-insensitive)

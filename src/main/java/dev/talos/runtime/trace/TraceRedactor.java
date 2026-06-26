@@ -4,10 +4,8 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.LinkedHashSet;
 import java.util.HexFormat;
 import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 

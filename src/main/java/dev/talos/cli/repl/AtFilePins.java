@@ -42,7 +42,7 @@ public final class AtFilePins {
      * code like {@code user@host} never become pins.
      */
     private static final Pattern TOKEN =
-            Pattern.compile("(?<![^\\s])@(?:\"([^\"]+)\"|([^\\s\"]+))");
+            Pattern.compile("(?<!\\S)@(?:\"([^\"]+)\"|([^\\s\"]+))");
 
     /** Trailing sentence punctuation on bare tokens ("see @Foo.java.") is not part of the path. */
     private static final Pattern TRAILING_PUNCTUATION = Pattern.compile("[.,;:!?)\\]}'`]+$");
