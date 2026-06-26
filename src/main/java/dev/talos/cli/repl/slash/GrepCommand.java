@@ -134,7 +134,7 @@ public final class GrepCommand implements Command {
                             if (totalMatches >= 50) break;
                         }
                     }
-                    if (totalMatches >= 50) break;
+                    if (totalMatches == 50) break;
                     continue;
                 }
                 if (UnsupportedDocumentFormats.isUnsupported(file) || looksLikeBinary(file)) {
@@ -163,7 +163,7 @@ public final class GrepCommand implements Command {
                         if (totalMatches >= 50) break;
                     }
                 }
-                if (totalMatches >= 50) break;
+                if (totalMatches == 50) break;
             }
 
             if (totalMatches == 0) {

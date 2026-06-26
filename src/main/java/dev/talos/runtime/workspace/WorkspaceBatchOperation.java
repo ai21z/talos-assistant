@@ -22,10 +22,8 @@ public record WorkspaceBatchOperation(
 
     public List<String> pathValues() {
         return switch (kind) {
-            case MKDIR -> List.of(targetPath);
-            case MOVE_PATH, COPY_PATH -> List.of(sourcePath, destinationPath);
-            case RENAME_PATH -> List.of(sourcePath, destinationPath);
-            case DELETE_PATH -> List.of(targetPath);
+            case MKDIR, DELETE_PATH -> List.of(targetPath);
+            case MOVE_PATH, COPY_PATH, RENAME_PATH -> List.of(sourcePath, destinationPath);
         };
     }
 
@@ -41,9 +39,8 @@ public record WorkspaceBatchOperation(
 
     public String appliedPathSummary() {
         return switch (kind) {
-            case MKDIR -> targetPath;
+            case MKDIR, DELETE_PATH -> targetPath;
             case MOVE_PATH, COPY_PATH, RENAME_PATH -> sourcePath + " -> " + destinationPath;
-            case DELETE_PATH -> targetPath;
         };
     }
 

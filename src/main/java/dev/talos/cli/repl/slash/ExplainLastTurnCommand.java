@@ -24,7 +24,6 @@ import java.util.Set;
 public final class ExplainLastTurnCommand implements Command {
     private static final int PREVIEW_LIMIT = 240;
 
-    private final Path workspace;
     private final SessionStore store;
     private final String sessionId;
     private final java.time.Instant activeSessionStartedAt;
@@ -53,10 +52,10 @@ public final class ExplainLastTurnCommand implements Command {
             java.time.Instant activeSessionStartedAt,
             String sessionId
     ) {
-        this.workspace = workspace == null ? Path.of(".") : workspace;
+        Path resolvedWorkspace = workspace == null ? Path.of(".") : workspace;
         this.store = store;
         this.sessionId = sessionId == null || sessionId.isBlank()
-                ? JsonSessionStore.sessionIdFor(this.workspace)
+                ? JsonSessionStore.sessionIdFor(resolvedWorkspace)
                 : sessionId;
         this.activeSessionStartedAt = activeSessionStartedAt;
     }

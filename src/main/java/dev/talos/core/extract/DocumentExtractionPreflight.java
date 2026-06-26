@@ -73,22 +73,19 @@ public final class DocumentExtractionPreflight {
                     "OCR is enabled, but the local OCR command is not configured.");
         }
 
-        Optional<Path> resolved = resolveCommand(command);
-        if (resolved.isEmpty()) {
-            return new FamilyStatus(
-                    "Image OCR",
-                    true,
-                    false,
-                    "unavailable",
-                    "OCR command not found on PATH or at configured path: " + command);
-        }
-
-        return new FamilyStatus(
-                "Image OCR",
-                true,
-                true,
-                "available",
-                "OCR command resolves to: " + resolved.get().toAbsolutePath().normalize());
+        return resolveCommand(command)
+                .map(path -> new FamilyStatus(
+                        "Image OCR",
+                        true,
+                        true,
+                        "available",
+                        "OCR command resolves to: " + path.toAbsolutePath().normalize()))
+                .orElseGet(() -> new FamilyStatus(
+                        "Image OCR",
+                        true,
+                        false,
+                        "unavailable",
+                        "OCR command not found on PATH or at configured path: " + command));
     }
 
     public static String render(Config cfg) {

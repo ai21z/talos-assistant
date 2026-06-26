@@ -97,8 +97,7 @@ final class PrivateDocumentNamedTargetGuard {
     private static boolean looksPrivateOrSensitiveDocumentPath(Path workspace, Path requestedPath, String requested) {
         if (ProtectedContentPolicy.isProtectedPath(workspace, requestedPath)) return true;
         if (ProtectedContentPolicy.looksProtectedPathString(requested)) return true;
-        String lower = normalizeTarget(requested).toLowerCase(Locale.ROOT);
-        String filename = lower;
+        String filename = normalizeTarget(requested).toLowerCase(Locale.ROOT);
         int slash = filename.lastIndexOf('/');
         if (slash >= 0) {
             filename = filename.substring(slash + 1);

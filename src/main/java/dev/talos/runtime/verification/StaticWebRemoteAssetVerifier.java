@@ -154,7 +154,7 @@ final class StaticWebRemoteAssetVerifier {
         int query = value.indexOf('?');
         int fragment = value.indexOf('#');
         int end = value.length();
-        if (query >= 0) end = Math.min(end, query);
+        if (query >= 0) end = query;
         if (fragment >= 0) end = Math.min(end, fragment);
         String out = value.substring(0, end);
         return out.length() <= 160 ? out : out.substring(0, 157) + "...";

@@ -108,8 +108,7 @@ final class SourceDerivedEvidenceGuard {
         if (state == null || contract == null || contract.sourceEvidenceTargets().isEmpty()) {
             return List.of();
         }
-        Set<String> readPaths = new LinkedHashSet<>();
-        readPaths.addAll(TurnSourceEvidenceCapture.readPaths());
+        Set<String> readPaths = new LinkedHashSet<>(TurnSourceEvidenceCapture.readPaths());
         for (String readPath : state.pathsReadThisTurn) {
             String normalized = evidencePathKey(readPath);
             if (!normalized.isBlank()) {
@@ -186,8 +185,7 @@ final class SourceDerivedEvidenceGuard {
     }
 
     private static String titleForTarget(String target) {
-        String normalized = target == null ? "" : ToolCallSupport.normalizePath(target);
-        String filename = normalized;
+        String filename = target == null ? "" : ToolCallSupport.normalizePath(target);
         int slash = filename.lastIndexOf('/');
         if (slash >= 0 && slash + 1 < filename.length()) {
             filename = filename.substring(slash + 1);
@@ -201,7 +199,7 @@ final class SourceDerivedEvidenceGuard {
         StringBuilder title = new StringBuilder(cleaned.length());
         for (String part : cleaned.split("\\s+")) {
             if (part.isBlank()) continue;
-            if (title.length() > 0) title.append(' ');
+            if (!title.isEmpty()) title.append(' ');
             title.append(Character.toUpperCase(part.charAt(0)));
             if (part.length() > 1) title.append(part.substring(1));
         }

@@ -203,7 +203,7 @@ public final class ContextPacker {
             // Strip leading '#' characters for display
             String heading = meta.headingContext().replaceFirst("^#+\\s*", "");
             if (!heading.isBlank()) {
-                sb.append(" \u00a7 ").append(heading);
+                sb.append(" § ").append(heading);
             }
         }
         return sb.toString();

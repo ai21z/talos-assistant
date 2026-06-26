@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -171,7 +170,7 @@ public final class ToolRegistry {
     public List<ToolDescriptor> descriptors() {
         return tools.values().stream()
                 .map(TalosTool::descriptor)
-                .collect(Collectors.toUnmodifiableList());
+                .toList();
     }
     /** Execute a tool call by name with workspace context (preferred). */
     public ToolResult execute(ToolCall call, ToolContext ctx) {

@@ -101,8 +101,7 @@ final class TargetScopeStaticVerifier {
             }
         }
         if (!contract.expectedTargets().isEmpty()
-                && problems.isEmpty()
-                && problems.stream().noneMatch(p -> p.contains("expected target was not successfully mutated"))) {
+                && problems.isEmpty()) {
             if (satisfiedContextTargets.isEmpty()) {
                 facts.add("Expected mutation target(s) were updated: "
                         + String.join(", ", contract.expectedTargets()) + ".");

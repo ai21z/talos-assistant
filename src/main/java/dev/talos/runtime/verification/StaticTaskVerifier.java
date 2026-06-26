@@ -187,7 +187,7 @@ public final class StaticTaskVerifier {
         expectedTargetExemptions.addAll(workspaceOperationVerification.expectedTargetExemptions());
 
         CapabilityProfile profile = CapabilityProfileRegistry.select(contract, root, mutatedPaths);
-        boolean webCoherenceRequired = profile.staticWeb();
+        boolean webCoherenceRequired;
 
         TargetScopeStaticVerifier.Result targetScopeVerification = TargetScopeStaticVerifier.verify(
                 contract,
