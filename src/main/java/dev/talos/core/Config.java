@@ -118,7 +118,6 @@ public class Config implements EngineConfig {
                 userConfigLoaded = true;
                 userConfigError = "";
             } catch (Exception e) {
-                userConfigLoaded = false;
                 userConfigError = summarizeConfigError(e);
             }
         }
