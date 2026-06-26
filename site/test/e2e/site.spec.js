@@ -75,11 +75,12 @@ test("live hero terminal streams a real turn and can replay", async ({ page }) =
   expect(page.browserIssues).toEqual([]);
 });
 
-test("hero shows the Greek identity inscription accent", async ({ page }) => {
+test("hero shows the TALOS wordmark and cycling acrostic word", async ({ page }) => {
   await page.goto("/");
-  const greek = page.locator(".hero-inscription-greek");
-  await expect(greek).toHaveText("ΤΑΛΩΣ");
-  await expect(greek).toBeVisible();
+  const mark = page.locator(".hero-inscription-mark");
+  await expect(mark).toHaveText("TALOS");
+  await expect(mark).toBeVisible();
+  await expect(page.locator("[data-inscription-cycle]")).toBeVisible();
   await expect(page.locator(".live-terminal")).toBeVisible();
 });
 
@@ -277,7 +278,7 @@ test("reduced-motion mode leaves content visible without reveal animations", asy
   );
   expect(hiddenRevealCount).toBe(0);
   await expect(page.locator("h1")).toBeVisible();
-  await expect(page.locator(".hero-inscription-greek")).toBeVisible();
+  await expect(page.locator(".hero-inscription-mark")).toBeVisible();
   // The live terminal still renders its content statically.
   await expect(page.locator("[data-live-output]")).toContainText("Local-first CLI workspace operator");
   // Staggered groups are shown immediately (no cascade) under reduced motion.
