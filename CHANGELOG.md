@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T874] `/mode` help and correctness: the advertised mode list is now generated
+  from the `ModeController` registry (no hardcoded literal, so it cannot drift from
+  what is actually selectable), bare `/mode` lists the available modes, the reserved
+  `web` stub is no longer selectable (`/mode web` returns a clear "reserved" message
+  instead of trapping the user in a dead mode), and the canonical name `unified` is
+  advertised rather than only the `chat` alias. Adds `Mode.available()`,
+  `ModeController.availableModeNames()`/`reservedModeNames()`, and regression tests.
+
 ## [0.10.6] - 2026-06-25
 
 - [T866] Added a deterministic command-output truthfulness guard in the outcome

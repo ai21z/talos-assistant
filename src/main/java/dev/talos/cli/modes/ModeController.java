@@ -85,11 +85,17 @@ public final class ModeController implements TurnRouter {
     /** Gets the active Mode if not "auto". */
     public Optional<Mode> getActive() { return Optional.ofNullable(byName.get(activeName)); }
 
-    /** Sets the active mode. Returns true if accepted (registered name or "auto"). */
+    /**
+     * Sets the active mode. Returns true if accepted. "auto" (the router default)
+     * and any registered, available mode are accepted; reserved/stub modes
+     * ({@link Mode#available()} false) and unknown names are rejected so the user
+     * can never switch into a dead mode.
+     */
     public boolean setActive(String name) {
         if (name == null || name.isBlank()) return false;
         String n = name.toLowerCase(Locale.ROOT).trim();
-        if ("auto".equals(n) || byName.containsKey(n)) {
+        Mode m = byName.get(n);
+        if ("auto".equals(n) || (m != null && m.available())) {
             this.activeName = n;
             if (promptRefreshCallback != null) {
                 promptRefreshCallback.run();
@@ -97,6 +103,30 @@ public final class ModeController implements TurnRouter {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Canonical mode names a user can switch into: "auto" plus every registered,
+     * available mode, with aliases excluded. Drives {@code /mode} help so the
+     * advertised set is generated from the registry and never drifts from what
+     * {@link #setActive} actually accepts.
+     */
+    public List<String> availableModeNames() {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        names.add("auto");
+        for (Mode m : order) {
+            if (m.available()) names.add(m.name().toLowerCase(Locale.ROOT));
+        }
+        return List.copyOf(names);
+    }
+
+    /** Registered modes reserved/unavailable for selection (e.g. the web stub). */
+    public List<String> reservedModeNames() {
+        List<String> names = new ArrayList<>();
+        for (Mode m : order) {
+            if (!m.available()) names.add(m.name().toLowerCase(Locale.ROOT));
+        }
+        return List.copyOf(names);
     }
 
     /** Routes without hint; uses activeName. */

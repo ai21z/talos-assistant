@@ -16,4 +16,11 @@ public interface Mode {
 
     /** Execute and return a renderable Result; Optional.empty() means “not applicable”. */
     Optional<Result> handle(String rawLine, Path workspace, Context ctx) throws Exception;
+
+    /**
+     * Whether this mode can be selected via {@code /mode <name>}. Reserved or stub
+     * modes return {@code false} so the controller refuses to switch into them and
+     * never traps the user in a dead mode. Functional modes use the default.
+     */
+    default boolean available() { return true; }
 }
