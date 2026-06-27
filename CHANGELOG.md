@@ -49,6 +49,9 @@
   `talos setup models --profile` + a restart (the managed engine binds one model at
   launch); the listing only makes them discoverable. New `GgufCacheScanner` is
   depth-bounded and never throws, so `/models` cannot crash on a filesystem error.
+- [T881] Hardened the T877 GGUF cache scanner against malformed configured
+  `hf_cache_dir` strings. Invalid path syntax now degrades to an empty downloaded
+  list instead of turning `/models` into a catalog error.
 
 ## [0.10.6] - 2026-06-25
 

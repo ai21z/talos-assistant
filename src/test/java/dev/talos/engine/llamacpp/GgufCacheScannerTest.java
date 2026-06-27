@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -67,5 +68,16 @@ class GgufCacheScannerTest {
                 .map(ModelRef::name).toList();
 
         assertEquals(List.of("model-b"), names, names.toString());
+    }
+
+    @Test
+    void downloadedNotConfiguredIgnoresInvalidConfiguredCacheDir() {
+        EngineConfig cfg = () -> Map.of("engines", Map.of("llama_cpp", Map.of(
+                "hf_cache_dir", "bad\u0000path",
+                "model", "model-a")));
+
+        List<ModelRef> found = assertDoesNotThrow(() -> GgufCacheScanner.downloadedNotConfigured(cfg));
+
+        assertTrue(found.isEmpty(), found.toString());
     }
 }

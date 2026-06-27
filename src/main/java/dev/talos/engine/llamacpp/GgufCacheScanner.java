@@ -23,9 +23,9 @@ import java.util.stream.Stream;
  * plus a restart (the managed engine binds one model at launch); this class only
  * makes them discoverable, it does not select them.
  *
- * <p>Never throws: a missing, unreadable, or huge cache yields an empty list so
- * {@code /models} can never crash on a filesystem error. The walk is depth-bounded
- * to stay cheap even if the cache directory is misconfigured.
+ * <p>Never throws: a missing, malformed, unreadable, or huge cache yields an
+ * empty list so {@code /models} can never crash on a filesystem error. The walk
+ * is depth-bounded to stay cheap even if the cache directory is misconfigured.
  */
 public final class GgufCacheScanner {
 
@@ -70,12 +70,20 @@ public final class GgufCacheScanner {
         LlamaCppConfig lc = LlamaCppConfig.from(cfg);
         Set<String> configured = configuredNames(lc);
         List<ModelRef> result = new ArrayList<>();
-        for (ModelRef m : scanDownloaded(resolveCacheDir(lc.hfCacheDir()))) {
+        for (ModelRef m : scanDownloaded(safeResolveCacheDir(lc.hfCacheDir()))) {
             if (!configured.contains(m.name().toLowerCase(Locale.ROOT))) {
                 result.add(m);
             }
         }
         return List.copyOf(result);
+    }
+
+    private static Path safeResolveCacheDir(String configured) {
+        try {
+            return resolveCacheDir(configured);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     /** The HF cache directory: the configured value, or the default under the user home. */
