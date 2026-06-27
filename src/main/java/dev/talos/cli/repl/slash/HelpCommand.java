@@ -91,7 +91,8 @@ public final class HelpCommand implements Command {
                             "/set model <backend/model> switches the active model.",
                             "Use `talos setup models` outside the REPL to configure tested managed llama.cpp profiles.",
                             "Tested profiles: qwen2.5-coder-14b and gpt-oss-20b.",
-                            "Example: /set model llama_cpp/qwen2.5-coder-14b.")));
+                            "Example: /set model <backend/model> using a name shown by /models "
+                                    + "(managed llama.cpp exposes only the configured/running GGUF).")));
             default -> findSpec(q)
                     .map(spec -> (Result) new Result.Ok(detail(spec)))
                     .orElseGet(() -> new Result.Error("No such help topic or command: " + q, 204));
@@ -119,6 +120,7 @@ public final class HelpCommand implements Command {
         sb.append('\n');
         sb.append("  ").append(AnsiColor.grey("More help")).append('\n');
         sb.append("    ").append(AnsiColor.blue("/help all")).append("       all commands").append('\n');
+        sb.append("    ").append(AnsiColor.blue("/help models")).append("    installed models and switching").append('\n');
         sb.append("    ").append(AnsiColor.blue("/help rag")).append("       retrieval and workspace context").append('\n');
         sb.append("    ").append(AnsiColor.blue("/help security")).append("  approvals, audit, secrets").append('\n');
         sb.append("    ").append(AnsiColor.blue("/help debug")).append("     diagnostics and traces").append('\n');

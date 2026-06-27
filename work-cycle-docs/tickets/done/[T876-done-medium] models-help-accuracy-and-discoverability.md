@@ -1,6 +1,6 @@
-# [T876-open-medium] Models help accuracy and discoverability
+# [T876-done-medium] Models help accuracy and discoverability
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -63,3 +63,27 @@ the user at `/models` when it has no valid name.
 
 - Inner dev loop; no version bump. Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
 - Cross-ref T877 (REPL model discoverability) and T878 (profiles naming collision).
+
+## Closeout (2026-06-27)
+
+Implemented in the inner loop on `improvement/qodana-cleanup`:
+
+- `HelpCommand` models topic: replaced the runnable literal
+  `Example: /set model llama_cpp/qwen2.5-coder-14b` with an illustrative
+  `/set model <backend/model> using a name shown by /models (managed llama.cpp
+  exposes only the configured/running GGUF)`, so copy-paste no longer 404s on a
+  normal install. The tested-profile names and `talos setup models` guidance stay.
+- `HelpCommand` default page: added a `/help models` line to the "More help" block
+  so the MODELS topic is advertised like rag/security/debug.
+- `SetModelCommand`: extracted a `USAGE` constant ("Usage: /set model <name>" +
+  "Run /models to see installed model names.") used on both usage-error paths, so a
+  user who runs `/set` or `/set model` with no name is pointed at `/models` (the
+  404 path already tipped `/models`).
+
+Acceptance met: no runnable example that 404s on a normal install; `/help models`
+advertised; `/set` no-arg/error points at `/models`. Tests:
+`SimpleCommandsTest$Help` 16/0 (added illustrative-example and advertised-topic
+assertions; the existing model-switch-flow test stays green), `SetModelCommandTest`
+3/0 (added `usageErrorPointsAtModelsForDiscovery`). Focused suites BUILD SUCCESSFUL.
+Listing downloaded GGUFs is the separate T877; `/profiles` naming is T878. Broad
+`check` deferred to the end-of-batch candidate run.
