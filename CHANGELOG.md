@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T883] `/models` switching tip rewritten into two clear tiers so it answers
+  "can I `/set` this now, or must I configure it first?": entries shown as
+  `backend/model` are switchable now (`/set model <backend/model>`), while
+  "Downloaded GGUFs (not configured)" are on disk but not selectable until
+  configured (`talos setup models ...` + restart). Adds the managed-GGUF caveat
+  (single GGUF fixed at launch, no hot-swap) and keeps the `/profiles`
+  disambiguation. Doc/text-only.
 - [T874] `/mode` help and correctness: the advertised mode list is now generated
   from the `ModeController` registry (no hardcoded literal, so it cannot drift from
   what is actually selectable), bare `/mode` lists the available modes, the reserved

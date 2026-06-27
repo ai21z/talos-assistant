@@ -56,9 +56,14 @@ public final class ModelsCommand implements Command {
         appendDownloadedGroup(sb, downloaded);
         sb.append("""
 
-Tip: use /set model <backend/model> to switch among models visible above.
-Managed llama.cpp lists the configured/running model only. Downloaded GGUFs are not selectable until configured.
-To switch the managed GGUF model profile, run `talos setup models --profile <name> --write --force`, then restart Talos.
+Switching models:
+  - Entries shown as backend/model are ready now. Switch with: /set model <backend/model>
+  - "Downloaded GGUFs (not configured)" are on disk but not selectable yet.
+    Configure one with: talos setup models --profile <name> --write --force
+    then restart Talos.
+
+Managed llama.cpp runs a single GGUF, fixed at launch. To change which GGUF it runs,
+reconfigure as above and restart (no hot-swap).
 The /profiles command is unrelated: it manages workspace verification profiles, not models.
 """);
         return sb.toString();
