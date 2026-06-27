@@ -1,6 +1,6 @@
-# [T877-open-medium] REPL model discoverability: list downloaded GGUFs
+# [T877-done-medium] REPL model discoverability: list downloaded GGUFs
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -61,3 +61,31 @@ limitation that should be stated plainly rather than hidden.
 ## Known Risks
 
 - Listing must not spawn processes on Windows; use a filesystem/cache scan, not a server probe.
+
+## Closeout (2026-06-27)
+
+Implemented in the inner loop on `improvement/qodana-cleanup`.
+
+- New `dev.talos.engine.llamacpp.GgufCacheScanner`:
+  - `scanDownloaded(Path)` walks the HF cache (depth-bounded `Files.walk`, no
+    subprocess) for `*.gguf`, returning llama_cpp `ModelRef`s by file-stem name,
+    deduped + sorted. Never throws (empty on null/missing/IO error) so `/models`
+    cannot crash.
+  - `downloadedNotConfigured(EngineConfig)` resolves the cache dir from the
+    llama_cpp config (`hf_cache_dir`, else the default
+    `~/.talos/models/huggingface`) and drops the configured model / model_path /
+    hf_file from the result.
+- `ModelsCommand`: calls `downloadedNotConfigured(ctx.cfg())` and renders a
+  "Downloaded GGUFs (not configured)" section (bare names, since they are not
+  selectable until configured). The existing tip already states switching needs
+  `talos setup models --profile` + restart, so the constraint is stated, not hidden.
+
+Acceptance met: downloaded GGUFs are surfaced distinctly from the configured model
+via a no-subprocess `Files.walk` scan; switching-needs-restart is stated; the
+no-process property is structural (no ProcessBuilder/exec anywhere in the path --
+`installed()`'s HTTP probe is unchanged). Tests: `GgufCacheScannerTest` 4/0 (HF
+layout + flat dir, non-gguf ignored, null/missing dir empty, dedup across snapshots,
+configured-model exclusion via a lambda EngineConfig), `ModelsCommandTest` 3/0
+(downloaded section renders N entries by bare name; configured model still renders
+as backend/name; existing grouping + disambiguation green). Focused suites BUILD
+SUCCESSFUL. Broad `check` deferred to the end-of-batch candidate run.
