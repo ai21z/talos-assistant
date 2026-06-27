@@ -183,7 +183,7 @@ public final class HelpCommand implements Command {
           .append(AnsiColor.dim(hRule()))
           .append('\n')
           .append("  ")
-          .append(AnsiColor.grey("/help <cmd> for details"))
+          .append(AnsiColor.grey("/help <cmd> for full options"))
           .append(AnsiColor.dim(dot))
           .append(AnsiColor.grey("Tab to autocomplete"))
           .append('\n');
@@ -258,8 +258,13 @@ public final class HelpCommand implements Command {
         String usage = spec.usage();
         if (usage.length() <= USAGE_COL) return usage;
 
-        String cmd = "/" + spec.name();
-        String rest = usage.substring(cmd.length()).trim();
+        // Derive the command token from the usage string itself (the form the user
+        // types), NOT spec.name(): a command whose usage leads with an alias — e.g.
+        // explain-last-turn with usage "/last ..." — would otherwise be sliced
+        // mid-token by substring(("/" + name).length()).
+        int sp = usage.indexOf(' ');
+        String cmd = sp < 0 ? usage : usage.substring(0, sp);
+        String rest = sp < 0 ? "" : usage.substring(sp + 1).trim();
 
         // Collapse multiple bracketed flags → [opts]
         rest = rest.replaceAll("\\[--[^]]+]", "[opts]")

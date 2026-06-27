@@ -456,6 +456,25 @@ class SimpleCommandsTest {
             assertFalse(text.contains("structured aud..."), text);
         }
 
+        @Test void help_all_renders_alias_usage_token_not_verbose_primary_name() {
+            var cmd = new HelpCommand(fullRegistry());
+            String text = cmd.execute("all", ctx).toString();
+            // explain-last-turn's usage leads with "/last"; /help all must show the
+            // typed form, never the verbose primary name or a mid-token-sliced fragment.
+            assertTrue(text.contains("/last"), text);
+            assertFalse(text.contains("/explain-last-turn"),
+                    "should render the typed alias /last, not the verbose primary name: " + text);
+            assertFalse(text.contains("ls|sources"),
+                    "must not mid-token-slice the usage string: " + text);
+        }
+
+        @Test void help_all_footer_points_to_per_command_full_options() {
+            var cmd = new HelpCommand(fullRegistry());
+            String text = cmd.execute("all", ctx).toString();
+            assertTrue(text.contains("/help <cmd>"), text);
+            assertTrue(text.contains("full options"), text);
+        }
+
         @Test void help_debug_topic() {
             var cmd = new HelpCommand(registry());
             Result r = cmd.execute("debug", ctx);

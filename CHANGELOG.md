@@ -9,6 +9,13 @@
   instead of trapping the user in a dead mode), and the canonical name `unified` is
   advertised rather than only the `chat` alias. Adds `Mode.available()`,
   `ModeController.availableModeNames()`/`reservedModeNames()`, and regression tests.
+- [T875] `/help all` now renders each command under the name the user actually
+  types: `compactUsage` derives the command token from the usage string's leading
+  token instead of `spec.name()`, so `explain-last-turn` (usage `/last ...`) shows
+  as `/last` rather than the verbose primary name (previously one length-threshold
+  from printing a mid-token-sliced fragment). The overview footer now points to
+  `/help <cmd>` for full options, where subcommands collapsed to `[opts]` are shown
+  in full.
 
 ## [0.10.6] - 2026-06-25
 

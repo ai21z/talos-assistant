@@ -1,6 +1,6 @@
-# [T875-open-low] /help all usage rendering: name-vs-usage mismatch and option collapse
+# [T875-done-low] /help all usage rendering: name-vs-usage mismatch and option collapse
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -61,3 +61,23 @@ silently corrupts or over-collapses a usage string.
 ## Work-Test Cycle Notes
 
 - Inner dev loop; no version bump. Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
+
+## Closeout (2026-06-27)
+
+Implemented in the inner loop on `improvement/qodana-cleanup`. `HelpCommand.compactUsage`
+now derives the command token from the usage string's own leading token (the form the
+user types) instead of `"/" + spec.name()`, eliminating the mid-token slice. Only
+`explain-last-turn` changes (its usage leads with `/last`, not `/explain-last-turn`);
+every other command's usage already leads with `"/" + name`, so output is identical.
+`/help all` now shows `/last [opts]` instead of `/explain-last-turn [opts]`. Finding #2
+(enumerated options collapse to `[opts]` in the overview) is the accepted space tradeoff
+-- the per-command detail is one step away -- and the footer now reads
+`/help <cmd> for full options` to point there explicitly.
+
+Acceptance met: the command token comes from the usage string (no mid-token slice
+possible); `/last` renders under its typed name; footer points to per-command full
+options. Tests: `SimpleCommandsTest$Help` 14/0, including
+`help_all_renders_alias_usage_token_not_verbose_primary_name` (asserts `/last`
+present, `/explain-last-turn` absent) and `help_all_footer_points_to_per_command_full_options`.
+Focused `SimpleCommandsTest` BUILD SUCCESSFUL. Broad `check` deferred to the
+end-of-batch candidate run.
