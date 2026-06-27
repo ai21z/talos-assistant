@@ -79,6 +79,14 @@ class ProfilesCommandTest {
     }
 
     @Test
+    void specSummaryDisambiguatesFromModelProfiles() throws IOException {
+        ProfilesCommand command = new ProfilesCommand(workspace(), store());
+        String summary = command.spec().summary();
+        assertTrue(summary.contains("verification"), summary);
+        assertTrue(summary.contains("not model/GGUF"), summary);
+    }
+
+    @Test
     void revokeReturnsAPinnedDeclarationToUntrusted() throws IOException {
         Path ws = workspace();
         declare(ws);

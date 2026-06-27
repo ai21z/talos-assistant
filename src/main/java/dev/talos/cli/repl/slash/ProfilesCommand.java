@@ -42,7 +42,7 @@ public final class ProfilesCommand implements Command {
     public CommandSpec spec() {
         return new CommandSpec("profiles", List.of(),
                 "/profiles [list|trust|revoke]",
-                "Inspect or trust workspace verification profiles.",
+                "Inspect or trust workspace verification profiles (.talos/profiles.yaml; not model/GGUF profiles).",
                 CommandGroup.SECURITY);
     }
 
