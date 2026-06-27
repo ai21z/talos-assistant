@@ -1,6 +1,6 @@
-# [T880-open-medium] UTF-8 stdout/stderr encoding for interactive lane glyphs
+# [T880-done-medium] UTF-8 stdout/stderr encoding for interactive lane glyphs
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -76,16 +76,16 @@ is the manual transcript + a screenshot.
 - Inner dev loop; no version bump. Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
 - This was greenlit for an immediate fix during testing but deferred to a ticket under the "freeze the branch, ticket everything" decision (2026-06-26).
 
-## Implementation (2026-06-27, pending manual verification)
+## Closeout (2026-06-27, glyphs confirmed)
 
 `build.gradle.kts` `applicationDefaultJvmArgs` now includes `-Dstdout.encoding=UTF-8`
-and `-Dstderr.encoding=UTF-8` (alongside the existing `-Dfile.encoding=UTF-8`).
-`gradlew help` configures clean.
+and `-Dstderr.encoding=UTF-8` (alongside the existing `-Dfile.encoding=UTF-8`). The
+global install was rebuilt (build 2026-06-27T10:30Z) with the flags confirmed in the
+generated launcher:
+`DEFAULT_JVM_OPTS="-Dfile.encoding=UTF-8" "-Dstdout.encoding=UTF-8" "-Dstderr.encoding=UTF-8" "-XX:+UseZGC"`.
 
-This ticket stays OPEN until the glyph rendering is confirmed on a refreshed global
-install. The fix can only be verified by a human running `talos run` on a
-Unicode-capable terminal and seeing the bullet/arrow markers instead of `?`:
-non-interactive/piped output deliberately uses the ASCII fallback, so neither the
-bug nor its fix is observable headlessly. The end-of-batch global rebuild
-(`installDist` + mirror to `%LOCALAPPDATA%\Programs\talos`) will refresh the install
-for that confirmation; close the ticket once the glyphs render.
+Acceptance MET: the owner ran `talos run` on a real terminal and confirmed the
+route/tool-step lane glyphs render as `•`/`→`/`✓` (not `?`). The ASCII fallback for
+non-Unicode/redirected output is unchanged. This was the one acceptance that could
+not be verified headlessly (non-interactive output uses the ASCII fallback), so the
+owner's visual confirmation is the closing evidence.
