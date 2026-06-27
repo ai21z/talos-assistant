@@ -32,6 +32,11 @@
   `/audit` (enable|disable), `/secret` del (also delete, rm), and
   `/privacy private` (enable|disable). Per owner direction the synonyms are
   documented, not removed.
+- [T880] Interactive lane glyphs no longer render as `?` on Windows: the launcher
+  now sets `-Dstdout.encoding=UTF-8` and `-Dstderr.encoding=UTF-8` alongside
+  `-Dfile.encoding=UTF-8`, so on Java 18+ `System.out`/`err` emit UTF-8 instead of
+  the Windows console code page (which could not encode the bullet/arrow markers).
+  The ASCII glyph fallback for non-Unicode/redirected output is unchanged.
 
 ## [0.10.6] - 2026-06-25
 

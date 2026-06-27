@@ -75,3 +75,17 @@ is the manual transcript + a screenshot.
 
 - Inner dev loop; no version bump. Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
 - This was greenlit for an immediate fix during testing but deferred to a ticket under the "freeze the branch, ticket everything" decision (2026-06-26).
+
+## Implementation (2026-06-27, pending manual verification)
+
+`build.gradle.kts` `applicationDefaultJvmArgs` now includes `-Dstdout.encoding=UTF-8`
+and `-Dstderr.encoding=UTF-8` (alongside the existing `-Dfile.encoding=UTF-8`).
+`gradlew help` configures clean.
+
+This ticket stays OPEN until the glyph rendering is confirmed on a refreshed global
+install. The fix can only be verified by a human running `talos run` on a
+Unicode-capable terminal and seeing the bullet/arrow markers instead of `?`:
+non-interactive/piped output deliberately uses the ASCII fallback, so neither the
+bug nor its fix is observable headlessly. The end-of-batch global rebuild
+(`installDist` + mirror to `%LOCALAPPDATA%\Programs\talos`) will refresh the install
+for that confirmation; close the ticket once the glyphs render.

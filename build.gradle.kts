@@ -763,6 +763,13 @@ application {
     mainClass.set("dev.talos.app.Main")
     applicationDefaultJvmArgs = listOf(
         "-Dfile.encoding=UTF-8",
+        // T880: on Java 18+ System.out/err use stdout.encoding/stderr.encoding, which
+        // default to the Windows console code page (e.g. cp1252) and replace the
+        // interactive lane glyphs (bullet, arrow) with '?'. Pin them to UTF-8 so a
+        // Unicode-capable terminal renders them; the ASCII fallback still covers
+        // non-Unicode/redirected output.
+        "-Dstdout.encoding=UTF-8",
+        "-Dstderr.encoding=UTF-8",
         "-XX:+UseZGC"
     )
 }
