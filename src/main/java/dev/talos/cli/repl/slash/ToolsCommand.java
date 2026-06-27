@@ -20,8 +20,11 @@ import java.util.List;
  */
 public final class ToolsCommand implements Command {
 
-    /** Column width for tool name display. */
-    private static final int NAME_COL = 20;
+    /** Word-wrap width for tool descriptions; conservative so the renderer never re-wraps a line. */
+    private static final int WRAP_WIDTH = 70;
+
+    /** Hanging indent for a tool's description and params lines. */
+    private static final String DESC_INDENT = "      ";
 
     @Override
     public CommandSpec spec() {
@@ -57,24 +60,29 @@ public final class ToolsCommand implements Command {
         sb.append('\n');
 
         // ── tool list ──────────────────────────────────────────────────
+        // Each tool is its own block: a short "name  badge" line, then the full
+        // description word-wrapped at a fixed width with a hanging indent, then the
+        // params. No line overflows the content width, so the answer renderer never
+        // re-wraps and mangles the layout (T882).
         for (ToolDescriptor d : sorted) {
-            String badge = badge(d.riskLevel());
             String name = stripPrefix(d.name());
 
-            sb.append("    ")
-              .append(AnsiColor.blue(pad(name, NAME_COL)))
-              .append(badge)
-              .append(AnsiColor.grey(d.description()))
+            sb.append("  ")
+              .append(AnsiColor.blue(name))
+              .append("  ")
+              .append(badge(d.riskLevel()))
               .append('\n');
 
-            // Show parameters if schema is available
+            for (String line : wrap(d.description(), WRAP_WIDTH)) {
+                sb.append(DESC_INDENT).append(AnsiColor.grey(line)).append('\n');
+            }
+
             String params = extractParams(d.parametersSchema());
             if (params != null) {
-                sb.append("    ")
-                  .append(pad("", NAME_COL))
-                  .append(AnsiColor.dim(params))
-                  .append('\n');
+                sb.append(DESC_INDENT).append(AnsiColor.dim(params)).append('\n');
             }
+
+            sb.append('\n');
         }
 
         // ── footer ─────────────────────────────────────────────────────
@@ -95,9 +103,24 @@ public final class ToolsCommand implements Command {
 
     // ── helpers ──────────────────────────────────────────────────────────
 
-    /** Pad string to exactly {@code width} characters. */
-    private static String pad(String s, int width) {
-        return s.length() >= width ? s + " " : String.format("%-" + width + "s", s);
+    /** Word-wrap text into lines no longer than {@code width}, breaking on spaces. */
+    static java.util.List<String> wrap(String text, int width) {
+        var lines = new java.util.ArrayList<String>();
+        if (text == null || text.isBlank()) return lines;
+        var line = new StringBuilder();
+        for (String word : text.trim().split("\\s+")) {
+            if (line.length() == 0) {
+                line.append(word);
+            } else if (line.length() + 1 + word.length() <= width) {
+                line.append(' ').append(word);
+            } else {
+                lines.add(line.toString());
+                line.setLength(0);
+                line.append(word);
+            }
+        }
+        if (line.length() > 0) lines.add(line.toString());
+        return lines;
     }
 
     /** Strip "talos." prefix for cleaner display. */
@@ -108,12 +131,12 @@ public final class ToolsCommand implements Command {
     /** Risk level badge: colored tag before description. */
     private static String badge(ToolRiskLevel risk) {
         if (risk == null || risk == ToolRiskLevel.READ_ONLY) {
-            return AnsiColor.green("read ") + " ";
+            return AnsiColor.green("read");
         }
         if (risk == ToolRiskLevel.WRITE) {
-            return AnsiColor.yellow("write") + " ";
+            return AnsiColor.yellow("write");
         }
-        return AnsiColor.red("destructive") + " ";
+        return AnsiColor.red("destructive");
     }
 
     /**
