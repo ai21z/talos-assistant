@@ -266,6 +266,38 @@ class RenderEngineTest {
         }
     }
 
+    // ── printTurnSeparator (T884) ────────────────────────────────────────
+
+    @Nested
+    class TurnSeparator {
+
+        @Test
+        void printsADimRuleBetweenTurns() {
+            var re = semanticEngine(true);
+            re.printTurnSeparator();
+
+            String text = output();
+            assertTrue(text.contains("─────"), "should print a horizontal rule: " + text);
+        }
+
+        @Test
+        void suppressedInNonInteractiveMode() {
+            var re = semanticEngine(false);
+            re.printTurnSeparator();
+
+            assertEquals("", output(),
+                    "scripted/redirected transcripts must stay byte-identical");
+        }
+
+        @Test
+        void ruleLineIsWidthBoundedAndGlyphAware() {
+            assertEquals("-".repeat(40), RenderEngine.turnSeparatorLine(40, false));
+            assertEquals("─".repeat(40), RenderEngine.turnSeparatorLine(40, true));
+            assertEquals(120, RenderEngine.turnSeparatorLine(999, false).length(), "clamps to max width");
+            assertEquals(8, RenderEngine.turnSeparatorLine(1, false).length(), "clamps to min width");
+        }
+    }
+
     @Nested
     class ToolProgress {
 

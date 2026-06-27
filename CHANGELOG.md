@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T884] Turns now read as distinct blocks: after a conversational turn the REPL
+  prints a dim full-width rule (blank line, rule, blank line) before the next
+  `talos [mode] >` prompt, so turn 2 no longer butts up against the end of turn 1.
+  Interactive-only render chrome (scoped to real prompt turns, not slash-command
+  output); scripted/redirected transcripts stay byte-for-byte unchanged.
 - [T883] `/models` switching tip rewritten into two clear tiers so it answers
   "can I `/set` this now, or must I configure it first?": entries shown as
   `backend/model` are switchable now (`/set model <backend/model>`), while

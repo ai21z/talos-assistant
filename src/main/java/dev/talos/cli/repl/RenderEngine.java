@@ -199,6 +199,36 @@ public final class RenderEngine {
     }
 
     /**
+     * Visual separator between conversational turns (T884): a blank line, a dim
+     * full-width rule, and a blank line, so consecutive turns read as distinct
+     * blocks instead of running straight into the next prompt.
+     *
+     * <p>Interactive-only render chrome: scripted/redirected transcripts stay
+     * byte-for-byte unchanged so the evidence chain that string-matches those
+     * transcripts is preserved. The rule never enters any {@link Result}.
+     */
+    public void printTurnSeparator() {
+        if (!interactive) return;
+        int width = dev.talos.cli.ui.TerminalWidths.resolve(
+                terminalWidth,
+                terminalWidth != null ? System.getenv() : Map.of(),
+                ANSWER_PANE_DEFAULT_WIDTH);
+        out.println();
+        out.println(theme.muted(turnSeparatorLine(width, unicodeSafe())));
+        out.println();
+        out.flush();
+    }
+
+    /**
+     * Build the turn-separator rule body (no color), width-bounded. Package-private
+     * so the width/glyph contract can be asserted without a live terminal.
+     */
+    static String turnSeparatorLine(int width, boolean unicode) {
+        int w = Math.max(8, Math.min(width, 120));
+        return (unicode ? "─" : "-").repeat(w);
+    }
+
+    /**
      * Starts the spinner (non-blocking).
      * Suppressed in non-interactive mode to avoid flooding piped output.
      */

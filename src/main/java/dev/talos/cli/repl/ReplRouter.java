@@ -201,6 +201,12 @@ public final class ReplRouter {
                         compaction.summarizedPairs(), compaction.keptPairs());
             }
         }
+
+        // T884: close the turn with a dim rule so it reads as a distinct block
+        // before the next prompt. Interactive-only render chrome (scripted
+        // transcripts stay byte-identical); scoped to real prompt turns, not
+        // slash-command output.
+        render.printTurnSeparator();
     }
 
     // ── Accessors ────────────────────────────────────────────────────────
