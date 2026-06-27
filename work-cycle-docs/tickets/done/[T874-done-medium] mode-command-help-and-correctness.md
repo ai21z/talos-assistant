@@ -1,6 +1,6 @@
-# [T874-open-medium] Mode command help and correctness cluster
+# [T874-done-medium] Mode command help and correctness cluster
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -77,3 +77,27 @@ canonical names (not just aliases) are discoverable.
 - Inner dev loop; not a candidate closeout. No version bump.
 - Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
 - `SimpleCommandsTest` currently asserts the misleading hardcoded mode-list string; that assertion must move to the registry-derived form.
+
+## Closeout (2026-06-27)
+
+Implemented in the inner loop on `improvement/qodana-cleanup`. Changes:
+
+- `Mode.available()` (default `true`); `WebMode.available()` returns `false`.
+- `ModeController.setActive` rejects unavailable/reserved modes; added
+  `availableModeNames()` (auto + registered available modes, aliases excluded) and
+  `reservedModeNames()`, both derived from the live registry.
+- `ModeCommand` derives its spec summary, error messages, and listing from the
+  controller: bare `/mode` lists the available modes; `/mode web` returns
+  "Mode 'web' is reserved and not yet available"; unknown names list the set.
+- `HelpCommand` default page passes `null` for the `/mode` override so it shows the
+  dynamic registry-derived summary instead of the terse hardcoded text.
+
+Acceptance met: advertised set is registry-generated (no literal, cannot drift);
+`/mode web` cannot trap (rejected, stays `auto`); bare `/mode` lists modes;
+`unified` is advertised while the `chat` alias still functions but is not
+advertised. Tests (focused run BUILD SUCCESSFUL): `ModeControllerTest` 45/0 (added
+reserved-web rejection, `availableModeNames`, `reservedModeNames`),
+`SimpleCommandsTest$Mode` 13/0 (added bare-lists, web-rejected, summary),
+`SimpleCommandsTest$Help` 12/0 (updated the `help all` assertion to the
+registry-derived string). Broad `check` and trust suites deferred to the
+end-of-batch candidate run.
