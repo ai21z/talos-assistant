@@ -99,7 +99,9 @@ class ToolsCommandTest {
         var ctx = Context.builder(new Config()).toolRegistry(registry).build();
 
         String text = cmd.execute("", ctx).toString();
-        assertTrue(text.contains("old_string must match the file exactly - strip"), text);
+        // description is now word-wrapped (T882), so collapse whitespace before the phrase check
+        String collapsed = text.replaceAll("\\s+", " ");
+        assertTrue(collapsed.contains("old_string must match the file exactly - strip"), text);
         assertFalse(text.contains("? strip"), text);
         assertTrue(text.chars().allMatch(ch -> ch < 128),
                 "installed transcript path should not need replacement characters: " + text);
@@ -145,6 +147,38 @@ class ToolsCommandTest {
     void extractParams_null_schema_returns_null() {
         assertNull(ToolsCommand.extractParams(null));
         assertNull(ToolsCommand.extractParams(""));
+    }
+
+    @Test
+    void wrap_breaks_long_text_into_width_bounded_lines_that_rejoin() {
+        String text = "Apply a batch of workspace operations from a native operations "
+                + "array (preferred) or a legacy operations_json string.";
+        var lines = ToolsCommand.wrap(text, 40);
+        assertFalse(lines.isEmpty());
+        for (String line : lines) {
+            assertTrue(line.length() <= 40, "line over width: '" + line + "'");
+        }
+        assertEquals(text, String.join(" ", lines), "wrapped lines should rejoin to the original");
+    }
+
+    @Test
+    void wrap_handles_null_and_blank() {
+        assertTrue(ToolsCommand.wrap(null, 40).isEmpty());
+        assertTrue(ToolsCommand.wrap("   ", 40).isEmpty());
+    }
+
+    @Test
+    void long_description_tool_renders_with_no_over_width_line() {
+        var cmd = new ToolsCommand();
+        var registry = new ToolRegistry();
+        registry.register(new FileEditTool());   // has a long, multi-sentence description
+        var ctx = Context.builder(new Config()).toolRegistry(registry).build();
+
+        String text = cmd.execute("", ctx).toString();
+        for (String raw : text.split("\n", -1)) {
+            String line = raw.replaceAll("\\[[0-9;]*m", ""); // strip ANSI -> visible width
+            assertTrue(line.length() <= 80, "over-width /tools line (" + line.length() + "): '" + line + "'");
+        }
     }
 }
 

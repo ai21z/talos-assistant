@@ -52,6 +52,11 @@
 - [T881] Hardened the T877 GGUF cache scanner against malformed configured
   `hf_cache_dir` strings. Invalid path syntax now degrades to an empty downloaded
   list instead of turning `/models` into a catalog error.
+- [T882] Fixed the `/tools` page layout. Tool descriptions were rendered full-width
+  on the name line and overflowed, re-wrapping to column 0 and mangling the page.
+  Each tool now renders as a short `name  badge` line, then the full description
+  word-wrapped at a fixed width with a hanging indent, then its params -- no line
+  exceeds the content width, so the renderer no longer re-wraps it.
 
 ## [0.10.6] - 2026-06-25
 
