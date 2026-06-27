@@ -42,6 +42,13 @@
   `/profiles` command is unrelated (it manages workspace verification profiles, not
   models); `/profiles`'s own summary reads "...verification profiles
   (.talos/profiles.yaml; not model/GGUF profiles)".
+- [T877] `/models` now surfaces downloaded-but-not-configured managed llama.cpp
+  GGUFs in a "Downloaded GGUFs (not configured)" section, via a safe, no-subprocess
+  scan of the Hugging Face cache (the configured `hf_cache_dir`, default
+  `~/.talos/models/huggingface`). Switching to one still requires
+  `talos setup models --profile` + a restart (the managed engine binds one model at
+  launch); the listing only makes them discoverable. New `GgufCacheScanner` is
+  depth-bounded and never throws, so `/models` cannot crash on a filesystem error.
 
 ## [0.10.6] - 2026-06-25
 

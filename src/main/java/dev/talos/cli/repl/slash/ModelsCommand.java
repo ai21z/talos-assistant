@@ -3,6 +3,7 @@ package dev.talos.cli.repl.slash;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.core.engine.EngineRegistry;
+import dev.talos.engine.llamacpp.GgufCacheScanner;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.ArrayList;
@@ -19,10 +20,13 @@ public final class ModelsCommand implements Command {
             try (var reg = new EngineRegistry(ctx.cfg())) {
                 var cat = reg.compositeCatalog();
                 var list = cat.installed(); // Use installed(), not all() to avoid subprocess calls
-                if (list.isEmpty()) {
+                // T877: surface downloaded-but-not-configured GGUFs via a safe, no-subprocess
+                // scan of the HF cache so a user can SEE what they have on disk.
+                var downloaded = GgufCacheScanner.downloadedNotConfigured(ctx.cfg());
+                if (list.isEmpty() && downloaded.isEmpty()) {
                     return new Result.Info("No models found. Run `talos setup models` to configure managed llama.cpp, or select a configured legacy backend.");
                 }
-                return new Result.Ok(renderInstalledModels(list));
+                return new Result.Ok(renderInstalledModels(list, downloaded));
             }
         } catch (Exception e) {
             // Friendly error instead of crashing the REPL
@@ -31,7 +35,7 @@ public final class ModelsCommand implements Command {
         }
     }
 
-    static String renderInstalledModels(List<ModelRef> models) {
+    static String renderInstalledModels(List<ModelRef> models, List<ModelRef> downloaded) {
         List<ModelRef> managed = new ArrayList<>();
         List<ModelRef> ollama = new ArrayList<>();
         List<ModelRef> other = new ArrayList<>();
@@ -49,6 +53,7 @@ public final class ModelsCommand implements Command {
         appendGroup(sb, "Recommended managed llama.cpp", managed);
         appendGroup(sb, "Legacy/optional Ollama", ollama);
         appendGroup(sb, "Other configured backends", other);
+        appendDownloadedGroup(sb, downloaded);
         sb.append("""
 
 Tip: use /set model <backend/model> to switch among models visible above.
@@ -66,6 +71,22 @@ The /profiles command is unrelated: it manages workspace verification profiles, 
         sb.append(title).append(":\n");
         for (ModelRef model : models) {
             sb.append("  ").append(model.backend()).append("/").append(model.name()).append("\n");
+        }
+        sb.append('\n');
+    }
+
+    /**
+     * T877: downloaded GGUFs present on disk but not the configured model. Rendered
+     * by bare name (not backend/name) because they are not selectable via /set until
+     * configured -- the tip below explains how to configure one.
+     */
+    private static void appendDownloadedGroup(StringBuilder sb, List<ModelRef> downloaded) {
+        if (downloaded == null || downloaded.isEmpty()) {
+            return;
+        }
+        sb.append("Downloaded GGUFs (not configured):\n");
+        for (ModelRef model : downloaded) {
+            sb.append("  ").append(model.name()).append("\n");
         }
         sb.append('\n');
     }
