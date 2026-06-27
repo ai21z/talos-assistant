@@ -29,9 +29,13 @@ class ModelsCommandTest {
         assertTrue(ollama > legacy, text);
         assertTrue(other > ollama, text);
         assertTrue(compat > other, text);
-        assertTrue(text.contains("Managed llama.cpp lists the configured/running model only"), text);
-        assertTrue(text.contains("Downloaded GGUFs are not selectable until configured"), text);
+        // T883: the tip is now explicit in two tiers so the user knows what is
+        // directly switchable vs what must be configured first.
+        assertTrue(text.contains("ready now"), text);                       // tier 1: backend/model entries
+        assertTrue(text.contains("/set model <backend/model>"), text);      // how to switch them
+        assertTrue(text.contains("not selectable yet"), text);              // tier 2: downloaded-not-configured
         assertTrue(text.contains("talos setup models --profile <name> --write --force"), text);
+        assertTrue(text.contains("no hot-swap"), text);                     // managed GGUF caveat
     }
 
     @Test
