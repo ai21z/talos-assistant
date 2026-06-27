@@ -1,5 +1,8 @@
 package dev.talos.cli.repl.slash;
 
+import dev.talos.cli.repl.Context;
+import dev.talos.core.Config;
+import dev.talos.runtime.Result;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,5 +28,19 @@ class SetModelCommandTest {
         assertTrue(text.contains("Model not found: ollama/gpt-oss:20b"), text);
         assertTrue(text.contains("Tip: /models"), text);
         assertFalse(text.contains("configured/running GGUF"), text);
+    }
+
+    @Test
+    void usageErrorPointsAtModelsForDiscovery() throws Exception {
+        var ctx = Context.builder(new Config()).build();
+        SetModelCommand cmd = new SetModelCommand();
+
+        Result noName = cmd.execute("model", ctx);  // /set model  (no name)
+        Result noSub = cmd.execute("", ctx);          // /set        (no subcommand)
+
+        assertTrue(noName.toString().contains("/models"),
+                "the no-name usage error should point the user at /models: " + noName);
+        assertTrue(noSub.toString().contains("/models"),
+                "the no-subcommand usage error should point the user at /models: " + noSub);
     }
 }

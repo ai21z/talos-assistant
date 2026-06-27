@@ -16,6 +16,12 @@
   from printing a mid-token-sliced fragment). The overview footer now points to
   `/help <cmd>` for full options, where subcommands collapsed to `[opts]` are shown
   in full.
+- [T876] Models help accuracy and discoverability: the `/help models` example no
+  longer hardcodes a specific GGUF (`/set model llama_cpp/qwen2.5-coder-14b`) that
+  404s unless that profile is the configured one -- it points to a name shown by
+  `/models`; the `/help models` topic is advertised in the default "More help"
+  block; and `/set` with no/blank model name now points the user at `/models` for
+  discovery (the not-found path already did).
 
 ## [0.10.6] - 2026-06-25
 

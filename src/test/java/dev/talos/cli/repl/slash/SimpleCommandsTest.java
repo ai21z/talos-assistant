@@ -500,6 +500,21 @@ class SimpleCommandsTest {
             assertTrue(text.contains("qwen2.5-coder-14b"), text);
         }
 
+        @Test void help_models_example_is_illustrative_not_a_404ing_literal() {
+            var cmd = new HelpCommand(fullRegistry());
+            String text = cmd.execute("models", ctx).toString();
+            assertFalse(text.contains("/set model llama_cpp/qwen2.5-coder-14b"),
+                    "must not present a specific GGUF as a runnable example (404s unless configured): " + text);
+            assertTrue(text.contains("/models"), text);
+        }
+
+        @Test void default_help_advertises_the_models_topic() {
+            var cmd = new HelpCommand(fullRegistry());
+            String text = cmd.execute("", ctx).toString();
+            assertTrue(text.contains("/help models"),
+                    "the MODELS topic page should be advertised like rag/security/debug: " + text);
+        }
+
         @Test void help_security_topic() {
             var cmd = new HelpCommand(registry());
             Result r = cmd.execute("security", ctx);

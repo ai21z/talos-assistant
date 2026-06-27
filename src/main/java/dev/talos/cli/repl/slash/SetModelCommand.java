@@ -8,6 +8,10 @@ import java.util.List;
 import java.util.Locale;
 
 public final class SetModelCommand implements Command {
+
+    private static final String USAGE =
+            "Usage: /set model <name>\nRun /models to see installed model names.";
+
     @Override public CommandSpec spec() {
         return new CommandSpec("set", List.of(), "/set model <name>", "Switch active model.",
                 CommandGroup.MODELS);
@@ -19,10 +23,10 @@ public final class SetModelCommand implements Command {
         String a = args == null ? "" : args.trim();
         String[] parts = a.split("\\s+", 2);
         if (parts.length == 0 || !"model".equals(parts[0].toLowerCase(Locale.ROOT))) {
-            return new Result.Error("Usage: /set model <name>", 200);
+            return new Result.Error(USAGE, 200);
         }
         String name = parts.length > 1 ? parts[1].trim() : "";
-        if (name.isEmpty()) return new Result.Error("Usage: /set model <name>", 200);
+        if (name.isEmpty()) return new Result.Error(USAGE, 200);
 
         String sanitized = name.replaceAll("[^A-Za-z0-9._:/-]", "");
         if (sanitized.isEmpty()) return new Result.Error("Invalid model name.", 400);
