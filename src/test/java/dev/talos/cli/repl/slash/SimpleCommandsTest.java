@@ -376,6 +376,27 @@ class SimpleCommandsTest {
         @Test void spec_name() {
             assertEquals("mode", cmd.spec().name());
         }
+
+        @Test void bare_mode_lists_available_modes() {
+            String text = cmd.execute("", ctx).toString();
+            assertTrue(text.contains("Available:"), text);
+            assertTrue(text.contains("unified"), text);
+            assertTrue(text.contains("auto"), text);
+        }
+
+        @Test void reserved_web_mode_is_rejected_and_does_not_switch() {
+            Result r = cmd.execute("web", ctx);
+            assertInstanceOf(Result.Error.class, r);
+            assertTrue(r.toString().toLowerCase(java.util.Locale.ROOT).contains("reserved"), r.toString());
+            assertEquals("auto", modes.getActiveName(), "must not trap into the reserved web stub");
+        }
+
+        @Test void spec_summary_lists_unified_and_marks_web_reserved() {
+            String summary = cmd.spec().summary();
+            assertTrue(summary.contains("unified"), summary);
+            assertTrue(summary.contains("web reserved"), summary);
+            assertFalse(summary.contains("chat"), "advertise the canonical name, not the chat alias: " + summary);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -429,8 +450,8 @@ class SimpleCommandsTest {
 
             assertInstanceOf(Result.Ok.class, r);
             String text = r.toString();
-            assertTrue(text.contains("Available: auto, rag, chat, dev, ask, web (reserved)"), text);
-            assertFalse(text.contains("Available: auto, rag, c..."), text);
+            assertTrue(text.contains("Switch mode: auto, dev, rag, ask, unified (web reserved)"), text);
+            assertTrue(text.contains("(web reserved)"), text);
             assertTrue(text.contains("Inspect the latest turn from structured audit data"), text);
             assertFalse(text.contains("structured aud..."), text);
         }

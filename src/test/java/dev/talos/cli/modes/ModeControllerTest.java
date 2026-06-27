@@ -96,6 +96,35 @@ class ModeControllerTest {
         assertEquals("unified", mc.getActiveName());
     }
 
+    // ── Reserved-mode and advertised-set discipline (T874) ───────────────
+
+    @Test
+    void defaultController_rejects_reserved_web_mode() {
+        ModeController mc = ModeController.defaultController();
+        assertFalse(mc.setActive("web"),
+                "web is a reserved stub and must not be settable (no trap into a dead mode)");
+        assertEquals("auto", mc.getActiveName(), "Should remain auto after rejecting reserved web");
+    }
+
+    @Test
+    void availableModeNames_lists_canonical_and_excludes_reserved_and_aliases() {
+        ModeController mc = ModeController.defaultController();
+        var names = mc.availableModeNames();
+        assertTrue(names.contains("auto"), names.toString());
+        assertTrue(names.contains("dev"), names.toString());
+        assertTrue(names.contains("rag"), names.toString());
+        assertTrue(names.contains("ask"), names.toString());
+        assertTrue(names.contains("unified"), names.toString());
+        assertFalse(names.contains("web"), "reserved web must not be advertised as available");
+        assertFalse(names.contains("chat"), "chat is an alias, not a canonical mode name");
+    }
+
+    @Test
+    void reservedModeNames_contains_web() {
+        ModeController mc = ModeController.defaultController();
+        assertTrue(mc.reservedModeNames().contains("web"), mc.reservedModeNames().toString());
+    }
+
     // ── Edge cases ──────────────────────────────────────────────────────
 
     @Test

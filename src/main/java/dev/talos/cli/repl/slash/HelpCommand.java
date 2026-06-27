@@ -107,7 +107,7 @@ public final class HelpCommand implements Command {
         sb.append("  ").append(AnsiColor.grey("Common commands")).append('\n');
 
         appendIfRegistered(sb, "status", "workspace, model, index, policy");
-        appendIfRegistered(sb, "mode", "switch operating mode");
+        appendIfRegistered(sb, "mode", null);
         appendIfRegistered(sb, "models", "list installed models; switch with /set model <backend/model>");
         appendIfRegistered(sb, "reindex", "refresh local index");
         appendIfRegistered(sb, "files", "list indexed files");
