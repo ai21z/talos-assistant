@@ -1,6 +1,6 @@
-# [T878-open-medium] "profiles" naming collision: verification vs model GGUF profiles
+# [T878-done-medium] "profiles" naming collision: verification vs model GGUF profiles
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -60,3 +60,20 @@ explicitly so the distinction is obvious at the point of use.
 
 - Inner dev loop; no version bump. Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
 - Cross-ref T876 (models help) and T877 (model discoverability).
+
+## Closeout (2026-06-27)
+
+Owner direction: reword-only (no command rename), consistent with the T879
+document-don't-break choice. Doc-only changes:
+
+- `ModelsCommand` tip: "managed GGUF profiles" -> "the managed GGUF model profile",
+  plus a new line "The /profiles command is unrelated: it manages workspace
+  verification profiles, not models."
+- `ProfilesCommand` summary: "Inspect or trust workspace verification profiles."
+  -> "...verification profiles (.talos/profiles.yaml; not model/GGUF profiles)."
+
+No command renamed, so nothing a user types changes; the two "profiles" are now
+distinguished at both surfaces. Tests: `ModelsCommandTest` 2/0 (tip mentions
+/profiles + "verification profiles"), `ProfilesCommandTest` 6/0 (summary contains
+"verification" + "not model/GGUF"). Focused suites BUILD SUCCESSFUL. Broad `check`
+deferred to the end-of-batch candidate run.

@@ -33,4 +33,13 @@ class ModelsCommandTest {
         assertTrue(text.contains("Downloaded GGUFs are not selectable until configured"), text);
         assertTrue(text.contains("talos setup models --profile <name> --write --force"), text);
     }
+
+    @Test
+    void renderInstalledModelsDisambiguatesGgufProfilesFromTheProfilesCommand() {
+        String text = ModelsCommand.renderInstalledModels(List.of(
+                ModelRef.of("llama_cpp", "qwen2.5-coder-14b")));
+        // the "GGUF model profile" tip must not be confused with the /profiles command
+        assertTrue(text.contains("/profiles"), text);
+        assertTrue(text.contains("verification profiles"), text);
+    }
 }

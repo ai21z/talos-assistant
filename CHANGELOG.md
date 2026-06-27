@@ -37,6 +37,11 @@
   `-Dfile.encoding=UTF-8`, so on Java 18+ `System.out`/`err` emit UTF-8 instead of
   the Windows console code page (which could not encode the bullet/arrow markers).
   The ASCII glyph fallback for non-Unicode/redirected output is unchanged.
+- [T878] Disambiguated the two "profiles" concepts (doc-only): the `/models` tip
+  now calls the GGUF selection a "managed GGUF model profile" and states the
+  `/profiles` command is unrelated (it manages workspace verification profiles, not
+  models); `/profiles`'s own summary reads "...verification profiles
+  (.talos/profiles.yaml; not model/GGUF profiles)".
 
 ## [0.10.6] - 2026-06-25
 
