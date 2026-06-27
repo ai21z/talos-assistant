@@ -77,7 +77,7 @@ public final class PrivacyCommand implements Command {
                   Show current privacy mode, protected-read handoff, private document extraction controls,
                   RAG/retrieve, and artifact persistence settings.
 
-                /privacy private on
+                /privacy private on   (alias: private enable)
                   Switch the current session/config state to private mode. Approved protected reads default to LOCAL_DISPLAY_ONLY:
                   content is read locally after approval but withheld from model context and persisted artifacts.
                   RAG/retrieve is disabled by default in private mode.
@@ -89,7 +89,7 @@ public final class PrivacyCommand implements Command {
                   Ordinary personal facts in normal .md/.txt/.csv files are not private by provenance unless the
                   file path or content matches protected-policy signals.
 
-                /privacy private off
+                /privacy private off   (alias: private disable)
                   Restore developer/default mode for the current session/config state. Approved direct protected reads may enter model context.
 
                 Persistence

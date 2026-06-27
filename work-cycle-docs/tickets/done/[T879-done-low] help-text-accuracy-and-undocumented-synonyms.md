@@ -1,6 +1,6 @@
-# [T879-open-low] Help-text accuracy and undocumented command synonyms
+# [T879-done-low] Help-text accuracy and undocumented command synonyms
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -63,3 +63,32 @@ documented or dropped, recorded per command).
 ## Work-Test Cycle Notes
 
 - Inner dev loop; no version bump. Add a one-line `## [Unreleased]` CHANGELOG entry when it lands.
+
+## Closeout (2026-06-27)
+
+Doc-only, no behavior change. Owner direction: DOCUMENT the synonyms, do not remove
+them (so nothing a user already types stops working).
+
+Description accuracy (HelpCommand):
+- Default page: `/debug` -> "set debug level: off|brief|rag|tools|prompt|trace"
+  (was "toggle developer hints"); `/clear` -> "aliases /reset, /cls" (was "alias
+  /reset").
+- `/help debug` topic: "`/debug prompt on` turns on prompt-level debug output"
+  (was "harmless suffix form"); added a "Level aliases: retrieval=rag, tool=tools,
+  prompts/frame=prompt, all=trace" note.
+
+Synonym documentation:
+- `AuditToggleCommand` summary -> "Toggle audit logging (on|off; enable|disable
+  also accepted)."
+- `SecretCommand` summary -> "Manage local secrets (del also accepts delete and rm)."
+- `PrivacyCommand` helpText -> `/privacy private on/off` headers annotated
+  "(alias: private enable/disable)".
+
+Tests: `SimpleCommandsTest$Help` 18/0 (debug-topic reword + alias note, default-page
+level-setter description, `/help audit` detail documents enable/disable),
+`PrivacyCommandTest` 9/0 (help documents private enable/disable). Focused suites
+BUILD SUCCESSFUL. Not separately unit-tested (doc-only, verified by inspection):
+the `/clear` `/cls` line (ClearCommand is not in the help test registries) and the
+`SecretCommand` summary (constructing it builds a FileSecretStore against the home,
+which a unit test should not touch); both render in `/help`. Broad `check` deferred
+to the end-of-batch candidate run.
