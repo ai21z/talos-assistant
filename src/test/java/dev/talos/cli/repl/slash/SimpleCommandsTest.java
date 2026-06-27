@@ -485,6 +485,24 @@ class SimpleCommandsTest {
             assertTrue(text.contains("/debug prompt on"), text);
             assertTrue(text.contains("/debug prompt off"), text);
             assertTrue(text.contains("/last trace"), text);
+            // T879: the prompt-on note reflects that it ENABLES the PROMPT level, not "harmless"
+            assertFalse(text.contains("harmless"), text);
+            assertTrue(text.contains("prompt-level"), text);
+            // T879: the accepted level aliases are documented
+            assertTrue(text.contains("retrieval"), text);
+        }
+
+        @Test void default_help_describes_debug_as_a_level_setter_not_a_toggle() {
+            var cmd = new HelpCommand(registry());
+            String text = cmd.execute("", ctx).toString();
+            assertTrue(text.contains("set debug level"), text);
+            assertFalse(text.contains("toggle developer hints"), text);
+        }
+
+        @Test void help_audit_detail_documents_enable_disable_synonyms() {
+            var cmd = new HelpCommand(registry());
+            String text = cmd.execute("audit", ctx).toString();
+            assertTrue(text.contains("enable"), text);
         }
 
         @Test void help_models_topic_explains_model_switch_flow() {

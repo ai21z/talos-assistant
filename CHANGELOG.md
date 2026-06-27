@@ -22,6 +22,16 @@
   `/models`; the `/help models` topic is advertised in the default "More help"
   block; and `/set` with no/blank model name now points the user at `/models` for
   discovery (the not-found path already did).
+- [T879] Help-text accuracy and synonym documentation (doc-only, no behavior
+  change): the default page describes `/debug` as a level setter
+  (off|brief|rag|tools|prompt|trace) instead of a "toggle" and lists `/clear`'s
+  `/cls` alias alongside `/reset`; the `/help debug` topic states that
+  `/debug prompt on` turns on prompt-level output (was "harmless suffix form") and
+  documents the level aliases (retrieval=rag, tool=tools, prompts/frame=prompt,
+  all=trace); and the accepted-but-undocumented synonyms are now surfaced --
+  `/audit` (enable|disable), `/secret` del (also delete, rm), and
+  `/privacy private` (enable|disable). Per owner direction the synonyms are
+  documented, not removed.
 
 ## [0.10.6] - 2026-06-25
 

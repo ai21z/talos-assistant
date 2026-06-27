@@ -127,4 +127,15 @@ class PrivacyCommandTest {
         assertTrue(info.text.contains("current session/config state"), info.text);
         assertTrue(info.text.contains("~/.talos/config.yaml"), info.text);
     }
+
+    @Test
+    void privacy_help_documents_enable_disable_aliases(@TempDir Path workspace) throws Exception {
+        PrivacyCommand command = new PrivacyCommand(workspace);
+
+        Result.Info info = assertInstanceOf(Result.Info.class,
+                command.execute("help", Context.builder(new Config(null)).build()));
+
+        assertTrue(info.text.contains("private enable"), info.text);
+        assertTrue(info.text.contains("private disable"), info.text);
+    }
 }
