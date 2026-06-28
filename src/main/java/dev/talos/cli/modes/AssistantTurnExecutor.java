@@ -19,6 +19,7 @@ import dev.talos.runtime.outcome.RuntimeVerificationStatusAnswer;
 import dev.talos.runtime.outcome.UnsupportedDocumentAnswerGuard;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
+import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
@@ -139,9 +140,15 @@ public final class AssistantTurnExecutor {
         private long llmTimeoutMs = 300_000L;
         private long responseMaxChars = 10 * 1024 * 1024L;
         private UnaryOperator<String> answerSanitizer = UnaryOperator.identity();
+        private CapabilityPosture capabilityPosture = CapabilityPosture.AGENT;
 
         public Options llmTimeoutMs(long ms)         { this.llmTimeoutMs = ms; return this; }
         public Options responseMaxChars(long chars)   { this.responseMaxChars = chars; return this; }
+        public CapabilityPosture capabilityPosture()  { return capabilityPosture; }
+        public Options capabilityPosture(CapabilityPosture posture) {
+            this.capabilityPosture = posture == null ? CapabilityPosture.AGENT : posture;
+            return this;
+        }
 
         /**
          * Optional post-processing for the raw LLM answer (e.g., RAG preamble stripping).
@@ -177,7 +184,11 @@ public final class AssistantTurnExecutor {
             messages = replaceLatestUserRequest(messages, workspaceBoundaryPreflight.effectiveUserRequest());
         }
         AssistantTurnPreparation.PreparedTurn preparedTurn = AssistantTurnPreparation.prepare(
-                messages, workspace, ctx, workspaceBoundaryReplayedRequest);
+                messages,
+                workspace,
+                ctx,
+                workspaceBoundaryReplayedRequest,
+                opts == null ? CapabilityPosture.AGENT : opts.capabilityPosture());
         ctx = preparedTurn.ctx();
         CurrentTurnPlan currentTurnPlan = preparedTurn.plan();
         Context turnContext = ctx;

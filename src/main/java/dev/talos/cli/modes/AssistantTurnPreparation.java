@@ -13,6 +13,8 @@ import dev.talos.runtime.context.ProjectMemoryLimits;
 import dev.talos.runtime.context.ProjectMemoryLoader;
 import dev.talos.runtime.context.ProjectMemoryRequest;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CapabilityPosture;
+import dev.talos.runtime.policy.CapabilityPosturePolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -48,6 +50,21 @@ final class AssistantTurnPreparation {
             Context ctx,
             boolean workspaceBoundaryReplayedRequest
     ) {
+        return prepare(
+                messages,
+                workspace,
+                ctx,
+                workspaceBoundaryReplayedRequest,
+                CapabilityPosture.AGENT);
+    }
+
+    static PreparedTurn prepare(
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx,
+            boolean workspaceBoundaryReplayedRequest,
+            CapabilityPosture capabilityPosture
+    ) {
         TaskContract rawTaskContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(messages),
                 workspace);
@@ -56,15 +73,22 @@ final class AssistantTurnPreparation {
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 activeDecision.taskContract(),
                 workspace);
+        CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
+                CapabilityPosturePolicy.apply(capabilityPosture, taskContract);
+        TaskContract effectiveTaskContract = WorkspaceTargetReconciler.reconcile(
+                effectiveTurn.taskContract(),
+                workspace);
         boolean activeDecisionUpdatesTurnSurface =
                 activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);
-        initializeExecutionPhaseForTurn(taskContract, ctx);
+        initializeExecutionPhaseForTurn(effectiveTurn.phase(), ctx);
         Context turnContext = withNativeToolSurface(
                 ctx,
-                taskContract,
-                activeDecisionUpdatesTurnSurface || workspaceBoundaryReplayedRequest);
-        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, turnContext, activeDecision);
+                effectiveTaskContract,
+                activeDecisionUpdatesTurnSurface
+                        || workspaceBoundaryReplayedRequest
+                        || effectiveTurn.forceNativeSurfaceRecompute());
+        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(effectiveTaskContract, turnContext, activeDecision);
         recordPolicyTrace(currentTurnPlan, turnContext);
         ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
         CurrentTurnPromptInstructions.injectProjectMemoryInstruction(messages, projectMemory);
@@ -78,9 +102,9 @@ final class AssistantTurnPreparation {
         return new PreparedTurn(turnContext, currentTurnPlan);
     }
 
-    private static void initializeExecutionPhaseForTurn(TaskContract contract, Context ctx) {
+    private static void initializeExecutionPhaseForTurn(ExecutionPhase phase, Context ctx) {
         if (ctx == null || ctx.executionPhaseState() == null) return;
-        ExecutionPhase initial = CurrentTurnPlan.defaultPhaseFor(contract);
+        ExecutionPhase initial = phase == null ? ExecutionPhase.INSPECT : phase;
         ctx.executionPhaseState().moveTo(initial);
     }
 

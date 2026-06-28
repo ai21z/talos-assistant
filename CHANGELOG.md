@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T889] Added a shared capability-posture foundation for Ask/Plan/Agent mode
+  enforcement. `AssistantTurnExecutor.Options` can now request `AGENT`,
+  `ASK_READ_ONLY`, or `PLAN_READ_ONLY`; read-only postures cap the effective
+  task contract to `mutationAllowed=false`, force the turn phase to `INSPECT`,
+  and recompute the native tool surface before the current-turn capability frame
+  is injected, so prompt-visible tools and runtime-enforced tools stay aligned.
 - [T888] The mode router now has a catalog-backed public surface for the
   Ask/Plan/Agent refactor foundation: canonical `agent` is selectable, legacy
   `chat`/`dev`/`unified` aliases resolve to `agent`, `rag` remains hidden but
