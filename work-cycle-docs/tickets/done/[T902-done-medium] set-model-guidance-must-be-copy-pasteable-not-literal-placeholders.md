@@ -23,10 +23,19 @@ The owner had no way to know the real profile name or server-path, tried twice, 
 
 New neutral registry [LlamaCppModelProfiles](src/main/java/dev/talos/engine/llamacpp/LlamaCppModelProfiles.java) in `engine.llamacpp` (which `SetModelCommand` already depends on via `GgufCacheScanner`, so no cycle): the canonical canned-profile table (alias -> hf_repo + hf_file) plus `profileAliasForGgufFile(String)` (case-/path-/`.gguf`-insensitive stem match). [SetupCmd.profiles()](src/main/java/dev/talos/cli/launcher/SetupCmd.java) now sources from this registry so the two never drift (single source of truth).
 
-[SetModelCommand](src/main/java/dev/talos/cli/repl/slash/SetModelCommand.java): a new `modelNotFoundMessage(String,List,resolvedProfile,serverPath)` overload substitutes the resolved profile alias and the configured `server_path` (read from `engines.llama_cpp.server_path` via `EngineConfig.data()`) into a copy-pasteable command, quoting the server-path when it contains spaces, and falling back to the placeholders only when a value cannot be resolved. So the owner's exact case now prints:
+[SetModelCommand](src/main/java/dev/talos/cli/repl/slash/SetModelCommand.java): `modelNotFoundMessage` now resolves the matched GGUF to its `CannedProfile` and leads with the concrete config-edit route (the `hf_repo`/`hf_file` to set under `engines.llama_cpp`), naming the equivalent setup profile alias. So `/set model gpt-oss-20b-mxfp4` now prints (live-verified):
 ```
-talos setup models --profile qwen36vf-q6k --server-path C:/.../llama-server.exe --write --force
+"gpt-oss-20b-mxfp4" is downloaded but not configured, so it is not selectable here yet.
+Managed llama.cpp binds one GGUF at launch (no hot-swap). To switch, edit ~/.talos/config.yaml under engines.llama_cpp:
+  hf_repo: "ggml-org/gpt-oss-20b-GGUF"
+  hf_file: "gpt-oss-20b-mxfp4.gguf"
+then restart Talos and confirm with /models.
+(Or run in your terminal: talos setup models --profile gpt-oss-20b --server-path <your engines.llama_cpp.server_path> --write --force)
 ```
+
+## Live-verification correction (important)
+
+The first T902 cut substituted the real absolute `server_path` into a `talos setup models ... --server-path <path>` command. Running the installed build showed it rendered as `--server-path [path]`: the render layer's privacy redaction (a trust invariant that must NOT be weakened) strips absolute filesystem paths from output, so the substituted path was redacted to `[path]` and the command was still not copy-pasteable. The fix was redesigned to lead with the `hf_repo`/`hf_file` config edit, which contains no absolute path and therefore survives redaction (and is the exact route that works without a re-download). The setup-models route is kept as a secondary line that references the `engines.llama_cpp.server_path` config key rather than an absolute path. No weakening of the redaction.
 
 ## Honesty / Scope
 

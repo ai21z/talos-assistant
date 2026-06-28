@@ -2,6 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
 import dev.talos.runtime.Result;
 import dev.talos.spi.types.ModelRef;
 import org.junit.jupiter.api.Test;
@@ -64,41 +65,33 @@ class SetModelCommandTest {
     }
 
     @Test
-    void downloadedGuidanceSubstitutesResolvedProfileAndServerPath() {
-        // T902: the guidance must be copy-pasteable, not literal <name>/<llama-server>,
-        // when the GGUF maps to a canned profile and the server-path is known.
+    void downloadedGuidanceGivesConcreteConfigEditForMappedGguf() {
+        // T902: the guidance must be copy-pasteable, not literal placeholders. The
+        // concrete hf_repo/hf_file config edit needs no absolute path, so it survives
+        // the render layer's privacy path-redaction (a server_path would show as [path]).
         var downloaded = List.of(ModelRef.of("llama_cpp", "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"));
+        var profile = LlamaCppModelProfiles.profileForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K").orElseThrow();
 
         String text = SetModelCommand.modelNotFoundMessage(
-                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded,
-                "qwen36vf-q6k", "C:/llama/llama-server.exe");
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded, profile);
 
+        assertTrue(text.contains("hf_repo: \"tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF\""), text);
+        assertTrue(text.contains("hf_file: \"Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf\""), text);
         assertTrue(text.contains("--profile qwen36vf-q6k"), text);
-        assertTrue(text.contains("--server-path C:/llama/llama-server.exe"), text);
         assertFalse(text.contains("<name>"), text);
         assertFalse(text.contains("<llama-server>"), text);
     }
 
     @Test
-    void downloadedGuidanceQuotesServerPathWithSpaces() {
-        var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
-
-        String text = SetModelCommand.modelNotFoundMessage(
-                "qwen2.5-coder-14b-instruct-q4_k_m", downloaded,
-                "qwen2.5-coder-14b", "C:/Program Files/llama/llama-server.exe");
-
-        assertTrue(text.contains("--server-path \"C:/Program Files/llama/llama-server.exe\""), text);
-    }
-
-    @Test
-    void downloadedGuidanceFallsBackToPlaceholdersWhenUnresolved() {
+    void downloadedGuidanceForUnmappedGgufPointsAtConfigWithoutPlaceholders() {
         var downloaded = List.of(ModelRef.of("llama_cpp", "mystery-model"));
 
-        String text = SetModelCommand.modelNotFoundMessage(
-                "mystery-model", downloaded, null, "");
+        String text = SetModelCommand.modelNotFoundMessage("mystery-model", downloaded, null);
 
-        assertTrue(text.contains("--profile <name>"), text);
-        assertTrue(text.contains("--server-path <llama-server>"), text);
+        assertTrue(text.contains("hf_file: \"mystery-model.gguf\""), text);
+        assertTrue(text.contains("downloaded but not configured"), text);
+        assertFalse(text.contains("<name>"), text);
+        assertFalse(text.contains("<llama-server>"), text);
     }
 
     @Test

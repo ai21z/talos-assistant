@@ -2,8 +2,6 @@ package dev.talos.engine.llamacpp;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -14,27 +12,29 @@ import static org.junit.jupiter.api.Assertions.*;
 class LlamaCppModelProfilesTest {
 
     @Test
-    void resolvesAliasForKnownGgufFileNames() {
-        assertEquals(Optional.of("qwen2.5-coder-14b"),
-                LlamaCppModelProfiles.profileAliasForGgufFile("qwen2.5-coder-14b-instruct-q4_k_m.gguf"));
-        assertEquals(Optional.of("gpt-oss-20b"),
-                LlamaCppModelProfiles.profileAliasForGgufFile("gpt-oss-20b-mxfp4"));
-        // the live owner case
-        assertEquals(Optional.of("qwen36vf-q6k"),
-                LlamaCppModelProfiles.profileAliasForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"));
+    void resolvesProfileForKnownGgufFileNames() {
+        assertEquals("qwen2.5-coder-14b",
+                LlamaCppModelProfiles.profileForGgufFile("qwen2.5-coder-14b-instruct-q4_k_m.gguf").orElseThrow().alias());
+        assertEquals("gpt-oss-20b",
+                LlamaCppModelProfiles.profileForGgufFile("gpt-oss-20b-mxfp4").orElseThrow().alias());
+        // the live owner case, with the repo/file we substitute into the guidance
+        var owner = LlamaCppModelProfiles.profileForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K").orElseThrow();
+        assertEquals("qwen36vf-q6k", owner.alias());
+        assertEquals("tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF", owner.hfRepo());
+        assertEquals("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf", owner.hfFile());
     }
 
     @Test
-    void aliasMatchIsCaseAndPathAndSuffixInsensitive() {
-        assertEquals(Optional.of("qwen36vf-q6k"),
-                LlamaCppModelProfiles.profileAliasForGgufFile("some/dir/QWEN3.6-14B-A3B-VIBEFORGED-V2-Q6_K.GGUF"));
+    void profileMatchIsCaseAndPathAndSuffixInsensitive() {
+        assertEquals("qwen36vf-q6k",
+                LlamaCppModelProfiles.profileForGgufFile("some/dir/QWEN3.6-14B-A3B-VIBEFORGED-V2-Q6_K.GGUF").orElseThrow().alias());
     }
 
     @Test
-    void unknownOrBlankGgufHasNoAlias() {
-        assertTrue(LlamaCppModelProfiles.profileAliasForGgufFile("mlabonne_Qwen3-14B-abliterated-Q4_K_M").isEmpty());
-        assertTrue(LlamaCppModelProfiles.profileAliasForGgufFile(null).isEmpty());
-        assertTrue(LlamaCppModelProfiles.profileAliasForGgufFile("").isEmpty());
+    void unknownOrBlankGgufHasNoProfile() {
+        assertTrue(LlamaCppModelProfiles.profileForGgufFile("mlabonne_Qwen3-14B-abliterated-Q4_K_M").isEmpty());
+        assertTrue(LlamaCppModelProfiles.profileForGgufFile(null).isEmpty());
+        assertTrue(LlamaCppModelProfiles.profileForGgufFile("").isEmpty());
     }
 
     @Test
