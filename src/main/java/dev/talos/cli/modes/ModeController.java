@@ -272,18 +272,21 @@ public final class ModeController implements TurnRouter {
      */
     public static ModeController defaultController() {
         AskMode askMode = new AskMode();
+        PlanMode planMode = new PlanMode();
         UnifiedAssistantMode agentMode = new UnifiedAssistantMode();
         return new ModeController()
                 .structuralMode(new DevMode())
                 .addHidden(new RagMode())
                 .add(askMode)
+                .add(planMode)
                 .add(agentMode)
                 .add(new WebMode())
                 .add(new AutoMode())
                 .alias("chat", agentMode)
                 .alias("unified", agentMode)
                 .alias("dev", agentMode)
-                .alias("ask", askMode);
+                .alias("ask", askMode)
+                .alias("plan", planMode);
     }
 
     private static String normalize(String name) {

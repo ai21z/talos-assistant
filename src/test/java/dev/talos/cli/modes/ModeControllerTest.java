@@ -62,6 +62,13 @@ class ModeControllerTest {
     }
 
     @Test
+    void defaultController_can_set_plan_mode() {
+        ModeController mc = ModeController.defaultController();
+        assertTrue(mc.setActive("plan"));
+        assertEquals("plan", mc.getActiveName());
+    }
+
+    @Test
     void defaultController_can_set_auto_mode() {
         ModeController mc = ModeController.defaultController();
         mc.setActive("rag"); // change first
@@ -118,6 +125,7 @@ class ModeControllerTest {
         var names = mc.availableModeNames();
         assertTrue(names.contains("auto"), names.toString());
         assertTrue(names.contains("ask"), names.toString());
+        assertTrue(names.contains("plan"), names.toString());
         assertTrue(names.contains("agent"), names.toString());
         assertFalse(names.contains("dev"), "dev is a hidden alias for agent");
         assertFalse(names.contains("rag"), "rag remains hidden legacy mode");

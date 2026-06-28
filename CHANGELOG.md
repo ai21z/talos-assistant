@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T891] Added canonical `/mode plan` as a read-only planning mode. Plan uses
+  `CapabilityPosture.PLAN_READ_ONLY`, advertises plan-specific prompt rules,
+  exposes no mutation or command tools, and is selectable/advertised through the
+  mode catalog while leaving "approve plan then execute" out of scope.
 - [T890] `/mode ask` is now a runtime-enforced read-only ceiling. Direct
   mutation requests return a deterministic local nudge (`Ask is read-only;
   switch to /mode agent to make changes.`) without calling the LLM, Ask turns

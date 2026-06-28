@@ -34,6 +34,7 @@ public final class SystemPromptBuilder {
     // --- Resource paths for composable sections ---
     private static final String RES_IDENTITY      = "prompts/sections/identity.txt";
     private static final String RES_ASK_RULES     = "prompts/sections/ask-rules.txt";
+    private static final String RES_PLAN_RULES    = "prompts/sections/plan-rules.txt";
     private static final String RES_RAG_RULES     = "prompts/sections/rag-rules.txt";
     private static final String RES_UNIFIED_RULES = "prompts/sections/unified-rules.txt";
     private static final String RES_TOOLS         = "prompts/sections/tools-preamble.txt";
@@ -52,7 +53,7 @@ public final class SystemPromptBuilder {
     private java.nio.file.Path workspace;
 
     /** The prompt modes. */
-    public enum Mode { ASK, RAG, UNIFIED }
+    public enum Mode { ASK, PLAN, RAG, UNIFIED }
 
     private SystemPromptBuilder(Mode mode) {
         this.mode = Objects.requireNonNull(mode);
@@ -61,6 +62,11 @@ public final class SystemPromptBuilder {
     /** Create a builder for ask/chat mode. */
     public static SystemPromptBuilder forAsk() {
         return new SystemPromptBuilder(Mode.ASK);
+    }
+
+    /** Create a builder for read-only planning mode. */
+    public static SystemPromptBuilder forPlan() {
+        return new SystemPromptBuilder(Mode.PLAN);
     }
 
     /** Create a builder for RAG/retrieval mode. */
@@ -194,6 +200,7 @@ public final class SystemPromptBuilder {
         // 2. Mode-specific rules
         String modeRes = switch (mode) {
             case ASK     -> RES_ASK_RULES;
+            case PLAN    -> RES_PLAN_RULES;
             case RAG     -> RES_RAG_RULES;
             case UNIFIED -> RES_UNIFIED_RULES;
         };
@@ -357,6 +364,7 @@ public final class SystemPromptBuilder {
     private String defaultPrompt() {
         return switch (mode) {
             case ASK     -> "You are Talos, a local-first workspace assistant. Answer clearly and concisely.\n";
+            case PLAN    -> "You are Talos, a local-first workspace assistant. Produce read-only implementation plans.\n";
             case RAG     -> "You are Talos, a local-first workspace assistant. Answer using the provided context snippets.\n";
             case UNIFIED -> "You are Talos, a local-first workspace assistant with full tool access. Use tools proactively for file operations and project questions.\n";
         };
