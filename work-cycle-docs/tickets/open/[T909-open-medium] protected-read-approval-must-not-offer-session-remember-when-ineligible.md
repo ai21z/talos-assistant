@@ -18,6 +18,17 @@ Priority: medium
 - Checkpoint id: n/a
 - Verification status: live installed audit reproduced; deterministic regression not yet added
 
+Additional installed-product corroboration:
+
+- Source: installed-product Plan-mode manual audit
+- Date: 2026-06-28 / prompt-debug saved as `20260629-000800` local time
+- Repo HEAD at audit: `1b79cb11`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\plan-mode-deep-20260628-235632\plan-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/plan-mode-deep-20260628-235632/artifacts/prompt-debug/prompt-debug-20260629-000800.md`
+- Trace ids: `trc-1d694bbb-f990-4f95-9b78-a858ec62c94f`, then `trc-80c2180c-45a7-4502-8ac8-285c68b0dd63`
+- Approval choices: `a` on protected `.env` read, then `n` when the next `.env` read prompted again
+
 Redacted prompt sequence:
 
 ```text
@@ -45,6 +56,10 @@ The approval window for `protected read: talos.read_file` displayed
 
 After selecting `a`, the next `.env` read still prompted for approval. Denying
 that prompt produced `BLOCKED_BY_APPROVAL`.
+
+The same behavior reproduced in `/mode plan`: selecting `a` granted the current
+protected read, but the next `.env` read prompted again and denial produced
+`BLOCKED_BY_APPROVAL`. The safe boundary held; the UI promise remained false.
 ```
 
 Code evidence:
@@ -238,4 +253,3 @@ Add broader commands if runtime code changes:
 ## Known Follow-Ups
 
 - None.
-
