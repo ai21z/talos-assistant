@@ -56,7 +56,7 @@ public final class UnifiedAssistantMode implements Mode {
 
     private static final Logger LOG = LoggerFactory.getLogger(UnifiedAssistantMode.class);
 
-    @Override public String name() { return "unified"; }
+    @Override public String name() { return "agent"; }
 
     @Override public boolean canHandle(String rawLine) {
         return rawLine != null && !rawLine.isBlank();

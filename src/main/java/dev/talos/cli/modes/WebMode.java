@@ -14,7 +14,7 @@ public final class WebMode implements Mode {
     /** Reserved stub: not selectable via /mode until a real web implementation exists. */
     @Override public boolean available() { return false; }
 
-    @Override public boolean canHandle(String rawLine) { return rawLine != null && !rawLine.isBlank(); }
+    @Override public boolean canHandle(String rawLine) { return false; }
 
     @Override
     public Optional<Result> handle(String rawLine, Path workspace, Context ctx) {

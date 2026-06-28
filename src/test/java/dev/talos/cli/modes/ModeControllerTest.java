@@ -27,10 +27,10 @@ class ModeControllerTest {
     }
 
     @Test
-    void defaultController_can_set_chat_mode() {
+    void defaultController_legacy_chat_alias_resolves_to_canonical_agent_mode() {
         ModeController mc = ModeController.defaultController();
         assertTrue(mc.setActive("chat"), "Should accept 'chat' as a valid mode");
-        assertEquals("chat", mc.getActiveName());
+        assertEquals("agent", mc.getActiveName());
     }
 
     @Test
@@ -48,10 +48,17 @@ class ModeControllerTest {
     }
 
     @Test
-    void defaultController_can_set_dev_mode() {
+    void defaultController_legacy_dev_alias_resolves_to_canonical_agent_mode() {
         ModeController mc = ModeController.defaultController();
         assertTrue(mc.setActive("dev"));
-        assertEquals("dev", mc.getActiveName());
+        assertEquals("agent", mc.getActiveName());
+    }
+
+    @Test
+    void defaultController_can_set_agent_mode() {
+        ModeController mc = ModeController.defaultController();
+        assertTrue(mc.setActive("agent"));
+        assertEquals("agent", mc.getActiveName());
     }
 
     @Test
@@ -72,28 +79,27 @@ class ModeControllerTest {
     // ── Alias behavior ──────────────────────────────────────────────────
 
     @Test
-    void chat_resolves_to_unified_and_ask_resolves_to_askMode() {
+    void chat_resolves_to_agent_and_ask_resolves_to_askMode() {
         ModeController mc = ModeController.defaultController();
 
         mc.setActive("ask");
         var askMode = mc.getActive().orElse(null);
 
         mc.setActive("chat");
-        var chatMode = mc.getActive().orElse(null);
+        var agentMode = mc.getActive().orElse(null);
 
         assertNotNull(askMode);
-        assertNotNull(chatMode);
-        // In the new architecture: chat → UnifiedAssistantMode, ask → AskMode
-        assertNotSame(askMode, chatMode, "chat (unified) and ask should be different instances");
-        assertTrue(chatMode instanceof UnifiedAssistantMode, "chat should resolve to UnifiedAssistantMode");
+        assertNotNull(agentMode);
+        assertNotSame(askMode, agentMode, "agent and ask should be different instances");
+        assertTrue(agentMode instanceof UnifiedAssistantMode, "chat should resolve to the Agent engine");
         assertTrue(askMode instanceof AskMode, "ask should resolve to AskMode");
     }
 
     @Test
-    void defaultController_can_set_unified_mode() {
+    void defaultController_legacy_unified_alias_resolves_to_canonical_agent_mode() {
         ModeController mc = ModeController.defaultController();
         assertTrue(mc.setActive("unified"), "Should accept 'unified' as a valid mode");
-        assertEquals("unified", mc.getActiveName());
+        assertEquals("agent", mc.getActiveName());
     }
 
     // ── Reserved-mode and advertised-set discipline (T874) ───────────────
@@ -107,16 +113,43 @@ class ModeControllerTest {
     }
 
     @Test
-    void availableModeNames_lists_canonical_and_excludes_reserved_and_aliases() {
+    void availableModeNames_lists_public_modes_and_excludes_reserved_hidden_and_aliases() {
         ModeController mc = ModeController.defaultController();
         var names = mc.availableModeNames();
         assertTrue(names.contains("auto"), names.toString());
-        assertTrue(names.contains("dev"), names.toString());
-        assertTrue(names.contains("rag"), names.toString());
         assertTrue(names.contains("ask"), names.toString());
-        assertTrue(names.contains("unified"), names.toString());
+        assertTrue(names.contains("agent"), names.toString());
+        assertFalse(names.contains("dev"), "dev is a hidden alias for agent");
+        assertFalse(names.contains("rag"), "rag remains hidden legacy mode");
+        assertFalse(names.contains("unified"), "unified is a hidden alias for agent");
         assertFalse(names.contains("web"), "reserved web must not be advertised as available");
         assertFalse(names.contains("chat"), "chat is an alias, not a canonical mode name");
+    }
+
+    @Test
+    void explicit_mode_does_not_fall_through_to_other_modes() throws Exception {
+        var declining = new DecliningStub("decline");
+        var fallback = new RecordingStub("fallback");
+        var mc = new ModeController()
+                .add(declining)
+                .add(fallback);
+        var ctx = Context.builder(new Config()).build();
+
+        assertTrue(mc.setActive("decline"));
+        Optional<Result> result = mc.route("hello", WS, ctx);
+
+        assertTrue(result.isEmpty(), "Explicit selected mode should be a hard boundary");
+        assertFalse(fallback.invoked, "Explicit mode must not sweep into another mode");
+    }
+
+    @Test
+    void reserved_web_mode_cannot_handle_even_when_routed_by_hint() throws Exception {
+        ModeController mc = ModeController.defaultController();
+        var ctx = Context.builder(new Config()).build();
+
+        Optional<Result> result = mc.route("search the web", WS, ctx, "web");
+
+        assertTrue(result.isEmpty(), "web is reserved and must be unsweepable");
     }
 
     @Test
@@ -144,7 +177,7 @@ class ModeControllerTest {
     void setActive_is_case_insensitive() {
         ModeController mc = ModeController.defaultController();
         assertTrue(mc.setActive("CHAT"));
-        assertEquals("chat", mc.getActiveName());
+        assertEquals("agent", mc.getActiveName());
 
         assertTrue(mc.setActive("Rag"));
         assertEquals("rag", mc.getActiveName());
@@ -191,7 +224,7 @@ class ModeControllerTest {
     private static ModeController stubController(
             RecordingStub devStub, RecordingStub ragStub, RecordingStub askStub) {
         var mc = new ModeController();
-        mc.add(devStub).add(ragStub).add(askStub).alias("chat", askStub);
+        mc.structuralMode(devStub).addHidden(ragStub).add(askStub).alias("chat", askStub);
         return mc;
     }
 
@@ -614,6 +647,26 @@ class ModeControllerTest {
         assertFalse(ask.invoked, "Explicit rag mode should NOT route to ask/unified");
     }
 
+    @Test
+    void active_agent_mode_routes_structural_commands_to_structural_handler() throws Exception {
+        var structural = new RecordingStub("structural");
+        var agent = new RecordingStub("agent");
+        var mc = new ModeController()
+                .structuralMode(structural)
+                .add(agent)
+                .alias("dev", agent);
+        var ctx = Context.builder(new Config()).build();
+
+        assertTrue(mc.setActive("dev"));
+        assertEquals("agent", mc.getActiveName());
+
+        Optional<Result> result = mc.route("ls", WS, ctx);
+
+        assertTrue(result.isPresent());
+        assertTrue(structural.invoked, "agent/dev compatibility should keep deterministic structural commands");
+        assertFalse(agent.invoked, "structural command should not go through the agent model path");
+    }
+
     // ── Recording stub mode for isolated testing ─────────────────────────
 
     private static class RecordingStub implements Mode {
@@ -634,5 +687,13 @@ class ModeControllerTest {
         }
 
         void reset() { invoked = false; }
+    }
+
+    private static final class DecliningStub extends RecordingStub {
+        DecliningStub(String name) {
+            super(name);
+        }
+
+        @Override public boolean canHandle(String raw) { return false; }
     }
 }
