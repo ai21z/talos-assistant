@@ -34,7 +34,7 @@ import java.util.Map;
  *       against the fixture workspace.</li>
  *   <li>Applies the scenario's {@link ScenarioApprovalPolicy} via a deterministic approval gate.</li>
  *   <li>Injects the scenario's scripted LLM response directly into
- *       {@link ToolCallLoop#run} — no real LLM call is made.</li>
+ *       {@link ToolCallLoop#run} - no real LLM call is made.</li>
  *   <li>Returns a {@link ScenarioResult} for post-run assertions.</li>
  * </ol>
  *
@@ -81,7 +81,7 @@ public final class ScenarioRunner {
      * scenario runs reflect more of the raw model/runtime behavior:
      * <ul>
      *   <li>{@link dev.talos.tools.ToolRegistry} fuzzy/alias/case-insensitive
-     *       tool-name rescue is disabled — only exact tool names resolve.</li>
+     *       tool-name rescue is disabled - only exact tool names resolve.</li>
      *   <li>{@link dev.talos.runtime.ToolCallLoop} measurement cushions are
      *       disabled: redundant read-only call suppression, B3
      *       duplicate-failing-edit short-circuit, B2 read-before-write hint
@@ -126,7 +126,7 @@ public final class ScenarioRunner {
         registry.register(new FileEditTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
-        // RetrieveTool intentionally omitted — requires full RAG stack
+        // RetrieveTool intentionally omitted - requires full RAG stack
 
         // 3. Approval gate driven by policy
         GateRecorder gate = new GateRecorder(scenario.approvalPolicy());
@@ -310,18 +310,18 @@ public final class ScenarioRunner {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    //  N4 — harness drives AssistantTurnExecutor end-to-end
+    //  N4 - harness drives AssistantTurnExecutor end-to-end
     //
     //  runThroughExecutor exercises the full executor path (streaming /
     //  non-streaming dispatch, tool-call loop, R2/R6/N2/N3 gates,
     //  synthesis retry, sanitization) against a scripted LlmClient.
     //  Use this when a scenario needs to assert on the ANSWER text
-    //  produced by those gates — in particular the T5-shape end-to-end
+    //  produced by those gates - in particular the T5-shape end-to-end
     //  regression (scripted false-mutation claim → FALSE_MUTATION_
     //  ANNOTATION prepended to the final answer).
     //
     //  Scenarios that only need ToolCallLoop behavior should keep using
-    //  run() / runStrict() — those do NOT invoke the executor gates.
+    //  run() / runStrict() - those do NOT invoke the executor gates.
     //  See docs/architecture/talos-harness-main-plan.md §8 N4.
     // ══════════════════════════════════════════════════════════════════
 
@@ -336,7 +336,7 @@ public final class ScenarioRunner {
      * gate retries (R6 / synthesis retry).
      *
      * <p>The {@code scenario}'s own {@link ScenarioDefinition#scriptedResponse()}
-     * field is intentionally ignored on this path — the executor
+     * field is intentionally ignored on this path - the executor
      * needs multiple turns, which the single-string field cannot
      * express. Initial files, name, and approval policy are honored
      * as for {@link #run(ScenarioDefinition)}.

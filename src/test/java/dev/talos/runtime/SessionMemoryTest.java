@@ -195,7 +195,7 @@ class SessionMemoryTest {
 
     @Test void getTurns_prunes_oldest_when_exceeding_max() {
         var mem = new SessionMemory();
-        // MAX_TURNS is 200 — fill beyond that (110 pairs = 220 messages)
+        // MAX_TURNS is 200 - fill beyond that (110 pairs = 220 messages)
         for (int i = 0; i < 110; i++) {
             mem.update("q" + i, "a" + i);
         }

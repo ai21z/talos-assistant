@@ -124,7 +124,7 @@ class MemoryUpdateListenerTest {
     }
 
     @Test void stripUiChromePreservesProseWithBrackets() {
-        String in = "The config uses [brackets] in its DSL — that is fine.";
+        String in = "The config uses [brackets] in its DSL - that is fine.";
         assertEquals(in, MemoryUpdateListener.stripUiChromeForHistory(in));
     }
 
@@ -135,7 +135,7 @@ class MemoryUpdateListenerTest {
 
     @Test void chromeOnlyAnswerIsNotRecordedInHistory() {
         // Real transcript pattern: model emits ONLY UI chrome (fabricated).
-        // After stripping it would be blank — must not pollute history.
+        // After stripping it would be blank - must not pollute history.
         String chromeOnly = "[Used 2 tool(s): talos.edit_file | 4 iteration(s)]\n✓ Edited index.html: replaced 1 line(s)";
         listener.onTurnComplete(tr(new Result.Streamed(chromeOnly, ""), 1), "edit it");
         assertEquals(0, cm.turnCount(), "chrome-only answer must not be recorded");

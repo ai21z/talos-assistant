@@ -29,7 +29,7 @@ class ContextPackerSemanticsTest {
         var budget = new TokenBudget(400, 0.30, 100);
         var packer = new ContextPacker(budget);
 
-        // Single snippet with 1000 chars — must be truncated to fit 684 chars
+        // Single snippet with 1000 chars - must be truncated to fit 684 chars
         var regular = List.of(snip("A.java#0", "x".repeat(1000)));
 
         ContextResult result = packer.pack(SYS, QUERY, List.of(), regular);

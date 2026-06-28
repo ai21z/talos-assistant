@@ -23,7 +23,7 @@ import java.util.List;
  * <p>Fail-closed: any condition that would require showing content the
  * approval window must not leak (protected paths), or that the builder
  * cannot afford (oversized/binary/unreadable files), yields a skipped
- * preview with a machine-readable reason — never an exception into the
+ * preview with a machine-readable reason - never an exception into the
  * approval flow, and never a partial diff.
  */
 public final class ApprovalDiffPreview {
@@ -88,7 +88,7 @@ public final class ApprovalDiffPreview {
     /**
      * Diff for a checkpoint restore (T794): CURRENT file content vs the
      * captured blob that a restore would write back. All write/edit guards
-     * apply — protected paths (including {@code .talos} since T788), binary
+     * apply - protected paths (including {@code .talos} since T788), binary
      * and oversized content fail closed to a skipped preview.
      */
     public static Preview forRestore(Path workspace, String relPath, byte[] blobBytes) {

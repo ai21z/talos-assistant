@@ -17,7 +17,7 @@ Outcome and repair classification sniffed human-readable error prose:
 `MutationFailureAnswerRenderer` and `ProtectedReadAnswerGuard` (startsWith
 "User did not approve "), and `TurnProcessor.preApprovalBlockReason`.
 Rephrasing any of these messages silently disabled repair ladders or
-outcome truth policy — outcome classification was string-coupled to
+outcome truth policy - outcome classification was string-coupled to
 renderer literals (2026-06-10 evaluation, roadmap item W2.3). Notably,
 `EditFilePreApprovalGuard` already HAD a typed Kind enum that was flattened
 to prose at the ToolOutcome boundary and re-derived downstream by sniffing.
@@ -58,7 +58,7 @@ load-bearing for live model behavior; decouple first, reword later)
 - Critical plumbing fix found during migration:
   `ProtectedContentPolicy.sanitizeToolResult` rebuilt ToolError with the
   two-arg constructor, silently DROPPING the reason for every sanitized
-  failure — redaction now rewrites prose, never classification.
+  failure - redaction now rewrites prose, never classification.
 
 ## Known Residual
 

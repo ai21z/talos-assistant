@@ -190,7 +190,7 @@ class ChunkerMetadataTest {
         assertTrue(chunks.size() >= 2,
                 "Expected at least 2 chunks, got " + chunks.size() + ": " + chunks);
 
-        // First chunk contains intro content — must have heading "# Intro", NOT "## Details"
+        // First chunk contains intro content - must have heading "# Intro", NOT "## Details"
         ParsedChunk first = chunks.get(0);
         assertEquals("# Intro", first.metadata().headingContext(),
                 "First chunk should carry the heading under which its content was accumulated");

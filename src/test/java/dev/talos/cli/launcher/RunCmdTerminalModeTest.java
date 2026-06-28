@@ -53,4 +53,16 @@ class RunCmdTerminalModeTest {
             assertEquals(command, reader.readLine(""));
         }
     }
+
+    @Test
+    void promptGapPrintsOnlyForInteractiveNonEmptyInput() {
+        assertTrue(RunCmd.shouldPrintPromptGap(true, "hey"));
+        assertTrue(RunCmd.shouldPrintPromptGap(true, "  /models  "));
+
+        assertFalse(RunCmd.shouldPrintPromptGap(false, "hey"),
+                "Scripted and redirected transcripts must stay byte-identical.");
+        assertFalse(RunCmd.shouldPrintPromptGap(true, "   "),
+                "Pressing Enter on an empty prompt should not add stray vertical space.");
+        assertFalse(RunCmd.shouldPrintPromptGap(true, null));
+    }
 }

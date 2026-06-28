@@ -273,7 +273,7 @@ public final class ToolCallLoop {
             this(toolName, pathHint, success, mutating, false, summary, errorMessage);
         }
 
-        /** Copy with a typed failure reason (T758) — used where outcomes are assembled or simulated. */
+        /** Copy with a typed failure reason (T758) - used where outcomes are assembled or simulated. */
         public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,

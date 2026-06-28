@@ -89,7 +89,7 @@ class TurnProcessorTest {
     }
 
     @Test void noModeHandlesReturnsNull() throws Exception {
-        // Empty controller — no modes registered
+        // Empty controller - no modes registered
         var tp = new TurnProcessor(new ModeController());
         var session = new Session(WS, new Config());
         var ctx = Context.builder(new Config()).build();

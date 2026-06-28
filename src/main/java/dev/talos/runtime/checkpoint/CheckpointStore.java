@@ -48,7 +48,7 @@ public interface CheckpointStore {
 
     /**
      * T793: capture the CURRENT state of the given workspace-relative paths
-     * before a restore overwrites them — the safety checkpoint that makes
+     * before a restore overwrites them - the safety checkpoint that makes
      * {@code /undo} itself undoable.
      */
     default CheckpointCaptureResult captureBeforeRestore(

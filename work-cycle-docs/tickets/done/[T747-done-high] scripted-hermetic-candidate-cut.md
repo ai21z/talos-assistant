@@ -13,7 +13,7 @@ The candidate cut is a prose checklist executed by hand, and the 0.10.1 cut
 violated its own rules four ways in one pass: a hand-extended **invalid full
 SHA** in the release report, candidate summary JSONs left **stale at 0.10.0**,
 the evidence chain left **uncommitted**, and the installed launcher **built 49
-seconds before the candidate commit existed**. None were dishonesty — all were
+seconds before the candidate commit existed**. None were dishonesty - all were
 transcription/sequencing errors that a script makes impossible.
 
 ## Evidence Analysis
@@ -27,7 +27,7 @@ transcription/sequencing errors that a script makes impossible.
 - `scripts/bump-patch.ps1` (79 lines, verified): bumps patch + promotes
   `## [Unreleased]` with hard validations (rejects placeholder notes, empty
   Unreleased, wrong section order) but performs **no commit, no build, no
-  verification** — the gap this ticket fills around it.
+  verification** - the gap this ticket fills around it.
 - Mandatory post-bump check: AGENTS.md ("A pre-bump check ... is not candidate
   evidence") and work-test-cycle.md make the post-bump `gradlew check`
   mandatory.
@@ -83,7 +83,7 @@ Flags: `-DryRun` (print plan, execute nothing mutating), `-SelfTest`
 - `pwsh scripts/cut-candidate.ps1 -SelfTest` green (manifest assembly,
   version parsing, failure messages).
 - `-DryRun` on the wave branch prints the correct plan without mutating.
-- Real execution exercised once at wave close (0.10.2 cut) — the dogfood gate.
+- Real execution exercised once at wave close (0.10.2 cut) - the dogfood gate.
 
 ## Acceptance Criteria
 

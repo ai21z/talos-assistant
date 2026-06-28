@@ -637,7 +637,7 @@ The TRUE_PTY_MANUAL lane for the current `0.10.1` packet is complete:
 - `PTY-MANUAL-AUDIT-RESULT.json` status PASSED, filled from observed evidence
   with owner identity recorded;
 - `validateSynchronizedApprovalPtyManualAudit` PASS (`true PTY/JLine coverage:
-  manual-validated`, findings: none) and the PTY canary scan PASS — both
+  manual-validated`, findings: none) and the PTY canary scan PASS - both
   independently rerun afterward with exit 0;
 - the transcript evidences: denied protected read (`BLOCKED_BY_APPROVAL`,
   approvals required=1 granted=0 denied=1, no raw value anywhere),

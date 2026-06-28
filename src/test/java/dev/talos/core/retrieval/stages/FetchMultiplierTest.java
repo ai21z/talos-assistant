@@ -63,7 +63,7 @@ class FetchMultiplierTest {
         int topK = 3;
         int expectedLimit = topK * RrfFusionStage.FUSED_LIMIT_MULTIPLIER; // 3 * 2 = 6
 
-        // Feed 20 candidates — RRF should limit output to 6
+        // Feed 20 candidates - RRF should limit output to 6
         List<RetrievalCandidate> candidates = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
             candidates.add(RetrievalCandidate.of("path" + i, 10f - i, "bm25"));

@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for {@link Sanitize#sanitizeForOutputPreservingToolCalls} and
- * {@link Sanitize#sanitizeMessageContent} — verifying that HTML tags inside
+ * {@link Sanitize#sanitizeMessageContent} - verifying that HTML tags inside
  * tool_call JSON parameters are NOT stripped.
  *
  * <p>Regression tests for the bug where {@code SUS_HTML} pattern stripped
@@ -156,7 +156,7 @@ class SanitizeToolCallPreservationTest {
          */
         @Test
         void edit_file_script_tag_not_corrupted_by_sanitization() {
-            // XML-format tool_call block (deprecated compatibility — native path is primary)
+            // XML-format tool_call block (deprecated compatibility - native path is primary)
             String toolCallXml =
                     "<tool_call>\n" +
                     "{\"name\":\"talos.edit_file\",\"parameters\":{" +
@@ -188,7 +188,7 @@ class SanitizeToolCallPreservationTest {
                     "\"new_string\":\"<script src=\\\"script.js\\\"></script></body>\"}}\n" +
                     "</tool_call>";
 
-            // The old method strips HTML globally — this SHOULD corrupt the JSON
+            // The old method strips HTML globally - this SHOULD corrupt the JSON
             String corrupted = Sanitize.sanitizeForOutput(toolCallXml);
             assertFalse(corrupted.contains("<script src=\\\"script.js\\\"></script>"),
                     "sanitizeForOutput should strip <script> (proving the bug). Got: " + corrupted);

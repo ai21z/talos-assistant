@@ -151,7 +151,7 @@ final class OllamaChatClient {
 
             JsonNode toolCallsNode = msg.path("tool_calls");
             if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && !toolCallsNode.isEmpty()) {
-                LOG.debug("Non-streaming response contains {} native tool_call(s) — "
+                LOG.debug("Non-streaming response contains {} native tool_call(s) - "
                         + "use chatStream()/chatStreamFull() for structured access",
                         toolCallsNode.size());
                 return msg.path("content").asText("");

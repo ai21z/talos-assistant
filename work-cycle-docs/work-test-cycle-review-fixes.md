@@ -6,13 +6,13 @@ cross-check what was claimed against what was changed.
 
 ## Fixes Applied
 
-### F3 — Persistence path determinism gap (medium)
+### F3 - Persistence path determinism gap (medium)
 **File**: `src/e2eTest/java/dev/talos/harness/ScenarioRunner.java`
 
 `ScenarioRunner.runWithPersistence(...)` was constructing a real
 `LlmClient(new Config())` at line 193. `MemoryUpdateListener.onTurnComplete`
 delegates to `ConversationManager.maybeCompact(llm)`, which calls
-`LlmClient.chatFull(...)` for sketch generation — introducing
+`LlmClient.chatFull(...)` for sketch generation - introducing
 network-dependent nondeterminism into persistence snapshots.
 
 Replaced with `LlmClient.scripted(List.of(""))`. Compaction now receives
@@ -22,12 +22,12 @@ Verified: `PersistenceScenarioPackTest` does not assert on `sketch()` or
 `getModel()`, so no additional overload is needed. Scripted-client default
 model string is sufficient.
 
-### F4 — Summary-task fail-soft wrapper (low-to-medium)
+### F4 - Summary-task fail-soft wrapper (low-to-medium)
 **File**: `build.gradle.kts`
 
 Introduced `writeSummarySoft(target, summaryName, payloadBuilder)` helper.
-Wraps each summary's payload construction. If the builder throws — for
-example, on a truncated SARIF or corrupt JUnit XML — the task writes a
+Wraps each summary's payload construction. If the builder throws - for
+example, on a truncated SARIF or corrupt JUnit XML - the task writes a
 fallback JSON with `summaryStatus: summary-generation-failed`,
 `errorClass`, and `errorMessage` instead of letting the exception take down
 the whole packet.
@@ -38,7 +38,7 @@ Applied to all four summary tasks:
 - `writeQodanaSummary`
 - `writeE2eSummary`
 
-### F2 — Summary payloads no longer contain wall-clock `generatedAt` (medium)
+### F2 - Summary payloads no longer contain wall-clock `generatedAt` (medium)
 **File**: `build.gradle.kts`
 
 `generatedAt: Instant.now()` removed from the four summary JSON payloads.
@@ -49,11 +49,11 @@ candidate-to-candidate diffing.
 `generatedAtIso()` retained for the jar manifest `Implementation-Vendor`
 attribute, which is separate from the evidence-reproducibility contract.
 
-### F1 — Revised (not a bug)
+### F1 - Revised (not a bug)
 **File**: `build.gradle.kts`
 
 `writeVersionSummary` retains `outputs.upToDateWhen { false }` because its
-payload reports `jarTask.state` observed at execution time — that state is
+payload reports `jarTask.state` observed at execution time - that state is
 per-invocation and cannot be declared as a Gradle input. Without the
 predicate, the first run's `built-in-current-run` status would be cached
 and never refresh to `up-to-date-in-current-run` on subsequent invocations.
@@ -64,7 +64,7 @@ My prior review's F1 framing implied the predicate was a defect. After
 correction, combined with F2 (removing `Instant.now()`), the remaining
 per-invocation variability is legitimate and explicit.
 
-### F6 — Precise directory inputs (low)
+### F6 - Precise directory inputs (low)
 **File**: `build.gradle.kts`
 
 `writeCoverageSummary` and `writeE2eSummary` now declare inputs as
@@ -72,7 +72,7 @@ per-invocation variability is legitimate and explicit.
 Neighbor files (binary results, IDE temp) no longer invalidate the Gradle
 cache.
 
-### F9 — Docs tightening (low)
+### F9 - Docs tightening (low)
 **File**: `work-cycle-docs/work-test-cycle.md`
 
 Three notes updated:

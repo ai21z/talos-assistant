@@ -118,7 +118,7 @@ class SourceBoostStageTest {
                 input
         );
 
-        // Scores unchanged — test file still first
+        // Scores unchanged - test file still first
         assertEquals("src/test/java/FooTest.java#0", output.candidates().get(0).path());
         assertEquals(0.9f, output.candidates().get(0).score(), 0.001f);
         assertNotNull(output.note());
@@ -230,7 +230,7 @@ class SourceBoostStageTest {
 
     @Test
     void candidateWithoutMetadata_fallsBackToPathClassification() {
-        // No sourceIdentity — should use legacy path-based classification
+        // No sourceIdentity - should use legacy path-based classification
         var c = RetrievalCandidate.of("src/main/java/Foo.java#0", 1.0f, "rrf");
 
         float factor = SourceBoostStage.classifyCandidate(c);

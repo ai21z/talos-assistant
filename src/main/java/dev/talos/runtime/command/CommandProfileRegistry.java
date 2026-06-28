@@ -41,12 +41,12 @@ public final class CommandProfileRegistry {
 
     /**
      * Merge a workspace declaration into this registry (T790). Declared
-     * profiles register ONLY when the trust state is {@code TRUSTED} — an
+     * profiles register ONLY when the trust state is {@code TRUSTED} - an
      * untrusted, changed, or invalid declaration leaves the registry's
      * runnable surface unchanged and only records the state for instructive
      * plan-time rejections. Built-ins win on id collision, which the
      * {@code ws:} namespace makes structurally impossible (built-in ids
-     * carry no colon) — asserted anyway.
+     * carry no colon) - asserted anyway.
      */
     public CommandProfileRegistry withWorkspaceDeclaration(
             WorkspaceCommandProfiles declaration,

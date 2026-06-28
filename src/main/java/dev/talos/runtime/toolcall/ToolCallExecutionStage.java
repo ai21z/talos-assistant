@@ -37,7 +37,7 @@ public final class ToolCallExecutionStage {
      *                               duplicate-edit rejections. Gated by
      *                               {@link ToolCallRepromptStage} to decide
      *                               whether to skip the post-mutation
-     *                               re-prompt (CCR-020 — skip only when
+     *                               re-prompt (CCR-020 - skip only when
      *                               every call in the iteration succeeded).
      */
     public record IterationOutcome(int mutationsThisIteration,

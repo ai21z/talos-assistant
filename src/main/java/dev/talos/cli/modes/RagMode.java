@@ -38,7 +38,7 @@ public final class RagMode implements Mode {
 
     private static final Logger LOG = LoggerFactory.getLogger(RagMode.class);
 
-    /** Local record for pinned file snippets — replaces legacy PinnedSnippet. */
+    /** Local record for pinned file snippets - replaces legacy PinnedSnippet. */
     record PinnedSnippet(String path, String text) {
         PinnedSnippet {
             path = java.util.Objects.requireNonNullElse(path, "");
@@ -94,7 +94,7 @@ public final class RagMode implements Mode {
         }
         List<ContextResult.Snippet> regularCtx = prepared.snippets();
 
-        // Load system prompt — composed from sections, tool-aware, history-aware
+        // Load system prompt - composed from sections, tool-aware, history-aware
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
@@ -219,7 +219,7 @@ public final class RagMode implements Mode {
                 "No context snippets were retrieved for this query. " +
                 "The workspace may not be indexed yet, or the query didn't match any indexed content. " +
                 "Use your tools (talos.list_dir, talos.read_file, talos.grep) to explore the workspace " +
-                "and answer the user's question directly. Do NOT say 'I can't see your files' — you have tools."
+                "and answer the user's question directly. Do NOT say 'I can't see your files' - you have tools."
             ));
         }
 

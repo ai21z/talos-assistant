@@ -3923,7 +3923,7 @@ class StaticTaskVerifierTest {
                     <h1>Retrocats</h1>
                     <ul>
                       <li>Rome - 15 July 2026</li>
-                      <li>Barcelona – 18 July 2026</li>
+                      <li>Barcelona - 18 July 2026</li>
                       <li>Berlin: 22 July 2026</li>
                     </ul>
                     <script src="script.js"></script>

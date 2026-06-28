@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * T776 parity contract: streaming text through {@link StreamingAnswerShaper}
  * + {@link AnswerPaneRenderer.Stream} must produce the same pane bytes as
- * {@link AnswerPaneRenderer#renderBlock} for the same full text — under any
+ * {@link AnswerPaneRenderer#renderBlock} for the same full text - under any
  * chunking of the input. renderBlock is the oracle; the shaper replicates
  * it incrementally.
  */

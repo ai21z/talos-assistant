@@ -13,9 +13,9 @@ public final class ProtectedWorkspacePaths {
 
     /** Index freshness version for protected workspace path classification.
      *  v3 (T759): equals-or-suffix word-run matching replaced substring
-     *  matching — stale RAG indexes must rebuild their privacy partition.
+     *  matching - stale RAG indexes must rebuild their privacy partition.
      *  v4 (T788): the workspace .talos directory became a CONTROL segment
-     *  (it holds verification-profile declarations and template commands) —
+     *  (it holds verification-profile declarations and template commands) -
      *  stale indexes would misclassify .talos content in the privacy
      *  partition, so they must rebuild.
      *  v5 (T836): Windows trailing-dot/trailing-space aliases and reserved

@@ -19,23 +19,23 @@ an honest reclassification recorded as new dated evidence.
 ## Evidence Analysis
 
 - Prior verdicts: three Qwen full-bank fail-closed runs (scenarios 31/25/31);
-  GPT-OSS full bank PASS; focused reruns pass — all anchored in
+  GPT-OSS full bank PASS; focused reruns pass - all anchored in
   `work-cycle-docs/reports/current-0.10.1-release-packet-20260610-090049-results.md`
   (final classification section) and the r3 root
   `local/manual-testing/current-0.10.1-qwen-syncbank-r3-20260610-210541/artifacts`.
 - Root-cause evidence for reclassification: ProviderRequestControlPolicy gap
   (T739 evidence), absent sampling with byte-identical bodies (T740 evidence),
-  double-encoded batch schema (T744), repair-ladder skips (T743) — full
+  double-encoded batch schema (T744), repair-ladder skips (T743) - full
   citations in `work-cycle-docs/research/talos-top-tier-evaluation-and-roadmap-20260610.md`.
 - Known runner gap (recorded in done T306): when a bank aborts, the runner's
-  own post-bank canary scan is bypassed — any aborted root must be scanned
+  own post-bank canary scan is bypassed - any aborted root must be scanned
   manually with `checkRuntimeArtifactCanaries`.
 - Observed runtimes: full live bank ≈ 1-3 minutes (r3: 30 scenarios + failure
-  in 62s; GPT-OSS 0.10.1 bank comparable) — cheap to run both models.
+  in 62s; GPT-OSS 0.10.1 bank comparable) - cheap to run both models.
 
 ## Architectural Hypothesis
 
-n/a — this is an evidence/audit ticket, not a code change.
+n/a - this is an evidence/audit ticket, not a code change.
 
 ## Architecture Metadata
 
@@ -54,15 +54,15 @@ Refactor scope: docs only (report + T280/T284/T312 updates)
 1. Run full live banks to fresh timestamped roots under
    `local/manual-testing/wave1-stabilization-<ts>/`:
    - Qwen (`qwen-config.yaml` from the 0.10.0 packet configs, as before);
-   - GPT-OSS (regression check — sampling/tool-choice changes affect it too).
+   - GPT-OSS (regression check - sampling/tool-choice changes affect it too).
 2. Canary-scan every produced root (manually for any aborted bank).
-3. Evidence grade: **stabilization** (mid-wave tree) — explicitly NOT release
+3. Evidence grade: **stabilization** (mid-wave tree) - explicitly NOT release
    evidence; the release-grade rerun happens from the committed 0.10.2
    candidate at wave close.
 4. Update the 0.10.1 packet report + T280/T284/T312 with a dated
    reclassification: "primarily runtime constraint-coverage gap
    (tool_choice/sampling/schema/repair-ladder); model sensitivity as trigger;
-   GPT-OSS tolerant" — recorded as NEW evidence, no history rewriting.
+   GPT-OSS tolerant" - recorded as NEW evidence, no history rewriting.
 5. If a bank still fails closed: classify honestly with the T745 A/B data;
    gates stay open; no wording softening.
 
@@ -85,12 +85,12 @@ Refactor scope: docs only (report + T280/T284/T312 updates)
 
 ## 2026-06-11 completion evidence
 
-- Qwen full bank: **31/31 PASS-family, artifact scan PASS** — the first
+- Qwen full bank: **31/31 PASS-family, artifact scan PASS** - the first
   complete Qwen bank in four attempts:
   `local/manual-testing/wave1-stabilization-qwen-20260611-005233/artifacts`
   (`workspace-batch-apply-approved` plain PASS; `t325`
   PASS_WITH_READBACK_ONLY_LIMITATION; 5/31 scenarios rescued by the bounded
-  T743 ladder — `SATISFIED_AFTER_RETRY` — honestly recorded).
+  T743 ladder - `SATISFIED_AFTER_RETRY` - honestly recorded).
 - GPT-OSS full bank: 31/31, artifact scan PASS, **zero rescues** (no
   regression from the wave-1 stack):
   `local/manual-testing/wave1-stabilization-gptoss-20260611-005426/artifacts`.
@@ -99,6 +99,6 @@ Refactor scope: docs only (report + T280/T284/T312 updates)
 - Reclassification + evidence recorded in the packet report addendum and
   T280/T284/T312.
 - Open observation carried to wave close: first attempts under NAMED tool
-  choice still occasionally produce no parsed call (5/31 Qwen rescues) —
+  choice still occasionally produce no parsed call (5/31 Qwen rescues) -
   grammar/template interaction worth a focused look when the 0.10.2 packet
   data lands.

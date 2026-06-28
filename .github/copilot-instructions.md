@@ -100,17 +100,17 @@ traceability, or verification-oriented outcomes.
 
 ### Key packages
 
-- `dev.talos.core.retrieval` — retrieval pipeline, stages, traces
-- `dev.talos.core.rerank` — reranker interface and implementations
-- `dev.talos.core.context` — context packing, token budgets
-- `dev.talos.core.ingest` — parsing, chunking
-- `dev.talos.core.index` — Lucene indexing
-- `dev.talos.core.embed` — embeddings client
-- `dev.talos.core.cache` — SQLite caching
-- `dev.talos.core.llm` — LLM client abstraction
-- `dev.talos.tools` — tool registry and local workspace tool implementations
-- `dev.talos.api` — programmatic API seam (`TalosKnowledgeEngine`)
-- `dev.talos.cli` — CLI commands and REPL
+- `dev.talos.core.retrieval` - retrieval pipeline, stages, traces
+- `dev.talos.core.rerank` - reranker interface and implementations
+- `dev.talos.core.context` - context packing, token budgets
+- `dev.talos.core.ingest` - parsing, chunking
+- `dev.talos.core.index` - Lucene indexing
+- `dev.talos.core.embed` - embeddings client
+- `dev.talos.core.cache` - SQLite caching
+- `dev.talos.core.llm` - LLM client abstraction
+- `dev.talos.tools` - tool registry and local workspace tool implementations
+- `dev.talos.api` - programmatic API seam (`TalosKnowledgeEngine`)
+- `dev.talos.cli` - CLI commands and REPL
 
 ### Retrieval pipeline
 

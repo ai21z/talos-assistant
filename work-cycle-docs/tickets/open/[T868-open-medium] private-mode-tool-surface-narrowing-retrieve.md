@@ -224,7 +224,7 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Unit test: `ToolSurfacePlannerTest` (extend) — private-mode config excludes retrieve from each selected surface; RAG-enabled config includes it.
+- Unit test: `ToolSurfacePlannerTest` (extend) - private-mode config excludes retrieve from each selected surface; RAG-enabled config includes it.
 - Integration/executor test: surface handed to the model in private mode contains no retrieval tool (assert against `PromptToolDescriptors` output / the rendered surface).
 - JSON e2e scenario: private-mode scripted retrieval-style turn (extend `PrivateModeScriptedE2eTest`) asserts retrieve is not offered and no private content surfaces.
 - Trace assertion: recorded offered-tool surface for a private-mode turn omits retrieve.

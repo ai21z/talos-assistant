@@ -312,7 +312,7 @@ public final class LocalTurnTraceCapture {
     }
 
     /**
-     * T793: best-effort restore trace — emits CHECKPOINT_RESTORED or
+     * T793: best-effort restore trace - emits CHECKPOINT_RESTORED or
      * CHECKPOINT_RESTORE_FAILED. A no-op without an active trace bag (the
      * slash-command path today), so callers never depend on it.
      */

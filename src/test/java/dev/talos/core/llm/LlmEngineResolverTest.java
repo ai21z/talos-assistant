@@ -31,8 +31,8 @@ import static org.junit.jupiter.api.Assertions.*;
  *       {@code engine()} is called).</li>
  * </ul>
  *
- * <p>Deeper behavior of the registry — provider discovery, backend switch,
- * engine lifecycle — is exercised by engine-level tests
+ * <p>Deeper behavior of the registry - provider discovery, backend switch,
+ * engine lifecycle - is exercised by engine-level tests
  * (e.g. {@code OllamaEngineProviderTest}). Duplicating that here would be
  * shallow restatement, which CCR-017 explicitly calls out as the risk to
  * avoid.
@@ -83,7 +83,7 @@ class LlmEngineResolverTest {
     void registry_resolver_constructs_with_config_without_network() {
         RegistryLlmEngineResolver resolver = new RegistryLlmEngineResolver(minimalConfig());
         try {
-            // Construction must not require contacting a backend — provider
+            // Construction must not require contacting a backend - provider
             // discovery is via ServiceLoader; engine() is lazy.
             assertNotNull(resolver);
         } finally {
@@ -96,7 +96,7 @@ class LlmEngineResolverTest {
         RegistryLlmEngineResolver resolver = new RegistryLlmEngineResolver(minimalConfig());
         try {
             // Selecting the same backend with a new model should be a no-op
-            // on the engine — no backend change means no provider.create(cfg).
+            // on the engine - no backend change means no provider.create(cfg).
             assertDoesNotThrow(() -> resolver.select("ollama", "qwen2.5-coder:14b"));
             assertDoesNotThrow(() -> resolver.select("ollama", "other-model"));
         } finally {

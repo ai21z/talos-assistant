@@ -262,8 +262,8 @@ public final class HelpCommand implements Command {
         if (usage.length() <= USAGE_COL) return usage;
 
         // Derive the command token from the usage string itself (the form the user
-        // types), NOT spec.name(): a command whose usage leads with an alias — e.g.
-        // explain-last-turn with usage "/last ..." — would otherwise be sliced
+        // types), NOT spec.name(): a command whose usage leads with an alias - e.g.
+        // explain-last-turn with usage "/last ..." - would otherwise be sliced
         // mid-token by substring(("/" + name).length()).
         int sp = usage.indexOf(' ');
         String cmd = sp < 0 ? usage : usage.substring(0, sp);

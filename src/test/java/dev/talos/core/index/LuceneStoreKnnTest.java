@@ -14,10 +14,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for {@link LuceneStore} KNN (vector) retrieval.
  *
  * <p>Uses small 3-dimensional vectors to validate KNN search, scoring,
- * ordering, metadata propagation, and edge cases — all without requiring
+ * ordering, metadata propagation, and edge cases - all without requiring
  * an external embedding model.
  */
-@DisplayName("LuceneStore — KNN retrieval")
+@DisplayName("LuceneStore - KNN retrieval")
 class LuceneStoreKnnTest {
 
     private static final int DIM = 3;

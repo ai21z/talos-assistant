@@ -14,12 +14,12 @@ import java.util.regex.Pattern;
  * T792: evidence-based verification upgrade. A user-approved, successful,
  * verification-class {@code run_command} outcome ordered AFTER the last
  * successful mutation of the turn is command-level proof the workspace
- * verifies — strictly stronger than readback.
+ * verifies - strictly stronger than readback.
  *
  * <p>Extraction is deliberately conservative: only the exact success-summary
  * shape {@code RunCommandTool.renderSuccess} emits is accepted; anything
  * ambiguous yields empty and the would-be READBACK_ONLY verdict stands
- * (fail closed). The upgrade is additive only — a FAILED verdict is never
+ * (fail closed). The upgrade is additive only - a FAILED verdict is never
  * overridden (failed runs already dominate the answer path).
  */
 final class CommandVerificationEvidence {
@@ -29,7 +29,7 @@ final class CommandVerificationEvidence {
 
     /**
      * Verification-class built-ins only: test/check/e2e prove behavior.
-     * gradle_build / gradle_install_dist are builds, not verification —
+     * gradle_build / gradle_install_dist are builds, not verification -
      * deliberately excluded in v1. Workspace {@code ws:} profiles are
      * verification profiles by declaration intent.
      */
@@ -53,7 +53,7 @@ final class CommandVerificationEvidence {
             if (outcome == null || !outcome.success() || outcome.denied()) continue;
             if (!CommandToolPlanner.isRunCommandTool(outcome.toolName())) continue;
             Matcher matcher = SUCCESS_SUMMARY.matcher(Objects.toString(outcome.summary(), ""));
-            if (!matcher.find()) continue; // ambiguous shape — fail closed
+            if (!matcher.find()) continue; // ambiguous shape - fail closed
             String profile = matcher.group(1);
             if (isVerificationClass(profile)) {
                 return Optional.of(profile);

@@ -8,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Byte-identity pins for {@link ApprovalPromptText} (T765).
  *
- * <p>Every assertion compares against a string literal typed here — never
- * against another constant — so that an accidental edit to the constants
+ * <p>Every assertion compares against a string literal typed here - never
+ * against another constant - so that an accidental edit to the constants
  * class cannot silently re-pin itself. These bytes are matched by the PTY
  * manual-audit validator, talosbench forbidden-substring banks, and recorded
  * audit packets; changing them invalidates external evidence.

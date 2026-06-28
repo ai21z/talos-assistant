@@ -71,7 +71,7 @@ The path is:
 
 ## The one true path
 
-### Phase 0 — Stop and define the architecture spine
+### Phase 0 - Stop and define the architecture spine
 
 Before more implementation, create one canonical architecture document:
 
@@ -106,7 +106,7 @@ This is not marketing. This is the architecture skeleton.
 
 ---
 
-### Phase 1 — Build the scenario discipline first
+### Phase 1 - Build the scenario discipline first
 
 Your own plan already says scenario/parity harness should come first because it turns “feels better” into evidence. That is correct.
 
@@ -149,7 +149,7 @@ If you cannot test a discipline, it is not architecture yet. It is aspiration.
 
 ---
 
-### Phase 2 — Create the runtime phase model
+### Phase 2 - Create the runtime phase model
 
 This is the most important runtime change.
 
@@ -208,7 +208,7 @@ This is where discipline becomes real.
 
 ---
 
-### Phase 3 — Add TaskContract
+### Phase 3 - Add TaskContract
 
 Without a task contract, Talos is still interpreting raw user text on every turn.
 
@@ -257,7 +257,7 @@ If Talos cannot explain the task contract, it cannot claim disciplined execution
 
 ---
 
-### Phase 4 — Centralize truth layers into a TaskOutcome model
+### Phase 4 - Centralize truth layers into a TaskOutcome model
 
 Right now, `AssistantTurnExecutor` has many valuable truth protections. But they are spread across post-processing functions.
 
@@ -302,7 +302,7 @@ That is reference-architecture quality.
 
 ---
 
-### Phase 5 — Add TaskVerifier, but start static
+### Phase 5 - Add TaskVerifier, but start static
 
 Your current docs correctly say per-file verification is not task-level verification. A file can be syntactically acceptable while the user’s task is still unfinished.
 
@@ -336,7 +336,7 @@ I know it is tempting to add a local command tool, test runner, browser, or MCP.
 
 ---
 
-### Phase 6 — Add failure discipline
+### Phase 6 - Add failure discipline
 
 This is where you become more serious than most hobby agents.
 
@@ -382,7 +382,7 @@ The Claude Code leak’s compaction example is relevant: a simple failure cap re
 
 ---
 
-### Phase 7 — Make CLI interaction show discipline
+### Phase 7 - Make CLI interaction show discipline
 
 A reference architecture is not only code. Users must feel the design.
 
@@ -437,7 +437,7 @@ This makes Talos teachable.
 
 ---
 
-### Phase 8 — Fix documentation as architecture, not decoration
+### Phase 8 - Fix documentation as architecture, not decoration
 
 Your README currently links `work-cycle-docs/work-test-cycle.md`, but that file was not retrievable through the connector when I checked. The README references it directly.  This is small but important: broken architecture links damage credibility.
 
@@ -475,7 +475,7 @@ Do not write huge essays. A reference architecture is readable.
 
 ---
 
-### Phase 9 — Clean the build/report architecture
+### Phase 9 - Clean the build/report architecture
 
 Your Gradle file has strong quality/reporting logic, but it is becoming heavy.  For a reference architecture, consider moving reporting logic into:
 
@@ -557,61 +557,61 @@ It still lacks first-class phase control, task-level verification, and failure d
 
 ## The final plan, in exact order
 
-### Step 1 — Name the architecture
+### Step 1 - Name the architecture
 
 Create `execution-discipline.md`.
 
 Outcome: Talos has a clear architectural doctrine.
 
-### Step 2 — Build scenario discipline
+### Step 2 - Build scenario discipline
 
 Create deterministic scenarios and scenario reports.
 
 Outcome: progress becomes measurable.
 
-### Step 3 — Add `TaskContract`
+### Step 3 - Add `TaskContract`
 
 Make every turn produce or infer a task contract.
 
 Outcome: Talos knows what kind of task it is executing.
 
-### Step 4 — Add `ExecutionPhase`
+### Step 4 - Add `ExecutionPhase`
 
 Enforce `INSPECT → PLAN → APPLY → VERIFY → RESPOND`.
 
 Outcome: Talos stops blending thinking, acting, and claiming done.
 
-### Step 5 — Add tool phase metadata
+### Step 5 - Add tool phase metadata
 
 Tools become allowed/blocked by phase and contract.
 
 Outcome: tool discipline becomes enforceable.
 
-### Step 6 — Add `TaskOutcome`
+### Step 6 - Add `TaskOutcome`
 
 Centralize mutation results, warnings, verification, and completion status.
 
 Outcome: truth layers stop being scattered patches.
 
-### Step 7 — Add static `TaskVerifier`
+### Step 7 - Add static `TaskVerifier`
 
 Start with file/web/workspace checks.
 
 Outcome: Talos stops claiming completion without task-level checking.
 
-### Step 8 — Add failure/reset policy
+### Step 8 - Add failure/reset policy
 
 Stop repeated blind retries.
 
 Outcome: Talos becomes more controlled under model failure.
 
-### Step 9 — Expose discipline in CLI
+### Step 9 - Expose discipline in CLI
 
 Show phases, approvals, verification, and outcomes.
 
 Outcome: users feel the architecture.
 
-### Step 10 — Clean architecture docs and build logic
+### Step 10 - Clean architecture docs and build logic
 
 Make the repo readable and copyable.
 

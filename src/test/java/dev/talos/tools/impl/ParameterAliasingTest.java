@@ -15,7 +15,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests that tool parameter aliasing works — verifying that models can use
+ * Tests that tool parameter aliasing works - verifying that models can use
  * alternative parameter names (file_path, text, etc.) and still have tools
  * execute successfully.
  *

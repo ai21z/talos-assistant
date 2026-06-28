@@ -62,7 +62,7 @@ class ExplainLastTurnCommandTest {
     /**
      * T799: the composition root injects the active session instance id.
      * The command must read THAT log, not one re-derived from the
-     * workspace hash — turns written under the instance id were invisible
+     * workspace hash - turns written under the instance id were invisible
      * to a hash-derived reader, and vice versa.
      */
     @Test

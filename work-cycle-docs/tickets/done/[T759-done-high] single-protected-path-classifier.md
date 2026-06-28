@@ -14,12 +14,12 @@ canonical `safety/ProtectedPathTokens` (substring matching, used by
 permission policy, EvidenceGate, Indexer, TraceRedactor, SafeLogFormatter)
 plus four byte-identical planner-local `isSensitiveReadbackPath` methods
 (SourceDerivedEvidenceGuard, ExpectedTargetScopeRepairPlanner,
-TargetReadbackCompactRepairPlanner, CompactMutationContinuationPlanner —
+TargetReadbackCompactRepairPlanner, CompactMutationContinuationPlanner -
 blank→true fail-closed, narrower vocabulary) plus
 `ProtectedReadAnswerGuard.looksProtectedPathHint` (narrowest copy). The
 canonical classifier itself false-positived on derivational suffixes:
 `tokenizer.java` (contains "token"), `secretary-notes.md`,
-`passwordless-ssh.md`, `credentialing.md` — protected-read approval
+`passwordless-ssh.md`, `credentialing.md` - protected-read approval
 friction and over-redaction on ordinary source files (2026-06-10
 evaluation, roadmap item W2.4).
 
@@ -30,7 +30,7 @@ runs): a run that ends with a vocabulary stem (secret(s), token(s),
 credential(s), password(s), privatekey) is secret-bearing; the
 (private, key) adjacent-run pair replaces contains("private_key"). Why not
 the roadmap-literal pure word-boundary: secret names overwhelmingly END
-with the noun (api_token, mysecrets, supersecret) — word-equality would
+with the noun (api_token, mysecrets, supersecret) - word-equality would
 fail OPEN on them; suffix matching keeps them while freeing the
 derivational-suffix names where the stem is a prefix of the run. "key"
 alone is deliberately not a stem (monkey, keyboard). All exact-segment,
@@ -49,16 +49,16 @@ supersecret.conf, AccessToken.java, password123.txt, private_key.txt,
 my_tokens.txt.
 
 Known remaining limitation (documented): lexer source files literally
-named Token.java/JsonToken.java stay protected — a source-extension
+named Token.java/JsonToken.java stay protected - a source-extension
 exemption is a separate policy decision, out of scope.
 
 Readback-sensitivity expansion (fail-closed, intended): the four planner
 copies' narrow vocabulary (.env/.git/.ssh/.gnupg/id_rsa/credentials/secret)
-widens to the full canonical vocabulary — compact repair frames inline
+widens to the full canonical vocabulary - compact repair frames inline
 less content for e.g. passwords.txt/*.pem targets.
 
 looksProtectedPathHint delta: CONTROL-kind hints (.git, .gnupg) now count
-as protected hints — consistent with the adjacent workspace-resolved
+as protected hints - consistent with the adjacent workspace-resolved
 branch which already included CONTROL.
 
 ## Architecture Metadata
@@ -67,7 +67,7 @@ Capability: protected-path classification (safety layer)
 Operation(s): read/write gating, redaction, indexing, repair planning
 Owning package/class: `dev.talos.safety.ProtectedPathTokens` (single
 owner; new public `isSensitiveReadbackPath`), `ProtectedWorkspacePaths.
-POLICY_VERSION` bumped v2→v3 (Indexer checks it for freshness — stale RAG
+POLICY_VERSION` bumped v2→v3 (Indexer checks it for freshness - stale RAG
 privacy partitions rebuild)
 New or changed tools: none
 Out of scope (recorded): SensitiveWorkspaceDetector (distinct personal-

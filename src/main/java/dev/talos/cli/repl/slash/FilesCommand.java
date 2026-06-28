@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * `/files` — List all indexed files in the workspace.
+ * `/files` - List all indexed files in the workspace.
  * Provides deterministic file inventory without LLM hallucinations.
  */
 public class FilesCommand implements Command {

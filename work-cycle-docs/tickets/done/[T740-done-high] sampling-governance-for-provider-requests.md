@@ -21,19 +21,19 @@ is currently a dice game.
 
 - `src/main/java/dev/talos/engine/compat/CompatChatClient.java:144-167`
   (`buildBody`) emits only `model/messages/stream/tools/tool_choice/response_format`
-  — no temperature/top_p/top_k/seed.
+  - no temperature/top_p/top_k/seed.
 - `LlamaCppServerManager.buildCommand` (113-152) passes no `--temp/--top-p/--seed`;
   live config `server_args: []`.
 - `spi/types/ChatRequestControls.java:13-19` record has five components
   (toolChoice, namedTool, responseFormat, jsonSchema, debugTags) and **13
   construction sites** in main (ProviderRequestControlPolicy:66, DEFAULTS:20,
-  LlmClient:501,946, ExactWriteContextFallback:161, 8 toolcall planners) —
+  LlmClient:501,946, ExactWriteContextFallback:161, 8 toolcall planners) -
   positional widening would churn all of them; `LlmClient.withDebugTag`
   (939-952) reconstructs field-by-field.
 - Qwen model-card guidance: temp 0.7 / top_p 0.8 / top_k 20 general;
   near-greedy is standard practice for tool-protocol turns on quantized 14B.
 - At even 3-5% per-scenario emission failure, a 31-scenario bank fails
-  somewhere in ≥60-80% of runs — matching 3/3 failed banks (scenarios 31, 25,
+  somewhere in ≥60-80% of runs - matching 3/3 failed banks (scenarios 31, 25,
   31) with every focused rerun passing.
 - `Config.java:286-291` `llm` section has only transport/default_backend/model;
   no sampling keys exist anywhere. Prompt-debug/provider-body capture is
@@ -72,7 +72,7 @@ ChatRequestControls construction sites (convenience ctor)
   delegating with null (zero call-site churn); add `withSampling(...)` copier.
 - `ProviderRequestControlPolicy` attaches `NEAR_GREEDY` wherever it returns
   REQUIRED/NAMED (tool-obligation turns). Non-obligation turns: sampling unset
-  (server defaults preserved — no silent behavior change for chat).
+  (server defaults preserved - no silent behavior change for chat).
 - Config keys `llm.sampling.seed|temperature|top_p|top_k` (putIfAbsent
   defaults pattern; unset by default). `LlmClient` stamps configured values
   onto outgoing controls (mirror `withDebugTag`), config overriding unset

@@ -10,7 +10,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Comprehensive tests for {@link CodeBlockSplitter} — the structural block
+ * Comprehensive tests for {@link CodeBlockSplitter} - the structural block
  * splitter for source code files (brace-based, indent-based, blank-line).
  */
 class CodeBlockSplitterTest {

@@ -100,7 +100,7 @@ class CommandToolPlannerTest {
         assertEquals(workspace.resolve("gradlew.bat").toAbsolutePath().normalize().toString(),
                 plan.executable());
         assertEquals(java.util.List.of("--no-daemon", "check"), plan.argv(),
-                "the plan argv must be exactly the declared fixed argv — nothing appended");
+                "the plan argv must be exactly the declared fixed argv - nothing appended");
         assertTrue(plan.requiresApproval(), "per-run approval is never waived");
         assertTrue(CommandToolPlanner.approvalDetail(plan).startsWith("profile: ws:check\n"));
     }

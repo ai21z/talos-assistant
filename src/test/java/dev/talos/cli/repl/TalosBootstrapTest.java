@@ -20,7 +20,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link TalosBootstrap} — the composition root.
+ * Tests for {@link TalosBootstrap} - the composition root.
  *
  * <p>Verifies that the bootstrap wires everything correctly and
  * produces a functional ReplRouter without exceptions.

@@ -38,7 +38,7 @@ public final class ParserUtil {
                 // Developer agent: preserve full source for code review and indexing.
                 // The previous behaviour stripped <script>, <style>, and all tags,
                 // destroying CSS/JS and reducing 190-line files to ~200 chars of
-                // plain text — causing single-chunk indexing and context starvation.
+                // plain text - causing single-chunk indexing and context starvation.
                 return raw.trim();
             }
             default -> {

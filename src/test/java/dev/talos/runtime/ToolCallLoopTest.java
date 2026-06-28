@@ -496,7 +496,7 @@ class ToolCallLoopTest {
     void malformedToolCallBlockStopsLoop() {
         var loop = createLoop(echoTool());
 
-        // Empty tool_call block — parser returns empty, loop stops
+        // Empty tool_call block - parser returns empty, loop stops
         String llmResponse = "<tool_call></tool_call>";
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("go")));
 
@@ -1188,7 +1188,7 @@ class ToolCallLoopTest {
         testLoop.run(llmResponse, messages, WS, defaultCtx());
 
         assertEquals(2, invocations.get(),
-                "Both write_file calls must execute — duplicate-failure detection must not conflate them");
+                "Both write_file calls must execute - duplicate-failure detection must not conflate them");
     }
 
     // ── Issue 4: failed read_file must not count as prior read ───────
@@ -1244,7 +1244,7 @@ class ToolCallLoopTest {
         boolean nudgePresent = messages.stream()
                 .anyMatch(m -> m.content() != null && m.content().contains("did not read this file"));
         assertTrue(nudgePresent,
-                "Nudge must appear when read_file failed — a failed read must not suppress the edit nudge");
+                "Nudge must appear when read_file failed - a failed read must not suppress the edit nudge");
     }
 
     // ── F1: summary() includes failure info ─────────────────────────

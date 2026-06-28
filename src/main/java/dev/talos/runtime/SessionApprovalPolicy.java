@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * goes through the approval gate. The optional "remember for session" choice
  * flips a single flag that auto-approves subsequent {@link ToolRiskLevel#WRITE}
  * calls whose target path is <em>inside the session workspace</em>. The
- * session-local flag is the entire memory surface — intentionally the
+ * session-local flag is the entire memory surface - intentionally the
  * smallest useful policy, not a DSL.
  *
  * <p>Invariants enforced here:
@@ -45,7 +45,7 @@ public final class SessionApprovalPolicy implements ApprovalPolicy {
     /**
      * Sensitive in-workspace directory segments that never auto-approve,
      * even when the session's remember flag is on. Matched exactly against
-     * any segment of the normalized relative path (case-sensitive — these
+     * any segment of the normalized relative path (case-sensitive - these
      * are POSIX-canonical names).
      */
     private static final List<String> SENSITIVE_DIR_SEGMENTS =
@@ -60,9 +60,9 @@ public final class SessionApprovalPolicy implements ApprovalPolicy {
             return Decision.AUTO_APPROVE;
         }
         if (risk == ToolRiskLevel.DESTRUCTIVE) {
-            return Decision.ASK; // never auto — invariant
+            return Decision.ASK; // never auto - invariant
         }
-        // WRITE — consider remember flag only for in-workspace, non-sensitive targets.
+        // WRITE - consider remember flag only for in-workspace, non-sensitive targets.
         if (rememberInWorkspaceWrites.get()
                 && isInWorkspace(workspace, call)
                 && !isSensitiveTarget(workspace, call)) {
@@ -73,7 +73,7 @@ public final class SessionApprovalPolicy implements ApprovalPolicy {
 
     @Override
     public void rememberApproval(Path workspace, ToolCall call, ToolRiskLevel risk) {
-        // Honor invariants even on the remember path — a user who approves
+        // Honor invariants even on the remember path - a user who approves
         // a sensitive write once must not silently opt in to future sensitive
         // writes for the whole session.
         if (risk == null || risk == ToolRiskLevel.READ_ONLY) return;
@@ -151,7 +151,7 @@ public final class SessionApprovalPolicy implements ApprovalPolicy {
         return null;
     }
 
-    /** Test hook — true if the session-wide remember flag has been set. */
+    /** Test hook - true if the session-wide remember flag has been set. */
     public boolean rememberInWorkspaceWritesEnabled() {
         return rememberInWorkspaceWrites.get();
     }

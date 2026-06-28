@@ -52,7 +52,7 @@ public final class LlmClient implements AutoCloseable {
     private final long responseMaxChars;
 
     /**
-     * P2 — wall-clock budget for a single LLM call (one full
+     * P2 - wall-clock budget for a single LLM call (one full
      * {@link #chatStreamFull} or {@link #chatFull} invocation, including all
      * internal retries).
      *
@@ -73,7 +73,7 @@ public final class LlmClient implements AutoCloseable {
     private final long defaultWallClockBudgetMs;
 
     /**
-     * P2 — idle-stream timeout (ms). If no chunk (text or tool-call) arrives
+     * P2 - idle-stream timeout (ms). If no chunk (text or tool-call) arrives
      * from the engine within this window, the worker is interrupted and the
      * call returns a synthesized abort marker (same shape as the wall-clock
      * trip).
@@ -91,7 +91,7 @@ public final class LlmClient implements AutoCloseable {
     private final long defaultIdleMs;
 
     /**
-     * P2 — externally-settable cancel hook. The REPL (or future Ctrl-C
+     * P2 - externally-settable cancel hook. The REPL (or future Ctrl-C
      * handler) calls {@link #setCancelSupplier} once at bootstrap to install
      * a {@link Supplier} that flips to {@code true} when the user requests
      * abort. The streaming loop polls it on every chunk; the watchdog polls
@@ -100,7 +100,7 @@ public final class LlmClient implements AutoCloseable {
     private volatile Supplier<Boolean> externalCancel = () -> false;
 
     /**
-     * P2 — companion reset callback for {@link #externalCancel}. Invoked at
+     * P2 - companion reset callback for {@link #externalCancel}. Invoked at
      * the top of each public streaming/non-streaming call so a Ctrl-C
      * pressed during turn N cannot leak into turn N+1. Default no-op
      * preserves test behavior (tests never set a cancel supplier).
@@ -221,7 +221,7 @@ public final class LlmClient implements AutoCloseable {
      * exhausted the last response is repeated (so a scripted run cannot
      * accidentally fall through to a real backend).
      *
-     * <p>Ignores engine / Ollama configuration entirely — no backend
+     * <p>Ignores engine / Ollama configuration entirely - no backend
      * connection is attempted.
      *
      * @param responses ordered list of model outputs, one per turn
@@ -339,7 +339,7 @@ public final class LlmClient implements AutoCloseable {
     }
 
     /**
-     * P2 — install an external cancel supplier (e.g., a Ctrl-C handler that
+     * P2 - install an external cancel supplier (e.g., a Ctrl-C handler that
      * flips an {@link java.util.concurrent.atomic.AtomicBoolean}). Polled on
      * every stream chunk and once per watchdog tick. Pass {@code null} or a
      * {@code () -> false} supplier to disable.
@@ -349,7 +349,7 @@ public final class LlmClient implements AutoCloseable {
     }
 
     /**
-     * P2 — install an external "reset the cancel flag" callback. Invoked
+     * P2 - install an external "reset the cancel flag" callback. Invoked
      * automatically at the top of {@link #chatStreamFull} and
      * {@link #chatFull} so a Ctrl-C pressed during turn N cannot leak into
      * turn N+1. The REPL owns the {@link java.util.concurrent.atomic.AtomicBoolean}
@@ -687,7 +687,7 @@ public final class LlmClient implements AutoCloseable {
                                        long wallClockMs,
                                        List<ToolSpec> requestToolSpecs,
                                        ChatRequestControls controls) {
-        // P2 — clear any Ctrl-C from the previous turn so stale cancels
+        // P2 - clear any Ctrl-C from the previous turn so stale cancels
         // don't immediately short-circuit this call.
         externalCancelReset.run();
         if (scriptedFailure != null) {
@@ -703,13 +703,13 @@ public final class LlmClient implements AutoCloseable {
             if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
             return new StreamResult(full, List.of());
         }
-        // P2 — track the time of the last visible chunk; the watchdog (set up
+        // P2 - track the time of the last visible chunk; the watchdog (set up
         // inside withWallClockBudget) abort()s the worker if no chunk arrives
         // for {@link #defaultIdleMs} ms. The cancel supplier OR-combines the
         // engine-level cancel and the externally-set cancel hook so a Ctrl-C
         // future patch can plug in without touching this method.
         AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
-        // Repetition breaker — observes the streamed chunks alongside the
+        // Repetition breaker - observes the streamed chunks alongside the
         // idle watchdog. The watchdog polls breaker.tripped() on every tick
         // and aborts the worker via RepetitionException when the model
         // enters a degenerate-output loop. See RepetitionBreaker for the
@@ -770,7 +770,7 @@ public final class LlmClient implements AutoCloseable {
                                  long wallClockMs,
                                  List<ToolSpec> requestToolSpecs,
                                  ChatRequestControls controls) {
-        // P2 — see chatStreamFull: clear stale cancel flag per call.
+        // P2 - see chatStreamFull: clear stale cancel flag per call.
         externalCancelReset.run();
         if (scriptedFailure != null) {
             throw scriptedFailure;
@@ -781,10 +781,10 @@ public final class LlmClient implements AutoCloseable {
         if (mode == TransportMode.PLACEHOLDER) {
             return new StreamResult(placeholderFromMessages(messages), List.of());
         }
-        // P2 — same idle-watchdog + cancel-hook plumbing as chatStreamFull.
+        // P2 - same idle-watchdog + cancel-hook plumbing as chatStreamFull.
         // The non-streaming path still uses an internal stream loop, so
         // chunk arrivals are observable; idle detection is meaningful.
-        // Repetition detection applies here too — a non-streaming chat is
+        // Repetition detection applies here too - a non-streaming chat is
         // still driven by the same engine-side token stream, and the same
         // degenerate attractors trip just as easily.
         AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
@@ -809,7 +809,7 @@ public final class LlmClient implements AutoCloseable {
      * installed by the worker inside {@link #engineAssembledWithMessagesFull}.
      * Called from the watchdog thread (or the abort {@code catch} blocks in
      * {@link LlmCallBudget#run}) to force the worker's blocked socket
-     * read to throw and unwind — no interrupt alone can do that.
+     * read to throw and unwind - no interrupt alone can do that.
      *
      * <p>Uses {@code getAndSet(null)} so repeated callers (e.g. watchdog then
      * the {@code ExecutionException} catch) don't double-close. All exceptions
@@ -823,7 +823,7 @@ public final class LlmClient implements AutoCloseable {
     }
 
     /**
-     * P2 — variant of {@link #engineAssembledWithMessagesFull} that calls
+     * P2 - variant of {@link #engineAssembledWithMessagesFull} that calls
      * the tracking sink on every text chunk (so the idle watchdog sees
      * activity). Behavior is otherwise identical.
      */
@@ -843,7 +843,7 @@ public final class LlmClient implements AutoCloseable {
             if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) return true;
             return Thread.currentThread().isInterrupted();
         };
-        // Bump the heartbeat once before we start blocking on the engine —
+        // Bump the heartbeat once before we start blocking on the engine -
         // protects against an engine that takes >idleMs to produce its
         // first chunk on a cold model.
         if (lastChunkAt != null) lastChunkAt.set(System.currentTimeMillis());
@@ -866,7 +866,7 @@ public final class LlmClient implements AutoCloseable {
                                                          ChatRequestControls controls,
                                                          boolean streamRequest) {
         // Sanitize message content while preserving tool-call structure
-        // (toolCalls, toolCallId) — these carry native tool-call context that
+        // (toolCalls, toolCallId) - these carry native tool-call context that
         // OllamaEngine.serializeChatMessage needs for proper /api/chat formatting.
         List<ChatMessage> sanitized = messages.stream()
                 .map(m -> new ChatMessage(
@@ -1219,7 +1219,7 @@ public final class LlmClient implements AutoCloseable {
         // Try-with-resources: closes the engine's token stream on every exit
         // path (cancel break, cap-reached break, exception, normal return).
         // For the Ollama transport this propagates to the HTTP body/socket
-        // close via Stream.onClose — preventing the "Ollama keeps generating
+        // close via Stream.onClose - preventing the "Ollama keeps generating
         // into a dead consumer" leak that kept a hung repetition-loop stream
         // alive after the tool-call loop had moved on.
         try (stream) {

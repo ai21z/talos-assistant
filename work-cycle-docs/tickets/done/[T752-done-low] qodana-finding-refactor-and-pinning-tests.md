@@ -11,22 +11,22 @@ Owner: unassigned
 
 The stale Qodana scan (v0.9.0-beta-dev era) carries three headline HIGH
 findings in load-bearing code. Plan-phase code review determined all three are
-false positives or style findings — but they sit in the mutation-readback
+false positives or style findings - but they sit in the mutation-readback
 verifier and command runner, where an unexplained static-analysis warning is
 itself a liability. Silence them by clarifying the code, with behavior-pinning
 tests proving the silencing is safe, before T753 re-scans.
 
 ## Evidence Analysis
 
-(Line numbers from the old scan — verify currency first; code may have moved.)
+(Line numbers from the old scan - verify currency first; code may have moved.)
 
 - `core/context/ContextItem.java:66` "sourcePath may produce NPE": null
-  `metadata` routes through the `blank("")` branch before dereference —
+  `metadata` routes through the `blank("")` branch before dereference -
   dataflow false positive, but the null-flow is implicit enough that the
   analyzer (and a human) can mis-read it.
 - `runtime/verification/MutationTargetReadbackVerifier.java:42`
   "fileVerificationStatus may produce NPE": null outcome hits the `continue`
-  at line 39 first — false positive; same readability issue, in the single
+  at line 39 first - false positive; same readability issue, in the single
   most load-bearing link of the evidence chain.
 - `runtime/command/ProcessCommandRunner.java:27` "ExecutorService leak":
   already `shutdownNow()` in a `finally` (line 84); the finding is the Java 21
@@ -71,7 +71,7 @@ Refactor scope: the three classes + their tests; no API changes
 
 - Pinning tests written BEFORE the refactor for each class: null-metadata
   ContextItem path; null-outcome readback-verifier path; command-runner
-  timeout/interrupt/shutdown behavior — green before and after.
+  timeout/interrupt/shutdown behavior - green before and after.
 
 ## Acceptance Criteria
 
@@ -84,7 +84,7 @@ Refactor scope: the three classes + their tests; no API changes
 - Line currency verified for all three findings before touching anything.
 - `ContextItem.fromToolResult`: the correlated ternary replaced with an
   explicit `metadataSourcePath` local (behavior identical; pinned by new
-  `ContextItemSourcePathFallbackTest` — null result and blank-source-path
+  `ContextItemSourcePathFallbackTest` - null result and blank-source-path
   fallbacks).
 - `MutationTargetReadbackVerifier`: explicit null-outcome guard preserving
   the exact legacy problem line ("tool succeeded but did not expose a target

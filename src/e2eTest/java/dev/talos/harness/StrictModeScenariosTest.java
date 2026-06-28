@@ -8,15 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * R5 — Proves that {@link ScenarioRunner#runStrict} produces meaningfully
+ * R5 - Proves that {@link ScenarioRunner#runStrict} produces meaningfully
  * different behavior from the default {@link ScenarioRunner#run}, on two
  * measurement cushions that genuinely exist on the harness path:
  *
  * <ol>
- *   <li><b>Alias rescue</b> — {@link dev.talos.tools.ToolRegistry} fuzzy
+ *   <li><b>Alias rescue</b> - {@link dev.talos.tools.ToolRegistry} fuzzy
  *       tool-name resolution. Normal mode rescues a non-canonical tool name;
  *       strict mode does not.</li>
- *   <li><b>Redundant read suppression</b> — {@link dev.talos.runtime.ToolCallLoop}
+ *   <li><b>Redundant read suppression</b> - {@link dev.talos.runtime.ToolCallLoop}
  *       in-turn cache of successful read-only calls. Normal mode suppresses
  *       the second identical read and injects an "already gathered" nudge;
  *       strict mode executes both reads.</li>
@@ -25,14 +25,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Seam discipline: these tests operate at the harness seam only
  * ({@link ScenarioRunner} → {@link dev.talos.runtime.ToolCallLoop}).
  * They do not exercise {@code AssistantTurnExecutor},
- * {@code ConversationManager}, compaction, or session history — none of
+ * {@code ConversationManager}, compaction, or session history - none of
  * which the scenario runner touches.
  */
-@DisplayName("R5 — Strict-mode scenario runs")
+@DisplayName("R5 - Strict-mode scenario runs")
 class StrictModeScenariosTest {
 
     // ─────────────────────────────────────────────────────────────────
-    // Difference 1 — Alias rescue (ToolRegistry)
+    // Difference 1 - Alias rescue (ToolRegistry)
     // ─────────────────────────────────────────────────────────────────
 
     /**
@@ -59,7 +59,7 @@ class StrictModeScenariosTest {
                 .withUserPrompt("Write out.txt with hello.")
                 .build();
 
-        // Normal mode — alias rescue is active.
+        // Normal mode - alias rescue is active.
         try (var normal = ScenarioRunner.run(scenario)) {
             normal.assertFileExists("out.txt")
                   .assertFileContains("out.txt", "hello")
@@ -69,7 +69,7 @@ class StrictModeScenariosTest {
                             + normal.loopResult().summary());
         }
 
-        // Strict mode — alias rescue disabled; the exact same scripted response
+        // Strict mode - alias rescue disabled; the exact same scripted response
         // must NOT successfully write the file.
         try (var strict = ScenarioRunner.runStrict(scenario)) {
             strict.assertFileAbsent("out.txt");
@@ -85,7 +85,7 @@ class StrictModeScenariosTest {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // Difference 2 — Redundant read suppression (ToolCallLoop)
+    // Difference 2 - Redundant read suppression (ToolCallLoop)
     // ─────────────────────────────────────────────────────────────────
 
     /**
@@ -103,7 +103,7 @@ class StrictModeScenariosTest {
     void redundantReadSuppressionDifference() {
         // Two fenced blocks describing the SAME read_file call. The JSON text
         // differs (key order is swapped) so ToolCallParser's text-level dedup
-        // does NOT collapse them — both reach the loop. At the loop level,
+        // does NOT collapse them - both reach the loop. At the loop level,
         // buildReadCallSignature normalizes on (tool, params) and treats them
         // as identical, which is what trips the redundant-read cushion in
         // normal mode and must NOT trip in strict mode.
@@ -124,7 +124,7 @@ class StrictModeScenariosTest {
 
         final String nudge = "already gathered this information";
 
-        // Normal mode — second identical read is suppressed.
+        // Normal mode - second identical read is suppressed.
         try (var normal = ScenarioRunner.run(scenario)) {
             assertEquals(1, normal.toolsInvoked(),
                     "Normal mode: the 2nd identical read must be suppressed (not counted). "
@@ -134,7 +134,7 @@ class StrictModeScenariosTest {
                             + "Transcript: " + normal.toolResultTexts());
         }
 
-        // Strict mode — both reads execute, no nudge.
+        // Strict mode - both reads execute, no nudge.
         try (var strict = ScenarioRunner.runStrict(scenario)) {
             assertEquals(2, strict.toolsInvoked(),
                     "Strict mode: both identical reads must execute. "

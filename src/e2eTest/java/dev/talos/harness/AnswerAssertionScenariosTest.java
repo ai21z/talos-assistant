@@ -23,13 +23,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       produced, with its tool-call blocks stripped;</li>
  *   <li>assertions that depend on executor-layer truth (claim-vs-action
  *       annotation, post-tool synthesis retry, deflection gate) are
- *       <b>deliberately not attempted here</b> — they remain covered in
+ *       <b>deliberately not attempted here</b> - they remain covered in
  *       {@code AssistantTurnExecutorTest}, which is the correct seam.</li>
  * </ul>
  *
  * <h2>Determinism</h2>
  * For prose-only scripted responses (no tool calls) the loop returns the
- * scripted text verbatim — assertions on the answer are fully deterministic.
+ * scripted text verbatim - assertions on the answer are fully deterministic.
  * For scenarios that fire tool calls, the re-prompt after execution goes to
  * the PLACEHOLDER LLM, whose output is non-deterministic; those scenarios
  * only assert on filesystem / tool outcomes, not on post-tool answer text.
@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AnswerAssertionScenariosTest {
 
     // ─────────────────────────────────────────────────────────────────
-    // R3 — prove the new answer-assertion surface is useful
+    // R3 - prove the new answer-assertion surface is useful
     // ─────────────────────────────────────────────────────────────────
 
     @Test
@@ -80,7 +80,7 @@ class AnswerAssertionScenariosTest {
         //   - the answer text makes the claim
         //   - the filesystem disproves it
         //
-        // Note: this is NOT a test of the R2 claim-vs-action annotation —
+        // Note: this is NOT a test of the R2 claim-vs-action annotation -
         // that lives at the executor seam (see AssistantTurnExecutorTest
         // ClaimVsActionTests). This test demonstrates that the HARNESS
         // surface can now directly express the mismatch shape, which is the
@@ -101,7 +101,7 @@ class AnswerAssertionScenariosTest {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // R4 — Transcript Turn 6 shape at the harness seam
+    // R4 - Transcript Turn 6 shape at the harness seam
     //
     // The parser-level unit coverage for fenced JSON with alias keys lives
     // in ToolCallParserTest (5 tests added in PR-1). This scenario proves
@@ -133,7 +133,7 @@ class AnswerAssertionScenariosTest {
         try (var result = ScenarioRunner.run(scenario)) {
             // The tool actually ran. (Using >= because the PLACEHOLDER LLM
             // re-prompt may produce additional calls after our scripted
-            // turn — same convention as Phase0ScenariosTest.)
+            // turn - same convention as Phase0ScenariosTest.)
             assertTrue(result.toolsInvoked() >= 1,
                     "Fenced JSON with tool_name/params alias must reach the tool executor "
                     + "(Turn 6 regression). Loop summary: " + result.loopResult().summary());
@@ -143,7 +143,7 @@ class AnswerAssertionScenariosTest {
                   .assertFileContains("index.html", "<title>updated</title>");
 
             // Post-tool answer text is non-deterministic (PLACEHOLDER
-            // re-prompt) — we intentionally do NOT assert on it here.
+            // re-prompt) - we intentionally do NOT assert on it here.
         }
     }
 }

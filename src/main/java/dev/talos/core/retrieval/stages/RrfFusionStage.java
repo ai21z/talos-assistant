@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
  * <p>The fused list is limited to {@code topK × }{@link #FUSED_LIMIT_MULTIPLIER} so that
  * downstream stages (reranker, dedup) still have room to drop or reorder candidates
  * before the final topK cut. The multiplier is intentionally lower than the per-source
- * {@link Bm25Stage#FETCH_MULTIPLIER}/{@link KnnStage#FETCH_MULTIPLIER} — RRF has
+ * {@link Bm25Stage#FETCH_MULTIPLIER}/{@link KnnStage#FETCH_MULTIPLIER} - RRF has
  * already merged and ranked; keeping 2× is enough headroom.
  */
 public final class RrfFusionStage implements RetrievalStage {

@@ -5,12 +5,12 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link TemplatePlaceholderGuard} — the classifier itself.
+ * Tests for {@link TemplatePlaceholderGuard} - the classifier itself.
  *
  * <p>Anchored to the real transcript shape that destroyed a user's
  * {@code horror-synth-site} playground: {@code content} argument was
  * a bare placeholder identifier like {@code <updated_index_html_content>}.
- * The guard must catch that shape and only that shape — real file
+ * The guard must catch that shape and only that shape - real file
  * content (even tiny stubs) must pass through.
  */
 class TemplatePlaceholderGuardTest {
@@ -56,20 +56,20 @@ class TemplatePlaceholderGuardTest {
 
     @Test
     void realFileContentIsNotFlagged() {
-        // Tiny but real stubs — the guard must not false-positive these.
+        // Tiny but real stubs - the guard must not false-positive these.
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<html></html>"),
-                "closing tag present — not a placeholder");
+                "closing tag present - not a placeholder");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<div>hi</div>"));
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<meta charset=\"UTF-8\">"),
-                "tag with attributes — real HTML");
+                "tag with attributes - real HTML");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("// TODO"),
-                "code comment — no angle brackets");
+                "code comment - no angle brackets");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("body { margin: 0; }"),
-                "CSS stub — no angle brackets");
+                "CSS stub - no angle brackets");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<h1>Hello</h1>\n<p>world</p>"),
                 "multi-line content must pass through");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("Hello <name>, welcome."),
-                "placeholder inside prose — not a bare placeholder");
+                "placeholder inside prose - not a bare placeholder");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<p>content from talos.read_file</p>"),
                 "real tagged content must not be treated as a placeholder");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("{\"name\":\"Talos\"}"),
@@ -87,12 +87,12 @@ class TemplatePlaceholderGuardTest {
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(">"));
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<>"));
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<123>"),
-                "leading digit is not a valid identifier — permissive");
+                "leading digit is not a valid identifier - permissive");
     }
 
     @Test
     void oversizedContentIsNotFlagged() {
-        // 121+ char single-token placeholder — unrealistic; the guard
+        // 121+ char single-token placeholder - unrealistic; the guard
         // only targets short template debris.
         String long120 = "<" + "a".repeat(118) + ">";  // exactly 120 chars
         String long121 = "<" + "a".repeat(119) + ">";  // 121 chars
@@ -107,7 +107,7 @@ class TemplatePlaceholderGuardTest {
         assertTrue(msg.contains("talos.write_file"));
         assertTrue(msg.contains("content"));
         assertTrue(msg.contains("<updated_foo>"));
-        // Model-directed — must not blame the user (avoids qwen's
+        // Model-directed - must not blame the user (avoids qwen's
         // "permissions" hallucination loop).
         assertFalse(msg.toLowerCase().contains("permissions"),
                 "rejection must not anchor model to a 'permissions' narrative");

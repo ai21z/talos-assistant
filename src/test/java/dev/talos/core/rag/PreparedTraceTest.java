@@ -12,7 +12,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link RagService.Prepared} — verifies trace exposure,
+ * Tests for {@link RagService.Prepared} - verifies trace exposure,
  * backwards-compatible constructors, and snippet accessors.
  */
 class PreparedTraceTest {
@@ -48,7 +48,7 @@ class PreparedTraceTest {
     void prepared_traceSummary_includesEmbeddingFailure() {
         var trace = new RetrievalTrace();
         trace.record("bm25", 1_000_000L, 0, 5, null);
-        trace.record("knn", 100_000L, 5, 5, "skipped: embedding failed — NaN");
+        trace.record("knn", 100_000L, 5, 5, "skipped: embedding failed - NaN");
 
         var prepared = new RagService.Prepared(List.of(), List.of(), trace);
 

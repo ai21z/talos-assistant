@@ -6,7 +6,7 @@ package dev.talos.tools;
  * <p>Carried from the failure producer through {@link ToolError} and the
  * runtime's ToolOutcome so classifiers (repair planners, outcome renderers,
  * truthfulness guards) switch on the reason instead of sniffing
- * human-readable message prose — the prose becomes free to change without
+ * human-readable message prose - the prose becomes free to change without
  * silently disabling repair or outcome policy.
  *
  * <p>Only failure families that a classifier consumes get a constant; a

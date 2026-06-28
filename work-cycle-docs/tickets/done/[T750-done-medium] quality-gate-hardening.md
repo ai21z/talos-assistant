@@ -21,7 +21,7 @@ skipped test carries no recorded reason.
 - `build.gradle.kts:939-951`: single rule, default INSTRUCTION counter,
   `minimum = 0.65`, with a stale comment claiming "current candidate coverage
   is ~71%". Plan-validation finding: a 0.80 floor **would fail `check` today**
-  on at least one measured lane — actuals differ by lane/report
+  on at least one measured lane - actuals differ by lane/report
   (candidate-lane comment ~71% vs coverage-summary 84.8% instruction /
   64.7% branch), so floors MUST be set from a fresh measurement, not assumed.
 - BRANCH coverage (64.73% per the regenerated 0.10.1 coverage-summary) is
@@ -30,13 +30,13 @@ skipped test carries no recorded reason.
   `v0.9.0-beta-dev` only; job body is solid (test → e2eTest → jacoco/canary
   gates → check on windows runner). Local-first workflow means CI is dormant
   (no pushes), but a definition that can never fire is false confidence.
-- `RagFlowSmokeTest.ask_doNotThrow`: bare `<skipped/>` in the test XML — no
+- `RagFlowSmokeTest.ask_doNotThrow`: bare `<skipped/>` in the test XML - no
   recorded reason, contradicting the evidence-accounting standard.
 
 ## Architectural Hypothesis
 
 Ratchet-to-actuals: pin gates just under measured reality and tighten over
-time — the same philosophy as the architecture ratchet's empty baseline.
+time - the same philosophy as the architecture ratchet's empty baseline.
 
 ## Architecture Metadata
 
@@ -100,5 +100,5 @@ Refactor scope: the three named files
   longer false confidence.
 - RagFlowSmokeTest skip: the reason already exists in code
   (`@Disabled("Avoid slow live LLM call in CI; enable for manual runs")`);
-  the bare `<skipped/>` in the XML is a JUnit report rendering artifact —
+  the bare `<skipped/>` in the XML is a JUnit report rendering artifact -
   no change required.

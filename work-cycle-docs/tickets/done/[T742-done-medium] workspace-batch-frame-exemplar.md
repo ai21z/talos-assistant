@@ -19,15 +19,15 @@ malformed payload or no call.
 ## Evidence Analysis
 
 - `runtime/policy/CurrentTurnCapabilityFrame.java:99-104`: the
-  WORKSPACE_OPERATION_REQUIRED frame text — prohibitions only, no example.
-- Lines 209-213: the expected-targets subsection — again prohibition-only.
+  WORKSPACE_OPERATION_REQUIRED frame text - prohibitions only, no example.
+- Lines 209-213: the expected-targets subsection - again prohibition-only.
 - `runtime/workspace/BatchWorkspaceApplyTool.java:36-39`: schema describes
   required keys per op in a prose description string.
 - Few-shot protocol exemplars measurably improve tool-format adherence for
   sub-20B models (Qwen function-calling guidance; Berkeley Function-Calling
   Leaderboard findings); cost ≈ 40 tokens within the 8192 context budget.
 - Even after T739 grammar enforcement, a grammar can only guarantee "some
-  string" for a string-typed field — the exemplar shows the model what that
+  string" for a string-typed field - the exemplar shows the model what that
   string must look like (until T744 lands a native array).
 
 ## Architectural Hypothesis
@@ -82,7 +82,7 @@ frame snapshot assertions that break
 - Implemented: one literal example line appended to the
   WORKSPACE_OPERATION_REQUIRED frame in `CurrentTurnCapabilityFrame`
   (prohibition lines untouched).
-- Tests green: `CurrentTurnCapabilityFrameTest` — example asserted present for
-  workspace turns and absent for mutating-tool turns; no snapshot fallout —
+- Tests green: `CurrentTurnCapabilityFrameTest` - example asserted present for
+  workspace turns and absent for mutating-tool turns; no snapshot fallout -
   full `test` + `e2eTest` lanes BUILD SUCCESSFUL (2m09s).
 - Live prompt-debug confirmation deferred to T746 banks.

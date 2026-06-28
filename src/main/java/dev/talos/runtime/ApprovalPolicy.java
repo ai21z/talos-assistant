@@ -15,7 +15,7 @@ import java.nio.file.Path;
  * without weakening the per-call gate for destructive or out-of-workspace
  * operations.
  *
- * <p>Policy invariants — enforced by every implementation:
+ * <p>Policy invariants - enforced by every implementation:
  * <ul>
  *   <li>{@link ToolRiskLevel#READ_ONLY} always returns {@link Decision#AUTO_APPROVE}.</li>
  *   <li>{@link ToolRiskLevel#DESTRUCTIVE} never returns {@link Decision#AUTO_APPROVE}.</li>
@@ -28,9 +28,9 @@ public interface ApprovalPolicy {
     enum Decision {
         /** Policy permits the call without prompting. */
         AUTO_APPROVE,
-        /** Policy is neutral — fall through to {@link ApprovalGate}. */
+        /** Policy is neutral - fall through to {@link ApprovalGate}. */
         ASK,
-        /** Policy forbids the call — refuse without prompting. */
+        /** Policy forbids the call - refuse without prompting. */
         DENY
     }
 

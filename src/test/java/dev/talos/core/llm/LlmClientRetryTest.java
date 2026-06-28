@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link LlmClient} error-resilience additions.
  *
- * <p>These run in explicit PLACEHOLDER mode — they verify that:
+ * <p>These run in explicit PLACEHOLDER mode - they verify that:
  * <ul>
  *   <li>Retry constants are sensible</li>
  *   <li>PLACEHOLDER mode is unaffected by the retry/propagation changes</li>

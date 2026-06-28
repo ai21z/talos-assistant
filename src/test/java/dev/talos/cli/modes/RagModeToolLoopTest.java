@@ -43,7 +43,7 @@ class RagModeToolLoopTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  buildMessages — structured /api/chat messages
+    //  buildMessages - structured /api/chat messages
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested
@@ -197,7 +197,7 @@ class RagModeToolLoopTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  handle() — end-to-end with PLACEHOLDER LLM
+    //  handle() - end-to-end with PLACEHOLDER LLM
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested

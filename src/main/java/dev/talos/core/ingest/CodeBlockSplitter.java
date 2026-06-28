@@ -70,7 +70,7 @@ final class CodeBlockSplitter {
     /**
      * Tracks brace depth through the file content, respecting string literals,
      * character literals, and both styles of comments. Splits between top-level
-     * declarations — each time brace depth returns to 0 and we encounter a blank
+     * declarations - each time brace depth returns to 0 and we encounter a blank
      * line or a new declaration, we emit a block.
      */
     static List<String> splitBraceBased(String content) {
@@ -122,13 +122,13 @@ final class CodeBlockSplitter {
 
                 if (atEnd || blankFollows || newDeclFollows) {
                     blocks.add(joinLines(lines, blockStart, i + 1));
-                    // Skip trailing blank lines — attach them to next block as leading whitespace
+                    // Skip trailing blank lines - attach them to next block as leading whitespace
                     int next = i + 1;
                     while (next < lines.length && lines[next].trim().isEmpty()) {
                         next++;
                     }
                     blockStart = next;
-                    // Don't advance i past the blank lines — the for-loop will handle them
+                    // Don't advance i past the blank lines - the for-loop will handle them
                 }
             }
         }
@@ -158,7 +158,7 @@ final class CodeBlockSplitter {
         boolean inString = false;
         boolean inChar = false;
         boolean inLineComment = false;
-        // Note: block comments spanning multiple lines are handled conservatively —
+        // Note: block comments spanning multiple lines are handled conservatively -
         // we don't track cross-line block comment state, which is acceptable because
         // block comments rarely contain braces, and the brace counter self-corrects
         // at the next top-level boundary.
@@ -183,7 +183,7 @@ final class CodeBlockSplitter {
                 continue;
             }
 
-            // Line comment — skip rest of line
+            // Line comment - skip rest of line
             if (inLineComment) {
                 continue;
             }

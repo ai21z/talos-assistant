@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Replaces the {@code \r} spinner thread for capable terminals: the
  * status row lives in a JLine-managed scroll region below the output, so it
  * never interleaves raw carriage returns with answer streaming and never
- * desynchronizes JLine's cursor model (the T774 single-writer discipline —
+ * desynchronizes JLine's cursor model (the T774 single-writer discipline -
  * all status drawing goes through {@link Status}, which writes through the
  * terminal itself).
  *
@@ -43,7 +43,7 @@ public final class StatusRowPresenter implements AutoCloseable {
     private Thread ticker;
     private volatile Instant startedAt;
     private volatile String label = "";
-    // Live context (T780) — renderer-owned, never model text.
+    // Live context (T780) - renderer-owned, never model text.
     private volatile String route = "";
     private volatile java.util.function.Supplier<String> model = () -> "";
     private volatile java.util.function.IntSupplier turn = () -> 0;

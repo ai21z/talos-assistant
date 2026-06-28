@@ -14,7 +14,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * {@code /profiles} — inspect, trust, or revoke the workspace verification
+ * {@code /profiles} - inspect, trust, or revoke the workspace verification
  * profile declaration ({@code .talos/profiles.yaml}).
  *
  * <p>{@code trust} is the explicit-consent step of the T789 trust chain: it

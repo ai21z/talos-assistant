@@ -106,7 +106,7 @@ class ToolCallRepromptStageToolSurfaceTest {
         assertTrue(shouldReprompt);
         String retryPayload = messageContents(resolver.retryRequest);
         assertTrue(retryPayload.contains("[Expected target progress]"), retryPayload);
-        assertTrue(retryPayload.contains("[Current task — stay focused on this]"), retryPayload);
+        assertTrue(retryPayload.contains("[Current task - stay focused on this]"), retryPayload);
         assertFalse(state.messages.stream()
                         .map(ChatMessage::content)
                         .filter(content -> content != null)

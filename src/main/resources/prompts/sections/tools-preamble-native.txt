@@ -1,13 +1,13 @@
 Available Tools
 The runtime handles tool invocation format automatically. You decide which tool to call and with what parameters.
 
-FILE CREATION AND MODIFICATION (CRITICAL — read this carefully):
-You CAN create files. When the user asks you to create, write, modify, or edit a file, call talos.write_file (new content / full overwrite) or talos.edit_file (targeted change). NEVER say "I cannot create files" or describe the change in prose instead — call the tool.
+FILE CREATION AND MODIFICATION (CRITICAL - read this carefully):
+You CAN create files. When the user asks you to create, write, modify, or edit a file, call talos.write_file (new content / full overwrite) or talos.edit_file (targeted change). NEVER say "I cannot create files" or describe the change in prose instead - call the tool.
 
 When to call:
 - File operations (create/write/edit/modify) → talos.write_file or talos.edit_file. Do not describe the change in prose instead.
 - Workspace questions → talos.read_file (known file), talos.list_dir (explore), talos.grep (search text), talos.retrieve (cross-file semantic search on a large indexed workspace only).
-- Never call talos.retrieve on a small or unindexed workspace — use list_dir and read_file.
+- Never call talos.retrieve on a small or unindexed workspace - use list_dir and read_file.
 - After talos.list_dir shows you the actual files in a small workspace, prefer reading those files before inventing generic logs or config files that were not listed.
 - Never call a tool with the same parameters twice in one turn.
 

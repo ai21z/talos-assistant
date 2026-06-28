@@ -25,10 +25,10 @@ For the rest of this document, "Talos" means the concrete code on
 `v0.9.0-beta-dev`, not the older retrieval-only headline:
 
 - **Live runtime center is unified tool-driven assistance.**
-  `cli/modes/AutoMode.java` is an explicit placeholder (its javadoc line 10–11
+  `cli/modes/AutoMode.java` is an explicit placeholder (its javadoc line 10-11
   says so); all real routing is in `ModeController#route`. That route sends
   deterministic file-ops (ls/dir/show/open) to `DevMode` and **everything
-  else to `UnifiedAssistantMode`** — the tool-calling path.
+  else to `UnifiedAssistantMode`** - the tool-calling path.
 - **`RagMode` is still a first-class explicit mode** (`/mode rag`), but it is
   no longer the default execution path. Retrieval is one tool among many
   inside the unified tool loop.
@@ -62,15 +62,15 @@ Measurement run: `gradlew clean build` on 2026-04-19, branch
 
 | Group | Tests | Root cause | Real defect? |
 |---|---|---|---|
-| `LlmClientRetryTest` (5) | `placeholder_chat*`, `placeholder_messages_*` | Throws `EngineException$ModelNotFound: qwen3:8b` — the test environment has no Ollama model of that id; tests presume a placeholder-engine short-circuit that the current `LlmClient` no longer takes | **(b) test-environment coupling**. Fix = decouple these tests from real engine discovery. |
+| `LlmClientRetryTest` (5) | `placeholder_chat*`, `placeholder_messages_*` | Throws `EngineException$ModelNotFound: qwen3:8b` - the test environment has no Ollama model of that id; tests presume a placeholder-engine short-circuit that the current `LlmClient` no longer takes | **(b) test-environment coupling**. Fix = decouple these tests from real engine discovery. |
 | `AssistantTurnExecutorTest` (7) | `returns_answer_and_marks_streamed`, `streamed_text_matches_returned_text`, `answer_sanitizer_is_applied`, `response_truncated_when_over_max_chars`, `retryTriggeredForDeflectionAfterToolUse`, `synthesisRetryFiresForRealTranscriptDeflection`, streaming-grounding-no-annotation | Same `qwen3:8b` not found error bleeds through into assertions about sanitizer/truncation/streamed-flag | **(b)**. Tests need a fake `ModelEngine` stub instead of hitting real engine resolution. |
-| `StreamingModeTest` (2) + `ModeErrorMessageTest` (1) | `askMode_with_streamSink_*` | Same family — placeholder routing not exercised because real-engine resolution trips first | **(b)**. |
-| `TalosBannerTest` (2) | `print_contains_version`, `printCompact_contains_brand_and_version` | Banner calls `BuildInfo.version()`, which reads `Implementation-Version` from the JAR manifest and **already falls back cleanly to `"unknown"`** when the manifest is absent (see `BuildInfo.manifestAttr`, lines 89–94). The failure is **not** a missing production fallback; it is that Gradle `:test` runs from exploded classes, so `version()` returns `"unknown"`, and the tests assert on the literal string `"0.9.0-beta"`. | **(b)**. Fix is a build/test ergonomics improvement: either teach `BuildInfo.version()` to consult a build-time resource when the manifest is absent, or adjust the banner tests to accept the fallback in exploded-class runs. Production behavior is unchanged. |
+| `StreamingModeTest` (2) + `ModeErrorMessageTest` (1) | `askMode_with_streamSink_*` | Same family - placeholder routing not exercised because real-engine resolution trips first | **(b)**. |
+| `TalosBannerTest` (2) | `print_contains_version`, `printCompact_contains_brand_and_version` | Banner calls `BuildInfo.version()`, which reads `Implementation-Version` from the JAR manifest and **already falls back cleanly to `"unknown"`** when the manifest is absent (see `BuildInfo.manifestAttr`, lines 89-94). The failure is **not** a missing production fallback; it is that Gradle `:test` runs from exploded classes, so `version()` returns `"unknown"`, and the tests assert on the literal string `"0.9.0-beta"`. | **(b)**. Fix is a build/test ergonomics improvement: either teach `BuildInfo.version()` to consult a build-time resource when the manifest is absent, or adjust the banner tests to accept the fallback in exploded-class runs. Production behavior is unchanged. |
 | `ConversationCompactionTest.compact_withTurns_returnsNewSketch` (1) | | Depends on a tokenizer/compactor path that indirectly hits engine resolution | **(b)**. |
 
 **Conclusion:** 18/18 failures are **environment-coupling defects in the
 tests**, not production defects. No production change needed to make the
-build green — a narrow test-refactor PR that introduces a `FakeModelEngine`
+build green - a narrow test-refactor PR that introduces a `FakeModelEngine`
 fixture plus a manifest-less `BuildInfo` fallback would eliminate all 18.
 
 ### 2.2 Health verdict
@@ -95,28 +95,28 @@ fixture plus a manifest-less `BuildInfo` fallback would eliminate all 18.
 | `core`      | 65    | 7883 | Config, LLM, retrieval, ingest, index, embed, cache, security | **See 3.3** |
 | `engine`    |  3    |  678 | Ollama engine impl                               | OK        |
 | `runtime`   | 27    | 3657 | Session, approval, turn processing, tool-call loop | **See 3.4** |
-| `spi`       | 12    |  315 | `ModelEngine`, types                             | **Duplicate — see 3.5** |
+| `spi`       | 12    |  315 | `ModelEngine`, types                             | **Duplicate - see 3.5** |
 | `tools`     | 21    | 2071 | Tool registry + concrete tools                   | OK        |
 
 **Architecture drift flagged:** `.github/copilot-instructions.md` still names
 pre-Talos package paths (lines 86-98). The actual tree is `dev.talos.*`.
 Doc is stale - fix during the first cleanup PR (doc-only, zero risk).
 
-### 3.2 `cli` sub-structure — the **`cmds` vs `commands` naming collision**
+### 3.2 `cli` sub-structure - the **`cmds` vs `commands` naming collision**
 
-- `cli/cmds/` (9 files) — **picocli top-level subcommands** for the binary
+- `cli/cmds/` (9 files) - **picocli top-level subcommands** for the binary
   launcher (`talos run`, `talos rag-index`, `talos rag-ask`, `talos setup`,
   `talos net`, `talos status`, `talos version`, `talos diagnose`).
-- `cli/commands/` (28 files) — **REPL slash-commands** (`/help`, `/quit`,
+- `cli/commands/` (28 files) - **REPL slash-commands** (`/help`, `/quit`,
   `/mode`, `/status`, …) with their own `Command`, `CommandRegistry`,
   `CommandSpec`, `CommandGroup` abstractions.
-- `cli/modes/` (11 files) — prompt-to-mode routing + mode implementations
+- `cli/modes/` (11 files) - prompt-to-mode routing + mode implementations
   (`AskMode`, `AutoMode`, `DevMode`, `RagMode`, `UnifiedAssistantMode`,
   `WebMode`, plus `AssistantTurnExecutor`, `PromptClassifier`, `ModeController`,
   `WorkspaceSymbolChecker`, `BaseMode`).
-- `cli/repl/` (14 files) — wiring (`TalosBootstrap`), the REPL runtime
+- `cli/repl/` (14 files) - wiring (`TalosBootstrap`), the REPL runtime
   (`ReplRouter`), execution pipeline, session state, render engine.
-- `cli/ui/` — banner and ANSI utilities.
+- `cli/ui/` - banner and ANSI utilities.
 
 **Finding (naming):** `cmds` vs `commands` vs `ModeController` vs
 `ReplRouter` vs `PromptClassifier` is genuinely confusing. `PromptClassifier` is a
@@ -131,16 +131,16 @@ recurring review cost. *Candidate rename* (low risk, doc-only + package move):
 All three are mechanical IDE refactors; risk = compile-only. Defer until after
 the 18-test fixture fix.
 
-### 3.3 `core` sub-structure — **dual SPI / dual engine packages**
+### 3.3 `core` sub-structure - **dual SPI / dual engine packages**
 
 Observed:
 
-- `dev.talos.spi/` — `ModelEngine`, `ModelCatalog`, `EngineException`,
+- `dev.talos.spi/` - `ModelEngine`, `ModelCatalog`, `EngineException`,
   `ModelEngineProvider`, plus `spi/types/*` (ChatRequest, ChatMessage,
   TokenChunk, Capabilities, Health, EmbeddingResult).
-- `dev.talos.core.spi/` — **only two files**: `CorpusStore`, `Embeddings`.
-- `dev.talos.engine.ollama.OllamaEngine` — implements `dev.talos.spi.ModelEngine`.
-- `dev.talos.core.engine.EngineRegistry` — lives in a *different* package than
+- `dev.talos.core.spi/` - **only two files**: `CorpusStore`, `Embeddings`.
+- `dev.talos.engine.ollama.OllamaEngine` - implements `dev.talos.spi.ModelEngine`.
+- `dev.talos.core.engine.EngineRegistry` - lives in a *different* package than
   the only engine implementation.
 
 **Finding (SOLID / DIP):** the SPI boundary is split across two packages
@@ -163,7 +163,7 @@ import-churn PR and should be the *only* change in its PR.
 
 27 files, 3657 LOC. Cohesive: session durability, approval, turn processing,
 tool-call plumbing. The heaviest single file is `ToolCallLoop.java` (965
-LOC) — see §4.
+LOC) - see §4.
 
 ### 3.5 `api` and `app`
 
@@ -183,8 +183,8 @@ link from `TerminalFirstRun`). See §5.
 
 | Rank | File | LOC | Responsibility count (≈) | Risk |
 |---:|---|---:|---:|---|
-| 1 | `core/llm/LlmClient.java` | 1018 | 6–8 | **High** |
-| 2 | `runtime/ToolCallLoop.java` | 965 | 5–6 | **High** |
+| 1 | `core/llm/LlmClient.java` | 1018 | 6-8 | **High** |
+| 2 | `runtime/ToolCallLoop.java` | 965 | 5-6 | **High** |
 | 3 | `cli/modes/AssistantTurnExecutor.java` | 923 | 5 | **High** |
 | 4 | `engine/ollama/OllamaEngine.java` | 554 | 4 | Medium |
 | 5 | `core/index/LuceneStore.java` | 418 | 3 | Medium |
@@ -209,7 +209,7 @@ link from `TerminalFirstRun`). See §5.
 | 24 | `core/context/ContextPacker.java` | 204 | 1 | Low |
 | 25 | `tools/impl/ContentVerifier.java` | 200 | 1 | Low |
 
-### 4.2 `LlmClient` (1018 LOC) — **top-priority refactor target, high risk**
+### 4.2 `LlmClient` (1018 LOC) - **top-priority refactor target, high risk**
 
 Mixed responsibilities observed:
 
@@ -230,16 +230,16 @@ stabilizes.
 
 **Suggested extraction targets** (not now, post-#6):
 
-- `core/llm/StreamWatchdog` — owns idle timing + repetition breaker + cancel
-- `core/llm/LlmRetryPolicy` — isolates retry + backoff
+- `core/llm/StreamWatchdog` - owns idle timing + repetition breaker + cancel
+- `core/llm/LlmRetryPolicy` - isolates retry + backoff
 - **Injectable engine-resolution seam** on `LlmClient`
   (most plausibly an injected `EngineRegistry`, factory, or equivalent
   collaborator, while retaining the existing `LlmClient(Config)` entry
   point). This is the real DIP fix that also unblocks the 16
-  placeholder-routing tests — no separate "PlaceholderRouter" class is
+  placeholder-routing tests - no separate "PlaceholderRouter" class is
   needed.
 
-### 4.3 `ToolCallLoop` (965 LOC) — **medium risk**
+### 4.3 `ToolCallLoop` (965 LOC) - **medium risk**
 
 Only 5 public methods (per grep), but the file is long because of embedded
 state machines for:
@@ -256,7 +256,7 @@ extract → approve → execute → reinject phases into stages, mirroring how
 `RagService.prepare()` uses the `RetrievalPipeline` stages. Low-to-medium
 invasive; parity tests already exist (`ToolCallLoopTest*`).
 
-### 4.4 `AssistantTurnExecutor` (923 LOC) — **high risk**
+### 4.4 `AssistantTurnExecutor` (923 LOC) - **high risk**
 
 This file is the origin of 7 of the 18 test failures. Responsibilities:
 
@@ -276,10 +276,10 @@ It does not hold or look up a `ModelEngine` directly.
 a real `LlmClient` that in turn hits real engine resolution. The correct
 test seam is therefore either
 (a) swap `ctx.llm()` for a scripted `LlmClient` fixture (the harness already
-does this via `ExecutorScenarioRunner` — see the class javadoc), or
+does this via `ExecutorScenarioRunner` - see the class javadoc), or
   (b) inject an **engine-resolution seam into `LlmClient`** (the layer
-  below), so every caller of `LlmClient` — including the live
-  `AssistantTurnExecutor` — resolves engines through an injectable
+  below), so every caller of `LlmClient` - including the live
+  `AssistantTurnExecutor` - resolves engines through an injectable
   collaborator rather than fixed internal discovery.
 
 Changing `AssistantTurnExecutor`'s own constructor is **not** a correct
@@ -287,7 +287,7 @@ remedy: it has no public constructor, and adding one would also mean
 removing the deliberate static-utility shape. See §9.2 for the corrected
 backlog item.
 
-### 4.5 `OllamaEngine` (554 LOC) — **medium risk, already in flight**
+### 4.5 `OllamaEngine` (554 LOC) - **medium risk, already in flight**
 
 Pending SPI item #6 will change this file. After #6 lands, split into:
 
@@ -299,7 +299,7 @@ Currently all three concerns share one 554-LOC file.
 
 ### 4.6 `TalosBootstrap` (405 LOC)
 
-Wiring orchestration — not a god class in the SRP sense (single concern:
+Wiring orchestration - not a god class in the SRP sense (single concern:
 assemble the ReplRouter), but it does grow whenever a new component joins
 the REPL. Keep as-is; do not extract a DI framework just for this.
 
@@ -314,7 +314,7 @@ second-highest SRP debt after `LlmClient`. Defer until `LlmClient` is split.
 9 public methods. Mixed concerns: registration, alias table (where the `ls`
 alias was added in priority-queue item #2), separator normalization,
 lookup, execution, context-aware vs legacy-no-context execution paths.
-**Legacy no-context path** is explicitly marked as such in javadoc — see §5.
+**Legacy no-context path** is explicitly marked as such in javadoc - see §5.
 
 ---
 
@@ -329,13 +329,13 @@ lookup, execution, context-aware vs legacy-no-context execution paths.
 | `"DEPRECATED COMPATIBILITY ONLY"` (XML tool-call parsing) | `runtime/ToolCallStreamFilter.java` (lines 22, 51, 57, 64, 71, 156), `runtime/ToolCallParser.java` (lines 31, 79, 104, 133, 139), `core/util/Sanitize.java` (lines 24, 142) | XML parsing is retained *only* for models that emit XML from training habits. Per `docs/architecture/25-xml-retirement-review.md`, retirement is planned. **Needs a parity metric**: count of real transcripts where XML fallback fires. Defer deletion until that metric is zero for N releases. |
 | `"legacy key"` | `core/embed/EmbeddingsFactory.java:29` (`ollama.embed`) | Old config key retained for backward compat. Add a one-release deprecation warning then remove in the next minor. |
 
-### 5.2 Potentially dead — needs caller verification before removal
+### 5.2 Potentially dead - needs caller verification before removal
 
 | Suspect | Evidence | Disposition |
 |---|---|---|
 | `runtime/CodeBlockToolExtractor.java` | Partially overlaps `ToolCallParser` + `ToolCallStreamFilter`. | **Investigate overlap**; may be foldable. |
 
-### 5.2a Live but stubbed surfaces (not dead — be careful)
+### 5.2a Live but stubbed surfaces (not dead - be careful)
 
 These are real code paths in production wiring. They are *not* dead-code
 suspects. They are flagged here only so later work does not accidentally
@@ -377,7 +377,7 @@ Violations concentrated in §4: `LlmClient`, `ToolCallLoop`,
 
 `ToolRegistry.ALIASES` is a hard-coded `Map.entry(...)` list (where `ls` was
 just added). For a v0.9 CLI that is fine; for v1 it will want to load
-aliases from config. Current shape doesn't prevent that — it just defers it.
+aliases from config. Current shape doesn't prevent that - it just defers it.
 Not a violation today.
 
 ### 6.3 Liskov Substitution
@@ -389,9 +389,9 @@ engine-resolution seam described in §4.2 / §9.2 is in place.
 
 ### 6.4 Interface Segregation
 
-- **`ModelEngine`** (`spi/ModelEngine.java`, 18 LOC): 7 methods —
+- **`ModelEngine`** (`spi/ModelEngine.java`, 18 LOC): 7 methods -
   `id/caps/health/chat/chatStream/embed/close`. Reasonably narrow. **Caveat:** mixing chat and embed in one interface forces every engine to implement both. For Ollama that is free; for a future embedding-only or chat-only backend this will be a real ISP violation. **Pre-split now** into `ChatModelEngine` + `EmbeddingEngine` with a `ComposedEngine` for backends that do both. Low risk today (one implementor). High payoff later.
-- **`TalosTool`** carries both legacy and context-aware `execute` methods —
+- **`TalosTool`** carries both legacy and context-aware `execute` methods -
   see §5.1. Narrow once the legacy method is deleted.
 
 ### 6.5 Dependency Inversion
@@ -401,12 +401,12 @@ engine-resolution seam described in §4.2 / §9.2 is in place.
   collaborator. This is the actual DIP gap that causes the 16
   placeholder-routing test failures in §2.1; `AssistantTurnExecutor`
   inherits the problem only because it sits on top of `LlmClient`.
-- `AssistantTurnExecutor` itself is a static utility class (see §4.4) —
+- `AssistantTurnExecutor` itself is a static utility class (see §4.4) -
   it is not a DIP violation in its own right and should not be refactored
   to accept engine dependencies.
-- `TalosBootstrap` directly `new`'s most components — acceptable at the
+- `TalosBootstrap` directly `new`'s most components - acceptable at the
   composition root; do not introduce a DI framework.
-- `OllamaEngine` is directly referenced by name in several places — OK while
+- `OllamaEngine` is directly referenced by name in several places - OK while
   it is the only implementation, but the `EngineRegistry` relocation in §3.3
   will naturally pull these through the SPI instead.
 
@@ -424,19 +424,19 @@ engine-resolution seam described in §4.2 / §9.2 is in place.
 
 Only patterns where the payoff clearly exceeds the churn are listed.
 
-1. **Chain-of-Responsibility for `ToolCallLoop`** — mirrors the existing
+1. **Chain-of-Responsibility for `ToolCallLoop`** - mirrors the existing
    `RetrievalPipeline` stage pattern. Extracts a 965-LOC state machine into
-   4–5 small stage classes. Medium invasive, high payoff for readability.
-2. **Strategy for modes** — already present (`Mode` interface +
+   4-5 small stage classes. Medium invasive, high payoff for readability.
+2. **Strategy for modes** - already present (`Mode` interface +
    `AskMode/RagMode/…`). No change needed; this is the one pattern the
    codebase already gets right.
-3. **Facade for `TalosKnowledgeEngine`** (`dev.talos.api`) — already the
+3. **Facade for `TalosKnowledgeEngine`** (`dev.talos.api`) - already the
    intent, just under-used. As each subsystem consolidates, tighten the
    facade surface.
-4. **Builder for `ChatRequest`** (`spi/types`) — fields are growing
+4. **Builder for `ChatRequest`** (`spi/types`) - fields are growing
    (budgets, stream options, cancel handles). A builder eliminates the
    constructor-parameter-creep that `LlmClient` is already exhibiting.
-5. **Observer for turn events** — `SessionListener` and
+5. **Observer for turn events** - `SessionListener` and
    `MemoryUpdateListener` already exist. Consolidate into a single
    `TurnEventBus` instead of adding more listener interfaces ad-hoc.
 
@@ -452,17 +452,17 @@ hexagonal rewrite. None pass the "pay-off > churn" bar for Talos today.
    `ExecutorScenarioRunner`-style harness supply a scripted `LlmClient`
    through `Context.llm()`; (b) add an injectable engine-resolution seam to
    `LlmClient`. See §9.2. Do **not** try to refactor `AssistantTurnExecutor`
-   (it is a static utility — §4.4).
+   (it is a static utility - §4.4).
 2. **Add an exploded-classes version source for `BuildInfo.version()`** so
    banner tests can resolve a real version outside a packaged JAR (unblocks
-   2 of the 18). Production fallback is already in place — this is a
+   2 of the 18). Production fallback is already in place - this is a
    test/build-ergonomics fix, not a production gap.
 3. **Decouple tests from live Ollama.** No test under `src/test/java` should
    require a real `qwen3:8b` model to pass.
 4. **Adopt the scenario-harness discipline** described in
    `docs/talos-source-pack-safe-local-alternative-2026-04-19.md` (v2)
-   — specifically the OpenHands eval-harness *methodology* and the
-   prompt-injection taxonomy — for regression coverage of the incidents
+   - specifically the OpenHands eval-harness *methodology* and the
+   prompt-injection taxonomy - for regression coverage of the incidents
    logged in `test-output.txt` / `build-test-output.txt`.
 5. **Test coverage gaps** (inferred from §4 file sizes vs test file names):
    - `OllamaEngine` has no direct HTTP-mock test; all coverage is
@@ -478,7 +478,7 @@ hexagonal rewrite. None pass the "pay-off > churn" bar for Talos today.
 Every PR below is atomic, reversible, and does **not** touch CI/quality
 tooling. Each should be a single focused PR targeting `v0.9.0-beta-dev`.
 
-### 9.0 Pre-existing priority-queue items (in flight / recently landed) — do not duplicate
+### 9.0 Pre-existing priority-queue items (in flight / recently landed) - do not duplicate
 
 | # | Title | Status |
 |---|---|---|
@@ -487,11 +487,11 @@ tooling. Each should be a single focused PR targeting `v0.9.0-beta-dev`.
 | 3 | Synchronous stream close (`OllamaEngine` + `LlmClient`) | **Landed** |
 | 4 | `RepetitionBreaker` + watchdog integration | **Landed** |
 | 5 | JLine-safe stream sink (`TalosBootstrap`) | **Landed** |
-| 6 | SPI-level async stream close (`ModelEngine` + `OllamaEngine` + `LlmClient` watchdog) | **In flight** — next up |
+| 6 | SPI-level async stream close (`ModelEngine` + `OllamaEngine` + `LlmClient` watchdog) | **In flight** - next up |
 
 Finish #6 before starting any §9.1+ work.
 
-### 9.1 Doc drift fix — zero production risk
+### 9.1 Doc drift fix - zero production risk
 
 - Files: `.github/copilot-instructions.md`
 - Change: replace stale package references with `dev.talos.*`.
@@ -506,15 +506,15 @@ the correct injection point is `LlmClient` itself.
 
 Two independent moves, either of which unblocks the 16 placeholder tests:
 
-- **9.2a — harness-style fixture (preferred first step, pure test change).**
+- **9.2a - harness-style fixture (preferred first step, pure test change).**
   The executor's javadoc already calls out `ExecutorScenarioRunner` as a
   driver that supplies a scripted `LlmClient`. Extend that fixture so the
   `LlmClientRetryTest`, `AssistantTurnExecutorTest`, `StreamingModeTest`, and
   `ModeErrorMessageTest` families construct a `Context` whose `llm()` returns
   a scripted client. Zero production change.
-- **9.2b — production-side injection (follow-up).** Give `LlmClient` an
-  injectable engine-resolution collaborator — most plausibly an injected
-  `EngineRegistry`, factory, or equivalent seam — while retaining the
+- **9.2b - production-side injection (follow-up).** Give `LlmClient` an
+  injectable engine-resolution collaborator - most plausibly an injected
+  `EngineRegistry`, factory, or equivalent seam - while retaining the
   current `LlmClient(Config)` entry point for default behavior. This is the
   real DIP fix.
 
@@ -558,7 +558,7 @@ Two independent moves, either of which unblocks the 16 placeholder tests:
   `src/main/java`. Make that a follow-up PR, kept off this branch if it
   ends up touching CI.
 
-### 9.5 `WebMode` decision — productize or remove intentionally (not a dead-code delete)
+### 9.5 `WebMode` decision - productize or remove intentionally (not a dead-code delete)
 
 - Files: `cli/modes/WebMode.java`, `cli/modes/ModeController.java:205`,
   `cli/commands/ModeCommand.java:25`, `README.md:204`.
@@ -568,8 +568,8 @@ Two independent moves, either of which unblocks the 16 placeholder tests:
 - Decision criterion: either
   (a) commit to implementing the mode and start a feature branch, or
   (b) retire the surface in a single PR that removes *all four* of its
-  references simultaneously — the class, the registration, the help-string
-  entry, and the README line — so no documentation advertises a mode that
+  references simultaneously - the class, the registration, the help-string
+  entry, and the README line - so no documentation advertises a mode that
   does not exist.
 - Do **not** silently delete just the `.java` file.
 
@@ -631,7 +631,7 @@ Per `.github/copilot-instructions.md` and this review:
 - No rewrite around LangChain4j, Spring AI, or any agent framework.
 - No merging of broad long-term memory into Talos core without a scoped design.
 - No MCP server implementation until the retrieval seam is stable.
-- No broad package reshuffles beyond the targeted ones in §9.7–9.8.
+- No broad package reshuffles beyond the targeted ones in §9.7-9.8.
 - **No CI / quality-tooling (JaCoCo, Sonar, Qodana, CodeQL, Snyk, workflow
   files) changes on `v0.9.0-beta-dev` or `main`**. These belong on
   `feature/code-quality-stack`.
@@ -644,7 +644,7 @@ Per `.github/copilot-instructions.md` and this review:
 
 ---
 
-## Appendix A — Data sources for this review
+## Appendix A - Data sources for this review
 
 - `gradlew clean build` run on 2026-04-19 (2341 tests, 18 failures).
 - `src/main/java/dev/talos/**` file listing + LOC counts (PowerShell
@@ -657,15 +657,15 @@ Per `.github/copilot-instructions.md` and this review:
 - Cross-reference against `.github/copilot-instructions.md`,
   `README.md`, and `docs/architecture/{21,23,24,25,26,talos-harness-*}.md`.
 
-## Appendix B — Change log
+## Appendix B - Change log
 
-- **2026-04-19 (rev 3)** — second maintainer review:
-  1. Added §1.1 "What Talos actually is today" — the live runtime center is
+- **2026-04-19 (rev 3)** - second maintainer review:
+  1. Added §1.1 "What Talos actually is today" - the live runtime center is
      **unified tool-driven assistance** (`UnifiedAssistantMode`), not
      classic RAG. `AutoMode` is an explicit placeholder per its own
      javadoc; `RagMode` is still a first-class explicit mode but is no
      longer the default execution path.
-  2. Rewrote §4.4 and §6.5 — `AssistantTurnExecutor` is a **static utility
+  2. Rewrote §4.4 and §6.5 - `AssistantTurnExecutor` is a **static utility
      class** (`private AssistantTurnExecutor() {} // utility class` at line
      45). Earlier rev-1/rev-2 wording suggesting it should "accept a
      `ModelEngineProvider` in the constructor" was architecturally wrong.
@@ -674,7 +674,7 @@ Per `.github/copilot-instructions.md` and this review:
   3. Rewrote §9.2 accordingly: split into 9.2a (harness-only fixture, pure
      test change) and 9.2b (injectable engine-resolution seam inside
      `LlmClient`). Dropped the "`PlaceholderRouter`" extraction from §4.2
-     and §9.11 — the DIP fix subsumes it.
+     and §9.11 - the DIP fix subsumes it.
   4. Tightened §2.1 and §9.3: `BuildInfo` already falls back cleanly to
      `"unknown"` (see `BuildInfo.java:89-94`); the banner-test failures
      come from tests asserting the literal `"0.9.0-beta"` string against
@@ -682,15 +682,15 @@ Per `.github/copilot-instructions.md` and this review:
      framed correctly as a two-part test/build-ergonomics fix: add a
      build-time version resource and have `BuildInfo.version()` consult it
      outside packaged JAR runs.
-  5. Rewrote §9.4 — class-delete of `FirstRunWizard` is a single-PR safe
+  5. Rewrote §9.4 - class-delete of `FirstRunWizard` is a single-PR safe
      operation, but **removing JavaFX from `build.gradle.kts` is a
      separate decision** that requires its own sweep for remaining
      JavaFX usage and is kept off this PR.
-- **2026-04-19 (rev 2)** — corrections from maintainer review:
+- **2026-04-19 (rev 2)** - corrections from maintainer review:
   1. Removed the false claim that `dev.talos.app` contains a
      `Version.java` (no such file exists in the tree).
   2. Reclassified `NoOpApprovalGate` and `NoOpSessionStore` from
-     "potentially dead — naming suggests test-only fallbacks" to
+     "potentially dead - naming suggests test-only fallbacks" to
      "active compatibility/default implementations" (they are the
      null-coalesce defaults in `TurnProcessor`, `Context.Builder`, and
      `Session`; their javadoc explicitly names them as the V1 defaults).
@@ -698,4 +698,4 @@ Per `.github/copilot-instructions.md` and this review:
      help-string and `README.md:204` placeholder references, and rewrote
      backlog §9.5 to reflect that any removal must also retire the
      `/mode` help entry and the README line atomically.
-- **2026-04-19 (rev 1)** — initial draft.
+- **2026-04-19 (rev 1)** - initial draft.

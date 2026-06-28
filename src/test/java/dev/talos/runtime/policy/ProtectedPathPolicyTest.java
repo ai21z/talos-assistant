@@ -51,7 +51,7 @@ class ProtectedPathPolicyTest {
 
     @Test
     void doesNotOverTriggerDerivationalSuffixSourceFiles() {
-        // T759: equals-or-suffix word-run matching — the stem must end the
+        // T759: equals-or-suffix word-run matching - the stem must end the
         // run. "tokenizer"/"secretary"/"passwordless" no longer classify;
         // "api_token"/"mysecrets" still do (suffix keeps them fail-closed).
         assertFalse(ProtectedPathPolicy.classify(workspace, "src/tokenizer.java").protectedPath());

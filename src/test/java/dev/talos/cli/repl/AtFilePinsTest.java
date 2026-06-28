@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * T802: the @-file pin resolver. Explicit paths only, visible notices
- * for everything skipped, and — the trust proof of this ticket — a
+ * for everything skipped, and - the trust proof of this ticket - a
  * protected path can never enter pinned content, whether or not it
  * exists.
  */
@@ -119,7 +119,7 @@ class AtFilePinsTest {
 
     /**
      * The T802 trust proof: a protected path can never enter pinned
-     * content — and the refusal is identical whether or not the file
+     * content - and the refusal is identical whether or not the file
      * exists, so the notice does not leak existence either.
      */
     @Test

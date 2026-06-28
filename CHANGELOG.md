@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T887] Interactive prompts now get one blank line after a submitted non-empty
+  `talos [mode] >` input before Talos starts route, slash-command, rate-limit, or
+  answer output. The gap is interactive-only, so scripted/redirected transcripts
+  stay unchanged.
 - [T884] Turns now read as distinct blocks: after a conversational turn the REPL
   prints a dim full-width rule (blank line, rule, blank line) before the next
   `talos [mode] >` prompt, so turn 2 no longer butts up against the end of turn 1.
@@ -186,8 +190,8 @@
 - [T788] The workspace `.talos` directory is now a protected CONTROL
   path (like `.git` and `.github/workflows`): it will hold
   workspace-declared verification profiles (`.talos/profiles.yaml`) and
-  template commands (`.talos/commands/*.md`) — content that influences
-  what Talos executes — so the model can no longer write it with an
+  template commands (`.talos/commands/*.md`) - content that influences
+  what Talos executes - so the model can no longer write it with an
   ordinary write approval; writes escalate through the protected-path
   flow and diff previews of its content fail closed. The protected-path
   `POLICY_VERSION` was bumped v3 → v4, which makes existing RAG indexes
@@ -197,48 +201,48 @@
   One deliberate read-side exemption: the project-memory loader still
   reads its own canonical `<dir>/.talos/rules.md` memory tiers into the
   prompt (that is their purpose, and the CONTROL classification now
-  protects them from un-escalated model WRITES — closing a
+  protects them from un-escalated model WRITES - closing a
   memory-injection vector); nothing else under `.talos` is exempt, so
   `.talos/profiles.yaml` can never flow into a prompt.
 - [T797] Characterization pins ahead of the context/session work (tests
   only, no behavior change): the compaction failure-breaker's exact
   operational skip string, the fact that compaction today sets a status
-  and nothing else (no event, no notice — T798/T805 change that
+  and nothing else (no event, no notice - T798/T805 change that
   deliberately), and the exact `/session` info/save/load/clear/usage
-  bytes that T799–T801 evolve.
+  bytes that T799-T801 evolve.
 - [T787] Characterization pins ahead of the wave-4 trust work (tests
   only, no behavior change): the not-yet-protected `.talos` workspace
   directory, the gradle `run_command` approval-detail bytes, the `/status`
   dashboard render bytes, `/undo`'s pre-existing approval/protected-path
   bypass, and the `/checkpoint` list shape (id-sorted, not
-  chronological) plus restore approval bytes — the byte baselines the
+  chronological) plus restore approval bytes - the byte baselines the
   following tickets are reviewed against.
 - [T785] First run is now an honest preflight: the flow runs the same
-  doctor probe set as `talos doctor` (default probes only — it never loads
+  doctor probe set as `talos doctor` (default probes only - it never loads
   a model) and prints per-check PASS/WARN/FAIL/SKIP lines instead of the
   previous unconditional "✓ Setup complete", which verified nothing. The
   verdict line is now truthful: "Setup verified." only when every check
   passed, "Setup complete with warnings." when the only finding is e.g. a
-  managed server that has not started yet, and "Setup incomplete — N
+  managed server that has not started yet, and "Setup incomplete - N
   check(s) failed." with fix hints and a pointer to `talos doctor`
   otherwise. The stale hardcoded configuration block (which claimed model
   `talos-agent` regardless of config) is gone. The sentinel is still
-  written once the flow has been shown — even on failure — because the
+  written once the flow has been shown - even on failure - because the
   launcher exits when first-run refuses, and an unconfigured user must
   never be locked out of the REPL; recurring verification belongs to
   `talos doctor`. First-run tests are now hermetic (injected doctor
-  runner, output stream, and sentinel path — the old test wrote the
+  runner, output stream, and sentinel path - the old test wrote the
   developer's real `~/.talos/first_run_done`).
 
 ### Changed (checkpoints)
 - [T796] `FileUndoStack` is deleted along with its write/edit tool push
-  sites — its sole functional consumer was the pre-T795 ungated `/undo`,
+  sites - its sole functional consumer was the pre-T795 ungated `/undo`,
   and checkpoints capture a strict superset (every gated mutation
   including batch/move/delete operations, durable on disk rather than
   20 in-memory entries lost at session end). One undo system remains:
   the governed one. The write/edit tools' output bytes are unchanged
   (the snapshot push was side-effect-only).
-- [T795] `/undo` is re-routed through checkpoints — the headline trust
+- [T795] `/undo` is re-routed through checkpoints - the headline trust
   fix of the wave. It now restores the NEWEST checkpoint behind a full
   approval whose detail shows the capture time, trigger, affected files
   (with explicit "will be DELETED" warnings for paths that did not
@@ -246,8 +250,8 @@
   the current state is captured FIRST, so `/undo` is itself undoable
   (`/undo` twice = redo) and a failed safety capture aborts with zero
   changes. The previous implementation popped an in-memory per-file
-  stack and wrote files directly — including protected paths like
-  `.env` — with no approval gate, no checkpoint, and no protected-path
+  stack and wrote files directly - including protected paths like
+  `.env` - with no approval gate, no checkpoint, and no protected-path
   classification, and its memory vanished at session end. Semantic
   change to be aware of: undo now operates on the last CHECKPOINTED
   mutation set (which can span multiple files for batch operations),
@@ -259,28 +263,28 @@
   two checkpoints captured within the same clock tick (exactly the
   undo-then-safety pattern) previously fell to a random UUID tiebreak,
   making "newest" a coin flip.
-- [T794] `/checkpoint list` renders the unified timeline — id, local
+- [T794] `/checkpoint list` renders the unified timeline - id, local
   capture time, turn number, trigger, file count, and size, newest
-  first — and a new `/checkpoint show <id>` renders per-file stats with
+  first - and a new `/checkpoint show <id>` renders per-file stats with
   capped, redacted restore diffs (captured content vs the CURRENT
   files, via a new `ApprovalDiffPreview.forRestore` that reuses every
   write/edit guard: protected paths including `.talos`, binary and
   oversized content all fail closed; entries that did not exist at
   capture are annotated "restore DELETES it"). Diff previews cap at 3
   files per show with an honest "(N more...)" marker. The
-  `/checkpoint restore` approval description/detail bytes stay frozen —
+  `/checkpoint restore` approval description/detail bytes stay frozen -
   the rich previewed restore path is `/undo` (T795).
 - [T793] Checkpoints gained a read model: `listSummaries`/`describe`/
   `blob` expose createdAt, turn number, a new human `trigger` (the tool
   and target that caused the capture; pre-T793 checkpoints render
-  "(unknown)" — schemaVersion stays 1), file/byte counts, and manifest
+  "(unknown)" - schemaVersion stays 1), file/byte counts, and manifest
   entries. `/checkpoint list` (and `listIds`) is now truly
-  newest-first by `createdAt` — it was reverse-lexicographic on random
+  newest-first by `createdAt` - it was reverse-lexicographic on random
   UUIDs, i.e. arbitrary. Restores can now be traced
   (`CHECKPOINT_RESTORED`/`CHECKPOINT_RESTORE_FAILED`, counts only,
   best-effort), and a new `captureBeforeRestore` records the CURRENT
   state of the affected paths under a `restore-safety` backend before a
-  restore overwrites them — the mechanism that makes `/undo` itself
+  restore overwrites them - the mechanism that makes `/undo` itself
   undoable in T795. Corrupt or pre-T793 metadata stays listable
   (tolerant reads).
 
@@ -289,7 +293,7 @@
   (gradle_test / gradle_check / gradle_e2e_test, or any trusted `ws:`
   workspace profile) that ran AFTER the turn's last successful mutation
   now upgrades the post-apply verification verdict from READBACK_ONLY to
-  PASSED ("Command verification passed: <profile> exited 0.") —
+  PASSED ("Command verification passed: <profile> exited 0.") -
   command-level proof is strictly stronger than readback, and this is
   what makes workspace profiles useful on non-Java workspaces. The
   upgrade is additive only: FAILED is never overridden (failed runs
@@ -303,7 +307,7 @@
 - [T806] Workspace template commands: a markdown file at
   `.talos/commands/review.md` makes `/review` expand to the file's
   content and run through the unmodified prompt pipeline. Templates are
-  workspace content — untrusted — so they get exactly typed-input
+  workspace content - untrusted - so they get exactly typed-input
   capability: the same classification, tool policy, and approvals as if
   the user had typed the text; expansion is single-level (the result is
   never re-classified as a command) and since T788 the directory is a
@@ -313,13 +317,13 @@
   separate catalog consulted only on a registry miss, and names
   colliding with any built-in command or alias are dropped at load.
   Limits: 24 templates per workspace, 16 KiB each, names
-  `[a-z0-9][a-z0-9-]*`; loaded once at startup (restart to reload — the
+  `[a-z0-9][a-z0-9-]*`; loaded once at startup (restart to reload - the
   footer in `/help all` says so). Templates appear in `/help all` under
   "Workspace commands" and in tab completion.
 - [T805] Automatic context compaction is no longer invisible. When the
   auto-compactor summarizes older exchanges mid-session, one muted line
-  now renders after the turn stats — `[context compacted: 6 older
-  exchanges summarized · 4 kept verbatim]` — so the user sees their
+  now renders after the turn stats - `[context compacted: 6 older
+  exchanges summarized · 4 kept verbatim]` - so the user sees their
   context change shape at the moment it happens instead of discovering
   it later through degraded recall. The notice is interactive-only
   render chrome: scripted and redirected transcripts are byte-identical
@@ -331,17 +335,17 @@
 - [T804] `/compact` compacts the conversation on demand. The forced
   path skips the pair-threshold and over-budget gates and runs even
   when the auto-compaction failure breaker is open (explicit user
-  intent — a forced failure still counts toward the breaker, a forced
+  intent - a forced failure still counts toward the breaker, a forced
   success resets it). Outcomes are reported honestly: "Compacted: N
   older exchanges summarized - M kept verbatim (~before -> ~after
   tokens, est.)", "Nothing to compact" when everything already fits
-  (or the conversation is empty — that fast path never touches the
+  (or the conversation is empty - that fast path never touches the
   model), and a failure renders the full status/category/reason with
   the guarantee that applies: history is preserved verbatim, nothing
   is lost. Uses the same compaction-mode flag as the auto path and
   `/context`, so the budget `/compact` enforces is the budget the
   meter shows.
-- [T803] `/context` shows what occupies the context window — previously
+- [T803] `/context` shows what occupies the context window - previously
   invisible state: an estimated history meter bar against the active
   compaction budget, the configured maximum
   (`limits.llm_context_max_tokens`), the response reserve and
@@ -352,7 +356,7 @@
   between `limits.llm_context_max_tokens` and
   `engines.llama_cpp.context`: a smaller engine context warns about
   overflow risk, a larger one is noted as safe-but-unused, and Ollama
-  shows "managed by Ollama" (reconciling the two keys stays deferred —
+  shows "managed by Ollama" (reconciling the two keys stays deferred -
   this makes the gap visible). All figures are the chars/4 estimates
   the budget logic itself uses, labeled `(est.)`. One bootstrap flag
   now feeds the compaction listener, `/context`, and the upcoming
@@ -360,7 +364,7 @@
 - [T802] `@file` pinning in prompts (unified/auto mode). Typing
   `@src/Main.java` (or `@"path with spaces"`) in a prompt pins that
   file's content into the turn: up to 4 explicit workspace-relative
-  paths per prompt — no fuzzy matching, no directory walks — at 4,000
+  paths per prompt - no fuzzy matching, no directory walks - at 4,000
   chars per file and 12,000 total, with visible truncation markers. The
   content rides as ONE user-role `[PinnedFiles]` message injected
   immediately before the user's line, framed as untrusted reference
@@ -368,7 +372,7 @@
   and never gains system authority, and the `@token` stays visible in
   the user's own words. Everything skipped says so before the spinner
   starts: missing files, directories, paths outside the workspace,
-  files over 2 MiB, and binary content all produce one-line notices —
+  files over 2 MiB, and binary content all produce one-line notices -
   and protected paths (`.env`, `.talos/**`, `.git/**`, keys) are
   refused with a pointer at the approval-gated `read_file` flow, with
   the identical refusal whether or not the file exists, so pinning can
@@ -376,28 +380,28 @@
   (`/mode rag`) keeps its existing implicit pinning unchanged; e-mail
   addresses and mid-word `@` are never treated as pins.
 - [T801] `/session export [id-prefix] [path] [--raw]` writes a markdown
-  transcript of a stored session — header (id, workspace, created,
-  model, exchanges, sketch) plus `## Turn N` blocks — from the snapshot
+  transcript of a stored session - header (id, workspace, created,
+  model, exchanges, sketch) plus `## Turn N` blocks - from the snapshot
   when one exists, else from the crash log's completed-ok rows (aborted/
   error-turn residue never leaves the machine as transcript). Content
   was already redacted when it was written to the session store; the
   assembled document gets one more idempotent redaction pass, and a
   seeded placeholder is pinned to survive export verbatim. The default
-  target is `~/.talos/exports/talos-session-<id>-<timestamp>.md` — the
+  target is `~/.talos/exports/talos-session-<id>-<timestamp>.md` - the
   user's own home, never the workspace unless an explicit path says so
-  — and explicit paths are never overwritten. No approval is asked
+  - and explicit paths are never overwritten. No approval is asked
   (PromptCommand precedent: a user-initiated write of the user's own
   data to the user's own directory); the absolute path is reported.
   `--raw` copies the per-turn JSONL beside the markdown.
 - [T800] `/session list` and `/session resume [id]`. `list` renders the
-  workspace's stored sessions newest-first — display id (the UTC
+  workspace's stored sessions newest-first - display id (the UTC
   timestamp suffix; the one possible legacy file shows its short hash),
   age, exchange count, model, and `(current)`/`(legacy)`/`(crash log
   only)` markers. `resume` restores the latest OTHER session by default
   ("pick up where the previous session left off"); an id prefix selects
   a specific one (matched against the display id, ambiguous prefixes
   list the candidates) and may explicitly target the current session as
-  a reload-from-disk. `/session load` is now an alias of `resume` — its
+  a reload-from-disk. `/session load` is now an alias of `resume` - its
   former meaning ("re-read this workspace's single file") stopped
   existing when T799 introduced per-run instance files. `save`, `clear`,
   and the info block's `Saved file` row now operate on the ACTIVE
@@ -416,7 +420,7 @@
   reads the active session's log through an injected id rather than
   re-deriving the workspace hash (which would have silently read the
   wrong log). Startup auto-restore and the "saved session found" notice
-  pick the NEWEST stored session across legacy and instance files —
+  pick the NEWEST stored session across legacy and instance files -
   legacy bare-hash files remain loadable and win when they are all that
   exists. Empty sessions (no turns, no sketch, no active task context)
   are no longer saved on close, so quitting an idle REPL leaves no
@@ -431,7 +435,7 @@
   estimates, the active mode's budget and pair threshold, sketch state,
   and the last compaction status; `compactNow` forces a compaction that
   skips the pair-threshold and over-budget gates and bypasses an OPEN
-  failure breaker (explicit user intent — forced failures still count
+  failure breaker (explicit user intent - forced failures still count
   toward it, successes reset it) while keeping the recent
   budget-fitting tail verbatim exactly like the auto path (shared body,
   proven behavior-preserving by the T797 pins); and a one-shot
@@ -439,7 +443,7 @@
   hook for the T805 render-side notice. No user-visible change yet.
 - [T791] New `/profiles` and `/verify` commands plus a `Verify` status
   row. `/profiles list` shows the declaration state and resolved
-  profiles; `/profiles trust` is the chain's explicit-consent step — it
+  profiles; `/profiles trust` is the chain's explicit-consent step - it
   renders the resolved profiles (absolute executable paths) and the
   declaration's SHA-256 behind an approval, then pins those exact bytes;
   `/profiles revoke` withdraws the pin. `/verify [ws:<id>]` evaluates
@@ -450,7 +454,7 @@
   verdict with capped output tails. `/status`, `talos status`, and the
   startup banner gain a `Verify` row (`none declared` / `N profile(s)
   (untrusted - run /profiles trust)` / `N profile(s) (trusted)` /
-  `invalid: ...`) — strictly additive: a blank value renders
+  `invalid: ...`) - strictly additive: a blank value renders
   byte-identically to the pre-T791 output, pinned.
 - [T790] Trusted workspace profiles are now invocable through
   `talos.run_command` as `ws:<id>`: one merged `CommandProfileRegistry`
@@ -459,7 +463,7 @@
   call sites. Declared profiles register ONLY when the declaration is
   content-hash trusted; an untrusted, changed, invalid, or undeclared
   state is rejected at plan time with an instructive message (review
-  with `/profiles trust`) — before any approval prompt is spent, which
+  with `/profiles trust`) - before any approval prompt is spent, which
   is the chain's proof obligation. Workspace profiles accept no caller
   arguments (declared fixed argv only), keep the per-run approval and
   BUILD_OR_TEST risk gates, and render through the same approval-detail
@@ -469,7 +473,7 @@
 - [T789] Workspace verification-profile declaration model (inert until
   T790 registers it): `<workspace>/.talos/profiles.yaml` declares up to 8
   fixed-argv command profiles (id, executable, args, timeout_ms,
-  expected_writes — approval, network, interactivity, and risk are NOT
+  expected_writes - approval, network, interactivity, and risk are NOT
   declarable and always pinned to the hardened values). The loader
   validates fail-closed: one bad profile rejects the whole file with one
   human-readable reason, unknown keys are rejected so typos cannot
@@ -478,20 +482,20 @@
   inside the workspace and register as their resolved absolute path
   (displayed in every trust and approval prompt). A new content-hash
   trust store (`~/.talos/trust/workspace-profiles/`) records explicit
-  user consent over the declaration's raw bytes — any byte change
+  user consent over the declaration's raw bytes - any byte change
   returns the workspace to untrusted and requires re-consent; corrupted
   pins fail closed.
 - [T786] New `/doctor` REPL command running the same default doctor probe
   set from inside a session (DEBUG group, listed by `/help`). It
   deliberately has no `--start` equivalent: a slash command must not block
   the session on a multi-minute model load or churn the GPU
-  mid-conversation — end-to-end server verification stays CLI-only
+  mid-conversation - end-to-end server verification stays CLI-only
   (`talos doctor --start`).
 - [T784] New `talos doctor` subcommand: a fast environment preflight that
   verifies the config loads (and the user config parses), the engine
   backend resolves and a model is configured, the managed llama.cpp server
   binary and GGUF model file exist (reusing the engine's own pre-launch
-  validation through a new public `LlamaCppPreflight` facade — one source
+  validation through a new public `LlamaCppPreflight` facade - one source
   of truth, the manager now delegates), the server responds (a managed
   server that simply is not running is honestly a WARN, since Talos starts
   it automatically on first prompt; unreachable connect-only servers FAIL),
@@ -504,14 +508,14 @@
   is side-effect-light and finishes in seconds.
 
 ### Fixed
-- [T783] `talos.delete_path` is now documented in the README tool table —
+- [T783] `talos.delete_path` is now documented in the README tool table -
   it was registered and approval-gated since its introduction but missing
   from the user-facing table, a claims drift on the most dangerous tool.
   The `/checkpoint` and `/undo` commands gained their missing README rows
   (wording taken from their `spec()` summaries so docs and `/help` agree).
   A new `ReadmeToolTableDriftTest` pins the tool table bidirectionally
-  against the canonical descriptor catalog — names and approval columns
-  both — so a registered tool can never silently vanish from the docs
+  against the canonical descriptor catalog - names and approval columns
+  both - so a registered tool can never silently vanish from the docs
   again. Ride-along: `TokenBudgetFromConfigTest` was reading the
   developer's real `~/.talos/config.yaml` (a machine-local 32k
   `llm_context_max_tokens` failed its built-in-default assertion); it now
@@ -524,8 +528,8 @@
 - [T782] Added the inline-TUI architecture decision record
   (`docs/architecture/31-inline-tui-strategy-and-fullscreen-rejection.md`):
   full-screen TUI (Lanterna/Jexer/alternate-screen) is rejected with
-  evidence — the alternate screen would destroy the plain-scrollback
-  transcripts the PTY evidence chain string-matches — and the Wave 3
+  evidence - the alternate screen would destroy the plain-scrollback
+  transcripts the PTY evidence chain string-matches - and the Wave 3
   standing rules (byte-frozen chrome contracts, byte-identical
   degradation, visible markdown markers, Talos-authored nanorc, single
   authoritative writer, additive status row, JLine bumps as isolated
@@ -534,7 +538,7 @@
   the JNA provider and parts of the 3.x API are removed there). 3.30.12+
   fixes the status-bar duplication on terminal resize affecting the T779
   status row. The inert `.jna(true)` builder flag (no JNA on the
-  classpath — resolution always fell through to the bundled JNI
+  classpath - resolution always fell through to the bundled JNI
   provider) is replaced by an explicit `.provider("jni")` pin for
   deterministic provider selection on JDK 21. Found and absorbed one
   3.30 behavior change: a terminal's writer now encodes output with the
@@ -549,7 +553,7 @@
   polled per tick and truncated ANSI-aware to the terminal width. All
   values are renderer-owned; the printed route-hint and turn-stat lines
   that the evidence chain matches remain printed scrollback lines,
-  byte-unchanged — the row only mirrors them. Broken suppliers degrade
+  byte-unchanged - the row only mirrors them. Broken suppliers degrade
   silently to a context-free row.
 - [T779] The thinking spinner now renders as a JLine Status bottom row
   on capable terminals (`cli.ui.StatusRowPresenter`): the row lives in a
@@ -560,13 +564,13 @@
   capability probe mirrors JLine's own protected check. The status
   region is closed on session shutdown so the terminal scroll area is
   restored. Content is unchanged this ticket (spinner glyph + label +
-  elapsed); the row is strictly additive — route hints, turn stats, and
+  elapsed); the row is strictly additive - route hints, turn stats, and
   approval lines remain printed scrollback lines.
 - [T778] Fenced code blocks are now syntax-highlighted in capable
   interactive terminals using JLine's bundled nanorc engine with
   Talos-authored minimal syntax definitions under `/nanorc/` (java,
   python, javascript/typescript, json, yaml, bash, diff, xml, html,
-  css — GNU nano's GPLv3 files are deliberately not vendored). The
+  css - GNU nano's GPLv3 files are deliberately not vendored). The
   complete code line is highlighted once and cut ANSI-aware at the pane
   width so token colors survive the cut; unknown languages, missing
   definitions, and parse failures all degrade to plain text, and
@@ -575,7 +579,7 @@
   headings, bullets, inline `**bold**`/`*italic*`/`` `code` `` spans,
   and ``` fence delimiters are styled by a renderer-owned state machine
   (`cli.ui.md.StreamingMarkdownShaper` + `MarkdownLineStyler`) operating
-  on already-sanitized, already-wrapped rows. Markers stay visible —
+  on already-sanitized, already-wrapped rows. Markers stay visible -
   styling only colors the original characters, so stripping ANSI always
   recovers the plain wrapped text byte-for-byte (the pinned invariant),
   and Talos chrome lines gain zero ANSI. Fenced code preserves spacing
@@ -589,7 +593,7 @@
   wrap byte-for-byte under arbitrary chunk boundaries (parity-tested
   against `renderBlock` as the oracle under 1-char, word-sized, and
   seeded-random chunkings at widths 60/80/96/120), emitting each row as
-  soon as it fills — latency is bounded by one row plus one in-flight
+  soon as it fills - latency is bounded by one row plus one in-flight
   word. Degraded modes (redirected, scripted, NO_COLOR, ASCII, dumb)
   keep the historical pass-through bytes, pinned by goldens.
 - [T775] The true-PTY manual-audit validator's prose-phrase checks (the
@@ -598,8 +602,8 @@
   prefixes are stripped and consecutive pane lines rejoined, so a
   required phrase split by width-reactive soft wrapping (T772/T776)
   still validates. Paragraph breaks deliberately do not rejoin, and
-  chrome checks — the byte-frozen approval prompt, isolation markers,
-  command echoes, and the approvals counter — keep strict raw matching.
+  chrome checks - the byte-frozen approval prompt, isolation markers,
+  command echoes, and the approvals counter - keep strict raw matching.
   Landed before the streaming wrap change so the evidence chain cannot
   be broken by a wrap boundary landing inside a required phrase.
 - [T774] Interactive sessions now write through a single authoritative
@@ -611,34 +615,34 @@
   JLine's cursor/column model now sees every character that reaches the
   terminal, closing the documented Apr 2026 display-corruption class
   where a prompt redraw spliced scrollback into the input line.
-  Scripted/redirected runs keep raw `System.out` — verified
+  Scripted/redirected runs keep raw `System.out` - verified
   byte-identical against a pre-change transcript.
 - [T773] The approval window and the `/status` dashboard resolve their
-  width from the live terminal (clamped 60–120) instead of a hardcoded
+  width from the live terminal (clamped 60-120) instead of a hardcoded
   80. The approval prompt strings themselves are width-independent and
   stay byte-frozen via `ApprovalPromptText`/the T766 contract test;
   terminal-less paths (scripted approval, `talos status` outside the
   REPL, redirected output) keep the fixed 80 and do not consult
   `COLUMNS`, so their bytes are unchanged by construction.
 - [T772] The answer pane resolves its width from the live terminal
-  (clamped 60–120) instead of a hardcoded 96; the width is captured at
+  (clamped 60-120) instead of a hardcoded 96; the width is captured at
   stream open, so one streamed answer stays internally consistent and a
   terminal resize takes effect on the next answer. Paths without a
   terminal (redirected, scripted, e2e) keep the historical fixed 96 and
   never consult `COLUMNS`, so their bytes are unchanged by construction.
 - [T771] Width resolution is now owned by a single rule
   (`cli.ui.TerminalWidths`): live JLine `Terminal.getWidth()` clamped to
-  60–120, then the `COLUMNS` environment variable (same clamp), then the
+  60-120, then the `COLUMNS` environment variable (same clamp), then the
   caller's surface default passed through unclamped so redirected and
   scripted output stays byte-identical. The startup banner is the first
-  consumer — it now renders at the real terminal width in interactive
+  consumer - it now renders at the real terminal width in interactive
   runs instead of assuming 80 (`COLUMNS` is never set by default on
   Windows, so the env fallback effectively never fired there).
-  Deliberate rule change: `COLUMNS` values of 40–59 previously rendered
+  Deliberate rule change: `COLUMNS` values of 40-59 previously rendered
   at face value; they now clamp to 60.
 - [T770] `TerminalCapabilities.detectDefault()` (the input behind
   color/unicode/glyph selection) now takes its interactivity signal from
-  the `isatty` probe instead of `System.console() != null` — the same
+  the `isatty` probe instead of `System.console() != null` - the same
   JDK-22 hazard as T769, where redirected output would have been treated
   as interactive and received ANSI color and Unicode glyphs instead of
   byte-identical plain ASCII. The capability decision matrix itself is
@@ -697,7 +701,7 @@
   the rendered outcome in addition to tool usage and file state: an
   approved-and-executed turn that fail-closes as BLOCKED (e.g.
   `OUTCOME_RENDERED {status=BLOCKED, classification=BLOCKED_BY_POLICY}`) now
-  fails the harness instead of passing silently — the claim gap that masked
+  fails the harness instead of passing silently - the claim gap that masked
   T763's phantom expected-target block across the 0.10.2/0.10.3 packet
   lanes. PARTIAL outcomes still pass, so legitimate runtime-repair lanes are
   not overclaimed.
@@ -725,7 +729,7 @@
 ### Changed
 - [T762] Read-only proposal grounding now derives ungrounded-file detection
   from observed tool evidence (result text plus the paths tools actually
-  touched) instead of a hardcoded audit-fixture filename list — claims about
+  touched) instead of a hardcoded audit-fixture filename list - claims about
   ANY unread file now trigger the grounding warning, not just the seven
   fixture names. The policy moved from AssistantTurnExecutor into
   `runtime.outcome.ReadOnlyProposalGroundingGuard` per the policy-ownership
@@ -734,11 +738,11 @@
   `ToolSurfacePlanner.plan()` over a canonical descriptor catalog instead of
   a hand-maintained duplicate branch tree; read-only turns with expected
   targets now advertise only `talos.read_file` (matching what the runtime
-  always enforced — the model can no longer be advertised tools the runtime
+  always enforced - the model can no longer be advertised tools the runtime
   denies). Parity tests pin the catalog against the bootstrap registry.
 - [T760] The protected-read answer postcondition now distinguishes blank
   model answers from refusals (truthful trace reasons) and scopes refusal-
-  marker detection to the first 240 characters of the answer — long grounded
+  marker detection to the first 240 characters of the answer - long grounded
   answers with tail caveats like "the raw value cannot be shared" are no
   longer destroyed and replaced.
 - [T759] Protected-path classification consolidated into a single canonical
@@ -770,7 +774,7 @@
   records hash and line counts; risk inference ignores diff bodies so quoted
   "remove"/"delete" code cannot escalate the risk label.
 - [T755] Markdown-commentary sanitization of write/edit content now runs
-  once, pre-approval, in the runtime's call normalization — the approval
+  once, pre-approval, in the runtime's call normalization - the approval
   preview, trace hashes, checkpoint, and written file all see identical
   bytes (approved bytes == written bytes). Tools write received bytes
   verbatim; sanitization is trace-recorded as a `TOOL_CONTENT_SANITIZED`
@@ -801,7 +805,7 @@
   codex/feature branches.
 - [T749] Added the release gate ledger: schema v1
   (`work-cycle-docs/release-gate-ledger.md`), a retrofitted GATES.json for
-  the 0.10.1 packet, and `GatesLedgerTest` validating every ledger — release
+  the 0.10.1 packet, and `GatesLedgerTest` validating every ledger - release
   verdicts become machine-checkable artifacts with tooling-sourced SHAs.
 - [T748] Added `TicketHygieneTest` (directory/status-token consistency and
   ID uniqueness repo-wide; strict template rules ratcheted for tickets

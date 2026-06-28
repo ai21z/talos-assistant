@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * T784: pins the static managed-mode validation strings now shared between
  * {@link LlamaCppServerManager} (pre-launch) and the doctor preflight via
  * {@link LlamaCppPreflight}. The manager-side behavior is separately pinned
- * by {@code LlamaCppServerManagerTest} — together they prove the extraction
+ * by {@code LlamaCppServerManagerTest} - together they prove the extraction
  * is behavior-preserving and stays that way.
  */
 class LlamaCppPreflightTest {

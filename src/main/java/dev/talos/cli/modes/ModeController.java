@@ -33,7 +33,7 @@ public final class ModeController implements TurnRouter {
     private String activeName = "auto";
     private Runnable promptRefreshCallback;
 
-    /** Last dispatched route — used by PromptClassifier for sticky retrieval. COMMAND is neutral. */
+    /** Last dispatched route - used by PromptClassifier for sticky retrieval. COMMAND is neutral. */
     private PromptClassifier.Route lastRoute;
 
     /** Optional workspace symbol checker for PascalCase → index resolution in auto-mode. */
@@ -155,7 +155,7 @@ public final class ModeController implements TurnRouter {
         Optional<Result> r = tryMode(byName.get(h), rawLine, workspace, ctx);
         if (r.isPresent()) return r;
 
-        // Explicit mode failed — sweep all modes in registration order
+        // Explicit mode failed - sweep all modes in registration order
         for (Mode m : order) {
             r = tryMode(m, rawLine, workspace, ctx);
             if (r.isPresent()) return r;
@@ -195,7 +195,7 @@ public final class ModeController implements TurnRouter {
     }
 
     /**
-     * Updates conversation context. COMMAND is neutral — it doesn't reset
+     * Updates conversation context. COMMAND is neutral - it doesn't reset
      * the retrieval context, so "explain X" → "ls src/" → "what about Y?"
      * correctly stays in retrieval mode.
      */
@@ -226,7 +226,7 @@ public final class ModeController implements TurnRouter {
     }
 
     /**
-     * Resolves the chat mode — prefers "chat" alias, falls back to "ask".
+     * Resolves the chat mode - prefers "chat" alias, falls back to "ask".
      */
     private Mode resolveChat() {
         Mode m = byName.get("chat");

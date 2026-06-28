@@ -79,7 +79,7 @@ class TurnProcessorDenialWordingTest {
                 Context.builder(new Config()).build());
 
         String msg = result.error().message();
-        // The reshape tells the model what to do next — either ask the
+        // The reshape tells the model what to do next - either ask the
         // user, or pick a different action. Either phrase is acceptable;
         // the invariant is that there's a recovery signal.
         assertTrue(msg.contains("ask") || msg.contains("different action"),

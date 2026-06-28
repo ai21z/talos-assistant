@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Routes slash-commands via {@link CommandRegistry} and prompts via
  * {@link TurnProcessor}, rendering results through {@link RenderEngine}.
  *
- * <p>All dependencies are injected — construction and wiring live in
+ * <p>All dependencies are injected - construction and wiring live in
  * {@link TalosBootstrap}. This class only knows <em>how to dispatch</em>,
  * not <em>what to construct</em>.
  */
@@ -41,7 +41,7 @@ public final class ReplRouter {
     private volatile TurnResult lastTurnResult;
 
     /**
-     * Primary constructor — called by {@link TalosBootstrap}.
+     * Primary constructor - called by {@link TalosBootstrap}.
      * All dependencies are pre-wired; the router only dispatches.
      */
     ReplRouter(ModeController modes, TurnProcessor turnProcessor, Session runtimeSession,
@@ -80,7 +80,7 @@ public final class ReplRouter {
     }
 
     /**
-     * Backward-compatible factory — delegates to {@link TalosBootstrap}.
+     * Backward-compatible factory - delegates to {@link TalosBootstrap}.
      * Existing callers (RunCmd) continue to work without changes.
      */
     public ReplRouter(SessionState session, Config cfg, PrintStream out, Path workspace) {
@@ -107,7 +107,7 @@ public final class ReplRouter {
         if (!registry.has(name)) {
             // T806: registry miss → workspace template commands. Built-ins
             // always win (collisions were dropped at load). The expansion
-            // runs the UNMODIFIED prompt pipeline directly — single-level,
+            // runs the UNMODIFIED prompt pipeline directly - single-level,
             // never re-classified, exactly typed-input capability.
             String expansion = templates.expand(name, c.argsText());
             if (expansion == null) return false;
@@ -191,7 +191,7 @@ public final class ReplRouter {
 
         // T805: the auto-compaction notice renders strictly AFTER the turn
         // stats. Listeners fire synchronously inside turnProcessor.process,
-        // so by this point the one-shot event is already set (or not) —
+        // so by this point the one-shot event is already set (or not) -
         // polling here is race-free. The notice is interactive-gated render
         // chrome; scripted/redirected transcripts stay unchanged.
         if (ctx.conversationManager() != null) {

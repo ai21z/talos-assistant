@@ -102,13 +102,13 @@ public final class SlashCommandCompleter implements Completer {
      */
     private static Candidate toCandidate(String name, CommandSpec spec) {
         return new Candidate(
-                "/" + name,           // value — what gets inserted
-                "/" + name,           // display — what the user sees
+                "/" + name,           // value - what gets inserted
+                "/" + name,           // display - what the user sees
                 spec.groupDisplayName(), // group
-                spec.summary(),       // descr — shown beside the candidate
+                spec.summary(),       // descr - shown beside the candidate
                 null,                 // suffix
                 null,                 // key
-                true                  // complete — candidate is a full word
+                true                  // complete - candidate is a full word
         );
     }
 }

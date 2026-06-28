@@ -212,7 +212,7 @@ class DoctorProbesTest {
     @Test
     void indexDirectoryUnwritableFails() throws IOException {
         // A talosHome path that is a FILE makes createDirectories throw on
-        // every platform — more reliable than read-only directory bits on
+        // every platform - more reliable than read-only directory bits on
         // Windows.
         Path fileAsHome = touch("not-a-directory");
         DoctorContext ctx = new DoctorContext(new Config(), tempDir, fileAsHome);

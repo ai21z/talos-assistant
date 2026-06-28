@@ -38,8 +38,8 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
     /**
      * Last Markdown heading in effect for this chunk (StoredField only).
      * <p>
-     * Current purpose: provenance — lets consumers display section context alongside
-     * a retrieved snippet (e.g. "src/Foo.java § Architecture, lines 10–25").
+     * Current purpose: provenance - lets consumers display section context alongside
+     * a retrieved snippet (e.g. "src/Foo.java § Architecture, lines 10-25").
      * <p>
      * Future purpose: if heading-filtered retrieval is needed, add a parallel
      * {@code StringField} or {@code TextField} to make this field searchable.

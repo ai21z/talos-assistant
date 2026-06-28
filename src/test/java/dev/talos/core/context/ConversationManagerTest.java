@@ -154,7 +154,7 @@ class ConversationManagerTest {
 
         // Default buildHistory() uses 25% budget
         List<ChatMessage> defaultHistory = cm.buildHistory();
-        // Assist buildHistory uses 55% budget — should fit more turns
+        // Assist buildHistory uses 55% budget - should fit more turns
         List<ChatMessage> assistHistory = cm.buildHistoryForAssist();
 
         assertTrue(assistHistory.size() >= defaultHistory.size(),

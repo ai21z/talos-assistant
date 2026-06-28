@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** T791: /verify — live trust evaluation, per-run approval, fixed-argv execution. */
+/** T791: /verify - live trust evaluation, per-run approval, fixed-argv execution. */
 class VerifyCommandTest {
 
     @TempDir Path tempDir;

@@ -90,7 +90,7 @@ class RenderEngineAnswerWidthTest {
 
         // No COLUMNS in this JVM's relevant env on the CI/dev host is not
         // assumed; a throwing supplier plus clamped COLUMNS both render
-        // between 60 and 120 — assert the strict contract only when the
+        // between 60 and 120 - assert the strict contract only when the
         // env carries no COLUMNS override.
         if (System.getenv("COLUMNS") == null) {
             assertTrue(output.contains(oracle),

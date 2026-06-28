@@ -150,7 +150,7 @@ public final class SessionCommand implements Command {
         List<SessionSummary> sessions = store.listSessions(workspaceId);
         String targetId;
         if (idPrefix.isBlank()) {
-            // Default: the latest OTHER session — "pick up where the
+            // Default: the latest OTHER session - "pick up where the
             // previous session left off". The active session's own files
             // are usually the newest and resuming them is a no-op.
             targetId = sessions.stream()
@@ -220,7 +220,7 @@ public final class SessionCommand implements Command {
     // -- Export (T801) --
     /**
      * {@code export [id-prefix] [path] [--raw]}: write a markdown
-     * transcript of a stored session. No approval — the default target
+     * transcript of a stored session. No approval - the default target
      * lives under the user's own {@code ~/.talos/exports/}, never the
      * workspace unless an explicit path says so (PromptCommand
      * precedent). Content was redacted at write time; the assembled
@@ -335,7 +335,7 @@ public final class SessionCommand implements Command {
             }
         } else {
             // Crash log: only completed-ok rows are part of the record the
-            // user can vouch for (same filter as restore — no aborted-turn
+            // user can vouch for (same filter as restore - no aborted-turn
             // confabulation in an artifact that leaves the machine).
             List<TurnRecord> rows = store.loadTurns(sessionId).stream()
                     .filter(r -> r.status() == null || r.status().isEmpty() || "ok".equals(r.status()))
@@ -403,7 +403,7 @@ public final class SessionCommand implements Command {
         return token.contains("/") || token.contains("\\") || token.contains(".");
     }
 
-    /** Display id without the ellipsis — safe inside a file name. */
+    /** Display id without the ellipsis - safe inside a file name. */
     private String fileSafeId(String id) {
         if (id.startsWith(workspaceId + "-")) {
             return id.substring(workspaceId.length() + 1);
@@ -431,7 +431,7 @@ public final class SessionCommand implements Command {
                 turnCount, Instant.now(), turns, ctx.llm() != null ? ctx.llm().getModel() : "",
                 activeTaskContext, artifactGoal);
     }
-    /** The active session's storage id — the save/clear target. */
+    /** The active session's storage id - the save/clear target. */
     public String sessionId() {
         return activeSessionId;
     }

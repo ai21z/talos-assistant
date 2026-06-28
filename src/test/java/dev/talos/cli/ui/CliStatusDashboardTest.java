@@ -17,7 +17,7 @@ class CliStatusDashboardTest {
 
     /**
      * T787 byte pin of the rendered dashboard for a fixed synthetic
-     * snapshot. T791 adds a `verify` row — the diff of this pin must show a
+     * snapshot. T791 adds a `verify` row - the diff of this pin must show a
      * pure row addition (every existing byte unchanged).
      */
     @Test

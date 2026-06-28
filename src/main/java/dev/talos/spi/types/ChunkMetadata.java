@@ -3,7 +3,7 @@ package dev.talos.spi.types;
 /**
  * Structured metadata carried by each indexed chunk.
  * <p>
- * Fields are intentionally nullable — a chunk may not have a heading context
+ * Fields are intentionally nullable - a chunk may not have a heading context
  * (e.g. plain-text files), or language detection may not be possible.
  *
  * @param language        programming/markup language inferred from file extension (e.g. "java", "md"), or null

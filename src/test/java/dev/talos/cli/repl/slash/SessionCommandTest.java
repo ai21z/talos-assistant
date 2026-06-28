@@ -61,7 +61,7 @@ class SessionCommandTest {
         /**
          * T800: the cross-process flow. Session A saves under its instance
          * id; a NEW session (different instance id, same workspace) runs
-         * /session load and gets A back — load means "resume the latest
+         * /session load and gets A back - load means "resume the latest
          * other session", no longer "re-read my own slot".
          */
         @Test void save_thenLoad_restoresConversation() throws Exception {

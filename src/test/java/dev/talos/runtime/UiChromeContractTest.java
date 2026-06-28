@@ -61,8 +61,8 @@ class UiChromeContractTest {
     @Test
     void turnAbortedSentinelsAreStripped() {
         // pins LlmCallBudget wall-clock / idle / repetition / interrupt branches
-        assertStripped("[turn aborted: assistant turn exceeded 120s wall-clock budget — model is hung]");
-        assertStripped("[turn aborted: assistant turn produced no tokens for 30s — model appears wedged.]");
+        assertStripped("[turn aborted: assistant turn exceeded 120s wall-clock budget - model is hung]");
+        assertStripped("[turn aborted: assistant turn produced no tokens for 30s - model appears wedged.]");
         assertStripped("[turn aborted: interrupted]");
     }
 
@@ -84,7 +84,7 @@ class UiChromeContractTest {
     @Test
     void modelNotFoundWrappersAreStripped() {
         // pins ToolReprompt* and AssistantTurnExecutor model-not-found appends
-        assertStripped("[Model 'qwen2.5-coder:14b' not found — tool loop aborted. Pull the model.]");
+        assertStripped("[Model 'qwen2.5-coder:14b' not found - tool loop aborted. Pull the model.]");
         assertStripped("[Model 'qwen2.5-coder:14b' not found. Pull the model.]");
     }
 
@@ -126,7 +126,7 @@ class UiChromeContractTest {
     @Test
     void commandVerificationSummaryIsVerificationProseNotChrome() {
         // T792: the upgraded verifier summary rides the existing verification
-        // annotation shape — it is legitimate verification text, introduces
+        // annotation shape - it is legitimate verification text, introduces
         // no new whole-line chrome prefix, and must survive history.
         String prose = "Command verification passed: gradle_check exited 0.";
         assertEquals(prose, strip(prose));
@@ -137,13 +137,13 @@ class UiChromeContractTest {
         // T768: FileWriteTool emits "Updated <path> (N lines, M bytes)" on
         // overwrite; the composed "✓ Updated ..." status line previously
         // leaked into conversation history (same confidence-trick surface
-        // as BUG #1 — pinned as a known gap in T767, fixed here).
+        // as BUG #1 - pinned as a known gap in T767, fixed here).
         assertStripped("✓ Updated app.css (12 lines, 310 bytes)");
     }
 
     @Test
     void wroteChromeShapeIsStrippedDefensively() {
-        // No current emitter produces "Wrote ..." — a "✓ Wrote ..." line can
+        // No current emitter produces "Wrote ..." - a "✓ Wrote ..." line can
         // only be chrome or a model imitating chrome; both stay out of history.
         assertStripped("✓ Wrote notes.md (3 lines, 40 bytes)");
     }
@@ -152,7 +152,7 @@ class UiChromeContractTest {
     void compactionNoticeIsStrippedDefensively() {
         // T805: pins ProgressLineRenderer.compactionNotice's plain body in
         // both glyph variants. The notice is render-side only and never
-        // enters a Result — this entry exists so a model IMITATING the
+        // enters a Result - this entry exists so a model IMITATING the
         // visible line cannot seed history with fake compaction claims.
         assertStripped("[context compacted: 6 older exchanges summarized · 4 kept verbatim]");
         assertStripped("[context compacted: 1 older exchange summarized - 4 kept verbatim]");

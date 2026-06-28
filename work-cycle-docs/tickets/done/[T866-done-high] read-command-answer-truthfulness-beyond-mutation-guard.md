@@ -3,7 +3,7 @@
 Status: done
 Priority: high
 
-## Implementation Checkpoint — 2026-06-24
+## Implementation Checkpoint - 2026-06-24
 
 Status: implemented, awaiting Opus/owner review.
 

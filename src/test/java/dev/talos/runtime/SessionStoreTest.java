@@ -95,7 +95,7 @@ class SessionStoreTest {
 
         @Test void nullStoreThrows() {
             // CCR-016: primary constructor no longer falls back to NoOp on
-            // null store — callers must pass NoOpSessionStore() explicitly.
+            // null store - callers must pass NoOpSessionStore() explicitly.
             assertThrows(NullPointerException.class, () -> new Session(
                     java.nio.file.Path.of(".").toAbsolutePath().normalize(),
                     new dev.talos.core.Config(),

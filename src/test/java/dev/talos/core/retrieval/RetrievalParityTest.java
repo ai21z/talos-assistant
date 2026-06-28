@@ -55,7 +55,7 @@ class RetrievalParityTest {
      * Note: Config and Main have identical sums due to symmetric rank positions.
      * HashMap iteration order is deterministic within a single JVM run but the
      * tie-break between them depends on insertion order into the HashMap.
-     * Both orderings are acceptable — the test accepts either order for the top 2.
+     * Both orderings are acceptable - the test accepts either order for the top 2.
      */
 
     private static List<RetrievalCandidate> combinedFixture() {

@@ -160,7 +160,7 @@ class SensitiveLogRedactionTest {
         assertFalse(registry.contains("name, decision.canonicalToolName()"), registry);
 
         // T755: in-tool sanitization (and its path-bearing debug logging) is
-        // gone — sanitization happens once, pre-approval, in the runtime's
+        // gone - sanitization happens once, pre-approval, in the runtime's
         // MarkdownCommentaryCallNormalizer, and is trace-recorded as
         // hash/byte summaries only. The tools must not log or sanitize.
         assertFalse(editTool.contains("ContentSanitizer"), editTool);
@@ -192,7 +192,7 @@ class SensitiveLogRedactionTest {
 
         assertTrue(embeddings.contains("SafeLogFormatter.value(this.host)"), embeddings);
         assertFalse(embeddings.contains("services.\", this.host"), embeddings);
-        assertFalse(embeddings.contains("from {} {} — skipping\", ep.path, ep.param"), embeddings);
+        assertFalse(embeddings.contains("from {} {} - skipping\", ep.path, ep.param"), embeddings);
         assertFalse(embeddings.contains("Empty embedding from {} {} (continuing to next attempt)\", ep.path, ep.param"),
                 embeddings);
         assertFalse(embeddings.contains("Batch embedding size mismatch from {} {} (expected {}, got {})\",\n                            ep.path, ep.param"),

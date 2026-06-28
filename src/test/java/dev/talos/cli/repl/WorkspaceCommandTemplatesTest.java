@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * T806: the workspace template catalog. Templates are workspace content
- * — untrusted — so the catalog only stores text; capability comes from
+ * - untrusted - so the catalog only stores text; capability comes from
  * the prompt pipeline the router routes expansions through. Built-ins
  * always win: collisions are dropped at load.
  */

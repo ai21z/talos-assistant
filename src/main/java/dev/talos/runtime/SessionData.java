@@ -10,7 +10,7 @@ import java.util.List;
  * Serialisable snapshot of a session's conversational state.
  *
  * <p>Used by {@link SessionStore} to persist/restore sessions across
- * REPL invocations. All fields are nullable-safe — missing data is
+ * REPL invocations. All fields are nullable-safe - missing data is
  * represented as empty strings or empty lists, never null.
  *
  * @param sessionId    opaque identifier (e.g. workspace hash or UUID)
@@ -46,7 +46,7 @@ public record SessionData(
         }
     }
 
-    /** Defensive copy — normalize nulls. */
+    /** Defensive copy - normalize nulls. */
     public SessionData {
         sessionId = (sessionId == null ? "" : sessionId);
         workspace = (workspace == null ? "" : workspace);

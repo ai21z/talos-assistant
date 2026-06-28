@@ -11,8 +11,8 @@ import java.util.Map;
  *
  * <p>Extended to support native tool calling:
  * <ul>
- *   <li>{@link #toolCalls()} — structured tool call requests from the assistant</li>
- *   <li>{@link #toolCallId()} — correlation id for tool-result messages</li>
+ *   <li>{@link #toolCalls()} - structured tool call requests from the assistant</li>
+ *   <li>{@link #toolCallId()} - correlation id for tool-result messages</li>
  * </ul>
  */
 public record ChatMessage(

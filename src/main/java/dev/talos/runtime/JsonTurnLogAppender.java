@@ -95,11 +95,11 @@ public final class JsonTurnLogAppender implements SessionListener {
     /**
      * Project a {@link Result} into a compact status tag for the turn log.
      *
-     * <p>Distinguishes errored turns from silent turns — before this field,
+     * <p>Distinguishes errored turns from silent turns - before this field,
      * a {@code Result.Error} landed on disk with blank assistantText and
      * was audibly indistinguishable from a turn that produced no committed
      * prose (Info, TrustedInfo, Table). One field, one string, no enum
-     * gymnastics — forward-compatible as new {@code Result} types are
+     * gymnastics - forward-compatible as new {@code Result} types are
      * added.
      */
     static String statusOf(Result r) {
@@ -107,7 +107,7 @@ public final class JsonTurnLogAppender implements SessionListener {
         return switch (r) {
             case Result.Ok ignored           -> "ok";
             // A streamed turn whose fullText is (or starts with) the bracketed
-            // "[turn aborted" marker is NOT conversational content — it is the
+            // "[turn aborted" marker is NOT conversational content - it is the
             // sentinel LlmClient.withWallClockBudget emits on wall-clock
             // expiry, idle-watchdog abort, or interrupt. Tagging it "aborted"
             // here is what lets the reconcile path in TalosBootstrap.replayTurnLog

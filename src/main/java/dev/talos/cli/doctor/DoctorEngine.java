@@ -13,7 +13,7 @@ public final class DoctorEngine {
 
     private DoctorEngine() {}
 
-    /** The default fast probe set — never starts the model server. */
+    /** The default fast probe set - never starts the model server. */
     public static List<DoctorProbe> defaultProbes() {
         return probes(false);
     }

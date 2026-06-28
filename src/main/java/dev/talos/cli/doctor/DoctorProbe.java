@@ -6,6 +6,6 @@ public interface DoctorProbe {
     /** Stable identifier shown in the report (e.g. {@code "engine-files"}). */
     String id();
 
-    /** Run the check. Must not throw — return FAIL instead (the engine also guards). */
+    /** Run the check. Must not throw - return FAIL instead (the engine also guards). */
     ProbeResult run(DoctorContext ctx);
 }

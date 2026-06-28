@@ -20,7 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * {@code /undo} — approval-gated restore of the newest checkpoint (T795).
+ * {@code /undo} - approval-gated restore of the newest checkpoint (T795).
  *
  * <p>This replaces the pre-T795 implementation, which popped an in-memory
  * per-file stack and wrote workspace files directly with NO approval gate,
@@ -80,7 +80,7 @@ public final class UndoCommand implements Command {
         }
 
         // Safety first: capture the CURRENT state of every affected path so
-        // this undo is itself undoable. A failed safety capture aborts —
+        // this undo is itself undoable. A failed safety capture aborts -
         // never a destructive restore without the way back.
         List<String> affectedPaths = detail.entries().stream()
                 .map(CheckpointDetail.Entry::relativePath)

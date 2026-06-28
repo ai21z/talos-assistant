@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link EmbeddingProfile} — identity, fingerprinting, built-in profiles.
+ * Tests for {@link EmbeddingProfile} - identity, fingerprinting, built-in profiles.
  */
 class EmbeddingProfileTest {
 
@@ -130,7 +130,7 @@ class EmbeddingProfileTest {
 
     @Test
     void cacheNamespaceDelegatesToFingerprint() {
-        // cacheNamespace must equal fingerprint — any vector-space-affecting
+        // cacheNamespace must equal fingerprint - any vector-space-affecting
         // parameter change must invalidate the cache key
         assertEquals(EmbeddingProfile.BGE_M3.fingerprint(),
                 EmbeddingProfile.BGE_M3.cacheNamespace());

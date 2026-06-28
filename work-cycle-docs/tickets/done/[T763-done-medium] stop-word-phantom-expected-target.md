@@ -16,7 +16,7 @@ named "by": the operation is approved, executed, and checkpointed, then
 `PENDING_ACTION_OBLIGATION_RAISED {targets=[by], kind=EXPECTED_TARGETS_REMAINING}`
 is raised and breached, and the turn fail-closes. Evidence:
 `local/manual-testing/current-0.10.3-release-packet-20260611-125134/artifacts/qwen/sync-approval/workspace-*-approved/traces/last-trace.txt`
-(same shape in the 0.10.2 packet and the wave-1 stabilization run — 12
+(same shape in the 0.10.2 packet and the wave-1 stabilization run - 12
 traces total, so pre-existing, not a wave-2 regression). The scenarios only
 pass because the harness claims accept a BLOCKED trace.
 
@@ -46,15 +46,15 @@ Causal chain:
   that workspace operation." and the move/rename/delete siblings), then pin
   the workspace-operation retry frame to extract only the real path targets.
 - Fix in `TaskContractResolver`: a `BARE_PATH_STOP_WORDS` set (articles,
-  conjunctions, and common prepositions — by, to, with, into, using, from,
-  of, in, on, at, for, as, via, or, onto — plus the previously excluded
+  conjunctions, and common prepositions - by, to, with, into, using, from,
+  of, in, on, at, for, as, via, or, onto - plus the previously excluded
   a/an/the/and) consulted by `looksLikeDirectoryTarget` (covers the
   single-directory and batch-directory capture lanes) and by the batch
   copy/move/rename destination capture. Membership is whole-token, so any
   name with a file extension or path separator ("by/2026", "with.d",
   "using.txt") never equals a stop word and still extracts.
 - No change to `MutationIntent` (its directory patterns classify, they do not
-  capture targets) and no change to the retry-frame wording — the contract
+  capture targets) and no change to the retry-frame wording - the contract
   layer must tolerate instructional prose in re-parsed requests regardless.
 
 ## Behavioral delta (intended)
@@ -106,7 +106,7 @@ TaskContractResolver only
 - Characterization run before the fix: the four scenario-prompt pins and the
   separator/extension preservation tests passed; the three regression tests
   (retry frame, bare stop-words after directory verbs, batch stop-word
-  destination) failed with the phantom "by" — reproducing all 12 packet
+  destination) failed with the phantom "by" - reproducing all 12 packet
   traces deterministically.
 - Fix: `BARE_PATH_STOP_WORDS` in `TaskContractResolver`, consulted by
   `looksLikeDirectoryTarget` and the batch destination capture. The same

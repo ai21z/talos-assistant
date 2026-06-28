@@ -12,12 +12,12 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * T804: /compact — the manual trigger over the T798 compactNow
+ * T804: /compact - the manual trigger over the T798 compactNow
  * machinery. The command's LLM-touching path is covered at the core
  * level by ConversationManagerCompactNowTest (the compactor's
  * chatPlain path has no scripted test transport, so command-level LLM
  * tests would silently depend on the machine's real config); here we
- * pin the guards — which never reach the model — and the pure
+ * pin the guards - which never reach the model - and the pure
  * outcome-to-Result mapping.
  */
 class CompactCommandTest {

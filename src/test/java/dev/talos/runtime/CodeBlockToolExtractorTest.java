@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CodeBlockToolExtractorTest {
 
     @Nested
-    @DisplayName("extract — inline filename patterns")
+    @DisplayName("extract - inline filename patterns")
     class InlineFilename {
 
         @Test void cStyleComment_withLang() {
@@ -53,7 +53,7 @@ class CodeBlockToolExtractorTest {
     }
 
     @Nested
-    @DisplayName("extract — preceding filename")
+    @DisplayName("extract - preceding filename")
     class PrecedingFilename {
 
         @Test void backtickFilename_colon() {
@@ -65,7 +65,7 @@ class CodeBlockToolExtractorTest {
     }
 
     @Nested
-    @DisplayName("extract — heading/prose filename")
+    @DisplayName("extract - heading/prose filename")
     class HeadingFilename {
 
         @Test
@@ -129,7 +129,7 @@ class CodeBlockToolExtractorTest {
         void bold_filename_prose() {
             String r = "Save this as **`config.yaml`**:\n\n```yaml\nkey: value\n```\n";
             // Note: the backtick filename `config.yaml` is preceded by **
-            // but our regex looks for ` not ** — let's verify the ** case.
+            // but our regex looks for ` not ** - let's verify the ** case.
             // The pattern matches `config.yaml` inside **`config.yaml`**
             List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
             assertEquals(1, calls.size());
@@ -138,7 +138,7 @@ class CodeBlockToolExtractorTest {
     }
 
     @Nested
-    @DisplayName("extract — no match")
+    @DisplayName("extract - no match")
     class NoMatch {
 
         @Test void plainBlock() {
@@ -159,7 +159,7 @@ class CodeBlockToolExtractorTest {
     }
 
     @Nested
-    @DisplayName("extract — edge cases")
+    @DisplayName("extract - edge cases")
     class EdgeCases {
 
         @Test void deduplicates_samePath() {

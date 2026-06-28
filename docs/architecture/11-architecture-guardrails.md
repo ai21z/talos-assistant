@@ -75,7 +75,7 @@ invariants.
 | `tools_must_not_depend_on_cli` | `tools` ↛ `cli` | **new boundary** (no gen-1 equivalent) |
 | `spi_must_not_depend_on_app` | `spi` ↛ `app` | **new boundary**; completes `spi…upper-layers` |
 
-Notes on the requested candidate list (1–7):
+Notes on the requested candidate list (1-7):
 
 - Candidates 1, 2, 3 → added as gen-2 spine refinements above. They are subsets
   of gen-1 `runtime_and_core_must_not_depend_on_cli`, kept as separate guards for
@@ -120,7 +120,7 @@ In rough priority order. None should be promoted until the underlying edges are
 zero and a deliberate refactor + (optionally) a matching regex-ratchet entry land
 under the standard approved-PR governance for build/quality tooling.
 
-1. `core ↛ tools` — cut the 8 `core→tools` back-edges, then lock. Most tractable.
+1. `core ↛ tools` - cut the 8 `core→tools` back-edges, then lock. Most tractable.
 2. Direction guard within the runtime control spine (e.g. `verification ↛ toolcall`
    or `policy ↛ toolcall`) once the runtime SCC is untangled.
 3. `cli.prompt ↛ cli.modes` (or a defined one-way CLI composition seam).

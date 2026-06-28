@@ -12,7 +12,7 @@ Owner: Claude
 The read-only proposal grounding policy lived inline in
 AssistantTurnExecutor, and its workspace-file detection was a hardcoded
 list that is literally the AGENTS.md audit fixture's filenames (.env,
-config.json, index.html, notes.md, report.docx, script.js, styles.css) —
+config.json, index.html, notes.md, report.docx, script.js, styles.css) -
 teaching-to-the-test: audit answers were checked, real-workspace answers
 (main.py, data.csv, anything not in the fixture) were not. It also
 violated the AGENTS.md policy-ownership doctrine ("AssistantTurnExecutor
@@ -23,20 +23,20 @@ should be an orchestrator, not a warehouse for every policy marker").
 
 - New `runtime.outcome.ReadOnlyProposalGroundingGuard` (joins the
   *AnswerGuard family) owns: GROUNDED_PROPOSAL_WARNING (literal
-  unchanged — pinned by tests), the proposal-turn shape check, the generic
-  command/dependency and internal-content marker sets (kept — they are not
+  unchanged - pinned by tests), the proposal-turn shape check, the generic
+  command/dependency and internal-content marker sets (kept - they are not
   fixture-specific), the conditional-context exemption, the .env-exclusion
   line stripping, and the NEW evidence-derived file detection. ATE's
   `groundedReadOnlyProposalAnswerIfNeeded` is a thin delegation; the
   marker sets and seven helper methods are deleted from ATE. Scope stops
-  there — no broader ATE refactor (Wave 5 dissolves it).
+  there - no broader ATE refactor (Wave 5 dissolves it).
 - File detection: filename-shaped mentions in the answer (word-ish stem +
   alphabetic 2-8 char extension, plus a generic leading-dot config-file
   shape class) are checked against (a) observed tool-result text and
   (b) the paths the tools actually touched (readPaths + outcome path
   hints). The path ledger matters: tool-result text does not echo target
   paths (read output is numbered lines), so the reviewed file's own name
-  must count as evidenced even when its content never mentions it —
+  must count as evidenced even when its content never mentions it -
   without this, every review answer naming its own subject would warn.
 - False-positive bounds: domain-style extensions (com/org/net/io/dev)
   skipped; versions (1.2.3) and abbreviations (e.g.) don't match the
@@ -45,7 +45,7 @@ should be an orchestrator, not a warehouse for every policy marker").
 
 ## Behavioral delta (intended)
 
-Any unevidenced filename claim in a read-only proposal answer now warns —
+Any unevidenced filename claim in a read-only proposal answer now warns -
 previously only the seven fixture names did. Audit compatibility holds:
 every fixture file matches the generic shapes, so the AGENTS.md prompt
 bank's expected warnings still fire (the five pre-existing executor tests

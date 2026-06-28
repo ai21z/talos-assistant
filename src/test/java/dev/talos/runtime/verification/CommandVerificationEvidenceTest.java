@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T792: the command-verification upgrade is additive-only and fail-closed —
+ * T792: the command-verification upgrade is additive-only and fail-closed -
  * only an approved, successful, verification-class run_command ordered
  * AFTER the last successful mutation upgrades READBACK_ONLY to PASSED.
  */

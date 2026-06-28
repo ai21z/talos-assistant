@@ -18,9 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * T783: the README "Tool Use" table is a user-facing claim about the
- * registered tool surface. It drifted once — {@code talos.delete_path} was
+ * registered tool surface. It drifted once - {@code talos.delete_path} was
  * registered and approval-gated but missing from the table through 0.10.4,
- * claims drift on the most dangerous tool — so the table is now pinned
+ * claims drift on the most dangerous tool - so the table is now pinned
  * bidirectionally against {@link CanonicalToolDescriptors} (the same catalog
  * the T761 parity test holds against a bootstrap-equivalent registry).
  */
@@ -64,7 +64,7 @@ class ReadmeToolTableDriftTest {
             rows.put(m.group(1), m.group(2));
         }
         assertFalse(rows.isEmpty(),
-                "README tool table parsed zero rows — has the table format changed?");
+                "README tool table parsed zero rows - has the table format changed?");
         return rows;
     }
 

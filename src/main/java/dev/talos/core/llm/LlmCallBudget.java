@@ -80,7 +80,7 @@ final class LlmCallBudget implements AutoCloseable {
             closeActiveStream(activeStream);
             future.cancel(true);
             String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " exceeded "
-                    + (wallClockMs / 1000) + "s wall-clock budget — model is hung "
+                    + (wallClockMs / 1000) + "s wall-clock budget - model is hung "
                     + "or producing tokens too slowly. Try a smaller model, a shorter prompt, "
                     + "or raise limits.llm_timeout_ms in config.]";
             return new LlmClient.StreamResult(msg, List.of());
@@ -90,14 +90,14 @@ final class LlmCallBudget implements AutoCloseable {
                 closeActiveStream(activeStream);
                 future.cancel(true);
                 String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " produced no tokens for "
-                        + (idle.idleMs / 1000) + "s — model appears wedged. "
+                        + (idle.idleMs / 1000) + "s - model appears wedged. "
                         + "Try a smaller model or raise limits.llm_idle_ms in config.]";
                 return new LlmClient.StreamResult(msg, List.of());
             }
             if (cause instanceof RepetitionException repetition) {
                 closeActiveStream(activeStream);
                 future.cancel(true);
-                String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " entered a repetition loop — "
+                String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " entered a repetition loop - "
                         + "the same " + repetition.substringLen + "-character pattern repeated "
                         + repetition.maxRepeats + "+ times in the streamed output. "
                         + "Try a smaller model, rephrase the prompt, or clear session memory with /clear.]";

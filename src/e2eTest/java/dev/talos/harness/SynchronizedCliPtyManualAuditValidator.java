@@ -303,7 +303,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
             return true;
         }
         // The prompt line and the approvals counter are chrome/trace lines,
-        // never pane-wrapped — they stay raw-only deliberately.
+        // never pane-wrapped - they stay raw-only deliberately.
         return prose.contains("private document model handoff")
                 && lower.contains(ApprovalPromptText.ONCE_PROMPT.toLowerCase(Locale.ROOT) + " y")
                 && lower.contains("approvals: required=1 granted=1 denied=0");
@@ -314,7 +314,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
      * approval-window rail prefix and joins consecutive railed lines with
      * single spaces, so a prose phrase split by width-reactive wrapping
      * still matches. A bare rail (blank pane line) is a paragraph break and
-     * deliberately does NOT join across — only soft wraps are tolerated.
+     * deliberately does NOT join across - only soft wraps are tolerated.
      */
     static String wrapTolerantView(String transcript) {
         StringBuilder out = new StringBuilder();

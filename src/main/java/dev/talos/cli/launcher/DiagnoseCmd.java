@@ -94,13 +94,13 @@ public class DiagnoseCmd implements Runnable {
                         System.out.println("  Status:    OK");
                         System.out.println("  Dimension: " + probe.length);
                     } else {
-                        System.out.println(term("  Status:    WARN — probe returned invalid vector (NaN/zero)", unicodeSafe));
+                        System.out.println(term("  Status:    WARN - probe returned invalid vector (NaN/zero)", unicodeSafe));
                     }
                 } finally {
                     closeEmbeddingProbe(embedClient);
                 }
             } catch (Exception embErr) {
-                System.out.println(term("  Status:    ERROR — " + embErr.getMessage(), unicodeSafe));
+                System.out.println(term("  Status:    ERROR - " + embErr.getMessage(), unicodeSafe));
             }
             System.out.println();
 

@@ -62,12 +62,12 @@ public final class CodeBlockToolExtractor {
      *
      * <p>Matches:
      * <ul>
-     *   <li>{@code ```lang // path/file.ext} — C-style comment after language tag</li>
-     *   <li>{@code ```lang # path/file.ext}  — Shell/Python comment after language tag</li>
-     *   <li>{@code ```// path/file.ext}      — No language tag, C-style comment</li>
-     *   <li>{@code ```# path/file.ext}       — No language tag, shell comment</li>
-     *   <li>{@code ```lang filename: path/file.ext} — "filename:" prefix</li>
-     *   <li>{@code ```lang file: path/file.ext}     — "file:" prefix</li>
+     *   <li>{@code ```lang // path/file.ext} - C-style comment after language tag</li>
+     *   <li>{@code ```lang # path/file.ext}  - Shell/Python comment after language tag</li>
+     *   <li>{@code ```// path/file.ext}      - No language tag, C-style comment</li>
+     *   <li>{@code ```# path/file.ext}       - No language tag, shell comment</li>
+     *   <li>{@code ```lang filename: path/file.ext} - "filename:" prefix</li>
+     *   <li>{@code ```lang file: path/file.ext}     - "file:" prefix</li>
      * </ul>
      *
      * <p>Group 1 = filename (with path), Group 2 = block content.

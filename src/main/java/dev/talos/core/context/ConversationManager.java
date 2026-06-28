@@ -58,7 +58,7 @@ public final class ConversationManager {
     /**
      * Fraction of context window allocated to history in assist/ask mode.
      * Assist mode has no RAG snippets competing for context space, so
-     * history gets a much larger share — critical for multi-turn creative
+     * history gets a much larger share - critical for multi-turn creative
      * tasks where the user iterates on the assistant's prior output.
      */
     static final double ASSIST_HISTORY_BUDGET_FRACTION = 0.55;
@@ -103,7 +103,7 @@ public final class ConversationManager {
      * (assistant-role summary of older context), and the remaining budget
      * is filled with the most recent verbatim turns.
      *
-     * <p>Turns are kept as user/assistant pairs — never split.
+     * <p>Turns are kept as user/assistant pairs - never split.
      *
      * @param availableTokens maximum tokens to spend on history
      * @return list of ChatMessage in chronological order
@@ -240,7 +240,7 @@ public final class ConversationManager {
         CompactionOutcome outcome = compactInternal(compactor, pairThreshold, budgetFraction, false);
         if (outcome.performed()) {
             // One-shot signal for the render-side notice (T798/T805). Set
-            // ONLY by the auto path — /compact reports its own outcome.
+            // ONLY by the auto path - /compact reports its own outcome.
             pendingEvent = new CompactionEvent(
                     outcome.summarizedPairs(),
                     outcome.keptPairs(),
@@ -253,7 +253,7 @@ public final class ConversationManager {
     /**
      * Manual compaction for {@code /compact} (T798): skips the pair-threshold
      * and over-budget gates (explicit user intent) and bypasses an OPEN
-     * failure breaker — the user consented to spend the LLM call — but a
+     * failure breaker - the user consented to spend the LLM call - but a
      * forced failure still increments the breaker counter. The recent tail
      * that fits the mode's history budget stays verbatim, exactly like the
      * auto path.

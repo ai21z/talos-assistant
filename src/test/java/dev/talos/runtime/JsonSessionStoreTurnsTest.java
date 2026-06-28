@@ -291,7 +291,7 @@ class JsonSessionStoreTurnsTest {
     }
 
     /**
-     * Prompt 5 — lenient UTF-8 decoding on load.
+     * Prompt 5 - lenient UTF-8 decoding on load.
      *
      * <p>A partial multi-byte-char write during a crash / power loss can leave
      * the file with an invalid UTF-8 sequence in exactly one line. Previously
@@ -312,7 +312,7 @@ class JsonSessionStoreTurnsTest {
                 "before", "ok", List.of(), 0, 0, 0, ""));
 
         byte[] corrupt = new byte[] {
-                // Three illegal UTF-8 lead bytes — the REPLACE decoder turns
+                // Three illegal UTF-8 lead bytes - the REPLACE decoder turns
                 // them into U+FFFD each, producing a line that is not remotely
                 // valid JSON and Jackson must reject.
                 (byte) 0xFF, (byte) 0xFE, (byte) 0xFD,

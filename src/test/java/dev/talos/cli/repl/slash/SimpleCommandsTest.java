@@ -17,10 +17,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for simple stateless REPL commands: HelpCommand, QuitCommand,
  * DebugCommand, KCommand, AuditToggleCommand, PolicyCommand, ModeCommand.
  *
- * <p>Uses {@code Context.builder(new Config()).build()} for minimal wiring —
+ * <p>Uses {@code Context.builder(new Config()).build()} for minimal wiring -
  * no external services required.
  */
-@DisplayName("REPL commands — simple stateless")
+@DisplayName("REPL commands - simple stateless")
 class SimpleCommandsTest {
 
     private final Context ctx = Context.builder(new Config()).build();

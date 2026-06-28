@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * Builds trace events for pre-approval markdown-commentary sanitization of
  * write/edit content parameters (T755). Stores summaries only (hash, bytes,
- * lines, stripped char count) — never the raw content.
+ * lines, stripped char count) - never the raw content.
  */
 final class ContentSanitizationTraceEventFactory {
     private ContentSanitizationTraceEventFactory() {}

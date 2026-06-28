@@ -36,7 +36,7 @@ class ToolContextTest {
 
     @Test
     void resolveDoesNotCheckSandbox() {
-        // resolve() should NOT enforce sandbox — caller must check separately
+        // resolve() should NOT enforce sandbox - caller must check separately
         Sandbox sandbox = new Sandbox(workspace, Map.of());
         ToolContext ctx = new ToolContext(workspace, sandbox, new Config());
 

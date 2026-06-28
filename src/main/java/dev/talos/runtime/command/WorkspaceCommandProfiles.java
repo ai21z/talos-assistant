@@ -6,7 +6,7 @@ import java.util.Objects;
 /**
  * The parsed workspace verification-profile declaration
  * ({@code <workspace>/.talos/profiles.yaml}). Either a list of valid
- * {@code ws:}-prefixed profiles, or one human-readable rejection reason —
+ * {@code ws:}-prefixed profiles, or one human-readable rejection reason -
  * never a partial mix: one bad profile poisons the whole file, which is
  * simpler to reason about than partial trust.
  */
@@ -29,7 +29,7 @@ public record WorkspaceCommandProfiles(
         return new WorkspaceCommandProfiles(false, List.of(), "");
     }
 
-    /** A declaration exists but failed validation — zero profiles register. */
+    /** A declaration exists but failed validation - zero profiles register. */
     public static WorkspaceCommandProfiles invalid(String reason) {
         return new WorkspaceCommandProfiles(true, List.of(),
                 reason == null || reason.isBlank() ? "invalid declaration" : reason);

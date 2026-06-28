@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T789: the workspace profile declaration validates fail-closed — one bad
+ * T789: the workspace profile declaration validates fail-closed - one bad
  * profile rejects the whole file with one human-readable reason, unknown
  * keys are rejected (typos cannot silently default), and nothing the
  * declaration says can weaken the non-declarable gates.

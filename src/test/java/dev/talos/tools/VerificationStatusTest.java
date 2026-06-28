@@ -68,7 +68,7 @@ class VerificationStatusTest {
     class ToolResultIntegration {
 
         @Test
-        @DisplayName("ok without verification — verification is null and acceptable")
+        @DisplayName("ok without verification - verification is null and acceptable")
         void ok_without_verification() {
             ToolResult r = ToolResult.ok("done");
             assertNull(r.verification());
@@ -76,7 +76,7 @@ class VerificationStatusTest {
         }
 
         @Test
-        @DisplayName("ok with PASS verification — acceptable")
+        @DisplayName("ok with PASS verification - acceptable")
         void ok_with_pass() {
             ToolResult r = ToolResult.ok("done", VerificationStatus.PASS);
             assertEquals(VerificationStatus.PASS, r.verification());
@@ -84,7 +84,7 @@ class VerificationStatusTest {
         }
 
         @Test
-        @DisplayName("ok with UNKNOWN verification — acceptable")
+        @DisplayName("ok with UNKNOWN verification - acceptable")
         void ok_with_unknown() {
             ToolResult r = ToolResult.ok("done", VerificationStatus.UNKNOWN);
             assertEquals(VerificationStatus.UNKNOWN, r.verification());
@@ -92,7 +92,7 @@ class VerificationStatusTest {
         }
 
         @Test
-        @DisplayName("ok with WARN verification — not acceptable")
+        @DisplayName("ok with WARN verification - not acceptable")
         void ok_with_warn() {
             ToolResult r = ToolResult.ok("wrote file. Warning: unclosed div", VerificationStatus.WARN);
             assertEquals(VerificationStatus.WARN, r.verification());
@@ -100,7 +100,7 @@ class VerificationStatusTest {
         }
 
         @Test
-        @DisplayName("ok with FAIL verification — not acceptable")
+        @DisplayName("ok with FAIL verification - not acceptable")
         void ok_with_fail() {
             ToolResult r = ToolResult.ok("wrote file. Warning: JSON parse failed", VerificationStatus.FAIL);
             assertEquals(VerificationStatus.FAIL, r.verification());
@@ -108,7 +108,7 @@ class VerificationStatusTest {
         }
 
         @Test
-        @DisplayName("fail result — verification is null")
+        @DisplayName("fail result - verification is null")
         void fail_has_no_verification() {
             ToolResult r = ToolResult.fail("something broke");
             assertNull(r.verification());

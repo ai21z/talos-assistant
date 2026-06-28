@@ -41,7 +41,7 @@ public class Chunker {
 
         for (String b : blocks) {
             // If adding this block exceeds budget, emit current buffer (with overlap)
-            // BEFORE updating heading context — the buffered content was accumulated
+            // BEFORE updating heading context - the buffered content was accumulated
             // under the previous heading, not the heading from block b.
             if (!buf.isEmpty() && buf.length() + b.length() > chunkChars) {
                 emit(relPath, fileHash, cid++, buf.toString(), language, lastHeading,
@@ -55,7 +55,7 @@ public class Chunker {
                 buf.append(tail);
             }
 
-            // Update heading context from the new block — takes effect for
+            // Update heading context from the new block - takes effect for
             // subsequent emits (including the while-loop below and future iterations).
             Matcher hm = MD_HEAD.matcher(b);
             if (hm.find()) {

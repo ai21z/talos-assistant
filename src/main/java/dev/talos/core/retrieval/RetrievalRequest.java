@@ -9,9 +9,9 @@ import java.util.Objects;
 public final class RetrievalRequest {
 
     private final String query;
-    private final float[] queryVector; // nullable — absent when vectors are disabled
+    private final float[] queryVector; // nullable - absent when vectors are disabled
     private final int topK;
-    private final String embeddingFailureReason; // nullable — set when embedding failed
+    private final String embeddingFailureReason; // nullable - set when embedding failed
 
     public RetrievalRequest(String query, float[] queryVector, int topK) {
         this(query, queryVector, topK, null);

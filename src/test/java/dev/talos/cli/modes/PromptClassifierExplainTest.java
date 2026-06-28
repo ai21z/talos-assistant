@@ -12,7 +12,7 @@ import static dev.talos.cli.modes.PromptClassifier.Route.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link PromptClassifier#explainRoute} — verifies that routing
+ * Tests for {@link PromptClassifier#explainRoute} - verifies that routing
  * decisions produce correct trigger labels and evaluation step traces.
  *
  * <p>These tests complement {@link PromptClassifierTest} (which only checks
@@ -182,7 +182,7 @@ class PromptClassifierExplainTest {
     void default_assist_trigger() {
         var r = PromptClassifier.explainRoute("hey", null, null);
         assertEquals(ASSIST, r.route());
-        assertEquals("default — no retrieval evidence", r.trigger());
+        assertEquals("default - no retrieval evidence", r.trigger());
     }
 
     @Test
@@ -211,7 +211,7 @@ class PromptClassifierExplainTest {
         assertTrue(steps.size() >= 7, "Should traverse all layers, got: " + steps);
         assertEquals("no dev command match", steps.get(0));
         assertEquals("no show-me-file match", steps.get(1));
-        assertEquals("not action-like — continuing", steps.get(2));
+        assertEquals("not action-like - continuing", steps.get(2));
         assertEquals("no workspace framing", steps.get(3));
         assertEquals("no file reference", steps.get(4));
         // isQ check
@@ -242,14 +242,14 @@ class PromptClassifierExplainTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Realistic user scenarios — end-to-end trace verification
+    //  Realistic user scenarios - end-to-end trace verification
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
     void scenario_hey() {
         var r = PromptClassifier.explainRoute("hey", null, null);
         assertEquals(ASSIST, r.route());
-        assertEquals("default — no retrieval evidence", r.trigger());
+        assertEquals("default - no retrieval evidence", r.trigger());
         assertFalse(r.steps().isEmpty());
     }
 
@@ -271,7 +271,7 @@ class PromptClassifierExplainTest {
     void scenario_bare_powerpoint_with_checker() {
         var r = PromptClassifier.explainRoute("PowerPoint", null, WORKSPACE_CHECKER);
         assertEquals(ASSIST, r.route());
-        assertEquals("default — no retrieval evidence", r.trigger());
+        assertEquals("default - no retrieval evidence", r.trigger());
     }
 
     @Test
@@ -292,7 +292,7 @@ class PromptClassifierExplainTest {
     void scenario_thanks_after_retrieve_breaks_to_assist() {
         var r = PromptClassifier.explainRoute("thanks", RETRIEVE, null);
         assertEquals(ASSIST, r.route());
-        assertEquals("default — no retrieval evidence", r.trigger());
+        assertEquals("default - no retrieval evidence", r.trigger());
     }
 
     // ═══════════════════════════════════════════════════════════════════════

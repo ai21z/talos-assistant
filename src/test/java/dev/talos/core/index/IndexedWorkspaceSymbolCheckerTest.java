@@ -53,7 +53,7 @@ class IndexedWorkspaceSymbolCheckerTest {
 
         var checker = new IndexedWorkspaceSymbolChecker(tempDir, true);
 
-        // PascalCase, lowercase, UPPERCASE — all should match
+        // PascalCase, lowercase, UPPERCASE - all should match
         assertTrue(checker.existsInWorkspace("RagService"));
         assertTrue(checker.existsInWorkspace("ragservice"));
         assertTrue(checker.existsInWorkspace("RAGSERVICE"));
@@ -191,7 +191,7 @@ class IndexedWorkspaceSymbolCheckerTest {
         assertFalse(checker.existsInWorkspace("NewService"),
                 "NewService should not exist before reindex");
 
-        // Phase 2: reindex — add NewService
+        // Phase 2: reindex - add NewService
         try (var store = new LuceneStore(tempDir, 0)) {
             store.add("src/RagService.java#0", "class RagService {}", new float[0]);
             store.add("src/NewService.java#0", "class NewService {}", new float[0]);
@@ -277,7 +277,7 @@ class IndexedWorkspaceSymbolCheckerTest {
 
     @Test
     void invalidateCache_is_safe_on_empty_cache() {
-        // No lookups done — cache is empty
+        // No lookups done - cache is empty
         var checker = new IndexedWorkspaceSymbolChecker(tempDir, true);
         assertDoesNotThrow(checker::invalidateCache,
                 "Invalidating an empty cache should not throw");

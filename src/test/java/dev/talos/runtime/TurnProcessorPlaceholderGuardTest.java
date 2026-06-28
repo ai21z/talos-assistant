@@ -166,7 +166,7 @@ class TurnProcessorPlaceholderGuardTest {
 
     @Test
     void legitimateSmallWriteStillReachesApproval() {
-        // Proof that the guard doesn't false-positive — a tiny but real
+        // Proof that the guard doesn't false-positive - a tiny but real
         // HTML stub must pass through the guard and hit the gate.
         AtomicInteger gateCalls = new AtomicInteger(0);
         ApprovalGate approving = (d, x) -> { gateCalls.incrementAndGet(); return true; };

@@ -290,7 +290,7 @@ class CliApprovalGateTest {
         void sessionPromptBytesAreTheEvidenceChainContract() {
             // T765 characterization: this exact string is matched by the PTY
             // manual-audit validator, the talosbench forbidden-substring bank,
-            // and the scripted harness. It is byte-frozen — any change must go
+            // and the scripted harness. It is byte-frozen - any change must go
             // through ApprovalPromptText and the e2e contract test.
             var capturedPrompt = new String[1];
             var gate = new CliApprovalGate(prompt -> {

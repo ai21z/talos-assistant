@@ -9,7 +9,7 @@ import dev.talos.tools.ToolFailureReason;
  * truthfulness logic.
  *
  * <p>T758: every shape switches on the typed {@link ToolFailureReason}
- * carried by the outcome — never on error-message prose, which is free to
+ * carried by the outcome - never on error-message prose, which is free to
  * change without affecting repair or outcome classification.
  */
 public final class ToolOutcomeFailureShape {

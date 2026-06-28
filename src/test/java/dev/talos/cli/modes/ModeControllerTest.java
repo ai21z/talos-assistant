@@ -429,7 +429,7 @@ class ModeControllerTest {
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
         var mc = stubController(dev, rag, ask);
-        // No checker set — original behavior
+        // No checker set - original behavior
         var ctx = Context.builder(new Config()).build();
 
         mc.route("RagService", WS, ctx);
@@ -491,7 +491,7 @@ class ModeControllerTest {
     @Test
     void invalidateSymbolCache_is_safe_without_checker() {
         var mc = new ModeController();
-        // No checker set — should be a safe no-op
+        // No checker set - should be a safe no-op
         assertDoesNotThrow(mc::invalidateSymbolCache);
     }
 

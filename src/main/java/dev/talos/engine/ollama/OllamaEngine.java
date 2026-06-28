@@ -140,7 +140,7 @@ final class OllamaEngine implements ModelEngine {
      * <p>Rationale: Ollama's {@code /api/chat} endpoint takes a single
      * {@code system} string. When callers layer multiple system messages
      * (main prompt + a transient task anchor from
-     * {@link dev.talos.runtime.ToolCallLoop}), we must concatenate — the
+     * {@link dev.talos.runtime.ToolCallLoop}), we must concatenate - the
      * previous "last one wins" behavior silently dropped the main system
      * prompt on tool-loop re-prompts, causing the model to continue without
      * tool rules or behavior rules.

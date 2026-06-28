@@ -74,12 +74,12 @@ public final class ExecutionPipeline {
     /**
      * Maps an exception to an appropriate error code:
      * <ul>
-     *   <li>404 — model not found</li>
-     *   <li>408 — timeout</li>
-     *   <li>502 — malformed backend response</li>
-     *   <li>503 — connection failed or transient backend error</li>
-     *   <li>400 — illegal argument / validation</li>
-     *   <li>500 — everything else (unexpected)</li>
+     *   <li>404 - model not found</li>
+     *   <li>408 - timeout</li>
+     *   <li>502 - malformed backend response</li>
+     *   <li>503 - connection failed or transient backend error</li>
+     *   <li>400 - illegal argument / validation</li>
+     *   <li>500 - everything else (unexpected)</li>
      * </ul>
      */
     static int classifyError(Throwable ex) {

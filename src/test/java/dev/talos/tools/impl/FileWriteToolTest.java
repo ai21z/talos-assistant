@@ -56,7 +56,7 @@ class FileWriteToolTest {
     @Test
     void contentIsWrittenVerbatimWithoutSanitization() throws IOException {
         // T755: sanitization happens once, pre-approval, in the runtime's call
-        // normalization. The tool must write exactly the bytes it receives —
+        // normalization. The tool must write exactly the bytes it receives -
         // re-sanitizing here would break approved-bytes == written-bytes.
         String contentWithCommentary =
                 "body { color: red; }\n```\n## Summary\n- Adjusted the body color\n";

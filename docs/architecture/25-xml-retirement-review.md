@@ -3,7 +3,7 @@
 **Branch:** `v0.9.0-beta-dev`  
 **Date:** 2026-04-13  
 **Reviewer:** Architecture review session  
-**Scope:** Tool-calling format layer — current state, burden, feasibility, target, plan
+**Scope:** Tool-calling format layer - current state, burden, feasibility, target, plan
 
 ---
 
@@ -15,19 +15,19 @@ All claims below are verified against the actual code in `v0.9.0-beta-dev`.
 
 | Location | File | What it does |
 |----------|------|-------------|
-| **System prompt instruction** | `tools-preamble.txt` (49 lines) | Lines 4–6, 42: "You MUST use `<tool_call>` and `</tool_call>` tags. Do not use \`\`\`json blocks or bare JSON." |
-| **Inline fallback prompt** | `SystemPromptBuilder.java` lines 251–285 (`DEFAULT_TOOLS_PREAMBLE`) | Same XML instructions, used when resource files are absent |
-| **Native→XML bridge** | `OllamaEngine.java` lines 290–336 (`convertNativeToolCallsToXml`) | Converts Ollama's structured `tool_calls` JSON back into `<tool_call>\n{JSON}\n</tool_call>` text |
-| **Streaming bridge** | `OllamaEngine.java` lines 448–464 (`chatStreamViaMessages` lambda) | Detects `"tool_calls"` in stream chunk, calls `convertNativeToolCallsToXml()`, emits as text `TokenChunk` |
-| **Non-streaming bridge** | `OllamaEngine.java` lines 247–269 (`extractChatContentOrToolCalls`) | Same conversion for non-streaming `/api/chat` response |
-| **Parser pass 1 (priority)** | `ToolCallParser.java` lines 33–36 (`VARIANT_TAG_PATTERN`) | `<(tool_call\|function_call\|tool\|function)>…</\1>` — first extraction pass |
-| **Parser strip** | `ToolCallParser.java` lines 51–54 (`STRIP_PATTERN`) | Removes XML-tagged blocks for final prose |
+| **System prompt instruction** | `tools-preamble.txt` (49 lines) | Lines 4-6, 42: "You MUST use `<tool_call>` and `</tool_call>` tags. Do not use \`\`\`json blocks or bare JSON." |
+| **Inline fallback prompt** | `SystemPromptBuilder.java` lines 251-285 (`DEFAULT_TOOLS_PREAMBLE`) | Same XML instructions, used when resource files are absent |
+| **Native→XML bridge** | `OllamaEngine.java` lines 290-336 (`convertNativeToolCallsToXml`) | Converts Ollama's structured `tool_calls` JSON back into `<tool_call>\n{JSON}\n</tool_call>` text |
+| **Streaming bridge** | `OllamaEngine.java` lines 448-464 (`chatStreamViaMessages` lambda) | Detects `"tool_calls"` in stream chunk, calls `convertNativeToolCallsToXml()`, emits as text `TokenChunk` |
+| **Non-streaming bridge** | `OllamaEngine.java` lines 247-269 (`extractChatContentOrToolCalls`) | Same conversion for non-streaming `/api/chat` response |
+| **Parser pass 1 (priority)** | `ToolCallParser.java` lines 33-36 (`VARIANT_TAG_PATTERN`) | `<(tool_call\|function_call\|tool\|function)>…</\1>` - first extraction pass |
+| **Parser strip** | `ToolCallParser.java` lines 51-54 (`STRIP_PATTERN`) | Removes XML-tagged blocks for final prose |
 | **Stream filter** | `ToolCallStreamFilter.java` (185 lines, entire file) | Suppresses `<tool_call>`, `<function_call>`, `<tool>`, `<function>` tags from terminal display |
-| **Sanitize workaround** | `Sanitize.java` lines 24–26 (`TOOL_CALL_BLOCK` pattern) | Protects `<tool_call>` blocks from SUS_HTML stripping |
-| **Sanitize workaround** | `Sanitize.java` lines 84–88 (`sanitizeForOutputPreservingToolCalls`) | Applies SUS_HTML only outside tool_call blocks |
-| **Sanitize workaround** | `Sanitize.java` lines 136–158 (`stripSuspiciousHtmlOutsideToolCalls`) | Walk-and-protect algorithm for interleaved prose+blocks |
-| **Belt-and-suspenders** | `ToolCallLoop.java` lines 250–251 | `Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentAnswer))` |
-| **Tool-call detection** | `AssistantTurnExecutor.java` line 43 | `ToolCallParser.containsToolCalls(answer)` — XML pattern check |
+| **Sanitize workaround** | `Sanitize.java` lines 24-26 (`TOOL_CALL_BLOCK` pattern) | Protects `<tool_call>` blocks from SUS_HTML stripping |
+| **Sanitize workaround** | `Sanitize.java` lines 84-88 (`sanitizeForOutputPreservingToolCalls`) | Applies SUS_HTML only outside tool_call blocks |
+| **Sanitize workaround** | `Sanitize.java` lines 136-158 (`stripSuspiciousHtmlOutsideToolCalls`) | Walk-and-protect algorithm for interleaved prose+blocks |
+| **Belt-and-suspenders** | `ToolCallLoop.java` lines 250-251 | `Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentAnswer))` |
+| **Tool-call detection** | `AssistantTurnExecutor.java` line 43 | `ToolCallParser.containsToolCalls(answer)` - XML pattern check |
 | **Tool-call detection** | `ToolCallLoop.java` line 135, 156 | `ToolCallParser.containsToolCalls(initialAnswer)` / `ToolCallParser.containsToolCalls(currentAnswer)` |
 | **Test fixtures** | `OllamaToolCallBridgeTest.java` (382 lines) | 10 tests for `convertNativeToolCallsToXml`, all assert `<tool_call>` in output |
 
@@ -35,10 +35,10 @@ All claims below are verified against the actual code in `v0.9.0-beta-dev`.
 
 | Location | File | What it does |
 |----------|------|-------------|
-| **Parser pass 2** | `ToolCallParser.java` lines 39–42 (`CODE_FENCE_PATTERN`) | Accepts ` ```json\n{…"name"…}\n``` ` code-fenced blocks |
-| **Parser pass 3** | `ToolCallParser.java` lines 45–48 (`BARE_JSON_PATTERN`) | Accepts bare `{"name":"talos.…"}` at line boundaries (only if no XML/fenced found) |
-| **Parser internals** | `ToolCallParser.java` lines 137–193 (`parseJson`, `unwrapIfNeeded`, `extractName`, `extractParams`) | Accepts key aliases: `name`/`function`/`tool_name`/`tool`, `parameters`/`arguments`/`args`/`params` |
-| **Ollama native → JSON** | `OllamaEngine.java` lines 484–513 (`convertToolSpecs`) | Sends `ToolSpec` as native JSON tool definitions to Ollama |
+| **Parser pass 2** | `ToolCallParser.java` lines 39-42 (`CODE_FENCE_PATTERN`) | Accepts ` ```json\n{…"name"…}\n``` ` code-fenced blocks |
+| **Parser pass 3** | `ToolCallParser.java` lines 45-48 (`BARE_JSON_PATTERN`) | Accepts bare `{"name":"talos.…"}` at line boundaries (only if no XML/fenced found) |
+| **Parser internals** | `ToolCallParser.java` lines 137-193 (`parseJson`, `unwrapIfNeeded`, `extractName`, `extractParams`) | Accepts key aliases: `name`/`function`/`tool_name`/`tool`, `parameters`/`arguments`/`args`/`params` |
+| **Ollama native → JSON** | `OllamaEngine.java` lines 484-513 (`convertToolSpecs`) | Sends `ToolSpec` as native JSON tool definitions to Ollama |
 | **Tool call JSON inside XML** | The JSON payload *inside* `<tool_call>…</tool_call>` is already JSON | The XML tags are just wrappers; the actual data format has always been JSON |
 
 ### 1.3 Where Native Tool Calling Is Already Active
@@ -46,16 +46,16 @@ All claims below are verified against the actual code in `v0.9.0-beta-dev`.
 | Location | File | What it does |
 |----------|------|-------------|
 | **Config default** | `default-config.yaml` line 110 | `tools.native_calling: true` |
-| **Config read** | `OllamaEngineProvider.java` line 40–43 | `nativeToolCallingFrom(cfg)` reads `tools.native_calling`, defaults `true` |
-| **Engine construction** | `OllamaEngineProvider.java` line 49–50 | `new OllamaEngine(host, model, nativeTools)` |
-| **Request building** | `OllamaEngine.java` lines 211–216, 420–425 | When `nativeToolCalling=true`, sends `"tools"` field in `/api/chat` request body |
-| **Response parsing** | `OllamaEngine.java` lines 253–258 | Detects `tool_calls` array in non-streaming response |
-| **Stream parsing** | `OllamaEngine.java` lines 450–464 | Detects `"tool_calls"` in streaming chunk |
-| **Message serialization** | `OllamaEngine.java` lines 527–551 (`serializeChatMessage`) | Serializes `ChatMessage.NativeToolCall` as Ollama-format `tool_calls` array |
-| **SPI types** | `ChatMessage.java` lines 18–72 | `NativeToolCall` record, `assistantWithToolCalls()`, `toolResult()`, `hasNativeToolCalls()` |
+| **Config read** | `OllamaEngineProvider.java` line 40-43 | `nativeToolCallingFrom(cfg)` reads `tools.native_calling`, defaults `true` |
+| **Engine construction** | `OllamaEngineProvider.java` line 49-50 | `new OllamaEngine(host, model, nativeTools)` |
+| **Request building** | `OllamaEngine.java` lines 211-216, 420-425 | When `nativeToolCalling=true`, sends `"tools"` field in `/api/chat` request body |
+| **Response parsing** | `OllamaEngine.java` lines 253-258 | Detects `tool_calls` array in non-streaming response |
+| **Stream parsing** | `OllamaEngine.java` lines 450-464 | Detects `"tool_calls"` in streaming chunk |
+| **Message serialization** | `OllamaEngine.java` lines 527-551 (`serializeChatMessage`) | Serializes `ChatMessage.NativeToolCall` as Ollama-format `tool_calls` array |
+| **SPI types** | `ChatMessage.java` lines 18-72 | `NativeToolCall` record, `assistantWithToolCalls()`, `toolResult()`, `hasNativeToolCalls()` |
 | **SPI request** | `ChatRequest.java` line 27 | `List<ToolSpec> tools` field |
 | **SPI type** | `ToolSpec.java` (23 lines) | `name`, `description`, `parametersSchemaJson` |
-| **LlmClient wiring** | `LlmClient.java` lines 41, 126–128 | `toolSpecs` field, `setToolSpecs()` populates it |
+| **LlmClient wiring** | `LlmClient.java` lines 41, 126-128 | `toolSpecs` field, `setToolSpecs()` populates it |
 | **LlmClient request** | `LlmClient.java` line 302, 368 | Passes `toolSpecs` to `ChatRequest` constructor |
 
 ### 1.4 Current Real Data Flow (verified end-to-end)
@@ -149,8 +149,8 @@ This is genuinely format-agnostic. Every tool implementation, the approval gate,
 | Type / Method | Status | What's missing |
 |---------------|--------|---------------|
 | `ChatMessage.NativeToolCall(id, name, arguments)` | **DEFINED, TESTED, UNUSED IN LOOP** | `ToolCallLoop` never creates these; uses `ChatMessage.assistant(rawText)` instead |
-| `ChatMessage.assistantWithToolCalls(content, toolCalls)` | **DEFINED, TESTED, UNUSED IN LOOP** | `ToolCallLoop` line 169: `messages.add(ChatMessage.assistant(currentAnswer))` — raw XML text |
-| `ChatMessage.toolResult(toolCallId, resultContent)` | **DEFINED, TESTED, UNUSED IN LOOP** | `ToolCallLoop` line 191: `messages.add(ChatMessage.user(resultText))` — role="user" not role="tool" |
+| `ChatMessage.assistantWithToolCalls(content, toolCalls)` | **DEFINED, TESTED, UNUSED IN LOOP** | `ToolCallLoop` line 169: `messages.add(ChatMessage.assistant(currentAnswer))` - raw XML text |
+| `ChatMessage.toolResult(toolCallId, resultContent)` | **DEFINED, TESTED, UNUSED IN LOOP** | `ToolCallLoop` line 191: `messages.add(ChatMessage.user(resultText))` - role="user" not role="tool" |
 | `ChatMessage.toolCallId()` field | **DEFINED, TESTED, NOT SERIALIZED** | `OllamaEngine.serializeChatMessage()` line 547-548: comment says "Include tool_call_id" but **no code follows** |
 | `OllamaEngine.serializeChatMessage()` tool_calls support | **IMPLEMENTED, BUT NEVER TRIGGERED** | Because `ToolCallLoop` never creates `assistantWithToolCalls` messages |
 | `Capabilities.nativeTools` field | **DOES NOT EXIST** | `Capabilities` only has `chat`, `stream`, `embed`, `contextWindow`. No way to query if engine supports native tools at the SPI level. |
@@ -161,11 +161,11 @@ This is genuinely format-agnostic. Every tool implementation, the approval gate,
 
 ### Statement 1: "Talos currently has native-capable transport in OllamaEngine"
 
-**CONFIRMED — but with important nuance.**
+**CONFIRMED - but with important nuance.**
 
 `OllamaEngine` sends native `tools` field and detects native `tool_calls` in responses. However, it immediately destroys the structured data by converting to XML text via `convertNativeToolCallsToXml()`. The transport is native-capable at the wire level but not at the pipeline level. The native data never reaches `ToolCallLoop` in structured form.
 
-**Evidence:** `OllamaEngine.java` line 457: `String xmlToolCalls = convertNativeToolCallsToXml(textContent, toolCallsNode);` followed by `return TokenChunk.of(xmlToolCalls);` — the structured `JsonNode toolCallsNode` is discarded.
+**Evidence:** `OllamaEngine.java` line 457: `String xmlToolCalls = convertNativeToolCallsToXml(textContent, toolCallsNode);` followed by `return TokenChunk.of(xmlToolCalls);` - the structured `JsonNode toolCallsNode` is discarded.
 
 ### Statement 2: "XML-centered prompting and orchestration"
 
@@ -183,7 +183,7 @@ The orchestration (detection, parsing, stripping, filtering) is all XML-first. `
 
 ### Statement 4: "Partially wired native message replay via ChatMessage.NativeToolCall"
 
-**CONFIRMED — more partial than implied.**
+**CONFIRMED - more partial than implied.**
 
 The types exist and are tested (`OllamaEngineNativeToolsTest`). `serializeChatMessage()` handles `hasNativeToolCalls()`. But:
 - `ToolCallLoop` never creates `assistantWithToolCalls` messages (line 169: uses raw text)
@@ -197,7 +197,7 @@ The types exist and are tested (`OllamaEngineNativeToolsTest`). `serializeChatMe
 
 `TokenChunk.java` (8 lines): `record TokenChunk(String text, Boolean done)`. No field for tool calls, no variant type, no metadata. This forces `OllamaEngine` to serialize native tool calls into text at the stream level.
 
-`ModelEngine.chatStream()` returns `Stream<TokenChunk>` — the SPI contract has no mechanism to return structured tool calls from the stream.
+`ModelEngine.chatStream()` returns `Stream<TokenChunk>` - the SPI contract has no mechanism to return structured tool calls from the stream.
 
 ### Statement 6: "XML-specific stream filtering and XML-aware sanitization"
 
@@ -228,14 +228,14 @@ The types exist and are tested (`OllamaEngineNativeToolsTest`). `serializeChatMe
 
 ### Statement 12: "Native message replay is incomplete because tool_call_id serialization may be missing"
 
-**CONFIRMED — and worse than "may be missing".**
+**CONFIRMED - and worse than "may be missing".**
 
 `OllamaEngine.serializeChatMessage()` lines 547-549:
 ```java
 // Include tool_call_id for tool-result messages
 // (Ollama doesn't actually require this yet, but it's correct protocol)
 ```
-**No code follows.** The `toolCallId` is never added to the serialized message map. This is dead code by omission — the comment promises functionality that doesn't exist.
+**No code follows.** The `toolCallId` is never added to the serialized message map. This is dead code by omission - the comment promises functionality that doesn't exist.
 
 Additionally, `ToolCallLoop` never creates `toolResult()` messages (uses `ChatMessage.user()` instead), so even if serialization worked, it would never be triggered.
 
@@ -327,7 +327,7 @@ returns to zero.
 
 ### Is that feasible now?
 
-**Yes.** The native infrastructure is 70–80% built:
+**Yes.** The native infrastructure is 70-80% built:
 - `ChatMessage.NativeToolCall` exists
 - `OllamaEngine` already sends/receives native
 - `ToolCall` is already format-agnostic
@@ -360,13 +360,13 @@ If XML is retired from prompts, models using text fallback would emit JSON block
 - Models that ignore the native `tools` field
 - Future non-Ollama backends that don't support native tool calling
 
-**The qualification:** XML should not be aggressively deleted from the parser. `ToolCallParser` should keep its XML recognition as a read-only fallback — it's 20 lines of regex and costs nothing at runtime. What should be retired is: XML in *prompts*, XML as the *bridge format*, XML-specific *stream filtering*, and XML-aware *sanitization workarounds*.
+**The qualification:** XML should not be aggressively deleted from the parser. `ToolCallParser` should keep its XML recognition as a read-only fallback - it's 20 lines of regex and costs nothing at runtime. What should be retired is: XML in *prompts*, XML as the *bridge format*, XML-specific *stream filtering*, and XML-aware *sanitization workarounds*.
 
 ### Is JSON text fallback enough, or must the native streaming/message path be completed first?
 
 **The native streaming/message path must be completed first.**
 
-JSON text fallback handles the degenerate case (model doesn't support native). But the *primary* path — which is 90%+ of real usage with modern Ollama models — currently goes through the native→XML→parse roundtrip. If we only add JSON fallback without completing the native path, we've added a new format without removing the old burden. The payoff comes from the native path being first-class.
+JSON text fallback handles the degenerate case (model doesn't support native). But the *primary* path - which is 90%+ of real usage with modern Ollama models - currently goes through the native→XML→parse roundtrip. If we only add JSON fallback without completing the native path, we've added a new format without removing the old burden. The payoff comes from the native path being first-class.
 
 ### Risk Assessment
 
@@ -374,7 +374,7 @@ JSON text fallback handles the degenerate case (model doesn't support native). B
 |------|--------|--------|
 | **Implementation risk** | **LOW-MEDIUM** | Infrastructure is mostly built. Main work is wiring, not invention. The SPI change (`TokenChunk` extension) is the only tricky part. |
 | **Regression risk** | **MEDIUM** | Tool calling is the most safety-critical path. Every change must be tested against: correct parsing, approval gate, sandbox, no-op rejection, progress UX, compaction. |
-| **Test burden** | **MEDIUM** | `OllamaToolCallBridgeTest` (382 lines) tests the XML bridge — many tests need updating or replacement. `SanitizeToolCallPreservationTest` tests the workaround — some tests become simpler, some become unnecessary. New tests needed for native path in `ToolCallLoop`. |
+| **Test burden** | **MEDIUM** | `OllamaToolCallBridgeTest` (382 lines) tests the XML bridge - many tests need updating or replacement. `SanitizeToolCallPreservationTest` tests the workaround - some tests become simpler, some become unnecessary. New tests needed for native path in `ToolCallLoop`. |
 | **Model-behavior risk** | **LOW** | Modern Ollama models already prefer native tool calling. Removing XML prompt instructions may actually *improve* reliability by eliminating conflicting instructions. |
 | **UX risk** | **LOW** | No user-visible change except potentially better tool-calling reliability. Stream filtering change is invisible. |
 | **Maintenance payoff** | **HIGH** | Eliminates: ~50 lines of sanitize workaround, 185-line stream filter simplification, ~60 lines of XML bridge in OllamaEngine, ~300 tokens/turn in prompt, the entire SUS_HTML bug category. |
@@ -409,9 +409,9 @@ JSON text fallback handles the degenerate case (model doesn't support native). B
     │  collects tool-call TokenChunks → List<NativeToolCall>
     │  returns StreamResult { String text, List<NativeToolCall> toolCalls }  ← NEW
     │  (text sanitization: sanitizeForOutput, NOT sanitizeForOutputPreservingToolCalls)
-    │  (tool calls are structured, not in text — no workaround needed)
+    │  (tool calls are structured, not in text - no workaround needed)
 
-[4] ToolCallLoop.run() — NEW signature
+[4] ToolCallLoop.run() - NEW signature
     │  receives StreamResult (or both text + toolCalls)
     │  IF toolCalls non-empty:
     │    → convert NativeToolCall → ToolCall (trivial map)
@@ -424,7 +424,7 @@ JSON text fallback handles the degenerate case (model doesn't support native). B
     │    → same execution path, but messages.add(ChatMessage.assistant(text))
     │    → messages.add(ChatMessage.user(resultText))  [legacy format]
 
-[5] OllamaEngine.serializeChatMessage() — FIXED
+[5] OllamaEngine.serializeChatMessage() - FIXED
     │  assistant with tool_calls → includes "tool_calls" array (already works)
     │  tool result → role="tool", content=result, tool_call_id=id  ← FIX the missing code
 ```
@@ -456,13 +456,13 @@ For models that don't support native tool calling:
 [4] Sanitization
     │  sanitizeForOutput() is sufficient
     │  sanitizeForOutputPreservingToolCalls() → deprecated, then removed
-    │  (JSON tool calls in code fences don't contain raw HTML — they use
+    │  (JSON tool calls in code fences don't contain raw HTML - they use
     │   escaped strings, and the fence itself isn't matched by SUS_HTML)
 ```
 
 ### 4.3 Internal Canonical Representation
 
-**`ToolCall` remains the canonical execution abstraction.** Confirmed — no change needed.
+**`ToolCall` remains the canonical execution abstraction.** Confirmed - no change needed.
 
 `record ToolCall(String toolName, Map<String, String> parameters)` is consumed by:
 - `TurnProcessor.executeTool()` → sandbox + approval gate
@@ -515,7 +515,7 @@ if ("tool".equals(m.role()) && m.toolCallId() != null) {
 **Recommendation: Extend `TokenChunk` with an optional `toolCalls` field.**
 
 This is preferred over a new wrapper type because:
-- `ModelEngine.chatStream()` returns `Stream<TokenChunk>` — changing the SPI return type is a breaking change
+- `ModelEngine.chatStream()` returns `Stream<TokenChunk>` - changing the SPI return type is a breaking change
 - Adding a field to a record is backward-compatible (existing constructors still work)
 - The semantics are clear: a chunk is either text or tool calls (never both in practice)
 
@@ -544,10 +544,10 @@ public record TokenChunk(
 ```
 
 **Why not a separate response envelope?**  
-`assembleFromStream()` already collects the stream into a `String`. Adding a `StreamResult` record there is also valid. But the `TokenChunk` extension is strictly better because it allows the *caller* (not just `LlmClient`) to detect tool calls during streaming — useful for future event-driven architectures.
+`assembleFromStream()` already collects the stream into a `String`. Adding a `StreamResult` record there is also valid. But the `TokenChunk` extension is strictly better because it allows the *caller* (not just `LlmClient`) to detect tool calls during streaming - useful for future event-driven architectures.
 
 **Why not a completely separate method?**  
-`ModelEngine` is the SPI. Adding a new method (`chatStreamNative()`) forces all engine implementations to implement it. The `TokenChunk` extension is additive — engines that don't support native tools simply never emit tool-call chunks.
+`ModelEngine` is the SPI. Adding a new method (`chatStreamNative()`) forces all engine implementations to implement it. The `TokenChunk` extension is additive - engines that don't support native tools simply never emit tool-call chunks.
 
 ### 4.6 Sanitization and Stream Filtering After XML Retirement
 
@@ -563,13 +563,13 @@ public record TokenChunk(
 
 **Stream filter simplification:**
 
-The native path needs no stream filtering — tool calls are structured, never in the text stream. The JSON fallback path needs code-fence filtering (simpler than XML tag matching).
+The native path needs no stream filtering - tool calls are structured, never in the text stream. The JSON fallback path needs code-fence filtering (simpler than XML tag matching).
 
 Two options:
 1. **Simplify `ToolCallStreamFilter`** to handle both XML (legacy) and code-fenced JSON, with a no-op fast path when no patterns are present.
-2. **Replace with a simpler approach**: on the native path, tool calls are never emitted as text chunks, so the filter becomes a pass-through. On the fallback path, `ToolCallParser.stripToolCalls()` already handles post-hoc removal — the stream filter could be simplified to a thin wrapper.
+2. **Replace with a simpler approach**: on the native path, tool calls are never emitted as text chunks, so the filter becomes a pass-through. On the fallback path, `ToolCallParser.stripToolCalls()` already handles post-hoc removal - the stream filter could be simplified to a thin wrapper.
 
-Recommend option 1 — keep the filter but add a fast path. Don't delete it entirely until XML is fully retired from the parser.
+Recommend option 1 - keep the filter but add a fast path. Don't delete it entirely until XML is fully retired from the parser.
 
 ---
 
@@ -582,7 +582,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Give the SPI streaming contract a way to carry structured tool calls.
 
 **Files:**
-- `TokenChunk.java` — add `List<NativeToolCall> toolCalls` field, backward-compat constructors, `ofToolCalls()`, `hasToolCalls()`
+- `TokenChunk.java` - add `List<NativeToolCall> toolCalls` field, backward-compat constructors, `ofToolCalls()`, `hasToolCalls()`
 
 **Why HIGH:** This is the foundational SPI change that unblocks everything else. Without it, no other step can pass native tool calls through the stream.
 
@@ -602,14 +602,14 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Stop converting native tool calls to XML. Emit `TokenChunk.ofToolCalls()` instead.
 
 **Files:**
-- `OllamaEngine.java` — change `chatStreamViaMessages()` lambda (lines 448-464) to emit `TokenChunk.ofToolCalls(...)` instead of `convertNativeToolCallsToXml()`. Change `extractChatContentOrToolCalls()` (lines 247-269) for non-streaming path.
-- `OllamaEngine.java` — fix `serializeChatMessage()` to actually serialize `toolCallId` (lines 547-549)
+- `OllamaEngine.java` - change `chatStreamViaMessages()` lambda (lines 448-464) to emit `TokenChunk.ofToolCalls(...)` instead of `convertNativeToolCallsToXml()`. Change `extractChatContentOrToolCalls()` (lines 247-269) for non-streaming path.
+- `OllamaEngine.java` - fix `serializeChatMessage()` to actually serialize `toolCallId` (lines 547-549)
 
 **Why HIGH:** This is the bridge elimination. Native tool calls stop being destroyed.
 
 **Risks:**
 - `LlmClient.assembleFromStream()` doesn't expect tool-call chunks yet. Must handle gracefully (skip text append, collect tool calls separately).
-- `OllamaToolCallBridgeTest` — many tests assert XML output. Must be rewritten.
+- `OllamaToolCallBridgeTest` - many tests assert XML output. Must be rewritten.
 
 **Tests:**
 - Updated `OllamaToolCallBridgeTest`: assert `TokenChunk.hasToolCalls()` instead of XML strings.
@@ -625,8 +625,8 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** The stream assembly method handles both text chunks and tool-call chunks, returning both to callers.
 
 **Files:**
-- `LlmClient.java` — `assembleFromStream()` gains a `List<NativeToolCall>` side-collection. Returns a `StreamResult` record or exposes via a callback.
-- `LlmClient.java` — new `chatStream()` overload that returns `StreamResult` (or: new method `chatStreamStructured()`)
+- `LlmClient.java` - `assembleFromStream()` gains a `List<NativeToolCall>` side-collection. Returns a `StreamResult` record or exposes via a callback.
+- `LlmClient.java` - new `chatStream()` overload that returns `StreamResult` (or: new method `chatStreamStructured()`)
 - Alternative: pass tool calls via a mutable holder/callback rather than changing return type.
 
 **Why HIGH:** Without this, `ToolCallLoop` can't receive native tool calls from `LlmClient`.
@@ -650,8 +650,8 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** When native tool calls are present, use them directly (no regex parsing). Use proper message types for re-prompting.
 
 **Files:**
-- `ToolCallLoop.java` — `run()` signature change: accept `List<NativeToolCall>` alongside `String initialAnswer`. If native calls present, convert to `ToolCall` directly. Use `ChatMessage.assistantWithToolCalls()` and `ChatMessage.toolResult()`.
-- New: `NativeToolCallConverter.java` (or inline in `ToolCallLoop`) — `NativeToolCall → ToolCall` mapping.
+- `ToolCallLoop.java` - `run()` signature change: accept `List<NativeToolCall>` alongside `String initialAnswer`. If native calls present, convert to `ToolCall` directly. Use `ChatMessage.assistantWithToolCalls()` and `ChatMessage.toolResult()`.
+- New: `NativeToolCallConverter.java` (or inline in `ToolCallLoop`) - `NativeToolCall → ToolCall` mapping.
 
 **Why HIGH:** This completes the native pipeline end-to-end.
 
@@ -661,7 +661,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 - Approval gate, sandbox, progress UX must all still fire correctly.
 
 **Tests:**
-- New: `ToolCallLoopNativeTest` — native tool calls are executed correctly.
+- New: `ToolCallLoopNativeTest` - native tool calls are executed correctly.
 - New: test that native path uses `assistantWithToolCalls` and `toolResult` message types.
 - Existing: all current `ToolCallLoop` tests must still pass (fallback path).
 - Integration: approval gate fires for native path mutations.
@@ -675,10 +675,10 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** When native tools are enabled, omit XML format instructions. Keep tool descriptions.
 
 **Files:**
-- `SystemPromptBuilder.java` — accept a boolean `nativeToolsEnabled` flag. When true, use a short preamble instead of `tools-preamble.txt`.
-- New: `prompts/sections/tools-preamble-native.txt` — short native preamble.
-- `Capabilities.java` — add `boolean nativeTools` field.
-- `OllamaEngine.java` — return `nativeToolCalling` in `caps()`.
+- `SystemPromptBuilder.java` - accept a boolean `nativeToolsEnabled` flag. When true, use a short preamble instead of `tools-preamble.txt`.
+- New: `prompts/sections/tools-preamble-native.txt` - short native preamble.
+- `Capabilities.java` - add `boolean nativeTools` field.
+- `OllamaEngine.java` - return `nativeToolCalling` in `caps()`.
 
 **Why HIGH:** Eliminates ~300 wasted tokens per turn and the contradictory dual instruction.
 
@@ -702,9 +702,9 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Native path is no-op (tool calls aren't in text). Fallback path suppresses code-fenced JSON blocks.
 
 **Files:**
-- `ToolCallStreamFilter.java` — add code-fence detection alongside XML detection. Add a fast-path skip when in native mode.
+- `ToolCallStreamFilter.java` - add code-fence detection alongside XML detection. Add a fast-path skip when in native mode.
 
-**Why MEDIUM:** Not blocking — the native path doesn't need filtering (tool calls are structured). But the fallback path currently would display JSON blocks to the user.
+**Why MEDIUM:** Not blocking - the native path doesn't need filtering (tool calls are structured). But the fallback path currently would display JSON blocks to the user.
 
 **Risks:** Low. The filter is isolated.
 
@@ -715,21 +715,21 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 
 ---
 
-#### M2: Simplify `Sanitize.java` — deprecate tool-call awareness
+#### M2: Simplify `Sanitize.java` - deprecate tool-call awareness
 
 **Goal:** Remove `sanitizeForOutputPreservingToolCalls()`, `TOOL_CALL_BLOCK`, `stripSuspiciousHtmlOutsideToolCalls()`.
 
 **Files:**
-- `Sanitize.java` — deprecate methods (keep for one release cycle).
-- `LlmClient.java` — switch to `sanitizeForOutput()`.
-- `ToolCallLoop.java` — verify `stripSuspiciousHtml()` on final prose is still correct (it is — tool calls are already stripped at that point).
+- `Sanitize.java` - deprecate methods (keep for one release cycle).
+- `LlmClient.java` - switch to `sanitizeForOutput()`.
+- `ToolCallLoop.java` - verify `stripSuspiciousHtml()` on final prose is still correct (it is - tool calls are already stripped at that point).
 
 **Why MEDIUM:** The workaround is no longer needed once native tool calls bypass text sanitization. But rushing this before the native path is stable risks regression.
 
-**Risks:** Must verify that the fallback path (JSON in text) doesn't trigger SUS_HTML. Code-fenced JSON contains escaped content, not raw HTML tags — this should be safe, but must be tested.
+**Risks:** Must verify that the fallback path (JSON in text) doesn't trigger SUS_HTML. Code-fenced JSON contains escaped content, not raw HTML tags - this should be safe, but must be tested.
 
 **Tests:**
-- Regression: `SanitizeToolCallPreservationTest.RegressionBug` — verify the original bug scenario still works.
+- Regression: `SanitizeToolCallPreservationTest.RegressionBug` - verify the original bug scenario still works.
 - New: JSON fallback with HTML content in tool params → not corrupted.
 
 ---
@@ -739,9 +739,9 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** `NativeToolCall.id` (or synthetic) flows through the pipeline. `ChatMessage.toolResult()` carries the correct ID. `serializeChatMessage()` sends it.
 
 **Files:**
-- `ToolCallLoop.java` — capture `NativeToolCall.id` when converting to `ToolCall`, pass to `toolResult()`.
-- `OllamaEngine.java` — verify serialization (already fixed in H2).
-- `ToolCall.java` — consider adding optional `callId` field (or keep as side data).
+- `ToolCallLoop.java` - capture `NativeToolCall.id` when converting to `ToolCall`, pass to `toolResult()`.
+- `OllamaEngine.java` - verify serialization (already fixed in H2).
+- `ToolCall.java` - consider adding optional `callId` field (or keep as side data).
 
 **Why MEDIUM:** Ollama doesn't require `tool_call_id` today, but the Anthropic and OpenAI protocols do. Future-proofing for multi-backend SPI.
 
@@ -754,8 +754,8 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Replace XML instructions with JSON instructions in the text fallback preamble.
 
 **Files:**
-- `tools-preamble.txt` — rewrite: code-fenced JSON format, no XML references.
-- `SystemPromptBuilder.DEFAULT_TOOLS_PREAMBLE` — update inline fallback to match.
+- `tools-preamble.txt` - rewrite: code-fenced JSON format, no XML references.
+- `SystemPromptBuilder.DEFAULT_TOOLS_PREAMBLE` - update inline fallback to match.
 
 **Why MEDIUM:** After H5 (conditional prompt), this file is only used for non-native engines. It should instruct JSON, not XML.
 
@@ -770,8 +770,8 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Delete the dead bridge method and its tests.
 
 **Files:**
-- `OllamaEngine.java` — delete `convertNativeToolCallsToXml()`.
-- `OllamaToolCallBridgeTest.java` — delete `ConvertNativeToolCallsToXml` nested class (or whole file if no other tests remain).
+- `OllamaEngine.java` - delete `convertNativeToolCallsToXml()`.
+- `OllamaToolCallBridgeTest.java` - delete `ConvertNativeToolCallsToXml` nested class (or whole file if no other tests remain).
 
 **Why LOW:** After H2, this method is never called. Safe to delete after one release cycle.
 
@@ -782,8 +782,8 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Delete deprecated `sanitizeForOutputPreservingToolCalls()` and related private methods.
 
 **Files:**
-- `Sanitize.java` — remove deprecated methods.
-- `SanitizeToolCallPreservationTest.java` — simplify or remove `PreservingToolCalls` tests.
+- `Sanitize.java` - remove deprecated methods.
+- `SanitizeToolCallPreservationTest.java` - simplify or remove `PreservingToolCalls` tests.
 
 **Why LOW:** After M2 deprecation cycle.
 
@@ -794,7 +794,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** Change pass order: JSON first, XML last. XML becomes the lowest-priority fallback.
 
 **Files:**
-- `ToolCallParser.java` — reorder: Pass 1 = code-fenced JSON, Pass 2 = bare JSON, Pass 3 = XML tags.
+- `ToolCallParser.java` - reorder: Pass 1 = code-fenced JSON, Pass 2 = bare JSON, Pass 3 = XML tags.
 
 **Why LOW:** Cosmetic. The parser already handles all formats. Reordering reflects the new priority but doesn't change functionality.
 
@@ -805,7 +805,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** After XML retirement is complete, simplify the filter to only handle code-fenced JSON (or remove it entirely if native-only).
 
 **Files:**
-- `ToolCallStreamFilter.java` — remove XML-specific patterns, simplify state machine.
+- `ToolCallStreamFilter.java` - remove XML-specific patterns, simplify state machine.
 
 **Why LOW:** The filter works fine as-is. Simplification is maintenance quality-of-life.
 
@@ -816,7 +816,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Goal:** `CodeBlockToolExtractor.containsExtractableBlocks()` is disabled but still called in `hasAnyToolCalls()`. Remove the dead check.
 
 **Files:**
-- `AssistantTurnExecutor.java` line 44 — remove `CodeBlockToolExtractor` reference.
+- `AssistantTurnExecutor.java` line 44 - remove `CodeBlockToolExtractor` reference.
 
 **Why LOW:** The extractor is already disabled in `ToolCallLoop.run()`. The check in `hasAnyToolCalls()` is harmless but misleading.
 
@@ -862,11 +862,11 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 
 **Files:** `OllamaEngine.java` (stream + non-stream paths, `serializeChatMessage`), updated `OllamaToolCallBridgeTest`
 
-**Why bounded:** Engine-layer only. `LlmClient` will receive tool-call chunks but currently ignores unknown fields — no breakage.
+**Why bounded:** Engine-layer only. `LlmClient` will receive tool-call chunks but currently ignores unknown fields - no breakage.
 
 **Major risk:** `LlmClient.assembleFromStream()` receives `TokenChunk` with `toolCalls` set. Currently it accesses `.text()` which returns `""` for tool-call chunks. Tool calls would be silently lost until PR-4. **Mitigation:** This PR must be followed immediately by PR-4, OR `LlmClient` should be updated in the same PR to at minimum not lose tool calls.
 
-**Actually — better to merge PR-3 and PR-4 as one PR to avoid a broken intermediate state.** See revised PR-3+4 below.
+**Actually - better to merge PR-3 and PR-4 as one PR to avoid a broken intermediate state.** See revised PR-3+4 below.
 
 **Must not regress:** Non-streaming `chat()` path, streaming text-only responses.
 
@@ -879,10 +879,10 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Purpose:** Complete the native tool-call pipeline from `OllamaEngine` through `LlmClient` to `ToolCallLoop`. This is the core migration PR.
 
 **Files:**
-- `OllamaEngine.java` — emit `TokenChunk.ofToolCalls()` instead of XML, fix `toolCallId` serialization
-- `LlmClient.java` — `assembleFromStream()` collects tool-call chunks; new internal `StreamResult` or side-channel; new method to expose structured result
-- `ToolCallLoop.java` — accept native tool calls, convert to `ToolCall`, use `assistantWithToolCalls()` + `toolResult()` for re-prompt, keep fallback path
-- `AssistantTurnExecutor.java` — pass native tool calls from `LlmClient` to `ToolCallLoop`
+- `OllamaEngine.java` - emit `TokenChunk.ofToolCalls()` instead of XML, fix `toolCallId` serialization
+- `LlmClient.java` - `assembleFromStream()` collects tool-call chunks; new internal `StreamResult` or side-channel; new method to expose structured result
+- `ToolCallLoop.java` - accept native tool calls, convert to `ToolCall`, use `assistantWithToolCalls()` + `toolResult()` for re-prompt, keep fallback path
+- `AssistantTurnExecutor.java` - pass native tool calls from `LlmClient` to `ToolCallLoop`
 
 **Why bounded:** The boundary is clear: engine→client→loop. Tool execution (`TurnProcessor`, tools, sandbox, approval) is untouched. Prompt generation is untouched. Stream filter is untouched (tool calls are no longer in the text stream on the native path, so the filter simply doesn't trigger).
 
@@ -897,7 +897,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 - Compaction behavior (tested via compaction tests)
 
 **Tests:**
-- New: `ToolCallLoopNativeTest` — end-to-end with `NativeToolCall` input
+- New: `ToolCallLoopNativeTest` - end-to-end with `NativeToolCall` input
 - New: native path uses correct `ChatMessage` types
 - Updated: `OllamaToolCallBridgeTest` for new behavior
 - Existing: all `ToolCallLoop` tests pass (fallback path)
@@ -910,9 +910,9 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Purpose:** Eliminate XML format instructions when native tools are available. Save ~300 tokens/turn.
 
 **Files:**
-- `SystemPromptBuilder.java` — accept `nativeTools` flag, conditional preamble
-- New: `tools-preamble-native.txt` — short native preamble
-- `Capabilities.java` — already updated in PR-2
+- `SystemPromptBuilder.java` - accept `nativeTools` flag, conditional preamble
+- New: `tools-preamble-native.txt` - short native preamble
+- `Capabilities.java` - already updated in PR-2
 
 **Why bounded:** Prompt-only change. No pipeline changes.
 
@@ -929,8 +929,8 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 **Purpose:** For non-native engines, instruct JSON format instead of XML.
 
 **Files:**
-- `tools-preamble.txt` — rewrite with JSON examples
-- `SystemPromptBuilder.DEFAULT_TOOLS_PREAMBLE` — update inline fallback
+- `tools-preamble.txt` - rewrite with JSON examples
+- `SystemPromptBuilder.DEFAULT_TOOLS_PREAMBLE` - update inline fallback
 
 **Why bounded:** Text-only change to prompt resources.
 
@@ -950,7 +950,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 
 **Why bounded:** Isolated display-layer change.
 
-**Major risk:** Low. Filter is a display concern only — doesn't affect tool execution.
+**Major risk:** Low. Filter is a display concern only - doesn't affect tool execution.
 
 **Must not regress:** XML blocks still suppressed (legacy compat). Normal text passes through.
 
@@ -974,7 +974,7 @@ Recommend option 1 — keep the filter but add a fast path. Don't delete it enti
 
 ---
 
-### PR-9: `chore: cleanup — remove deprecated XML bridge + sanitize workaround`
+### PR-9: `chore: cleanup - remove deprecated XML bridge + sanitize workaround`
 
 **Purpose:** Delete `convertNativeToolCallsToXml()`, deprecated sanitize methods, update tests.
 
@@ -1030,17 +1030,17 @@ The following properties must be preserved across the entire migration:
 |----------|-------------|---------------------|
 | **No guessed mutation targets** | `ToolCallLoop.repairMissingPath()`, `PathInferenceTest` | `NativeToolCall → ToolCall` converter must not add path inference |
 | **No code-block fallback writes** | `ToolCallLoop.run()` line 141-144 (warning only) | Must not re-enable during refactor |
-| **Approval previews** | `TurnProcessor.executeTool()`, `ApprovalGateTest` | Approval gate operates on `ToolCall` (format-agnostic) — should be safe |
-| **Structured verification status** | `ToolResult.verification()`, write/edit tool tests | Tool execution is unchanged — should be safe |
-| **Tool progress UX** | `ToolCallLoop.emitProgress()`, `ToolProgressSink` | Progress operates on `ToolCall.toolName()` — should be safe |
-| **Compaction improvements** | Compaction tests | Compaction operates on `ChatMessage.content()` — must verify `assistantWithToolCalls()` messages compact correctly |
+| **Approval previews** | `TurnProcessor.executeTool()`, `ApprovalGateTest` | Approval gate operates on `ToolCall` (format-agnostic) - should be safe |
+| **Structured verification status** | `ToolResult.verification()`, write/edit tool tests | Tool execution is unchanged - should be safe |
+| **Tool progress UX** | `ToolCallLoop.emitProgress()`, `ToolProgressSink` | Progress operates on `ToolCall.toolName()` - should be safe |
+| **Compaction improvements** | Compaction tests | Compaction operates on `ChatMessage.content()` - must verify `assistantWithToolCalls()` messages compact correctly |
 | **Payload-safe sanitization** | `SanitizeToolCallPreservationTest` | Until M2, the workaround stays. After M2, verify JSON fallback is safe |
-| **`ToolCall` execution semantics** | All tool tests, `TurnProcessorTest` | `ToolCall` record is unchanged — zero risk |
-| **No-op edit rejection** | `EditFileToolTest` | Operates on `ToolCall.parameters()` — format-agnostic |
+| **`ToolCall` execution semantics** | All tool tests, `TurnProcessorTest` | `ToolCall` record is unchanged - zero risk |
+| **No-op edit rejection** | `EditFileToolTest` | Operates on `ToolCall.parameters()` - format-agnostic |
 | **Stream display doesn't show protocol** | `ToolCallStreamFilter` tests | Native: tool calls never in text. Fallback: filter updated in PR-7 |
-| **Tool result formatting** | `ToolCallLoop.formatToolResult()` | Unchanged — formats `ToolCall` + `ToolResult`, not format-specific |
+| **Tool result formatting** | `ToolCallLoop.formatToolResult()` | Unchanged - formats `ToolCall` + `ToolResult`, not format-specific |
 | **Multi-turn context integrity** | Chat/session tests | `ChatMessage` types are additive. Backward-compat constructor preserved |
-| **Config flag respected** | `OllamaEngineProviderTest`, config tests | `nativeToolCalling` boolean gates behavior — must remain functional |
+| **Config flag respected** | `OllamaEngineProviderTest`, config tests | `nativeToolCalling` boolean gates behavior - must remain functional |
 | **Error handling in tool loop** | `ToolCallLoop` error paths | Must verify native path error handling matches fallback path |
 
 ---
@@ -1056,7 +1056,7 @@ I do not have direct access to browse `chauncygu/collection-claude-code-source-c
 **What they do well:**
 1. **Structured tool protocol throughout.** Tool calls are JSON objects with `type: "tool_use"`, tool results are `type: "tool_result"` with `tool_use_id` correlation. No text-based format at any layer.
 2. **Correlation IDs are mandatory.** Every tool call has an `id`, every result references it. This enables parallel tool execution and unambiguous result matching.
-3. **No format instructions in system prompt.** The API handles tool format — the prompt only describes tool *semantics* (when to use, what each tool does).
+3. **No format instructions in system prompt.** The API handles tool format - the prompt only describes tool *semantics* (when to use, what each tool does).
 4. **Streaming events, not text chunks.** Tool use events are distinct from text content events in the stream.
 
 **What Talos should borrow:**
@@ -1076,12 +1076,12 @@ I do not have direct access to browse `chauncygu/collection-claude-code-source-c
 3. **Parallel tool execution.** When multiple tool calls are returned, they can execute concurrently.
 
 **What Talos should borrow:**
-- Structured tool result metadata (Talos already has `ToolResult.verification()` — this is partially there)
+- Structured tool result metadata (Talos already has `ToolResult.verification()` - this is partially there)
 - The concept of native tool calls as a first-class pipeline stage rather than a text parsing artifact
 
 **What Talos should NOT copy:**
-- Parallel tool execution — in a local-first CLI with user approval gates, parallel execution would create confusing UX (multiple approval prompts simultaneously).
-- Heavy state machine abstraction — Talos's `ToolCallLoop` is deliberately simple (while loop with max iterations). Over-engineering the state machine would add complexity without corresponding benefit for a single-user CLI.
+- Parallel tool execution - in a local-first CLI with user approval gates, parallel execution would create confusing UX (multiple approval prompts simultaneously).
+- Heavy state machine abstraction - Talos's `ToolCallLoop` is deliberately simple (while loop with max iterations). Over-engineering the state machine would add complexity without corresponding benefit for a single-user CLI.
 
 ### What Is Incompatible With Talos's Local-First CLI Constraints
 
@@ -1092,5 +1092,5 @@ I do not have direct access to browse `chauncygu/collection-claude-code-source-c
 ---
 
 *Review complete. All claims verified against code in `v0.9.0-beta-dev`.*  
-*Findings that could not be verified from code alone: None — all analysis is code-grounded.*
+*Findings that could not be verified from code alone: None - all analysis is code-grounded.*
 

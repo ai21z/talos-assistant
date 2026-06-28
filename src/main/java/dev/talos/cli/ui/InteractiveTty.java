@@ -14,7 +14,7 @@ import java.lang.reflect.Method;
  * interactivity check. That breaks on JDK 22+: JLine's bundled console
  * provider and JDK 22's console changes make {@code System.console()}
  * return a non-null console even when stdout is piped or redirected, so a
- * console-null check silently reports "interactive" for redirected runs —
+ * console-null check silently reports "interactive" for redirected runs -
  * flooding piped output with spinner carriage returns and ANSI.
  *
  * <p>The authoritative check is the OS-level {@code isatty(fd)} probe via
@@ -22,7 +22,7 @@ import java.lang.reflect.Method;
  * for terminal selection). The console-based check survives only as the
  * fallback for exotic launchers where the natives cannot load, hardened
  * with the JDK 22 {@code Console.isTerminal()} disambiguator (looked up
- * reflectively — this codebase compiles on JDK 21).
+ * reflectively - this codebase compiles on JDK 21).
  */
 public final class InteractiveTty {
 

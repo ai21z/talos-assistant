@@ -33,7 +33,7 @@ public final class KnnStage implements RetrievalStage {
         if (!request.hasVector()) {
             String reason = request.embeddingFailureReason();
             String note = reason != null
-                    ? "skipped: embedding failed — " + reason
+                    ? "skipped: embedding failed - " + reason
                     : "skipped: no query vector";
             return StageOutput.of(candidates, note);
         }

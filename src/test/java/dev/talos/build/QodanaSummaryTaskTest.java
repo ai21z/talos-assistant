@@ -194,7 +194,7 @@ class QodanaSummaryTaskTest {
         writeUtf8(resultsDir.resolve("result-allProblems.json"), """
                 { "listProblem": [] }
                 """);
-        // Deliberately malformed JSON — must not take the packet down.
+        // Deliberately malformed JSON - must not take the packet down.
         writeUtf8(resultsDir.resolve("qodana.sarif.json"), "{ this is not valid json");
 
         runWriteQodanaSummary(projectDir);

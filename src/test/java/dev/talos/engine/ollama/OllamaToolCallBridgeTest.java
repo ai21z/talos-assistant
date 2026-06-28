@@ -15,9 +15,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for OllamaEngine's native tool-calling bridge methods:
  * <ul>
- *   <li>{@code extractChatContentOrToolCalls} — /api/chat JSON response → text (no XML conversion)</li>
- *   <li>{@code convertToolSpecs} — ToolSpec list → Ollama native tool format</li>
- *   <li>{@code parseNativeToolCalls} — Ollama tool_calls JSON → NativeToolCall list</li>
+ *   <li>{@code extractChatContentOrToolCalls} - /api/chat JSON response → text (no XML conversion)</li>
+ *   <li>{@code convertToolSpecs} - ToolSpec list → Ollama native tool format</li>
+ *   <li>{@code parseNativeToolCalls} - Ollama tool_calls JSON → NativeToolCall list</li>
  * </ul>
  *
  * <p>Both methods are package-private for testability.
@@ -29,7 +29,7 @@ class OllamaToolCallBridgeTest {
 
     @BeforeEach
     void setUp() {
-        // host/model don't matter — we only call package-private bridge methods
+        // host/model don't matter - we only call package-private bridge methods
         engine = new OllamaEngine("http://localhost:11434", "test-model");
     }
 
@@ -217,7 +217,7 @@ class OllamaToolCallBridgeTest {
 
             List<Map<String, Object>> result = engine.convertToolSpecs(List.of(spec));
 
-            // Should not throw — falls back gracefully
+            // Should not throw - falls back gracefully
             assertEquals(1, result.size());
             @SuppressWarnings("unchecked")
             var fn = (Map<String, Object>) result.get(0).get("function");
@@ -282,7 +282,7 @@ class OllamaToolCallBridgeTest {
         void defaultConstructor_enablesNativeToolCalling() {
             // Default constructor should enable native tool calling (backwards-compatible)
             var defaultEngine = new OllamaEngine("http://localhost:11434", "test-model");
-            // Can still call convertToolSpecs — toggle only affects request building
+            // Can still call convertToolSpecs - toggle only affects request building
             var specs = List.of(new ToolSpec("talos.list_dir", "List dir", "{}"));
             assertFalse(defaultEngine.convertToolSpecs(specs).isEmpty(),
                     "Default engine should convert tool specs");
@@ -297,7 +297,7 @@ class OllamaToolCallBridgeTest {
 
         @Test
         void explicitFalse_stillConvertsSpecs() {
-            // convertToolSpecs itself doesn't check the toggle — the toggle is checked
+            // convertToolSpecs itself doesn't check the toggle - the toggle is checked
             // at the chatViaMessages / chatStreamViaMessages level
             var disabledEngine = new OllamaEngine("http://localhost:11434", "test-model", false);
             var specs = List.of(new ToolSpec("talos.list_dir", "List dir", "{}"));
@@ -423,7 +423,7 @@ class OllamaToolCallBridgeTest {
             assertEquals("talos.edit_file", result.get(0).name());
             assertEquals("<script src=\"script.js\"></script></body>",
                     result.get(0).arguments().get("new_string"),
-                    "<script> tag in arguments must be preserved — this was the SUS_HTML bug root cause");
+                    "<script> tag in arguments must be preserved - this was the SUS_HTML bug root cause");
         }
     }
 }

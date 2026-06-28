@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  * Parses and validates {@code <workspace>/.talos/profiles.yaml} into
  * {@code ws:}-prefixed {@link CommandProfile}s.
  *
- * <p>Trust posture: the declaration is workspace content — untrusted,
+ * <p>Trust posture: the declaration is workspace content - untrusted,
  * model-reachable input (writable only through the protected-path flow
  * since T788). The loader therefore validates fail-closed (one bad profile
  * rejects the whole file with a single human-readable reason, unknown keys
@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
  *
  * <p>Non-declarable by design: {@code requiresApproval} (always true),
  * {@code networkAccess}/{@code interactive} (always false), risk (always
- * BUILD_OR_TEST), checkpointing (never — verification commands are not
+ * BUILD_OR_TEST), checkpointing (never - verification commands are not
  * mutations).
  */
 public final class WorkspaceCommandProfilesLoader {
@@ -232,10 +232,10 @@ public final class WorkspaceCommandProfilesLoader {
     /**
      * Executable forms: a bare program name (PATH-resolved by the OS at run
      * time), an absolute path, or a workspace-relative path (wrappers like
-     * {@code ./gradlew} — the norm in non-Java repos). Relative and absolute
+     * {@code ./gradlew} - the norm in non-Java repos). Relative and absolute
      * forms must exist and relative forms must stay inside the workspace;
      * the resolved absolute path is what registers (and what every trust
-     * and approval prompt displays — owner decision 2026-06-12).
+     * and approval prompt displays - owner decision 2026-06-12).
      */
     private static String resolveExecutable(String raw, String id, Path workspace) {
         if (raw.isBlank()) {
@@ -250,7 +250,7 @@ public final class WorkspaceCommandProfilesLoader {
         screenShellSyntax(id, raw);
         boolean pathLike = raw.contains("/") || raw.contains("\\");
         if (!pathLike) {
-            return raw; // bare program name — the OS resolves it from PATH
+            return raw; // bare program name - the OS resolves it from PATH
         }
         Path candidate;
         try {

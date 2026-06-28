@@ -174,6 +174,9 @@ public class RunCmd implements Runnable, SessionState {
 
                 line = sanitizeOutput(line).trim();
                 if (line.isEmpty()) continue;
+                if (shouldPrintPromptGap(useSystemTerminal, line)) {
+                    sink.println();
+                }
 
                 // Rate limit
                 if (!checkRateLimit(lim)) {
@@ -245,8 +248,8 @@ public class RunCmd implements Runnable, SessionState {
         TerminalBuilder builder = TerminalBuilder.builder();
         if (interactiveConsole) {
             // Provider pinned to the bundled JNI natives (T781): the old
-            // .jna(true) flag was inert — no JNA dependency is on the
-            // classpath, so resolution always fell through to JNI anyway —
+            // .jna(true) flag was inert - no JNA dependency is on the
+            // classpath, so resolution always fell through to JNI anyway -
             // and pinning keeps provider selection deterministic across
             // JLine upgrades (FFM would need JDK 22+; this build targets 21).
             return builder.system(true).provider("jni").build();
@@ -283,6 +286,10 @@ public class RunCmd implements Runnable, SessionState {
             boolean stdoutTerminal,
             int stdinAvailableBytes) {
         return interactiveConsole && stdinTerminal && stdoutTerminal && stdinAvailableBytes <= 0;
+    }
+
+    static boolean shouldPrintPromptGap(boolean interactive, String line) {
+        return interactive && line != null && !line.trim().isEmpty();
     }
 
     static int bufferedInputBytes(InputStream in) {

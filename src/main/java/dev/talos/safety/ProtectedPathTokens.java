@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Pure protected-path token recognition — the SINGLE protected-path
+ * Pure protected-path token recognition - the SINGLE protected-path
  * classifier (T759). Sink redaction, permission policy, evidence gating,
  * answer guards, and repair planners all delegate here; do not grow local
  * copies of this vocabulary.
@@ -16,7 +16,7 @@ import java.util.Locale;
  * {@code supersecret}); code-tooling names append derivational suffixes
  * ({@code tokenizer}, {@code secretary}, {@code passwordless}) where the
  * stem is a prefix. Pure word-equality would fail OPEN on
- * {@code mysecrets.txt}-class names — the suffix rule keeps them protected
+ * {@code mysecrets.txt}-class names - the suffix rule keeps them protected
  * while fixing the {@code tokenizer.java}-class false positives.
  */
 public final class ProtectedPathTokens {
@@ -69,7 +69,7 @@ public final class ProtectedPathTokens {
 
         // .talos is CONTROL since T788: it holds workspace-declared
         // verification profiles (.talos/profiles.yaml) and template commands
-        // (.talos/commands/*.md) — content that influences what Talos
+        // (.talos/commands/*.md) - content that influences what Talos
         // executes, so the model must not write it with an ordinary
         // write approval.
         if (segments.contains(".git") || segments.contains(".gnupg")

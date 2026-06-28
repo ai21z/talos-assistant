@@ -4,7 +4,7 @@ package dev.talos.core.util;
  * Talos-emitted status-line ("chrome") prefixes shared between the emitters
  * and the conversation-history stripper (T767).
  *
- * <p>The runtime decorates assistant text with status lines — tool-usage
+ * <p>The runtime decorates assistant text with status lines - tool-usage
  * summaries, mutation confirmations, abort/engine-error sentinels. Those
  * lines must never reach conversation history: code-tuned local models
  * memorize the format after one exposure and start emitting fake status
@@ -59,7 +59,7 @@ public final class UiChrome {
     /**
      * Defensive stripper entry with no current emitter (T768): no tool
      * produces "Wrote ...", but a line shaped {@code ✓ Wrote ...} can only
-     * be chrome or a model imitating chrome — neither belongs in history.
+     * be chrome or a model imitating chrome - neither belongs in history.
      */
     public static final String WROTE_PREFIX = CHECK_PREFIX + "Wrote ";
 
@@ -74,8 +74,8 @@ public final class UiChrome {
 
     /**
      * Auto-compaction notice (T805): {@code [context compacted: N older
-     * exchanges summarized · M kept verbatim]}. Render-side only — the
-     * emitter is RenderEngine, after turn stats — but stripped
+     * exchanges summarized · M kept verbatim]}. Render-side only - the
+     * emitter is RenderEngine, after turn stats - but stripped
      * defensively like all chrome: a model imitating the line must not
      * seed history with fake compaction claims.
      */

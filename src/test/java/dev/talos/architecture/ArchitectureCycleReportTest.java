@@ -204,7 +204,7 @@ class ArchitectureCycleReportTest {
 
         for (List<String> scc : nonTrivial) {
             String severity = severity(level, scc);
-            sb.append("### SCC {").append(String.join(", ", scc)).append("} — severity: ")
+            sb.append("### SCC {").append(String.join(", ", scc)).append("} - severity: ")
                     .append(severity).append("\n\n");
             List<String> cyclePath = findOneCycle(scc, adj);
             sb.append("- representative cycle: ")
@@ -234,12 +234,12 @@ class ArchitectureCycleReportTest {
         try {
             ArchRule rule = slices().matching(pattern).should().beFreeOfCycles().allowEmptyShould(true);
             rule.check(classes);
-            return " (ArchUnit beFreeOfCycles cross-check: PASS — no cycles)";
+            return " (ArchUnit beFreeOfCycles cross-check: PASS - no cycles)";
         } catch (AssertionError cycleError) {
             String msg = cycleError.getMessage() == null ? "" : cycleError.getMessage();
             int cycleCount = countOccurrences(msg, "Cycle ");
             return " (ArchUnit beFreeOfCycles cross-check: cycles reported"
-                    + (cycleCount > 0 ? " — " + cycleCount + " cycle group(s)" : "") + ")";
+                    + (cycleCount > 0 ? " - " + cycleCount + " cycle group(s)" : "") + ")";
         } catch (RuntimeException unexpected) {
             return " (ArchUnit cross-check unavailable: " + unexpected.getClass().getSimpleName() + ")";
         }

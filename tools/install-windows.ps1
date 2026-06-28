@@ -46,7 +46,7 @@ Write-Host "Installing Talos to $installDir..."
 
 # Kill any running Talos/Java processes that may lock installation files.
 # This also catches the Gradle daemon which keeps dependency jars open
-# after installDist — its command line won't mention 'talos' but it holds
+# after installDist - its command line won't mention 'talos' but it holds
 # file locks on jars inside the install directory.
 $javaProcs = Get-Process -Name "java","javaw" -ErrorAction SilentlyContinue
 if ($javaProcs) {
@@ -79,7 +79,7 @@ if ($javaProcs) {
 # Remove existing installation if present
 if (Test-Path $installDir) {
     Write-Host "Removing existing installation..."
-    # Retry up to 5 times — processes may take a moment to release files
+    # Retry up to 5 times - processes may take a moment to release files
     $retries = 5
     for ($i = 1; $i -le $retries; $i++) {
         try {

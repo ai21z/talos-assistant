@@ -143,7 +143,7 @@ avoidable confusion for humans and AI assistants.
 
 ---
 
-### CCR-002 — Decouple failing tests from real engine resolution with the correct seam per test layer
+### CCR-002 - Decouple failing tests from real engine resolution with the correct seam per test layer
 
 **Status**
 
@@ -207,7 +207,7 @@ deterministic without changing production behavior.
 
 ---
 
-### CCR-003 — Add exploded-classes version source for `BuildInfo.version()`
+### CCR-003 - Add exploded-classes version source for `BuildInfo.version()`
 
 **Status**
 
@@ -263,7 +263,7 @@ production, but it breaks banner tests that assert a concrete version string.
 
 ---
 
-### CCR-004 — Delete deprecated `FirstRunWizard` class only
+### CCR-004 - Delete deprecated `FirstRunWizard` class only
 
 **Status**
 
@@ -313,7 +313,7 @@ This is a low-risk cleanup if kept strictly to class deletion.
 
 ---
 
-### CCR-005 — Make an explicit `WebMode` product decision
+### CCR-005 - Make an explicit `WebMode` product decision
 
 **Status**
 
@@ -367,7 +367,7 @@ Choose one of two outcomes:
 
 ---
 
-### CCR-006 — Migrate `TalosTool` contract from legacy no-context execution to context-aware execution
+### CCR-006 - Migrate `TalosTool` contract from legacy no-context execution to context-aware execution
 
 **Status**
 
@@ -427,7 +427,7 @@ shape should be reversed only after parity is proven.
 
 ---
 
-### CCR-007 — Split `ModelEngine` into chat and embedding interfaces
+### CCR-007 - Split `ModelEngine` into chat and embedding interfaces
 
 **Status**
 
@@ -481,7 +481,7 @@ acceptable with one implementation, but it is a future ISP problem.
 
 ---
 
-### CCR-008 — Consolidate `core.spi` / `core.engine` into clearer SPI packages
+### CCR-008 - Consolidate `core.spi` / `core.engine` into clearer SPI packages
 
 **Status**
 
@@ -534,7 +534,7 @@ The current SPI boundary is split awkwardly between `dev.talos.spi`,
 
 ---
 
-### CCR-009 — Split `OllamaEngine` into chat, embed, and health components
+### CCR-009 - Split `OllamaEngine` into chat, embed, and health components
 
 **Status**
 
@@ -586,7 +586,7 @@ internal extraction after the async-close changes settle.
 
 ---
 
-### CCR-010 — Extract `ToolCallLoop` stages into a dedicated runtime subpackage
+### CCR-010 - Extract `ToolCallLoop` stages into a dedicated runtime subpackage
 
 **Status**
 
@@ -638,7 +638,7 @@ retrieval pipeline.
 
 ---
 
-### CCR-011 — Decompose `LlmClient` into smaller collaborators
+### CCR-011 - Decompose `LlmClient` into smaller collaborators
 
 **Status**
 
@@ -691,7 +691,7 @@ in place.
 
 ---
 
-### CCR-012.1 — Instrument and observe XML compatibility fallback usage
+### CCR-012.1 - Instrument and observe XML compatibility fallback usage
 
 **Status**
 
@@ -744,7 +744,7 @@ whether the fallback path is still used.
 
 ---
 
-### CCR-012.2 — Retire XML compatibility path if parity evidence justifies it
+### CCR-012.2 - Retire XML compatibility path if parity evidence justifies it
 
 **Why this exists**
 
@@ -791,7 +791,7 @@ longer needed.
 
 ---
 
-### CCR-013 — Final naming cleanup pass
+### CCR-013 - Final naming cleanup pass
 
 **Status**
 
@@ -845,7 +845,7 @@ review and onboarding cost.
 
 ---
 
-### CCR-014 — Resolve ignored architecture-doc ownership after cleanup renames
+### CCR-014 - Resolve ignored architecture-doc ownership after cleanup renames
 
 **Status**
 
@@ -912,7 +912,7 @@ accidental side effect of a mechanical rename ticket.
 
 ---
 
-### CCR-015 — Final terminology and stale-reference alignment after XML/naming cleanup
+### CCR-015 - Final terminology and stale-reference alignment after XML/naming cleanup
 
 **Status**
 
@@ -992,7 +992,7 @@ This should remain a narrow terminology/alignment pass only.
 
 ---
 
-### CCR-016 — Decide explicit approval and session default policy before harness work
+### CCR-016 - Decide explicit approval and session default policy before harness work
 
 **Status**
 
@@ -1005,7 +1005,7 @@ This should remain a narrow terminology/alignment pass only.
   policy-by-null.
 - Convenience constructors (2-/3-arg `Session`, 1-/2-/3-arg
   `TurnProcessor`) continue to pass explicit `NoOp*` values for tests and
-  ad-hoc call sites — explicit wiring, not policy-by-null.
+  ad-hoc call sites - explicit wiring, not policy-by-null.
 - `Context.Builder` now receives an explicit `.approvalGate(approvalGate)`
   from `TalosBootstrap`; its `build()` fallback to `NoOpApprovalGate` is
   retained as a documented, test-only default and no longer a production
@@ -1083,7 +1083,7 @@ approval, or trust semantics.
 
 ---
 
-### CCR-017 — Add focused unit coverage for extracted `core.llm` collaborators
+### CCR-017 - Add focused unit coverage for extracted `core.llm` collaborators
 
 **Why this exists**
 
@@ -1140,7 +1140,7 @@ next harness stream.
 
 ---
 
-### CCR-018 — Review XML telemetry gate and decide the next `CCR-012.2` action
+### CCR-018 - Review XML telemetry gate and decide the next `CCR-012.2` action
 
 **Why this exists**
 
@@ -1198,20 +1198,20 @@ remaining in a permanent "we will decide later" state.
 
 ---
 
-### CCR-019 — Gate conversation-history prune on compaction success (data-loss fix)
+### CCR-019 - Gate conversation-history prune on compaction success (data-loss fix)
 
 **Status**
 
 - Safety-core slice implemented in current tree as `T709a`; broader `T709`
   remains open for integrity/redaction/trace hardening.
 - High-confidence bug confirmed from the manual-testing transcript
-  (`manual-testing/test-output:53–55`): compaction LLM call failed but
+  (`manual-testing/test-output:53-55`): compaction LLM call failed but
   history was still pruned, losing turns.
 
 **Why this exists**
 
 `ConversationCompactor.compact(...)` returned the existing sketch on
-failure — indistinguishable from a successful no-op. Callers could not
+failure - indistinguishable from a successful no-op. Callers could not
 tell success from failure from the return value alone, so
 `ConversationManager.maybeCompactWithBudget(...)` unconditionally called
 `memory.pruneOldest(...)` after every compaction attempt. A failed
@@ -1272,7 +1272,7 @@ compaction attempt which also failed, yet history was pruned anyway.
 **Rollback plan**
 
 - Revert the `tryCompact` seam and restore the previous unconditional
-  prune. Not recommended — the previous behavior is the bug.
+  prune. Not recommended - the previous behavior is the bug.
 
 **Dependencies**
 
@@ -1282,38 +1282,38 @@ compaction attempt which also failed, yet history was pruned anyway.
 
 ## 5. Suggested Milestones
 
-### Milestone A — Safe prep
+### Milestone A - Safe prep
 
 - `CCR-001`
 - `CCR-002`
 - `CCR-003`
 - `CCR-004`
 
-### Milestone B — Surface cleanup
+### Milestone B - Surface cleanup
 
 - `CCR-005`
 - `CCR-006`
 - `CCR-007`
 - `CCR-008`
 
-### Milestone C — Internal decomposition
+### Milestone C - Internal decomposition
 
 - `CCR-009`
 - `CCR-010`
 - `CCR-011`
 
-### Milestone D — Late cleanup
+### Milestone D - Late cleanup
 
 - `CCR-012.1`
 - `CCR-012.2`
 - `CCR-013`
 
-### Milestone E — Post-Cleanup Alignment
+### Milestone E - Post-Cleanup Alignment
 
 - `CCR-014`
 - `CCR-015`
 
-### Milestone F — Pre-Harness Follow-Ups
+### Milestone F - Pre-Harness Follow-Ups
 
 - `CCR-016`
 - `CCR-017`

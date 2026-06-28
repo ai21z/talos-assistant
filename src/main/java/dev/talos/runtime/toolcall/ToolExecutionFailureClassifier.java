@@ -43,7 +43,7 @@ final class ToolExecutionFailureClassifier {
         boolean mutating = call != null && ToolCallSupport.isMutatingTool(call.toolName());
         boolean invalidParams = error != null && ToolError.INVALID_PARAMS.equals(error.code());
         // T758: classification switches on the typed ToolFailureReason carried
-        // by the error — never on message prose, which is free to change.
+        // by the error - never on message prose, which is free to change.
         ToolFailureReason reason = error == null ? ToolFailureReason.NONE : error.reason();
         boolean userApprovalDenial = denied
                 && reason == ToolFailureReason.USER_APPROVAL_DENIED;

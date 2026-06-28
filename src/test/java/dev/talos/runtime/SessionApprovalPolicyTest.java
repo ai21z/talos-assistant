@@ -98,7 +98,7 @@ class SessionApprovalPolicyTest {
     void relativePathResolvesAgainstWorkspace(@TempDir Path ws) {
         SessionApprovalPolicy p = new SessionApprovalPolicy();
         ToolCall write = new ToolCall("t.write", Map.of(
-                "path", "src/x.js",  // relative — resolves under ws
+                "path", "src/x.js",  // relative - resolves under ws
                 "content", "data"));
         p.rememberApproval(ws, write, ToolRiskLevel.WRITE);
         assertTrue(p.rememberInWorkspaceWritesEnabled());
@@ -176,7 +176,7 @@ class SessionApprovalPolicyTest {
     @Test
     void rememberApprovalOnSensitiveTargetDoesNotFlipFlag(@TempDir Path ws) {
         // User's first approved write happens to target .git/config.
-        // The policy must NOT silently "remember" that choice — otherwise
+        // The policy must NOT silently "remember" that choice - otherwise
         // every subsequent .git write would still be blocked (good) but a
         // malicious prompt could then rely on the user having said "a"
         // to slip normal-file writes through. Symmetry: remember only flips
@@ -218,7 +218,7 @@ class SessionApprovalPolicyTest {
     @Test
     void turnProcessorAutoApprovesAfterRememberChoice(@TempDir Path ws) {
         // A gate that returns APPROVED_REMEMBER exactly once, then would
-        // DENY if called again — so the test proves the second in-workspace
+        // DENY if called again - so the test proves the second in-workspace
         // write did NOT reach the gate.
         AtomicInteger gateCalls = new AtomicInteger(0);
         ApprovalGate gate = new ApprovalGate() {
@@ -250,7 +250,7 @@ class SessionApprovalPolicyTest {
         assertEquals(1, gateCalls.get());
         assertTrue(policy.rememberInWorkspaceWritesEnabled());
 
-        // Second in-workspace write — gate must NOT be called (would deny).
+        // Second in-workspace write - gate must NOT be called (would deny).
         ToolCall c2 = new ToolCall("test.w",
                 Map.of("path", ws.resolve("b.txt").toString(), "content", "2"));
         ToolResult r2 = tp.executeTool(s, c2, ctx);

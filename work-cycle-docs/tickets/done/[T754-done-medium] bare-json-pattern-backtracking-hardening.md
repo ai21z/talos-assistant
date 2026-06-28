@@ -62,14 +62,14 @@ restructuring (the Jackson pass-2b alternative stays a future option)
 
 ## Tests
 
-- `ToolCallParserTest.adversarialUnclosedBareJsonFailsFast` — 200k-char
+- `ToolCallParserTest.adversarialUnclosedBareJsonFailsFast` - 200k-char
   unclosed candidate under `assertTimeoutPreemptively(2s)`.
-- `ToolCallParserTest.adversarialRepeatedOpenBraceFragmentsFailFast` —
+- `ToolCallParserTest.adversarialRepeatedOpenBraceFragmentsFailFast` -
   50k repeated `{"a":` fragments under the same timeout.
 - `ToolProtocolTextTest.stripToolCallsSurvivesAdversarialUnclosedBareJson`
-  and `...RepeatedOpenBraces` — display-path stripper survives, prose kept.
+  and `...RepeatedOpenBraces` - display-path stripper survives, prose kept.
 - `ToolProtocolTextTest.stripToolCallsStillRemovesBareJsonWithOneLevelNestedBraces`
-  — equivalence pin for the possessive conversion.
+  - equivalence pin for the possessive conversion.
 - Existing bare-JSON tests (`parseBareJson`,
   `codeFencedJsonSuppressesBareJsonFallback`, `containsToolCallsDetectsBareJson`,
   lenient-JSON suite) unchanged and green.
@@ -87,7 +87,7 @@ restructuring (the Jackson pass-2b alternative stays a future option)
   (exposed via `bareToolJsonPattern()`); `ToolCallParser` references it.
 - Final form: `(?:[^{}]++|\{[^{}]*+\})*+`. Implementation note discovered
   during the work and documented in the javadoc: the first branch must be
-  `++`, not `*+` — a zero-length first-branch iteration terminates the
+  `++`, not `*+` - a zero-length first-branch iteration terminates the
   loop, and under a possessive outer loop there is no backtrack left to
   retry that iteration with the brace branch, which silently breaks
   one-level nested argument objects (caught by `parseBareJson` and the new

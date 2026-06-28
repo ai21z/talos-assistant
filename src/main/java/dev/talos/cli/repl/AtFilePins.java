@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 /**
  * Resolver for {@code @file} pins in a prompt line (T802).
  *
- * <p>Explicit paths only — no fuzzy lookup, no workspace walk: what the
+ * <p>Explicit paths only - no fuzzy lookup, no workspace walk: what the
  * user typed either resolves or produces a visible notice. Checks run in
  * privacy-conscious order (sandbox, then protected classification, then
  * existence) so a protected path gets the same refusal whether or not it
@@ -52,7 +52,7 @@ public final class AtFilePins {
     /**
      * Last prompt's resolution, recorded by the router for the
      * {@code /context} pinned-bytes row (T803; LastPromptCapture
-     * precedent). The resolver itself stays pure — recording is an
+     * precedent). The resolver itself stays pure - recording is an
      * explicit call at the dispatch site.
      */
     private static volatile Resolution lastResolution = new Resolution(List.of(), List.of());
@@ -144,7 +144,7 @@ public final class AtFilePins {
                     continue;
                 }
                 // UTF-8 decode replaces malformed bytes with U+FFFD; that
-                // (or a NUL) marks binary content — fail closed.
+                // (or a NUL) marks binary content - fail closed.
                 String content = new String(
                         Files.readAllBytes(resolved), StandardCharsets.UTF_8);
                 if (content.indexOf('�') >= 0 || content.indexOf('\0') >= 0) {

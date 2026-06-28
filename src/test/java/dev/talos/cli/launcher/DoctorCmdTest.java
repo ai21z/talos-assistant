@@ -36,7 +36,7 @@ class DoctorCmdTest {
                 "server_path", touch("llama-server.exe").toString(),
                 "model_path", touch("agent.gguf").toString(),
                 "host", "http://127.0.0.1",
-                "port", 1));  // nothing listens on port 1 — managed-not-running is a WARN
+                "port", 1));  // nothing listens on port 1 - managed-not-running is a WARN
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
 
         int exit = DoctorCmd.run(cfg, tempDir.resolve("ws"), tempDir.resolve("home"),

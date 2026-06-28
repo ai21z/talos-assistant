@@ -196,7 +196,7 @@ public final class ScenarioResult implements AutoCloseable {
     // ── Answer-content assertions ───────────────────────────────────
     //
     // These assert on the *final answer text* returned by ToolCallLoop. They
-    // operate at the harness seam only — i.e. on text ToolCallLoop itself
+    // operate at the harness seam only - i.e. on text ToolCallLoop itself
     // produces. They do NOT exercise AssistantTurnExecutor's post-loop
     // answer gates (deflection retry, claim-vs-action annotation); those
     // remain covered at the executor seam in AssistantTurnExecutorTest.
@@ -204,12 +204,12 @@ public final class ScenarioResult implements AutoCloseable {
     // Determinism note: when a scripted response contains no tool calls,
     // ToolCallLoop returns it verbatim and these assertions are fully
     // deterministic. When tool calls do fire, the PLACEHOLDER LLM re-prompt
-    // makes post-tool text non-deterministic — in that case prefer
+    // makes post-tool text non-deterministic - in that case prefer
     // file/tool assertions over answer-text assertions.
 
     /**
      * Assert that the final answer text contains the given substring.
-     * Uses plain {@link String#contains} — no regex.
+     * Uses plain {@link String#contains} - no regex.
      */
     public ScenarioResult assertAnswerContains(String expected) {
         String answer = finalAnswer();
@@ -315,7 +315,7 @@ public final class ScenarioResult implements AutoCloseable {
         deleteRecursive(sessionsDir);
     }
 
-    /** AutoCloseable — delegates to closeWorkspace(). Enables try-with-resources. */
+    /** AutoCloseable - delegates to closeWorkspace(). Enables try-with-resources. */
     @Override
     public void close() {
         closeWorkspace();

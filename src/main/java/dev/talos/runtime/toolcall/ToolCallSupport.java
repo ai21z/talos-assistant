@@ -120,7 +120,7 @@ public final class ToolCallSupport {
         boolean isError = body.contains("[error]");
         int len = body.length();
         return "[compacted: " + tool + (isError ? " error" : " result")
-                + ", " + len + " chars — full output elided to keep context focused]";
+                + ", " + len + " chars - full output elided to keep context focused]";
     }
 
     public static String firstSentenceSummary(String output) {

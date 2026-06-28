@@ -256,7 +256,7 @@ A third Qwen full-bank live attempt
 failed closed again at `workspace-batch-apply-approved` after 30 completed
 scenarios (the model issued no workspace-batch tool call; manual canary scan
 over the r3 root passed). Final classification: full-bank live-model
-instability with fail-closed runtime behavior — model-owned, since GPT-OSS
+instability with fail-closed runtime behavior - model-owned, since GPT-OSS
 passes the same 31-scenario bank and the runtime failed closed correctly in
 all three attempts.
 

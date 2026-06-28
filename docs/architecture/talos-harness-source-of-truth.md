@@ -97,7 +97,7 @@ The current document you are reading is the **source-evaluation companion**.
 Opus should not treat every source equally.
 Use this 3-tier model.
 
-### Tier A — highest trust
+### Tier A - highest trust
 Use these as primary evidence.
 
 These are the best sources for direct architectural grounding:
@@ -105,7 +105,7 @@ These are the best sources for direct architectural grounding:
 - official project docs / official repo docs
 - official config / security / evaluation docs
 
-### Tier B — useful but interpret carefully
+### Tier B - useful but interpret carefully
 Use for signal, not blind copying.
 
 These include:
@@ -117,7 +117,7 @@ These include:
 These are valuable because they reveal hidden mechanisms.
 But they also contain hype, selection bias, and product-specific baggage.
 
-### Tier C — design judgment
+### Tier C - design judgment
 This includes our conclusions about:
 - what Talos should adopt
 - what Talos should adapt carefully
@@ -130,7 +130,7 @@ Opus must keep these layers separate.
 
 ---
 
-## 5. Source inventory — what to give Opus
+## 5. Source inventory - what to give Opus
 
 This section is the practical source pack.
 
@@ -399,7 +399,7 @@ These conflict with Talos identity:
 
 This section should be read by Opus carefully.
 
-### Danger 1 — copying vendor defenses as if they are product quality
+### Danger 1 - copying vendor defenses as if they are product quality
 Example:
 - fake-tool injection
 - DRM/attestation
@@ -408,18 +408,18 @@ Example:
 These may help a vendor defend a product.
 They do **not** make Talos more trustworthy.
 
-### Danger 2 — copying multi-agent spectacle instead of bounded competence
+### Danger 2 - copying multi-agent spectacle instead of bounded competence
 Talos is not trying to impress via worker theatrics.
 It is trying to become a reliable local operator.
 
-### Danger 3 — copying cloud economics mechanisms without need
+### Danger 3 - copying cloud economics mechanisms without need
 Prompt-cache optimization, compaction tricks, and mode latches may make sense in a hosted commercial product.
 Talos should only import them when they help **correctness, determinism, or local UX**, not because they look advanced.
 
-### Danger 4 — copying prompt behavior when runtime policy should exist in code
+### Danger 4 - copying prompt behavior when runtime policy should exist in code
 If a mechanism is critical to safety, correctness, or trust, it should not live only in prompt prose.
 
-### Danger 5 — copying educational abstractions straight into production runtime
+### Danger 5 - copying educational abstractions straight into production runtime
 The book is useful for understanding, but Talos needs stricter production harnessing than a learning framework.
 
 ---

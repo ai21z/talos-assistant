@@ -46,7 +46,7 @@ import java.util.Optional;
  *
  * <p>Design notes:
  * <ul>
- *   <li>No pre-injected RAG context — the model pulls context on demand via tools</li>
+ *   <li>No pre-injected RAG context - the model pulls context on demand via tools</li>
  *   <li>Uses {@link SystemPromptBuilder#forUnified()} for merged behavior rules</li>
  *   <li>Larger history budget (55%) since no RAG snippets compete for context space</li>
  *   <li>RagMode remains available via explicit {@code /mode rag}</li>
@@ -93,7 +93,7 @@ public final class UnifiedAssistantMode implements Mode {
         }
         contractMessages.add(ChatMessage.user(rawLine));
 
-        // System prompt — unified mode: tools + workspace + retrieval guidance
+        // System prompt - unified mode: tools + workspace + retrieval guidance
         boolean hasHistory = !history.isEmpty();
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
@@ -120,7 +120,7 @@ public final class UnifiedAssistantMode implements Mode {
         String system = promptBuilder.build();
 
         // Build structured conversation messages: system + history (+ pins) + user.
-        // Pins are deliberately absent from contractMessages above — pinned
+        // Pins are deliberately absent from contractMessages above - pinned
         // file CONTENT must never influence task classification.
         List<ChatMessage> messages = buildMessages(system, rawLine, history,
                 renderPinnedFilesBlock(ctx.pinnedFiles()));
@@ -168,7 +168,7 @@ public final class UnifiedAssistantMode implements Mode {
 
     /**
      * T802 variant: an optional {@code [PinnedFiles]} block rides as ONE
-     * user-role message immediately before the current user line — file
+     * user-role message immediately before the current user line - file
      * content arrives as conversation data, never as system authority.
      * Blank block ⇒ byte-identical to the 3-arg shape.
      */

@@ -29,7 +29,7 @@ public record ToolContext(Path workspace, Sandbox sandbox, Config config) {
 
     /**
      * Resolve a user-supplied relative path against the workspace root.
-     * Does NOT check sandbox policy — caller must call
+     * Does NOT check sandbox policy - caller must call
      * {@code sandbox().allowedPath()} on the result before I/O.
      */
     public Path resolve(String relativePath) {

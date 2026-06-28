@@ -20,11 +20,11 @@ class RepetitionBreakerTest {
     @Test
     void tripsAfterMaxRepeats() {
         RepetitionBreaker b = new RepetitionBreaker(8, 3, 64);
-        // 8-char probe "ABCDEFGH" emitted 3 times in a row (24 chars) —
+        // 8-char probe "ABCDEFGH" emitted 3 times in a row (24 chars) -
         // the third occurrence makes count == maxRepeats == 3 → trip.
-        assertFalse(b.onChunk("ABCDEFGH"), "1st emission — below threshold");
-        assertFalse(b.onChunk("ABCDEFGH"), "2nd emission — still below");
-        assertTrue(b.onChunk("ABCDEFGH"),  "3rd emission — trips");
+        assertFalse(b.onChunk("ABCDEFGH"), "1st emission - below threshold");
+        assertFalse(b.onChunk("ABCDEFGH"), "2nd emission - still below");
+        assertTrue(b.onChunk("ABCDEFGH"),  "3rd emission - trips");
         assertTrue(b.tripped());
     }
 
@@ -37,7 +37,7 @@ class RepetitionBreakerTest {
     void tripsOnTranscriptObservedPattern() {
         RepetitionBreaker b = new RepetitionBreaker(); // defaults (48/6/2048)
         String probe = "The user's prompt is 'The user's prompt is '";
-        // probe is 44 chars — slightly shorter than the 48-char default.
+        // probe is 44 chars - slightly shorter than the 48-char default.
         // Pad with the typical trailing quote + space so the 48-char window
         // captures a full cycle including the boundary.
         String loop = probe + " 'The";  // 50 chars; emit 20 repeats.
@@ -51,7 +51,7 @@ class RepetitionBreakerTest {
 
     /**
      * Legitimate prose containing the same phrase twice (e.g., emphatic
-     * repetition in an explanation) must NOT trip — only pathological
+     * repetition in an explanation) must NOT trip - only pathological
      * sustained repetition should.
      */
     @Test
@@ -75,12 +75,12 @@ class RepetitionBreakerTest {
     void nonOverlappingScanDoesNotOverFire() {
         RepetitionBreaker b = new RepetitionBreaker(4, 3, 64);
         // "ABABABAB" has "AB" 4x overlapping, but "ABAB" non-overlapping
-        // only 2x — under threshold of 3.
+        // only 2x - under threshold of 3.
         b.onChunk("ABABABABABABABAB"); // probe = last 4 = "ABAB"
         // "ABAB" appears non-overlapping 4 times in the string → trips at 3.
         // That's expected: the model IS emitting a sustained "ABAB" pattern.
         assertTrue(b.tripped(),
-                "sustained ABAB pattern non-overlapping 4x trips at 3 — degenerate output");
+                "sustained ABAB pattern non-overlapping 4x trips at 3 - degenerate output");
     }
 
     /**
@@ -95,7 +95,7 @@ class RepetitionBreakerTest {
         b.onChunk("ABCDEFGH");
         b.onChunk("ABCDEFGH");
         assertTrue(b.onChunk("ABCDEFGH"), "first trip reports true");
-        assertFalse(b.onChunk("ABCDEFGH"), "already tripped — no second true");
+        assertFalse(b.onChunk("ABCDEFGH"), "already tripped - no second true");
         assertFalse(b.onChunk("different content"), "no duplicate trip signal");
         assertTrue(b.tripped(), "but tripped state is permanent");
     }
@@ -123,7 +123,7 @@ class RepetitionBreakerTest {
 
     /**
      * Old repetitions that have scrolled out of the rolling window must not
-     * keep the breaker tripped — but once tripped, it stays tripped. This
+     * keep the breaker tripped - but once tripped, it stays tripped. This
      * test confirms that the WINDOW itself is correctly bounded (no
      * unbounded memory growth) without weakening the monotonic trip contract.
      */

@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * and file-fallback paths. Commands that need Ollama/CacheDb are
  * tested for their error handling (graceful failure, not crashes).
  */
-@DisplayName("REPL commands — infrastructure-dependent")
+@DisplayName("REPL commands - infrastructure-dependent")
 class InfraCommandsTest {
 
     @TempDir
@@ -296,7 +296,7 @@ class InfraCommandsTest {
             if (r instanceof Result.Ok ok) {
                 assertTrue(ok.text.contains("test content here"));
             }
-            // If index lookup throws, we get an error — that's also acceptable
+            // If index lookup throws, we get an error - that's also acceptable
         }
 
         @Test void file_fallback_rejects_workspace_escape() throws Exception {
@@ -472,7 +472,7 @@ class InfraCommandsTest {
             }
 
             // FilesCommand needs ctx.rag().getIndexer().indexDirFor(workspace)
-            // which won't resolve to our temp dir — so this tests the error path
+            // which won't resolve to our temp dir - so this tests the error path
             var cmd = new FilesCommand(ws);
             Result r = cmd.execute("", ctx);
             assertNotNull(r);
@@ -514,7 +514,7 @@ class InfraCommandsTest {
         @Test void reindex_graceful_failure() {
             var cmd = new ReindexCommand(ws);
             Result r = cmd.execute("", ctx);
-            // Without Ollama, reindex will fail — should return error, not crash
+            // Without Ollama, reindex will fail - should return error, not crash
             assertNotNull(r);
         }
 

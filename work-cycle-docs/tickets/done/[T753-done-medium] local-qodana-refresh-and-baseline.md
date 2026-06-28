@@ -23,12 +23,12 @@ families. The 0.10.1 packet disclosed the staleness (owner-approved); the
   `branchStatus: branch-mismatch`; linter QDJVM 253.31821; 159 issues
   (155 HIGH warning, 4 MODERATE note).
 - Noise families measured from the SARIF: 51× RegExpUnnecessaryNonCapturingGroup
-  (44 in `runtime/MutationIntent.java` — stylistic), 32× AutoCloseableResource
+  (44 in `runtime/MutationIntent.java` - stylistic), 32× AutoCloseableResource
   (28 = intentional shared-LlmClient lifecycle pattern).
 - Fully local tooling verified: `qodanaLocal` (build.gradle.kts:1189-1209) =
   `docker run jetbrains/qodana-jvm-community:2026.1` with volume mounts to
   `.qodana/` and persistent cache volumes; `qodana.yaml` uses the free
-  community linter, profile `qodana.starter`, **no cloud token anywhere** —
+  community linter, profile `qodana.starter`, **no cloud token anywhere** -
   satisfies the owner's local-only constraint.
 - `writeQodanaSummary` is fail-soft and re-reads `.qodana/` outputs; running
   it post-scan refreshes `build/reports/talos/qodana-summary.json` with
@@ -36,7 +36,7 @@ families. The 0.10.1 packet disclosed the staleness (owner-approved); the
 
 ## Architectural Hypothesis
 
-n/a — quality-evidence refresh ticket.
+n/a - quality-evidence refresh ticket.
 
 ## Architecture Metadata
 
@@ -53,7 +53,7 @@ Refactor scope: qodana.yaml only (+ regenerated reports)
 
 ## Required Behavior
 
-1. Run AFTER T752 (fix first, then baseline only residual noise — reverse
+1. Run AFTER T752 (fix first, then baseline only residual noise - reverse
    order churns qodana.yaml).
 2. `.\gradlew.bat qodanaLocal` on the post-T752 head (Docker must be running;
    first run pulls the image).
@@ -61,8 +61,8 @@ Refactor scope: qodana.yaml only (+ regenerated reports)
    accepted-pattern suppressions, noise families. Add commented suppressions/
    excludes to `qodana.yaml` for the two measured noise families
    (RegExpUnnecessaryNonCapturingGroup scoped to MutationIntent; shared
-   LlmClient AutoCloseableResource pattern) — comments must cite this ticket.
-4. `.\gradlew.bat writeQodanaSummary` (or talosQualitySummaries) — verify the
+   LlmClient AutoCloseableResource pattern) - comments must cite this ticket.
+4. `.\gradlew.bat writeQodanaSummary` (or talosQualitySummaries) - verify the
    refreshed summary reports current branch/SHA with no revision-mismatch.
 5. Record the triage table (rule → count → bucket → action) in this ticket's
    completion evidence.
@@ -96,7 +96,7 @@ Refactor scope: qodana.yaml only (+ regenerated reports)
 - `writeQodanaSummary` regenerated: `summaryStatus:
   qodana-results-match-current-candidate`, provenance branch
   `codex/wave1-stability-and-cycle` rev `b6f2641f`,
-  `revisionStatus: matches-current-revision` — staleness eliminated.
+  `revisionStatus: matches-current-revision` - staleness eliminated.
 - Triage table (169 findings, 0 critical, 165 HIGH-warning / 4 MODERATE):
 
   | Rule | Count | Bucket | Action |

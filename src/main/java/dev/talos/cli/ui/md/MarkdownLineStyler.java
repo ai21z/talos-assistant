@@ -6,15 +6,15 @@ import dev.talos.cli.ui.CliTheme;
  * Renderer-owned markdown row styling (T777).
  *
  * <p>Operates on already-wrapped plain rows, so styling can never disturb
- * column math. Markers stay visible — styling only colors the original
- * characters, never removes them — so stripping ANSI from a styled row
+ * column math. Markers stay visible - styling only colors the original
+ * characters, never removes them - so stripping ANSI from a styled row
  * always yields the plain row byte-for-byte, and transcript string-matching
  * (PTY evidence chain, talosbench) cannot regress. Rows with no markdown
  * tokens pass through with zero ANSI added, which keeps Talos chrome lines
  * (`✓ Edited ...`, `[Used N tool(s)...]`) byte-identical.
  *
  * <p>Inline span state (code/bold/italic) carries across the wrapped rows
- * of one logical line and resets at {@link #lineEnd()} — markdown inline
+ * of one logical line and resets at {@link #lineEnd()} - markdown inline
  * spans do not cross line breaks.
  */
 final class MarkdownLineStyler {

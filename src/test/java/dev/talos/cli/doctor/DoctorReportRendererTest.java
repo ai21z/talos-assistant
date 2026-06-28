@@ -7,7 +7,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** T784: report format — one ASCII line per probe, hints only on FAIL. */
+/** T784: report format - one ASCII line per probe, hints only on FAIL. */
 class DoctorReportRendererTest {
 
     @Test

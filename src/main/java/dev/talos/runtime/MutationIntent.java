@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  *
  * <p>This is intentionally lexical and conservative: it should only fire when
  * the user's own prompt clearly asks for a modification. Runtime guards must
- * consult the original user request only — never assistant messages or tool
+ * consult the original user request only - never assistant messages or tool
  * results.
  */
 public final class MutationIntent {

@@ -7,9 +7,9 @@ import java.util.List;
  *
  * <p>A chunk is either:
  * <ul>
- *   <li><b>Text</b> — a token fragment ({@code text} is non-empty, {@code toolCalls} is null)</li>
- *   <li><b>Tool calls</b> — one or more native tool invocations ({@code toolCalls} is non-empty)</li>
- *   <li><b>EOS</b> — end-of-stream sentinel ({@code done} is true)</li>
+ *   <li><b>Text</b> - a token fragment ({@code text} is non-empty, {@code toolCalls} is null)</li>
+ *   <li><b>Tool calls</b> - one or more native tool invocations ({@code toolCalls} is non-empty)</li>
+ *   <li><b>EOS</b> - end-of-stream sentinel ({@code done} is true)</li>
  * </ul>
  *
  * <p>Backward-compatible: existing code that only uses {@code text} and {@code done}

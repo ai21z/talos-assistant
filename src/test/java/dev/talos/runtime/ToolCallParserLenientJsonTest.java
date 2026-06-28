@@ -55,13 +55,13 @@ class ToolCallParserLenientJsonTest {
         assertEquals(1, calls.size(), "Non-standard backslash escape must not drop the tool call");
         assertEquals("talos.read_file", calls.get(0).toolName());
         // The parser accepts the escape; it is fine whether the parsed value
-        // is "cost_$100.md" or "cost_\\$100.md" — we only pin non-rejection.
+        // is "cost_$100.md" or "cost_\\$100.md" - we only pin non-rejection.
         assertNotNull(calls.get(0).parameters().get("path"));
     }
 
     @Test
     void parsesPayloadWithLiteralTabInsideStringValue() {
-        // Literal HT (0x09) inside a JSON string value — same RFC-8259
+        // Literal HT (0x09) inside a JSON string value - same RFC-8259
         // category as LF; another common shape from code-tuned models.
         String response = "```json\n"
                 + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"indent.txt\",\"content\":\"col1\tcol2\"}}\n"

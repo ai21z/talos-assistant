@@ -22,8 +22,8 @@ lists). Acceptable alternatives if Sonargraph is unavailable:
 
 - **IntelliJ IDEA** → *Analyze → Dependencies* / *Dependency Matrix* (DSM) and
   the diagram view (built-in, fastest to start).
-- **Structure101** (commercial) — strongest for cycle/slice visualization.
-- **jQAssistant + Neo4j** — query-driven, good for reproducible exports.
+- **Structure101** (commercial) - strongest for cycle/slice visualization.
+- **jQAssistant + Neo4j** - query-driven, good for reproducible exports.
 
 Whatever tool is used, point it at the **compiled production classes only**
 (`build/classes/java/main`), not tests, so the picture matches the ArchUnit
@@ -70,7 +70,7 @@ reports) are listed so the reviewer can confirm the tool agrees:
 | `ConversationManager` | `core.context` | 5 | 9 | should stay contained, CLI-free |
 
 If the tool's numbers differ materially from these, that gap is itself a finding
-(different metric definition, or the build is stale — rebuild and recheck).
+(different metric definition, or the build is stale - rebuild and recheck).
 
 ## 3. Questions to answer
 
@@ -89,7 +89,7 @@ should confirm or refute it.
    Expected: `runtime.task.TaskContract` (66), `tools.ToolCall` (66),
    `spi.types.ChatMessage` (60), `core.Config` (59).
 4. **Is policy moving out of `AssistantTurnExecutor`?**
-   Expected: not yet — fan-out 63 indicates it is still a warehouse. Look for
+   Expected: not yet - fan-out 63 indicates it is still a warehouse. Look for
    policy logic that belongs in `runtime.policy`. This is the headline question.
 5. **Do tools depend upward?**
    Expected: NO. `tools → runtime` and `tools → cli` must be empty (both are hard
@@ -106,18 +106,18 @@ should confirm or refute it.
 Save under `local/manual-testing/<audit-id>/architecture-visuals/` (outside the
 tracked tree; do not commit raw tool exports). Name files deterministically.
 
-1. **`package-dependency-matrix.png`** — full `dev.talos.*` DSM. Confirm the
+1. **`package-dependency-matrix.png`** - full `dev.talos.*` DSM. Confirm the
    lower-left triangle is empty for `safety`/`spi` rows.
-2. **`assistantturnexecutor-class-graph.png`** — outgoing class graph for
+2. **`assistantturnexecutor-class-graph.png`** - outgoing class graph for
    `AssistantTurnExecutor`, depth 1.
-3. **`runtime-policy-graph.png`** — `runtime.policy` internal + external edges.
-4. **`runtime-toolcall-graph.png`** — `runtime.toolcall` graph; highlight cycles
+3. **`runtime-policy-graph.png`** - `runtime.policy` internal + external edges.
+4. **`runtime-toolcall-graph.png`** - `runtime.toolcall` graph; highlight cycles
    to `policy`/`verification`.
-5. **`core-context-graph.png`** — `core.context` graph; confirm no `cli` edges.
-6. **`tools-graph.png`** — `dev.talos.tools` graph; confirm no upward edges.
-7. **`top-complexity-list.csv`** (or `.png`) — top fan-out/fan-in/complexity
+5. **`core-context-graph.png`** - `core.context` graph; confirm no `cli` edges.
+6. **`tools-graph.png`** - `dev.talos.tools` graph; confirm no upward edges.
+7. **`top-complexity-list.csv`** (or `.png`) - top fan-out/fan-in/complexity
    table for cross-checking section 2/3 numbers.
-8. **`cycles-list.png`** — the tool's cycle report at package + subpackage level.
+8. **`cycles-list.png`** - the tool's cycle report at package + subpackage level.
 
 ## 5. How to interpret findings
 
@@ -127,7 +127,7 @@ and the existing hard guards.
 **High severity**
 - Any new edge that violates a current hard guard (e.g. `core → cli`,
   `tools → cli`, `tools → runtime`, `safety → anything`, `spi → upper`,
-  `runtime.policy → cli`). This means the build is broken or the export is stale —
+  `runtime.policy → cli`). This means the build is broken or the export is stale -
   reconcile with ArchUnit immediately.
 - New cross-layer top-level cycles beyond the known `core ↔ tools`.
 - Growth of `AssistantTurnExecutor` fan-out beyond ~63, or new policy logic
@@ -148,7 +148,7 @@ and the existing hard guards.
 
 **Acceptable coupling (do not file tickets)**
 - `tools → core` (38), `runtime → tools` (151), `runtime → core` (64),
-  `cli → runtime/core` — all are correct downward/invocation directions.
+  `cli → runtime/core` - all are correct downward/invocation directions.
 - High fan-in on `TaskContract`, `ToolCall`, `ChatMessage`, `Config`.
 - `api`/`app` reaching multiple layers (seam + composition root, unconstrained
   by design).
@@ -157,7 +157,7 @@ and the existing hard guards.
 ## 6. How findings become tickets
 
 1. **Reconcile first.** If a visual finding contradicts an ArchUnit hard guard,
-   it is an evidence/staleness problem, not a new ticket — rebuild and re-export
+   it is an evidence/staleness problem, not a new ticket - rebuild and re-export
    before believing the tool.
 2. **Classify** each genuine finding by the severity rubric above.
 3. **De-duplicate** against `docs/architecture/12` (top-10 refactor candidates)
@@ -165,7 +165,7 @@ and the existing hard guards.
    *confirm* existing findings, not create new ones.
 4. **File only net-new or higher-confidence findings.** Each ticket records:
    target class/package, the visual evidence file, severity, why it matters, the
-   suggested direction, and priority — matching the schema already used in doc 12.
+   suggested direction, and priority - matching the schema already used in doc 12.
 5. **Promotion to a hard guard** stays governed: a boundary only becomes an
    ArchUnit guard after its edge count is driven to zero by a real refactor, and
    adding a matching `build.gradle.kts` regex entry is a separate, approval-gated

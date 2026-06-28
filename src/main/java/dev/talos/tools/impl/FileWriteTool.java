@@ -16,13 +16,13 @@ import java.util.Map;
  * workspace and pass the sandbox allow/deny checks. Parent directories
  * are created automatically if they don't exist.
  *
- * <p>Risk level: {@link ToolRiskLevel#WRITE} — requires user approval
+ * <p>Risk level: {@link ToolRiskLevel#WRITE} - requires user approval
  * via the {@link dev.talos.runtime.ApprovalGate}.
  *
  * <p>Parameters:
  * <ul>
- *   <li>{@code path} — relative path to the file within the workspace (required)</li>
- *   <li>{@code content} — the full file content to write (required)</li>
+ *   <li>{@code path} - relative path to the file within the workspace (required)</li>
+ *   <li>{@code content} - the full file content to write (required)</li>
  * </ul>
  */
 public final class FileWriteTool implements TalosTool {
@@ -117,7 +117,7 @@ public final class FileWriteTool implements TalosTool {
             boolean existed = Files.exists(resolved);
 
             // Undo snapshots moved to the governed checkpoint machinery
-            // (T795/T796) — captured pre-approval by the runtime, not here.
+            // (T795/T796) - captured pre-approval by the runtime, not here.
             Files.writeString(resolved, content);
 
             long lines = content.chars().filter(c -> c == '\n').count() + (content.isEmpty() ? 0 : 1);

@@ -6,7 +6,7 @@ import dev.talos.runtime.Result;
 import java.nio.file.Path;
 import java.util.Optional;
 
-/** Strategy interface for REPL “modes”. Pure, no printing — return Result for RenderEngine. */
+/** Strategy interface for REPL “modes”. Pure, no printing - return Result for RenderEngine. */
 public interface Mode {
     /** Short, user-facing name (ask, rag, dev, web, auto, ...). */
     String name();

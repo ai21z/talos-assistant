@@ -198,19 +198,19 @@ class ArchitectureSpineAccessReportTest {
         boolean wideIn = fanIn >= 30;
         boolean heavyCalls = callsFrom >= 150;
         if (wideOut && wideIn) {
-            return "Possible god-object risk: high fan-out AND high fan-in — both an orchestrator and a "
+            return "Possible god-object risk: high fan-out AND high fan-in - both an orchestrator and a "
                     + "magnet; review for responsibility split.";
         }
         if (wideOut && heavyCalls) {
-            return "Possible god-object risk: high fan-out with heavy outgoing calls — likely doing too "
+            return "Possible god-object risk: high fan-out with heavy outgoing calls - likely doing too "
                     + "much; candidate for delegation/extraction.";
         }
         if (wideIn) {
-            return "Well-used hub: high fan-in but contained fan-out — acceptable as a shared "
+            return "Well-used hub: high fan-in but contained fan-out - acceptable as a shared "
                     + "type/contract if it stays thin.";
         }
         if (wideOut) {
-            return "Coordinator with wide fan-out but modest fan-in — acceptable for an orchestrator; "
+            return "Coordinator with wide fan-out but modest fan-in - acceptable for an orchestrator; "
                     + "watch growth.";
         }
         return "Reasonably contained: fan-in and fan-out are within moderate bounds.";
@@ -245,7 +245,7 @@ class ArchitectureSpineAccessReportTest {
             } else {
                 sb.append('`').append(e.getKey()).append('`');
             }
-            sb.append(" — ").append(e.getValue()).append('\n');
+            sb.append(" - ").append(e.getValue()).append('\n');
         }
         sb.append('\n');
     }
