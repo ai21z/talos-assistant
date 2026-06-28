@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T896] Editing an existing file is classified FILE_EDIT, not FILE_CREATE, when the
+  instruction body uses a content-addition phrase. "Edit index.html to add a Contact
+  section" now classifies as an edit (previously the "add a" CREATE_MARKER flipped it
+  to create). The classifier prefers FILE_EDIT when an explicit edit verb leads before
+  any create verb; genuine "Create ..."/"Build ..." requests are unchanged.
 - [T895] Read-then-copy no longer false-blocks: a "read X and create Y" request now
   projects the read source X as source evidence (read-only) instead of a required
   mutation target, so writing only Y satisfies the contract (no `BLOCKED_BY_POLICY`

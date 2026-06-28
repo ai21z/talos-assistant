@@ -304,6 +304,21 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void editExistingFileToAddSectionStaysFileEditContract() {
+        // T896: an explicit edit verb on a named file is FILE_EDIT even when the body says
+        // "add a/the <section>" (content addition inside the file, not a new file).
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Edit index.html to add a Contact section: an <h2>Contact</h2> heading and a paragraph. "
+                        + "Keep all existing content.");
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationAllowed());
+
+        TaskContract readme = TaskContractResolver.fromUserRequest(
+                "Edit README.md to add the install steps.");
+        assertEquals(TaskType.FILE_EDIT, readme.type());
+    }
+
+    @Test
     void readThenUpdateMeQuestionStaysReadOnly() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Read README.md and update me on what it says.");

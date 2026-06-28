@@ -277,6 +277,14 @@ public final class TaskContractResolver {
     private static final Pattern READ_CLAUSE_BEFORE_MUTATION = Pattern.compile(
             "(?i)\\b(?:read|open)\\s+(.{0,120}?)\\b(?:and|then)\\b");
 
+    // T896: distinguish a leading EDIT verb from a CREATE verb so an explicit edit of an existing
+    // named file ("Edit index.html to add a Contact section") classifies FILE_EDIT even though
+    // "add a" is a CREATE_MARKER describing content to add INSIDE the file.
+    private static final Pattern EDIT_LEADING_VERB = Pattern.compile(
+            "(?i)\\b(?:edit|modify|change|update|fix|rewrite|replace|append|remove|delete|adjust|tweak|restyle|redesign|refactor)\\b");
+    private static final Pattern CREATE_LEADING_VERB = Pattern.compile(
+            "(?i)\\b(?:create|write|build|generate|scaffold|make|add)\\b");
+
     private static final Pattern PYTHON_COMMAND_EXECUTION = Pattern.compile(
             "(?i)(?:\\b(?:run|execute|try|probe|verify|check|test)\\s+"
                     + "(?:(?:python3?|py)\\b|pytest\\b|(?:this|the)\\s+python\\s+file\\b|"
@@ -1046,6 +1054,16 @@ public final class TaskContractResolver {
         return fragment.substring(0, end);
     }
 
+    // T896: true when the leading mutation verb is an EDIT verb occurring before any CREATE verb.
+    // An explicit edit of a named existing file stays an edit even if the body says "add a/the X".
+    private static boolean startsWithEditNotCreateVerb(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        Matcher edit = EDIT_LEADING_VERB.matcher(lower);
+        if (!edit.find()) return false;
+        Matcher create = CREATE_LEADING_VERB.matcher(lower);
+        return !create.find() || edit.start() < create.start();
+    }
+
     private static TaskType classify(String lower, boolean mutationRequested, String classificationReason) {
         if (mutationRequested) {
             if ("explicit-review-and-fix-request".equals(classificationReason)) {
@@ -1057,7 +1075,13 @@ public final class TaskContractResolver {
             if (looksCreateMissingFilesRequest(lower)) {
                 return TaskType.FILE_CREATE;
             }
-            return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
+            // T896: when a CREATE_MARKER is present but an explicit EDIT verb leads before any
+            // CREATE verb, the marker describes content added INSIDE an existing file (e.g. "Edit
+            // index.html to add a Contact section"), so it is an edit, not a new-file create.
+            if (containsAny(lower, CREATE_MARKERS)) {
+                return startsWithEditNotCreateVerb(lower) ? TaskType.FILE_EDIT : TaskType.FILE_CREATE;
+            }
+            return TaskType.FILE_EDIT;
         }
         if (looksExplicitNoInspectionDirectAnswer(lower)) {
             return TaskType.SMALL_TALK;
