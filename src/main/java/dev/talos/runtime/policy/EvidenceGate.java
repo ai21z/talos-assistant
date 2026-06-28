@@ -120,7 +120,7 @@ public final class EvidenceGate {
         if (!basename.equals("style.css") && !basename.equals("script.js")) {
             return false; // only the conventional inferred satellites are eligible
         }
-        if (lowerRequest.contains(basename)) {
+        if (containsWord(lowerRequest, basename)) {
             return false; // user named it explicitly -> keep requiring it
         }
         return !targetExistsOnDisk(workspace, target); // drop only when absent on disk
