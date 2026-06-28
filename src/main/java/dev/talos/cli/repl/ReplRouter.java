@@ -12,6 +12,7 @@ import dev.talos.runtime.TurnResult;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -129,6 +130,14 @@ public final class ReplRouter {
     public boolean tryHandlePrompt(String rawLine) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
+        // T898: a shell invocation of the talos binary typed into the prompt
+        // (e.g. "talos setup models ...") is a user mistake. Nudge them to their
+        // terminal instead of spending a model turn on a confused answer.
+        Optional<String> shellHint = ShellCommandHint.detect(rawLine);
+        if (shellHint.isPresent()) {
+            render.render(new Result.TrustedInfo(shellHint.get()));
+            return true;
+        }
         processPrompt(rawLine);
         return true;
     }
