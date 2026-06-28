@@ -1,10 +1,18 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.runtime.Result;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
+import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -178,6 +186,53 @@ class AskModeTest {
         assertTrue(r2.isPresent());
     }
 
+    @Test
+    void mutationRequestReturnsReadOnlyNudgeWithoutCallingLlm() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                engineConfig(),
+                List.of(new LlmClient.StreamResult("should not be called", List.of())),
+                8192);
+        var ctx = Context.builder(engineConfig())
+                .llm(recorded.client())
+                .toolRegistry(fileToolRegistry())
+                .build();
+        var mode = new AskMode();
+
+        Optional<Result> result = mode.handle("Create README.md with a short note.", WS, ctx);
+
+        assertTrue(result.isPresent());
+        assertTrue(result.get().toString().contains(AskMode.READ_ONLY_MUTATION_NUDGE));
+        assertTrue(recorded.requests().isEmpty(), "Ask mutation nudge must not call the LLM");
+    }
+
+    @Test
+    void askLlmRequestUsesReadOnlyNativeAndPromptToolSurface() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                engineConfig(),
+                List.of(new LlmClient.StreamResult("read-only answer", List.of())),
+                8192);
+        var ctx = Context.builder(engineConfig())
+                .llm(recorded.client())
+                .toolRegistry(fileToolRegistry())
+                .build();
+        var mode = new AskMode();
+
+        Optional<Result> result = mode.handle("Read README.md and summarize it.", WS, ctx);
+
+        assertTrue(result.isPresent());
+        assertEquals(1, recorded.requests().size());
+        ChatRequest request = recorded.requests().getFirst();
+        assertEquals(List.of("talos.read_file"), toolNames(request));
+        String prompt = joinedMessages(request);
+        assertTrue(prompt.contains("Ask Mode"));
+        assertTrue(prompt.contains("read-only"));
+        assertFalse(prompt.contains("- **talos.write_file**"), prompt);
+        assertFalse(prompt.contains("- **talos.edit_file**"), prompt);
+        assertFalse(prompt.contains("FILE CREATION AND MODIFICATION"), prompt);
+        assertFalse(prompt.contains("You CAN write files"), prompt);
+        assertFalse(prompt.contains("ALWAYS call the tool"), prompt);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Fast-path tests (exact echo, think tags) - no memory interaction
     // ═══════════════════════════════════════════════════════════════════════
@@ -242,6 +297,32 @@ class AskModeTest {
     @Test
     void name_is_ask() {
         assertEquals("ask", new AskMode().name());
+    }
+
+    private static Config engineConfig() {
+        Config cfg = placeholderConfig();
+        Map<String, Object> tools = new LinkedHashMap<>();
+        tools.put("native_calling", true);
+        cfg.data.put("tools", tools);
+        return cfg;
+    }
+
+    private static ToolRegistry fileToolRegistry() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        return registry;
+    }
+
+    private static List<String> toolNames(ChatRequest request) {
+        return request.tools.stream().map(ToolSpec::name).sorted().toList();
+    }
+
+    private static String joinedMessages(ChatRequest request) {
+        return request.messages.stream()
+                .map(ChatMessage::content)
+                .reduce("", (left, right) -> left + "\n" + right);
     }
 }
 

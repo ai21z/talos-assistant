@@ -690,11 +690,15 @@ class SystemPromptBuilderTest {
     }
 
     @Test
-    void askRulesContainWriteFileReinforcement() {
+    void askRulesContainReadOnlyModeBoundary() {
         String prompt = SystemPromptBuilder.forAsk().build();
 
-        assertTrue(prompt.contains("NEVER output code blocks as a substitute"),
-                "Ask rules should reinforce never dumping code blocks");
+        assertTrue(prompt.contains("Behavior Rules (Ask Mode)"),
+                "Ask rules should identify Ask mode");
+        assertTrue(prompt.contains("Ask is read-only"),
+                "Ask rules should reinforce the read-only boundary");
+        assertTrue(prompt.contains("switch to `/mode agent`"),
+                "Ask rules should point mutation requests to Agent");
     }
 
     @Test
