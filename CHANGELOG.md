@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+- [T901] Live "working" indicator during model generation and the tool loop. The
+  spinner started once before a turn and stopped on first output, never resuming, so
+  multi-tool / long-generation rounds (observed at 144s and 271s) showed a bare cursor.
+  The tool-progress sink now re-arms the spinner after each tool line so the following
+  generation wait shows activity; the tool line clears any running spinner first so a
+  legacy carriage-return frame never collides (single-writer discipline). Non-interactive
+  output stays byte-identical.
+- [T900] Read-only turns (Ask/Plan) no longer require reading inferred static-web
+  satellites that are absent on disk. Plan-mode "redesign this page" on a single-file
+  index.html projected the conventional triplet and then falsely blocked for not reading
+  nonexistent style.css/script.js. A disk-aware filter drops a conventional satellite
+  (style.css/script.js) from the read-evidence set only when it is absent on disk AND was
+  not named by the user; present, named, protected, path-existence, and non-satellite
+  targets keep their requirement, and genuine misses still fail closed. Read-evidence
+  sibling of T897 (the mutation facet stays open).
+- [T899] /set model on a downloaded-but-unconfigured GGUF now gives actionable switch
+  guidance instead of a bare 404. When the requested name matches an on-disk GGUF
+  (case- and .gguf-suffix-insensitive) it explains the file is downloaded-but-unconfigured,
+  that managed llama.cpp binds one GGUF at launch (no hot-swap), and the exact
+  `talos setup models`/config-edit + restart to switch. No false promise of an in-REPL
+  hot-swap.
+- [T898] A shell invocation of the talos binary typed into the REPL prompt (e.g.
+  "talos setup models --write --force") now prints a hint to run it in the terminal
+  instead of routing it to the model (which previously produced a confused/hallucinated
+  answer). Narrow detection: a leading talos-binary token plus a real subcommand or flag;
+  a normal question that merely mentions "talos" is untouched.
 - [T896] Editing an existing file is classified FILE_EDIT, not FILE_CREATE, when the
   instruction body uses a content-addition phrase. "Edit index.html to add a Contact
   section" now classifies as an edit (previously the "add a" CREATE_MARKER flipped it
