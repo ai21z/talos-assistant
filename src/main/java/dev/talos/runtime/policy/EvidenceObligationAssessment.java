@@ -32,9 +32,24 @@ public record EvidenceObligationAssessment(
                     EvidenceObligationVerifier.Result.satisfied("No current-turn plan was available."));
         }
         EvidenceObligation obligation = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        Set<String> targets = evidenceTargets(plan.taskContract());
+        if (obligation == EvidenceObligation.READ_TARGET_REQUIRED) {
+            // T900: never require reading an inferred static-web satellite that is not on
+            // disk and was not named. Requiring a read of a nonexistent file is always a
+            // false block (e.g. plan-mode "redesign this page" on a single-file index.html).
+            targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(
+                    plan.taskContract(), targets, workspace);
+            if (targets.isEmpty()) {
+                return new EvidenceObligationAssessment(
+                        obligation,
+                        EvidenceObligationVerifier.Result.satisfied(
+                                "Inferred static-web satellites were absent on disk; "
+                                        + "no readable target was required."));
+            }
+        }
         EvidenceObligationVerifier.Result result = EvidenceObligationVerifier.verify(
                 obligation,
-                evidenceTargets(plan.taskContract()),
+                targets,
                 evidenceOutcomes(loopResult),
                 workspace);
         return new EvidenceObligationAssessment(obligation, result);

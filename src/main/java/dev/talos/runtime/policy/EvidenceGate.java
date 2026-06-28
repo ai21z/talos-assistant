@@ -5,10 +5,12 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.core.Config;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Pure evidence-obligation policy for current-turn handoff decisions.
@@ -77,6 +79,61 @@ public final class EvidenceGate {
             }
         }
         return List.copyOf(targets);
+    }
+
+    /**
+     * T900: read-evidence targets minus inferred conventional static-web satellites
+     * ({@code style.css} / {@code script.js}) that do NOT exist on disk and were NOT
+     * named by the user. You cannot read a file that is not there, so requiring it as
+     * read evidence falsely blocks a read-only turn (observed live: plan-mode
+     * "redesign this page" on a single-file index.html demanded reading nonexistent
+     * style.css/script.js).
+     *
+     * <p>This is deliberately narrow and trust-preserving: the conventional triplet is
+     * only ever projected when the user named no files, so a satellite that is present
+     * on disk OR explicitly named is always kept (still required). Non-satellite
+     * targets are never touched. Create-from-scratch is unaffected because it is a
+     * mutation contract, not a read-evidence one.
+     */
+    public static Set<String> withoutAbsentInferredStaticWebSatellites(
+            TaskContract contract, Set<String> targets, Path workspace) {
+        if (targets == null || targets.isEmpty() || workspace == null || contract == null) {
+            return targets == null ? Set.of() : targets;
+        }
+        String lowerRequest = contract.originalUserRequest() == null
+                ? ""
+                : contract.originalUserRequest().toLowerCase(Locale.ROOT);
+        LinkedHashSet<String> kept = new LinkedHashSet<>();
+        for (String target : targets) {
+            if (!isAbsentInferredStaticWebSatellite(target, lowerRequest, workspace)) {
+                kept.add(target);
+            }
+        }
+        return Set.copyOf(kept);
+    }
+
+    private static boolean isAbsentInferredStaticWebSatellite(
+            String target, String lowerRequest, Path workspace) {
+        if (target == null || target.isBlank()) return false;
+        String normalized = target.replace('\\', '/').toLowerCase(Locale.ROOT);
+        String basename = normalized.substring(normalized.lastIndexOf('/') + 1);
+        if (!basename.equals("style.css") && !basename.equals("script.js")) {
+            return false; // only the conventional inferred satellites are eligible
+        }
+        if (lowerRequest.contains(basename)) {
+            return false; // user named it explicitly -> keep requiring it
+        }
+        return !targetExistsOnDisk(workspace, target); // drop only when absent on disk
+    }
+
+    private static boolean targetExistsOnDisk(Path workspace, String target) {
+        try {
+            Path base = workspace.toAbsolutePath().normalize();
+            Path resolved = base.resolve(target).toAbsolutePath().normalize();
+            return resolved.startsWith(base) && Files.exists(resolved);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     public static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract) {
