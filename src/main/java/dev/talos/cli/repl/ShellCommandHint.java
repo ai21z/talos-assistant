@@ -45,12 +45,37 @@ public final class ShellCommandHint {
         String[] tokens = trimmed.split("\\s+");
         if (tokens.length < 2) return Optional.empty(); // bare "talos" is a normal word
 
-        String binary = tokens[0].toLowerCase(Locale.ROOT);
+        // T903: accept a path-qualified invocation (./talos, /usr/local/bin/talos,
+        // C:\...\talos.exe) by comparing the basename of the first token.
+        String binary = basename(tokens[0]).toLowerCase(Locale.ROOT);
         if (!BINARY_NAMES.contains(binary)) return Optional.empty();
 
         String second = tokens[1].toLowerCase(Locale.ROOT);
-        boolean looksShell = second.startsWith("-") || SUBCOMMANDS.contains(second);
+        boolean looksShell;
+        if (second.startsWith("-")) {
+            looksShell = true; // a flag second token, e.g. "talos -v"
+        } else if (SUBCOMMANDS.contains(second)) {
+            // T903: a subcommand alone, a short subcommand chain, or a subcommand
+            // with a flag is a shell command; longer prose that merely starts with a
+            // subcommand-homonym verb (e.g. "talos run the tests please") is not, and
+            // must reach the model.
+            looksShell = tokens.length <= 3 || hasFlagToken(tokens);
+        } else {
+            looksShell = false;
+        }
         return looksShell ? Optional.of(message()) : Optional.empty();
+    }
+
+    private static String basename(String token) {
+        int sep = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
+        return sep >= 0 ? token.substring(sep + 1) : token;
+    }
+
+    private static boolean hasFlagToken(String[] tokens) {
+        for (int i = 1; i < tokens.length; i++) {
+            if (tokens[i].startsWith("-")) return true;
+        }
+        return false;
     }
 
     private static String message() {
