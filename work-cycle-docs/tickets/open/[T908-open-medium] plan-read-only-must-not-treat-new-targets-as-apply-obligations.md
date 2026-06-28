@@ -20,6 +20,18 @@ Priority: medium
 - Checkpoint id: n/a
 - Verification status: live installed audit found a current-turn/repair-control contradiction; deterministic regression not yet added
 
+Additional installed-product corroboration:
+
+- Source: Plan-mode deep manual audit
+- Date: 2026-06-28 / prompt-debug saved as `20260629-000800` local time
+- Repo HEAD at audit: `1b79cb11`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\plan-mode-deep-20260628-235632\plan-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/plan-mode-deep-20260628-235632/artifacts/prompt-debug/prompt-debug-20260629-000800.md`
+- Provider body artifact copy: `local/manual-testing/plan-mode-deep-20260628-235632/artifacts/prompt-debug/prompt-debug-20260629-000800.provider-body.json`
+- Trace ids: `trc-1add7bce-a8a8-42f6-821a-4244ed2b7cd4`, `trc-4c8302e9-89bb-4871-9684-c47575b56c6f`
+- Disk verification: `plan-new.txt` and `plan-direct.txt` absent after the audit
+
 Redacted prompt sequence:
 
 ```text
@@ -49,6 +61,15 @@ For a plan-only request about a new file, Plan tried `talos.read_file` on
 `plan-only.txt`, received NOT_FOUND, and answered the missing-file failure
 instead of producing an implementation plan.
 
+The later deep Plan audit reproduced the same shape with:
+
+  Plan how to add a new file plan-new.txt with exactly PLAN NEW CONTENT.
+
+The installed product read `config.json`, then tried `talos.read_file` on
+nonexistent `plan-new.txt`, and answered only the missing-file failure. The
+trace showed `READ_ONLY_QA`, `mutationAllowed=false`, `READ_TARGET_REQUIRED`,
+and `plan-new.txt = MUST_READ`.
+
 For a direct mutation request in Plan mode, Plan correctly refused to write and
 did not request approval, but first tried `talos.read_file` on
 `plan-refuse.txt`. `/last trace` showed:
@@ -58,6 +79,12 @@ did not request approval, but first tried `talos.read_file` on
 - evidenceObligation: READ_TARGET_REQUIRED
 - target role: plan-refuse.txt = VERIFY_ONLY
 - tool: talos.read_file -> plan-refuse.txt [failed]
+
+The later deep Plan audit reproduced the direct-create variant with
+`plan-direct.txt`: no write tool and no approval were exposed, but Plan first
+tried to read the nonexistent target, then answered `I cannot create files.`
+The trace outcome was `COMPLETED_UNVERIFIED`, which is weak for a request that
+was intentionally not completed in Plan mode.
 
 The saved provider body then contained an `[Expected target progress]`
 continuation saying to "Continue this mutation task" and "Use the visible

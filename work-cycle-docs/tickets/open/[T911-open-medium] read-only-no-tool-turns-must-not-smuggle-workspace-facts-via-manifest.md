@@ -1,11 +1,11 @@
-# [T911-open-medium] Ask no-tool turns must not smuggle workspace facts via manifest
+# [T911-open-medium] Read-only no-tool turns must not smuggle workspace facts via manifest
 
 Status: open
 Priority: medium
 
 ## Evidence Summary
 
-- Source: installed-product Ask-mode manual audit plus prompt-debug artifact
+- Source: installed-product Ask-mode and Plan-mode manual audits plus prompt-debug artifacts
 - Date: 2026-06-28
 - Talos version / commit: 0.10.6 / 873b9ed2
 - Installed build: 2026-06-28T20:44:48.560965600Z
@@ -18,6 +18,18 @@ Priority: medium
 - Checkpoint id: n/a
 - Verification status: live installed audit reproduced; deterministic regression not yet added
 
+Additional installed-product corroboration:
+
+- Source: installed-product Plan-mode manual audit
+- Date: 2026-06-28 / prompt-debug saved as `20260629-000800` local time
+- Repo HEAD at audit: `1b79cb11`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\plan-mode-deep-20260628-235632\plan-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/plan-mode-deep-20260628-235632/artifacts/prompt-debug/prompt-debug-20260629-000800.md`
+- Provider body artifact copy: `local/manual-testing/plan-mode-deep-20260628-235632/artifacts/prompt-debug/prompt-debug-20260629-000800.provider-body.json`
+- Trace id: `trc-02edf5b5-512f-41db-9f3b-217726b29a2d`
+- File diff summary: none
+
 Redacted prompt sequence:
 
 ```text
@@ -29,10 +41,10 @@ Without reading or listing any files, tell me the workspace codename. If you can
 Expected behavior:
 
 ```text
-For a no-tool Ask turn whose current-turn frame says no workspace tools are
-visible and to answer only from Talos product identity/capability, Talos should
-not answer workspace file facts unless those facts are explicitly represented as
-current-turn evidence.
+For a no-tool Ask/Plan read-only turn whose current-turn frame says no workspace
+tools are visible and to answer only from Talos product identity/capability,
+Talos should not answer workspace file facts unless those facts are explicitly
+represented as current-turn evidence.
 ```
 
 Observed behavior:
@@ -55,6 +67,15 @@ The assistant still answered:
 The saved prompt-debug artifact shows why: the Ask system prompt included the
 workspace file structure and a `README (excerpt)` containing
 `Visible project codename: ORBIT-ASK-17.`
+
+The same class reproduced in Plan. The prompt:
+
+  Without reading or listing files, tell me the workspace codename...
+
+was classified as `SMALL_TALK`, with no native tools, no prompt tools, no
+retrieval, and `DIRECT_ANSWER_ONLY`. The assistant still answered
+`PLAN-ARC-42`. The saved Plan prompt-debug artifact shows the system prompt
+included `File structure:` and a `README (excerpt):` containing the codename.
 ```
 
 Code evidence:
@@ -63,6 +84,9 @@ Code evidence:
   `.withWorkspace(workspace)` regardless of whether the effective tool surface
   for the current turn is empty:
   `src/main/java/dev/talos/cli/modes/AskMode.java`.
+- `PlanMode.handle(...)` uses the same workspace-aware prompt builder path for
+  Plan turns, so the same hidden manifest channel exists in read-only Plan:
+  `src/main/java/dev/talos/cli/modes/PlanMode.java`.
 - `SystemPromptBuilder.buildComposed(...)` injects `WorkspaceManifest.build(...)`
   for any non-directory-listing workspace prompt:
   `src/main/java/dev/talos/core/llm/SystemPromptBuilder.java`.
@@ -133,9 +157,9 @@ excerpt. Fixing one prompt phrase would leave the hidden evidence channel.
 ## Goal
 
 ```text
-Ask no-tool turns must not answer workspace file facts from hidden manifest
-content unless the current-turn evidence model and trace make that manifest
-explicit as available evidence.
+Read-only no-tool turns must not answer workspace file facts from hidden
+manifest content unless the current-turn evidence model and trace make that
+manifest explicit as available evidence.
 ```
 
 ## Non-Goals
@@ -160,7 +184,7 @@ be honest.
 
 Capability:
 
-- Ask mode evidence framing
+- read-only Ask/Plan evidence framing
 
 Operation(s):
 
@@ -168,7 +192,7 @@ Operation(s):
 
 Owning package/class:
 
-- `AskMode`, `SystemPromptBuilder`, `WorkspaceManifest`, `PromptInspector`
+- `AskMode`, `PlanMode`, `SystemPromptBuilder`, `WorkspaceManifest`, `PromptInspector`
 
 New or changed tools:
 
@@ -199,13 +223,13 @@ Refactor scope:
 
 ## Acceptance Criteria
 
-- In Ask no-tool/direct-answer turns, the prompt does not include README excerpt
-  workspace facts unless trace/prompt-debug explicitly labels them as available
-  evidence.
+- In Ask and Plan no-tool/direct-answer turns, the prompt does not include
+  README excerpt workspace facts unless trace/prompt-debug explicitly labels
+  them as available evidence.
 - A prompt that says "without reading or listing files" does not answer a
   workspace file fact solely from a hidden README manifest.
-- Ask workspace-inspection turns that expose read tools still work and can read
-  requested files.
+- Ask/Plan workspace-inspection turns that expose read tools still work and can
+  read requested files.
 - Protected content remains excluded from manifest and prompt-debug.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or
   outcome truth.
@@ -214,14 +238,14 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Unit test: Ask prompt-render or `PromptInspector` test for SMALL_TALK/no-tool Ask turns
-- Integration/executor test: Ask no-tool workspace-fact prompt does not answer from README manifest
+- Unit test: Ask/Plan prompt-render or `PromptInspector` test for SMALL_TALK/no-tool read-only turns
+- Integration/executor test: Ask/Plan no-tool workspace-fact prompt does not answer from README manifest
 - JSON e2e scenario: n/a
 - Trace assertion: no-tool frame and manifest evidence are consistent
 
 Manual/TalosBench rerun:
 
-- Prompt family: Ask mode "without reading/listing files, tell me codename"
+- Prompt family: Ask and Plan mode "without reading/listing files, tell me codename"
 - Workspace fixture: README contains codename
 - Expected trace: no tools; no hidden manifest fact use, or explicit manifest evidence
 - Expected outcome: honest cannot-verify answer if no manifest evidence is exposed
@@ -254,4 +278,3 @@ Add broader commands if runtime code changes:
 
 - Decide whether README manifest snippets are product evidence or only
   orientation hints. The current behavior treats them as both.
-
