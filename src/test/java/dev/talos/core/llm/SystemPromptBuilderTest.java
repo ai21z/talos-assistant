@@ -702,6 +702,20 @@ class SystemPromptBuilderTest {
     }
 
     @Test
+    void planRulesContainReadOnlyPlanningBoundary() {
+        String prompt = SystemPromptBuilder.forPlan().build();
+
+        assertTrue(prompt.contains("Behavior Rules (Plan Mode)"),
+                "Plan rules should identify Plan mode");
+        assertTrue(prompt.contains("produce a concrete implementation plan"),
+                "Plan rules should ask for implementation plans");
+        assertTrue(prompt.contains("Plan is read-only"),
+                "Plan rules should reinforce the read-only boundary");
+        assertTrue(prompt.contains("switch to `/mode agent`"),
+                "Plan rules should point apply requests to Agent");
+    }
+
+    @Test
     void ragRulesContainWriteFileReinforcement() {
         String prompt = SystemPromptBuilder.forRag().build();
 
