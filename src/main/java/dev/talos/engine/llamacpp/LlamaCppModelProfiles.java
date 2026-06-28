@@ -50,15 +50,15 @@ public final class LlamaCppModelProfiles {
     }
 
     /**
-     * The canned profile alias whose GGUF file matches {@code ggufFileOrStem}
+     * The canned profile whose GGUF file matches {@code ggufFileOrStem}
      * (case-insensitive, a {@code .gguf} suffix optional, any directory prefix
      * ignored), or empty if none.
      */
-    public static Optional<String> profileAliasForGgufFile(String ggufFileOrStem) {
+    public static Optional<CannedProfile> profileForGgufFile(String ggufFileOrStem) {
         String want = stem(ggufFileOrStem);
         if (want.isEmpty()) return Optional.empty();
         for (CannedProfile p : PROFILES.values()) {
-            if (stem(p.hfFile()).equals(want)) return Optional.of(p.alias());
+            if (stem(p.hfFile()).equals(want)) return Optional.of(p);
         }
         return Optional.empty();
     }

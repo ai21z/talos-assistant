@@ -2,16 +2,13 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
-import dev.talos.core.CfgUtil;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.GgufCacheScanner;
 import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
-import dev.talos.spi.EngineConfig;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 public final class SetModelCommand implements Command {
 
@@ -41,17 +38,10 @@ public final class SetModelCommand implements Command {
             var cat = reg.compositeCatalog();
             var mref = cat.find(sanitized);
             if (mref.isEmpty()) {
-                // T899/T902: if the requested name is a GGUF on disk that just is not
-                // configured yet, say so and how to switch, with the real profile alias
-                // and server-path resolved into a copy-pasteable command when known.
+                // T899/T902: a downloaded-but-unconfigured GGUF gets actionable switch
+                // guidance (concrete hf_repo/hf_file config edit) instead of a bare 404.
                 var downloaded = GgufCacheScanner.downloadedNotConfigured(ctx.cfg());
-                String matched = matchDownloaded(sanitized, downloaded);
-                String profile = matched == null
-                        ? null
-                        : LlamaCppModelProfiles.profileAliasForGgufFile(matched).orElse(null);
-                String serverPath = configuredServerPath(ctx.cfg());
-                return new Result.Error(
-                        modelNotFoundMessage(sanitized, downloaded, profile, serverPath), 404);
+                return new Result.Error(modelNotFoundMessage(sanitized, downloaded), 404);
             }
             var chosen = mref.get();
             ctx.llm().setModel(chosen.backend() + "/" + chosen.name());
@@ -78,48 +68,40 @@ public final class SetModelCommand implements Command {
      * honestly rather than imply an in-REPL hot-swap that does not exist.
      */
     static String modelNotFoundMessage(String sanitized, List<ModelRef> downloaded) {
-        return modelNotFoundMessage(sanitized, downloaded, null, null);
+        String matched = matchDownloaded(sanitized, downloaded);
+        LlamaCppModelProfiles.CannedProfile profile = matched == null
+                ? null
+                : LlamaCppModelProfiles.profileForGgufFile(matched).orElse(null);
+        return modelNotFoundMessage(sanitized, downloaded, profile);
     }
 
     /**
-     * T902: as the downloaded-but-unconfigured guidance, but substitutes the real
-     * canned-profile alias and server-path into a copy-pasteable command when they
-     * are known, falling back to {@code <name>}/{@code <llama-server>} placeholders
-     * only when they cannot be resolved.
+     * T902: actionable downloaded-but-unconfigured guidance. Leads with the concrete
+     * {@code hf_repo}/{@code hf_file} config edit, which needs no absolute path and so
+     * survives the privacy path-redaction in the render layer (a substituted
+     * {@code server_path} would render as {@code [path]}). Names the equivalent setup
+     * profile. Honest about the no-hot-swap reality: this still requires a restart.
      */
     static String modelNotFoundMessage(
-            String sanitized, List<ModelRef> downloaded, String resolvedProfile, String serverPath) {
+            String sanitized, List<ModelRef> downloaded, LlamaCppModelProfiles.CannedProfile profile) {
         String matched = matchDownloaded(sanitized, downloaded);
-        if (matched != null) {
-            String profilePart = (resolvedProfile != null && !resolvedProfile.isBlank())
-                    ? resolvedProfile : "<name>";
-            String serverPart = (serverPath != null && !serverPath.isBlank())
-                    ? quoteIfNeeded(serverPath.trim()) : "<llama-server>";
-            return "\"" + matched + "\" is downloaded but not configured, so it is not selectable here yet."
-                    + "\nManaged llama.cpp binds one GGUF at launch (no hot-swap). Switching means reconfiguring and restarting."
-                    + "\nTo switch to it, run in your terminal (not at this prompt):"
-                    + "\n  talos setup models --profile " + profilePart + " --server-path " + serverPart + " --write --force"
-                    + "\n(or edit engines.llama_cpp.hf_repo / hf_file in ~/.talos/config.yaml to point at this GGUF)."
-                    + "\nThen restart Talos and confirm with /models.";
+        if (matched == null) {
+            return modelNotFoundMessage(sanitized);
         }
-        return modelNotFoundMessage(sanitized);
-    }
-
-    private static String quoteIfNeeded(String path) {
-        return path.contains(" ") ? "\"" + path + "\"" : path;
-    }
-
-    /** The configured managed llama.cpp server_path, or empty if unset/unreadable. */
-    private static String configuredServerPath(EngineConfig cfg) {
-        if (cfg == null) return "";
-        try {
-            Map<String, Object> engines = CfgUtil.map(cfg.data().get("engines"));
-            Map<String, Object> block = CfgUtil.map(engines.get("llama_cpp"));
-            Object sp = block.get("server_path");
-            return sp == null ? "" : sp.toString().trim();
-        } catch (RuntimeException e) {
-            return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("\"").append(matched).append("\" is downloaded but not configured, so it is not selectable here yet.");
+        sb.append("\nManaged llama.cpp binds one GGUF at launch (no hot-swap). To switch, edit ~/.talos/config.yaml under engines.llama_cpp:");
+        if (profile != null) {
+            sb.append("\n  hf_repo: \"").append(profile.hfRepo()).append("\"");
+            sb.append("\n  hf_file: \"").append(profile.hfFile()).append("\"");
+            sb.append("\nthen restart Talos and confirm with /models.");
+            sb.append("\n(Or run in your terminal: talos setup models --profile ").append(profile.alias())
+                    .append(" --server-path <your engines.llama_cpp.server_path> --write --force)");
+        } else {
+            sb.append("\n  hf_file: \"").append(matched).append(".gguf\"   (and set hf_repo to its Hugging Face repo, or use model_path)");
+            sb.append("\nthen restart Talos and confirm with /models.");
         }
+        return sb.toString();
     }
 
     /** Returns the on-disk GGUF name matching {@code sanitized} (ignoring case, a
