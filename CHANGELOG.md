@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T892] Aligned the Ask/Plan/Agent UX surface across prompt inspection,
+  route hints, help text, and user docs. `/prompt` now canonicalizes legacy
+  `dev`/`chat`/`unified` to `agent`, applies Ask/Plan read-only posture caps
+  when previewing prompt-visible tools, and route hints use public `agent` plus
+  `structural` for deterministic local commands. Public docs and `/help all`
+  now advertise `auto`, `ask`, `plan`, and `agent`, with hidden legacy aliases,
+  hidden `rag`, and reserved `web` documented as compatibility/reserved
+  surfaces.
 - [T891] Added canonical `/mode plan` as a read-only planning mode. Plan uses
   `CapabilityPosture.PLAN_READ_ONLY`, advertises plan-specific prompt rules,
   exposes no mutation or command tools, and is selectable/advertised through the

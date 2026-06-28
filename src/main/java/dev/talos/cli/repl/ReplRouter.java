@@ -142,8 +142,8 @@ public final class ReplRouter {
         if ("auto".equals(modes.getActiveName())) {
             PromptClassifier.Route preview = PromptClassifier.route(rawLine, modes.lastRoute(),
                     modes.getSymbolChecker());
-            // In auto-mode: COMMAND → dev, everything else → unified
-            String label = (preview == PromptClassifier.Route.COMMAND) ? "dev" : "unified";
+            // In auto-mode: COMMAND -> structural handler, everything else -> agent.
+            String label = (preview == PromptClassifier.Route.COMMAND) ? "structural" : "agent";
             render.printRouteHint(label);
         }
 

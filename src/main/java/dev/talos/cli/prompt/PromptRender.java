@@ -24,7 +24,7 @@ public record PromptRender(
 ) {
     public PromptRender {
         requestedMode = requestedMode == null ? "auto" : requestedMode;
-        resolvedMode = resolvedMode == null ? "unified" : resolvedMode;
+        resolvedMode = resolvedMode == null ? "agent" : resolvedMode;
         model = model == null ? "unknown" : model;
         workspace = workspace == null ? Path.of(".").toAbsolutePath().normalize() : workspace;
         taskType = taskType == null ? "UNKNOWN" : taskType;

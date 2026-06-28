@@ -265,7 +265,7 @@ Talos has a local indexing and retrieval path:
 
 - `rag-index` builds the local index.
 - `rag-ask` asks through the retrieval pipeline directly.
-- The unified assistant can use retrieval as a tool when workspace context is
+- Agent mode can use retrieval as a tool when workspace context is
   needed.
 
 RAG in Talos means the local Lucene index and retrieval pipeline, not cloud
@@ -322,11 +322,17 @@ Talos maintains local session state:
 
 Talos exposes multiple modes:
 
-- `auto`: default mode for most workspace work
-- `rag`: explicit retrieval-focused mode
-- `dev`: deterministic file and navigation commands
-- `ask` and `chat`: direct assistant-style interaction
-- `web`: reserved mode in this build
+- `auto`: default mode for most workspace work; routes structural commands
+  directly and natural-language work to Agent
+- `ask`: read-only answers and workspace inspection; no edits or commands
+- `plan`: read-only planning; can inspect allowed files but does not apply
+  changes
+- `agent`: edit-capable assistant mode, still governed by approval and policy
+
+Legacy aliases `dev`, `chat`, and `unified` resolve to canonical `agent`.
+Legacy `rag` remains available for explicit retrieval-focused compatibility but
+is not part of the primary public mode list. `web` is reserved in this build and
+cannot be selected.
 
 Auto mode is assistant-first. It uses tools and retrieval when needed, while
 runtime policy keeps each turn bounded.

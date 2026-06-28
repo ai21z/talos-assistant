@@ -60,9 +60,16 @@ wordmark.
 Use `/mode <mode>` inside the REPL to switch mode when supported by the active
 runtime.
 
-Current mode names include `auto`, `rag`, `chat`, `dev`, `ask`, and reserved
-`web`. Reserved `web` is a stub in this build and performs no external network
-calls.
+Public mode names are `auto`, `ask`, `plan`, and `agent`.
+
+- `auto` is the default and routes each turn.
+- `ask` is read-only.
+- `plan` is read-only planning.
+- `agent` can make changes when policy allows and approval is granted.
+
+Legacy aliases `dev`, `chat`, and `unified` resolve to canonical `agent`.
+Legacy `rag` remains available as a hidden retrieval-focused compatibility mode.
+Reserved `web` is a stub in this build and performs no external network calls.
 
 Use `/status` to see the current active mode and runtime state.
 

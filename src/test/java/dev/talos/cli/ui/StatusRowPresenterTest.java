@@ -58,12 +58,12 @@ class StatusRowPresenterTest {
     void rowCarriesRouteModelAndTurnContext() throws Exception {
         try (Terminal terminal = dumbTerminal(new ByteArrayOutputStream())) {
             var presenter = new StatusRowPresenter(terminal, CliTheme.current());
-            presenter.route("unified");
+            presenter.route("agent");
             presenter.context(() -> "qwen2.5-coder:14b", () -> 3);
 
             String row = presenter.buildRow().toString(); // AttributedString#toString is the plain text
 
-            org.junit.jupiter.api.Assertions.assertTrue(row.contains("route unified"), row);
+            org.junit.jupiter.api.Assertions.assertTrue(row.contains("route agent"), row);
             org.junit.jupiter.api.Assertions.assertTrue(row.contains("qwen2.5-coder:14b"), row);
             org.junit.jupiter.api.Assertions.assertTrue(row.contains("turn 3"), row);
         }

@@ -4,6 +4,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CapabilityPosture;
+import dev.talos.runtime.policy.CapabilityPosturePolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -11,7 +13,6 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
-import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -39,23 +40,25 @@ public final class PromptInspector {
         String input = userInput == null || userInput.isBlank()
                 ? DEFAULT_INPUT_PLACEHOLDER
                 : userInput;
-        TaskContract contract = "unified".equals(resolvedMode)
+        TaskContract rawContract = usesAssistantTaskContract(resolvedMode)
                 ? WorkspaceTargetReconciler.reconcile(
                         TaskContractResolver.fromUserRequest(input),
                         workspace)
                 : TaskContract.unknown(input);
-        boolean smallTalk = "unified".equals(resolvedMode)
+        CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(resolvedMode, rawContract);
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
+        ExecutionPhase initialPhase = effectiveTurn.phase();
+        boolean smallTalk = "agent".equals(resolvedMode)
                 && contract.type() == TaskType.SMALL_TALK;
-        boolean directoryListing = "unified".equals(resolvedMode)
+        boolean directoryListing = "agent".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
-        ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(contract);
-        List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, ctx);
+        List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, initialPhase, ctx);
 
         SystemPromptBuilder builder = builderFor(resolvedMode)
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
                 .withDirectoryListingToolMode(directoryListing);
-        if ("unified".equals(resolvedMode)) {
+        if (usesAssistantTaskContract(resolvedMode)) {
             if (!smallTalk) {
                 builder
                         .withPromptTools(PromptToolDescriptors.fromRegistry(ctx == null ? null : ctx.toolRegistry()))
@@ -75,8 +78,12 @@ public final class PromptInspector {
         messages.add(ChatMessage.system(system));
         messages.addAll(history);
         messages.add(ChatMessage.user(input));
-        if ("unified".equals(resolvedMode)) {
-            CurrentTurnPromptInstructions.injectTaskContractInstruction(messages);
+        if (usesAssistantTaskContract(resolvedMode)) {
+            CurrentTurnPromptInstructions.injectTaskContractInstruction(
+                    messages,
+                    contract,
+                    initialPhase,
+                    effectiveTools);
         }
 
         List<String> registryTools = registryToolNames(ctx);
@@ -114,13 +121,16 @@ public final class PromptInspector {
             int historyMessages,
             List<ChatMessage> messages
     ) {
-        TaskContract contract = WorkspaceTargetReconciler.reconcile(
+        String canonicalMode = resolvePromptMode(resolvedMode);
+        TaskContract rawContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(messages),
                 workspace);
-        List<String> effectiveTools = effectiveToolNames(resolvePromptMode(resolvedMode), contract, ctx);
+        CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(canonicalMode, rawContract);
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
+        List<String> effectiveTools = effectiveToolNames(canonicalMode, contract, effectiveTurn.phase(), ctx);
         return new PromptRender(
                 normalizeMode(requestedMode),
-                resolvePromptMode(resolvedMode),
+                canonicalMode,
                 modelName(ctx),
                 nativeTools,
                 workspace,
@@ -131,7 +141,7 @@ public final class PromptInspector {
                 registryToolNames(ctx),
                 effectiveTools,
                 sectionNames(
-                        resolvePromptMode(resolvedMode),
+                        canonicalMode,
                         workspace,
                         historyMessages > 0,
                         nativeTools,
@@ -198,7 +208,8 @@ public final class PromptInspector {
         return switch (normalized) {
             case "rag" -> "rag";
             case "ask" -> "ask";
-            default -> "unified";
+            case "plan" -> "plan";
+            default -> "agent";
         };
     }
 
@@ -206,6 +217,7 @@ public final class PromptInspector {
         return switch (resolvePromptMode(resolvedMode)) {
             case "rag" -> SystemPromptBuilder.forRag();
             case "ask" -> SystemPromptBuilder.forAsk();
+            case "plan" -> SystemPromptBuilder.forPlan();
             default -> SystemPromptBuilder.forUnified();
         };
     }
@@ -237,17 +249,43 @@ public final class PromptInspector {
         return ctx.llm().getModel();
     }
 
-    private static List<String> effectiveToolNames(String resolvedMode, TaskContract contract, Context ctx) {
+    private static List<String> effectiveToolNames(
+            String resolvedMode,
+            TaskContract contract,
+            ExecutionPhase phase,
+            Context ctx
+    ) {
         if (ctx == null || ctx.toolRegistry() == null) return List.of();
         if (ctx.hasNativeToolSpecOverride()) {
             return NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
         }
-        if ("unified".equals(resolvePromptMode(resolvedMode)) && contract != null) {
-            ExecutionPhase phase = CurrentTurnPlan.defaultPhaseFor(contract);
+        if (usesAssistantTaskContract(resolvePromptMode(resolvedMode)) && contract != null) {
             return NativeToolSpecPolicy.names(
                     NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
         }
         return registryToolNames(ctx);
+    }
+
+    private static CapabilityPosturePolicy.EffectiveTurn effectiveTurn(
+            String resolvedMode,
+            TaskContract contract
+    ) {
+        return CapabilityPosturePolicy.apply(postureFor(resolvedMode), contract);
+    }
+
+    private static CapabilityPosture postureFor(String resolvedMode) {
+        return switch (resolvePromptMode(resolvedMode)) {
+            case "ask" -> CapabilityPosture.ASK_READ_ONLY;
+            case "plan" -> CapabilityPosture.PLAN_READ_ONLY;
+            default -> CapabilityPosture.AGENT;
+        };
+    }
+
+    private static boolean usesAssistantTaskContract(String resolvedMode) {
+        return switch (resolvePromptMode(resolvedMode)) {
+            case "agent", "ask", "plan" -> true;
+            default -> false;
+        };
     }
 
     private static List<String> registryToolNames(Context ctx) {

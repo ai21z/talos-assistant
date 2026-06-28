@@ -133,7 +133,7 @@ public final class UnifiedAssistantMode implements Mode {
         CurrentTurnPromptInstructions.injectStaticVerificationRepairInstruction(messages, taskContract, workspace);
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
-                "unified",
+                "agent",
                 workspace,
                 turnCtx,
                 nativeTools,
