@@ -271,6 +271,12 @@ public final class TaskContractResolver {
     private static final Pattern SOURCE_EVIDENCE_SPAN = Pattern.compile(
             "(?i)\\b(according\\s+to|based\\s+on|summari[sz]ing|summary\\s+of|from|using)\\b\\s+(.{1,320})");
 
+    // T895: the file named in the leading "read|open ... and|then <mutate>" clause is a READ
+    // source, not a mutation target. Captured so it is projected as source evidence (MUST_READ)
+    // rather than a MUST_MUTATE obligation that falsely blocks the turn.
+    private static final Pattern READ_CLAUSE_BEFORE_MUTATION = Pattern.compile(
+            "(?i)\\b(?:read|open)\\s+(.{0,120}?)\\b(?:and|then)\\b");
+
     private static final Pattern PYTHON_COMMAND_EXECUTION = Pattern.compile(
             "(?i)(?:\\b(?:run|execute|try|probe|verify|check|test)\\s+"
                     + "(?:(?:python3?|py)\\b|pytest\\b|(?:this|the)\\s+python\\s+file\\b|"
@@ -471,6 +477,31 @@ public final class TaskContractResolver {
                     expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
                 }
             }
+            // T895: "read X and create/write Y" names X as a READ source, not a mutation target.
+            // When X is distinct from the create target(s) Y, project X as source evidence so it is
+            // never a MUST_MUTATE obligation (which falsely blocked the turn when only Y was written).
+            // When X is the only target (read then mutate the SAME file), createTargets is empty and
+            // X stays a mutation target.
+            if ("explicit-read-then-mutation-request".equals(classificationReason)
+                    && !readEvidenceTargetsAreAlsoMutationTargets(original)) {
+                Set<String> readSources = extractReadThenMutationSourceTargets(original);
+                if (!readSources.isEmpty()) {
+                    LinkedHashSet<String> createTargets = new LinkedHashSet<>(expectedTargets);
+                    createTargets.removeAll(readSources);
+                    // Only treat the read source as evidence when a genuine, NON-forbidden write
+                    // target remains distinct from it. When the read source is the only write
+                    // target (read then mutate the same file), or the only remainder is a forbidden
+                    // target (e.g. "... do not edit scripts.js"), leave expectedTargets unchanged.
+                    LinkedHashSet<String> genuineWriteTargets = new LinkedHashSet<>(createTargets);
+                    genuineWriteTargets.removeAll(forbiddenTargets);
+                    if (!genuineWriteTargets.isEmpty()) {
+                        expectedTargets = Set.copyOf(createTargets);
+                        LinkedHashSet<String> mergedSources = new LinkedHashSet<>(sourceEvidenceTargets);
+                        mergedSources.addAll(readSources);
+                        sourceEvidenceTargets = Set.copyOf(mergedSources);
+                    }
+                }
+            }
             if (expectedTargets.isEmpty()) {
                 expectedTargets = withoutForbiddenTargets(
                         inferConventionalStaticWebTargets(original, type),
@@ -578,6 +609,22 @@ public final class TaskContractResolver {
                 String target = normalizeTarget(extensionlessMatcher.group(1));
                 if (!target.isBlank()) out.add(target);
             }
+        }
+        return Set.copyOf(out);
+    }
+
+    // T895: extract the read-source file(s) from the leading "read|open ... and|then" clause of a
+    // read-then-mutation request, so a distinct read source is not projected as a mutation target.
+    private static Set<String> extractReadThenMutationSourceTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        Matcher clause = READ_CLAUSE_BEFORE_MUTATION.matcher(userRequest);
+        if (!clause.find()) return Set.of();
+        String span = clause.group(1);
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        Matcher target = TARGET_FILE.matcher(span);
+        while (target.find()) {
+            String normalized = normalizeTarget(target.group(1));
+            if (!normalized.isBlank()) out.add(normalized);
         }
         return Set.copyOf(out);
     }
