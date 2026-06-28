@@ -144,6 +144,14 @@ final class ReadEvidenceHandoff {
             return new Result(answer, null, null);
         }
         Set<String> targets = evidenceTargets(contract);
+        if (obligation == EvidenceObligation.READ_TARGET_REQUIRED) {
+            // T900: do not recover-handoff to read inferred static-web satellites that are
+            // absent on disk and unnamed; they are not required read evidence.
+            targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(contract, targets, workspace);
+            if (targets.isEmpty()) {
+                return new Result(answer, null, null);
+            }
+        }
         if (deniedOutcomesBlockReadEvidenceRecovery(loopResult.toolOutcomes(), targets, workspace)) {
             return new Result(answer, null, null);
         }

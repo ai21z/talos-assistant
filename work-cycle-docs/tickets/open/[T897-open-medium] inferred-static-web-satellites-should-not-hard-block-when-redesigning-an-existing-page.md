@@ -4,6 +4,8 @@ Status: open
 Priority: medium
 Blocker level: future milestone (deferred-beyond-this-arc). Discovered while scoping T895; split out because the clean fix is disk-aware, not lexical.
 
+> Update 2026-06-28: the READ-evidence sibling of this bug (plan/ask read-only demanding reads of nonexistent inferred satellites) was fixed and closed as T900 (see work-cycle-docs/tickets/done/[T900-done-medium] ...). T897 now covers ONLY the remaining MUTATION facet below. The read fix could be cleanly disk-aware (you can never read a nonexistent file); the mutation facet cannot use a naive disk-existence drop because create-from-scratch satellites are also absent on disk, so dropping them would regress the intended "keep creating until the triplet is done" behavior (T98/T99/T100). The mutation fix therefore still needs the inferred-vs-named + create-vs-redesign distinction at the mutation-obligation layer.
+
 ## Evidence Summary
 
 - Source: T895 investigation (2026-06-28) + the owner's original dev-mode redesign trace

@@ -6,7 +6,10 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
@@ -92,6 +95,61 @@ class EvidenceObligationAssessmentTest {
         assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, readAssessment.result().status());
         assertTrue(readAssessment.missingEvidence());
         assertFalse(readAssessment.protectedReadApprovalMissing());
+    }
+
+    @Test
+    void planModeStaticWebRedesignDoesNotRequireReadingAbsentSatellites(@TempDir Path workspace) throws Exception {
+        // T900: plan-mode "redesign this page" on a single-file index.html projected the
+        // conventional triplet; the read-evidence obligation demanded reading nonexistent
+        // style.css/script.js -> false block. The model read index.html (the only file
+        // that exists), so the obligation must be SATISFIED.
+        Files.writeString(workspace.resolve("index.html"), "<h1>Acme</h1>");
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                false, // read-only (plan posture)
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of(),
+                "lets plan a full page change to make it visually better",
+                "contextual-static-web-follow-up; capability-posture-read-only");
+        CurrentTurnPlan plan = plan(EvidenceObligation.READ_TARGET_REQUIRED, contract);
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of("talos.read_file"),
+                List.of("index.html"),
+                List.of(readOutcome("index.html")));
+
+        EvidenceObligationAssessment assessment =
+                EvidenceObligationAssessment.assess(plan, loopResult, workspace);
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, assessment.result().status());
+        assertFalse(assessment.missingEvidence());
+    }
+
+    @Test
+    void planModeStaticWebStillRequiresReadingThePageThatExists(@TempDir Path workspace) throws Exception {
+        // Guard: dropping absent satellites must not drop index.html. If the model read
+        // nothing, the turn is still (correctly) unsatisfied.
+        Files.writeString(workspace.resolve("index.html"), "<h1>Acme</h1>");
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                false,
+                true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(),
+                Set.of(),
+                "redesign this page",
+                "contextual-static-web-follow-up; capability-posture-read-only");
+        CurrentTurnPlan plan = plan(EvidenceObligation.READ_TARGET_REQUIRED, contract);
+        ToolCallLoop.LoopResult loopResult = loopResult(List.of(), List.of(), List.of());
+
+        EvidenceObligationAssessment assessment =
+                EvidenceObligationAssessment.assess(plan, loopResult, workspace);
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, assessment.result().status());
+        assertTrue(assessment.missingEvidence());
     }
 
     private static CurrentTurnPlan plan(EvidenceObligation obligation, TaskContract contract) {

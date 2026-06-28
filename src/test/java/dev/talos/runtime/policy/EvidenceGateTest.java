@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.LinkedHashMap;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -197,6 +198,72 @@ class EvidenceGateTest {
                 contract,
                 EvidenceObligation.READ_TARGET_REQUIRED,
                 workspace));
+    }
+
+    // ── T900: inferred static-web satellites absent on disk must not be hard read evidence ──
+
+    @Test
+    void absentInferredStaticWebSatellitesAreDroppedFromReadEvidence(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Acme</h1>");
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT, true, false, true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(), Set.of(),
+                "redesign this page to make it visually better",
+                "contextual-static-web-follow-up; capability-posture-read-only");
+
+        Set<String> targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(
+                contract, contract.expectedTargets(), workspace);
+
+        assertEquals(Set.of("index.html"), targets);
+    }
+
+    @Test
+    void presentStaticWebSatelliteIsKeptAsReadEvidence(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Acme</h1>");
+        Files.writeString(workspace.resolve("style.css"), "body{}");
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT, true, false, true,
+                Set.of("index.html", "style.css", "script.js"),
+                Set.of(), Set.of(),
+                "redesign this page",
+                "contextual-static-web-follow-up");
+
+        Set<String> targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(
+                contract, contract.expectedTargets(), workspace);
+
+        assertTrue(targets.contains("index.html"), targets.toString());
+        assertTrue(targets.contains("style.css"), targets.toString());   // present on disk -> keep
+        assertFalse(targets.contains("script.js"), targets.toString());  // absent + inferred -> drop
+    }
+
+    @Test
+    void userNamedSatelliteIsKeptEvenWhenAbsent(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Acme</h1>");
+        TaskContract contract = new TaskContract(
+                TaskType.READ_ONLY_QA, false, false, false,
+                Set.of("index.html", "style.css"),
+                Set.of(), Set.of(),
+                "read style.css and tell me the colors",  // user named style.css explicitly
+                "test");
+
+        Set<String> targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(
+                contract, contract.expectedTargets(), workspace);
+
+        assertTrue(targets.contains("style.css"), targets.toString());  // named -> keep even though absent
+    }
+
+    @Test
+    void nonStaticWebAbsentTargetsAreNotDropped(@TempDir Path workspace) {
+        TaskContract contract = new TaskContract(
+                TaskType.READ_ONLY_QA, false, false, false,
+                Set.of("notes.md"), Set.of(), Set.of(),
+                "read notes.md", "test");
+
+        Set<String> targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(
+                contract, contract.expectedTargets(), workspace);
+
+        assertEquals(Set.of("notes.md"), targets);  // not a conventional satellite -> untouched
     }
 
     private static Config imageOcrEnabledConfig() {
