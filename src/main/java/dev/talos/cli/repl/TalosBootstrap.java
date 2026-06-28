@@ -274,7 +274,10 @@ public final class TalosBootstrap {
 
         // Tool progress sink: renders lightweight status lines via RenderEngine.
         // Connected before ToolCallLoop so progress events flow during tool execution.
-        ToolProgressSink progressSink = render::printToolProgress;
+        // T901: the resuming variant re-arms the spinner after each tool line so the
+        // following model-generation wait shows a live "working" indicator instead of
+        // dead air (the spinner had only run before the first output and never resumed).
+        ToolProgressSink progressSink = render::printToolProgressResumingSpinner;
         ToolCallLoop   toolCallLoop   = new ToolCallLoop(turnProcessor,
                 ToolCallLoop.DEFAULT_MAX_ITERATIONS, progressSink);
 
