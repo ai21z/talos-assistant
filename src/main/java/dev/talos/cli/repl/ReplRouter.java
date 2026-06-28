@@ -228,6 +228,10 @@ public final class ReplRouter {
 
         StringBuilder sb = new StringBuilder();
         sb.append("\nCurrent Turn Trace\n");
+        var localTrace = turnResult.audit().localTrace();
+        if (localTrace != null && localTrace.mode() != null && !localTrace.mode().isBlank()) {
+            sb.append("  mode: ").append(localTrace.mode()).append('\n');
+        }
         sb.append("  contract: ").append(trace.taskType())
                 .append(" mutationAllowed=").append(trace.mutationAllowed())
                 .append(" verificationRequired=").append(trace.verificationRequired())

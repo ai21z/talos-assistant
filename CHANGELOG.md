@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T893] Local turn traces now record canonical active mode instead of
+  `"unknown"` for `ModeController` turns. The trace-mode seam lives on the
+  `TurnRouter` port, `ModeController` reports canonical active names
+  (`auto`, `ask`, `plan`, `agent`, hidden `rag`), legacy aliases resolve to
+  `agent`, and `/last trace` renders the local trace mode line for human audit
+  review.
 - [T892] Aligned the Ask/Plan/Agent UX surface across prompt inspection,
   route hints, help text, and user docs. `/prompt` now canonicalizes legacy
   `dev`/`chat`/`unified` to `agent`, applies Ask/Plan read-only posture caps

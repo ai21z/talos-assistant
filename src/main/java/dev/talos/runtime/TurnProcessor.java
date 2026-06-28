@@ -196,13 +196,14 @@ public final class TurnProcessor {
         // files is owned by JsonTurnLogAppender's injected id.
         String sessionId = JsonSessionStore.sessionIdFor(session.workspace());
         String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
+        String traceMode = modes == null ? "unknown" : modes.traceMode(userInput);
         LocalTurnTraceCapture.begin(
                 traceId,
                 sessionId,
                 turn,
                 java.time.Instant.now().toString(),
                 sessionId,
-                "unknown",
+                traceMode,
                 modelBackend(model),
                 modelName(model),
                 userInput);
