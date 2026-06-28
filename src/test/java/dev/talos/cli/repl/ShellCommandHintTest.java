@@ -35,6 +35,12 @@ class ShellCommandHintTest {
         @Test void windows_exe_binary()  { assertTrue(ShellCommandHint.detect("talos.exe --version").isPresent()); }
         @Test void case_insensitive()    { assertTrue(ShellCommandHint.detect("TALOS SETUP").isPresent()); }
         @Test void leading_whitespace()  { assertTrue(ShellCommandHint.detect("   talos setup").isPresent()); }
+        @Test void subcommand_with_flag(){ assertTrue(ShellCommandHint.detect("talos setup models --write --force").isPresent()); }
+        @Test void subcommand_chain()    { assertTrue(ShellCommandHint.detect("talos setup models").isPresent()); }
+        // T903: path-qualified invocations (basename extraction)
+        @Test void path_qualified_unix() { assertTrue(ShellCommandHint.detect("./talos setup").isPresent()); }
+        @Test void path_qualified_abs()  { assertTrue(ShellCommandHint.detect("/usr/local/bin/talos --version").isPresent()); }
+        @Test void path_qualified_win()  { assertTrue(ShellCommandHint.detect("C:\\Users\\me\\talos.exe setup").isPresent()); }
     }
 
     @Nested
@@ -45,6 +51,17 @@ class ShellCommandHintTest {
         }
         @Test void talos_followed_by_plain_word() {
             assertTrue(ShellCommandHint.detect("talos can you read this file").isEmpty());
+        }
+        // T903: prose that starts with the binary name + a subcommand-homonym verb,
+        // with no flag, must reach the model instead of being swallowed.
+        @Test void prose_run_the_tests() {
+            assertTrue(ShellCommandHint.detect("talos run the tests please").isEmpty());
+        }
+        @Test void prose_status_of_repo() {
+            assertTrue(ShellCommandHint.detect("talos status of the repo").isEmpty());
+        }
+        @Test void prose_setup_my_project() {
+            assertTrue(ShellCommandHint.detect("talos setup my project for me").isEmpty());
         }
         @Test void bare_binary_name_only() {
             assertTrue(ShellCommandHint.detect("talos").isEmpty());
