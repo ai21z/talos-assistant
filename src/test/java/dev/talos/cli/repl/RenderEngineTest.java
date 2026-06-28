@@ -46,6 +46,46 @@ class RenderEngineTest {
         return bout.toString(StandardCharsets.UTF_8);
     }
 
+    // ── T901: spinner resumes across tool-loop generation waits ──────────
+
+    @Nested
+    class SpinnerResumeDuringToolLoop {
+
+        @Test
+        void toolProgressClearsRunningSpinnerBeforePrintingItsLine() {
+            var re = engine(true);
+            re.startSpinner();
+            assertTrue(re.spinnerRunning(), "spinner should be running after startSpinner");
+
+            re.printToolProgress("talos.read_file", "read", "index.html");
+
+            assertFalse(re.spinnerRunning(),
+                    "tool progress must clear the spinner before printing its line (no \\r collision)");
+        }
+
+        @Test
+        void resumingToolProgressReArmsSpinnerForTheNextGenerationWait() {
+            var re = engine(true);
+
+            re.printToolProgressResumingSpinner("talos.read_file", "read", "index.html");
+
+            assertTrue(re.spinnerRunning(),
+                    "after a tool line the spinner resumes so the next model-generation wait shows activity");
+            re.shutdown();
+            assertFalse(re.spinnerRunning(), "shutdown stops the spinner");
+        }
+
+        @Test
+        void resumingToolProgressIsSuppressedWhenNonInteractive() {
+            var re = engine(false);
+
+            re.printToolProgressResumingSpinner("talos.read_file", "read", "index.html");
+
+            assertFalse(re.spinnerRunning(), "non-interactive stays byte-identical: no spinner");
+            assertEquals("", output(), "non-interactive prints no tool line");
+        }
+    }
+
     // ── printTurnStats ───────────────────────────────────────────────────
 
     @Nested

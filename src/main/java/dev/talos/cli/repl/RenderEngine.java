@@ -462,10 +462,31 @@ public final class RenderEngine {
      */
     public void printToolProgress(String toolName, String action, String detail) {
         if (!interactive) return;
+        // T901: clear any running spinner before printing the tool line so a legacy
+        // \r frame never collides with it (the single-writer discipline, T774/T779).
+        stopSpinner();
         println(progressRenderer.tool(
                 terminalText(toolName),
                 terminalText(action),
                 detail == null ? null : sroInline(detail)));
+    }
+
+    /**
+     * T901: print a tool progress line, then resume the spinner so the following
+     * model-generation wait shows activity. Wired as the tool-loop progress sink
+     * (see {@link TalosBootstrap}). Each model round re-arms the indicator; it is
+     * stopped again on the next visible output (first answer token, next tool line,
+     * or the approval gate), preserving the single-writer discipline. Suppressed in
+     * non-interactive mode like every other indicator method.
+     */
+    public void printToolProgressResumingSpinner(String toolName, String action, String detail) {
+        printToolProgress(toolName, action, detail);
+        startSpinner();
+    }
+
+    /** Test-only: whether the legacy spinner frame thread is currently running. */
+    boolean spinnerRunning() {
+        return spinnerActive.get();
     }
 
     private void renderToolProgress(Result.ToolProgress tp) {
