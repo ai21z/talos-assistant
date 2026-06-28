@@ -12,7 +12,7 @@ Owner: unassigned
 Release-gate verdicts live only in prose reports; "the lane passed" is an
 asserted markdown sentence judged by reading. The build side already has
 machine-readable, provenance-aware summaries (version/coverage/e2e/qodana
-JSON), but the live-audit side has nothing equivalent — which is how a wrong
+JSON), but the live-audit side has nothing equivalent - which is how a wrong
 SHA and an overstated lane claim survived in the 0.10.1 packet until a manual
 forensic pass caught them.
 
@@ -24,8 +24,8 @@ forensic pass caught them.
   results are "hand-written ticket markdown, not machine-checkable gate
   artifacts."
 - Defects this would have caught structurally: the invalid full SHA (report
-  line 5, fixed in `953bf4eb`) — a ledger whose `sha` field comes from
-  tooling cannot be hand-mistyped; the T313 closure-wording overstatement —
+  line 5, fixed in `953bf4eb`) - a ledger whose `sha` field comes from
+  tooling cannot be hand-mistyped; the T313 closure-wording overstatement -
   a `TRUE_PTY_MANUAL: MANUAL_REQUIRED` ledger row contradicts prose claims
   mechanically.
 - House JSON pattern to reuse: `writeSummarySoft`/`writeJson`
@@ -59,9 +59,9 @@ Refactor scope: new schema doc + new test + one exemplar JSON
    NOT_RUN|SUPERSEDED), evidencePath, model?, notes?, expires?}`.
    Rule: `sha` MUST be captured from tooling, never typed.
 2. Exemplar: author `work-cycle-docs/reports/current-0.10.1-release-packet-20260610-090049-GATES.json`
-   retrofitting the (now corrected) 0.10.1 packet verdicts — safe lanes PASS,
+   retrofitting the (now corrected) 0.10.1 packet verdicts - safe lanes PASS,
    sync GPT-OSS PASS, sync Qwen FAIL_REVIEW_REQUIRED, workspace-ops PASS,
-   TRUE_PTY_MANUAL PASS, capability PASS-heuristic — with evidence paths.
+   TRUE_PTY_MANUAL PASS, capability PASS-heuristic - with evidence paths.
 3. `GatesLedgerTest`: discovers `work-cycle-docs/reports/**/*GATES.json`,
    validates required fields, status vocabulary, `sha` is 40-hex, evidence
    paths non-blank; clear per-file failure messages.

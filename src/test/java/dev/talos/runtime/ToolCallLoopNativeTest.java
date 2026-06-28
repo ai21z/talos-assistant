@@ -103,7 +103,7 @@ class ToolCallLoopNativeTest {
             assertEquals("index.html", result.get(0).param("path"));
             assertEquals(oldStr, result.get(0).param("old_string"));
             assertEquals(newStr, result.get(0).param("new_string"),
-                    "<script> tag in new_string must NOT be stripped — this was the SUS_HTML bug");
+                    "<script> tag in new_string must NOT be stripped - this was the SUS_HTML bug");
         }
 
         @Test
@@ -116,7 +116,7 @@ class ToolCallLoopNativeTest {
     @Nested
     class RunOverloadDispatching {
 
-        // Minimal TurnProcessor stub — never actually invoked for no-tool-call tests
+        // Minimal TurnProcessor stub - never actually invoked for no-tool-call tests
         private TurnProcessor stubTp() {
             return new TurnProcessor(null);
         }

@@ -45,7 +45,7 @@ public final class Session implements AutoCloseable {
     }
 
     /**
-     * Primary constructor. All parameters are required — callers must pass
+     * Primary constructor. All parameters are required - callers must pass
      * an explicit {@link SessionMemory} and {@link SessionStore}. Pass
      * {@link NoOpSessionStore} explicitly to keep the ephemeral-store
      * default; silent null-to-NoOp substitution is no longer supported at
@@ -53,7 +53,7 @@ public final class Session implements AutoCloseable {
      *
      * <p>The 2-arg and 3-arg convenience constructors still provide
      * explicit {@code NoOpSessionStore} defaults for tests and ad-hoc call
-     * sites — those are explicit wiring, not policy-by-null.
+     * sites - those are explicit wiring, not policy-by-null.
      */
     public Session(Path workspace, Config config, SessionMemory memory, SessionStore store) {
         this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
@@ -61,9 +61,9 @@ public final class Session implements AutoCloseable {
         this.startedAt = Instant.now();
         this.turnCount = new AtomicInteger(0);
         this.memory = Objects.requireNonNull(memory,
-                "memory must not be null — pass new SessionMemory() explicitly");
+                "memory must not be null - pass new SessionMemory() explicitly");
         this.store = Objects.requireNonNull(store,
-                "store must not be null — pass NoOpSessionStore() explicitly "
+                "store must not be null - pass NoOpSessionStore() explicitly "
                         + "to keep the ephemeral-store default (CCR-016)");
     }
 
@@ -76,7 +76,7 @@ public final class Session implements AutoCloseable {
     /** When this session was created. */
     public Instant startedAt() { return startedAt; }
 
-    /** Current turn number (0-based, incremented per prompt — not per command). */
+    /** Current turn number (0-based, incremented per prompt - not per command). */
     public int turnCount() { return turnCount.get(); }
 
     /** Increment turn counter and return the new value. */
@@ -102,7 +102,7 @@ public final class Session implements AutoCloseable {
 
     /**
      * Close the session, firing all registered close listeners.
-     * Safe to call multiple times — only the first call fires listeners.
+     * Safe to call multiple times - only the first call fires listeners.
      */
     @Override
     public void close() {

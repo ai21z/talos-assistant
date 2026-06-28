@@ -68,7 +68,7 @@ public sealed class EngineException extends RuntimeException
     public static final class Transient extends EngineException {
         public Transient(String message, Throwable cause, int httpStatus) {
             super(message, cause, httpStatus,
-                    "Temporary error — please try again.");
+                    "Temporary error - please try again.");
         }
 
         public Transient(String message, int httpStatus) {

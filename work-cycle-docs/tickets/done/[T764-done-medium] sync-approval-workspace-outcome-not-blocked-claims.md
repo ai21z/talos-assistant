@@ -32,7 +32,7 @@ moved, not that the user was told the task completed.
 ## Design
 
 - Characterization first: pin the claim mechanics in
-  `SynchronizedApprovalAuditRunnerTest` against constructed traces — a
+  `SynchronizedApprovalAuditRunnerTest` against constructed traces - a
   BLOCKED/BLOCKED_BY_POLICY outcome (the exact packet regression shape) and a
   BLOCKED/BLOCKED_BY_APPROVAL outcome must fail the claim;
   COMPLETE (verified and unverified) and PARTIAL outcomes must pass, so the
@@ -46,8 +46,8 @@ moved, not that the user was told the task completed.
   scraping, so it is immune to event-map rendering order). It fails with the
   rendered `OUTCOME_RENDERED {status=..., classification=...}` shape in the
   message so a failure maps directly onto the trace artifact line.
-- Wire the claim into all six workspace-operation scenarios — copy, move,
-  rename, delete, and also mkdir and batch-apply for uniformity — in both the
+- Wire the claim into all six workspace-operation scenarios - copy, move,
+  rename, delete, and also mkdir and batch-apply for uniformity - in both the
   scripted and live overloads: scripted lanes claim alongside the existing
   file-state checks; live lanes claim inside the existing
   `writeFailureMarker` try-block, after tool-usage and file-state checks so
@@ -63,8 +63,8 @@ moved, not that the user was told the task completed.
 No runtime behavior change. The harness contract for approved
 workspace-operation lanes tightens: a regression that fail-closes an
 approved-and-executed workspace operation (T763's shape, or any future one)
-now fails the scenario — scripted lanes fail `gradlew e2eTest`
-deterministically, live lanes write a `FAILURE.md` bundle — instead of
+now fails the scenario - scripted lanes fail `gradlew e2eTest`
+deterministically, live lanes write a `FAILURE.md` bundle - instead of
 passing on tool-usage and file-state checks alone.
 
 ## Architecture Metadata
@@ -128,7 +128,7 @@ Allowed refactor scope: the new claim helper and its twelve call sites in
   pinning end to end that approved workspace operations render un-BLOCKED
   after T763's fix.
 - `gradlew test e2eTest --no-daemon` green (BUILD SUCCESSFUL; `:e2eTest`
-  re-executed with the new claims — SynchronizedApprovalAuditRunnerTest
+  re-executed with the new claims - SynchronizedApprovalAuditRunnerTest
   39/39, 0 failures; `:test` UP-TO-DATE against the same-day T763 green run,
   unit inputs unchanged by this ticket).
 - CHANGELOG Unreleased entry added under Changed.

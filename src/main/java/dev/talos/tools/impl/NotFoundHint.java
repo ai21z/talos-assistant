@@ -39,7 +39,7 @@ final class NotFoundHint {
 
     /**
      * Build a "File not found" message augmented with a parent-directory
-     * hint when possible. Never throws — silently falls back to the plain
+     * hint when possible. Never throws - silently falls back to the plain
      * message if listing the parent fails (permissions, IO, etc.).
      *
      * @param pathParam  the path the caller tried (as the model wrote it)
@@ -54,7 +54,7 @@ final class NotFoundHint {
             if (parent == null) return msg.toString();
 
             if (Files.isDirectory(parent)) {
-                // Parent exists — list its contents so the model can pick the right file.
+                // Parent exists - list its contents so the model can pick the right file.
                 List<String> names = listChildren(parent);
                 if (!names.isEmpty()) {
                     String parentDisp = displayParent(parent, workspace);
@@ -64,7 +64,7 @@ final class NotFoundHint {
                 return msg.toString();
             }
 
-            // Parent doesn't exist — walk up until we find one that does,
+            // Parent doesn't exist - walk up until we find one that does,
             // and list its directory children so the model sees sibling
             // folder names (catches the classic foo_bar vs foo-bar typo).
             Path walk = parent.getParent();
@@ -79,7 +79,7 @@ final class NotFoundHint {
                 }
             }
         } catch (Exception ignore) {
-            // Best effort — never let the hint itself mask the original error.
+            // Best effort - never let the hint itself mask the original error.
         }
         return msg.toString();
     }

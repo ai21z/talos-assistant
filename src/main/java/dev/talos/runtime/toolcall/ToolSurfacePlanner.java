@@ -128,7 +128,7 @@ public final class ToolSurfacePlanner {
      * (capability-frame fallbacks, prompt inspector, traces).
      *
      * <p>T761: derived from {@link #plan} over the canonical descriptor
-     * catalog — the production-enforced surface IS the advertised surface,
+     * catalog - the production-enforced surface IS the advertised surface,
      * by construction. A ~46-line hand-maintained copy of the plan branches
      * previously lived here and had drifted (the expected-target-read branch
      * had no counterpart, so read-only turns with expected targets advertised

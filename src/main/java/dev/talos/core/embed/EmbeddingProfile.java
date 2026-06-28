@@ -7,7 +7,7 @@ import java.util.Objects;
  * <p>
  * Captures all parameters that affect the embedding vector space: provider,
  * model, dimensions, instruction mode, and normalization. Two profiles that
- * differ in any of these fields produce <em>incompatible</em> vector spaces —
+ * differ in any of these fields produce <em>incompatible</em> vector spaces -
  * their embeddings must not be mixed in the same index or cache namespace.
  * <p>
  * Use {@link #fingerprint()} for index compatibility checks and
@@ -74,7 +74,7 @@ public record EmbeddingProfile(
     /**
      * Deterministic fingerprint encoding every parameter that affects the
      * vector space. Two profiles with different fingerprints produce
-     * incompatible embeddings — they must not share an index or cache.
+     * incompatible embeddings - they must not share an index or cache.
      * <p>
      * Includes a hash of instruction strings so that changing the query or
      * document instruction template invalidates compatibility.
@@ -97,12 +97,12 @@ public record EmbeddingProfile(
      * Cache namespace for embedding cache isolation.
      * <p>
      * Delegates to {@link #fingerprint()} so that any parameter change that
-     * affects the vector space also changes the cache key — preventing stale
+     * affects the vector space also changes the cache key - preventing stale
      * vector reuse across incompatible profiles.
      * <p>
      * <strong>Note:</strong> This intentionally breaks backward compatibility
      * with the legacy {@code "ollama/bge-m3"} cache keys. Existing cached
-     * embeddings will become cache misses on first run after upgrade — they
+     * embeddings will become cache misses on first run after upgrade - they
      * will be recomputed and cached under the new key. This is the correct
      * trade-off: cache safety &gt; one-time cold start.
      */

@@ -10,7 +10,7 @@ Priority: low
 - Talos version / commit: 0.10.5 / a366091d
 - Model/backend: managed llama.cpp; qwen2.5-coder-14b and gpt-oss-20b
 - Workspace fixture: `local/manual-workspaces/capability-live-audit-20260624-173843/{qwen,gptoss}`
-- Raw transcript path: `local/manual-testing/capability-live-audit-20260624-173843/` (per-model prompt-debug homes, 52 captures each; per-turn `/session` audit was overwritten by the runbook's clear-before-each-turn pattern — an evidence caveat; provider bodies + workspace git state + canary scan are the durable evidence)
+- Raw transcript path: `local/manual-testing/capability-live-audit-20260624-173843/` (per-model prompt-debug homes, 52 captures each; per-turn `/session` audit was overwritten by the runbook's clear-before-each-turn pattern - an evidence caveat; provider bodies + workspace git state + canary scan are the durable evidence)
 - Trace path or `/last trace` summary: gpt-oss-20b PRIVATE_MARKER search turn; durable evidence is the saved provider bodies under the gptoss prompt-debug home plus the canary scan output
 - File diff summary: none. No mutation involved in the affected turn (read-only search).
 - Approval choices: not applicable (read-only `talos.grep` turn)
@@ -37,7 +37,7 @@ Observed behavior:
 ```text
 The rendered match for the PRIVATE_MARKER turn contained the literal token "line?2"
 (a mangled "line:2"-style locator: the ":" separator surfaced as "?"). No protected
-content leaked — the canary scan passed and the .ssh/id_rsa "dummy" content is absent
+content leaked - the canary scan passed and the .ssh/id_rsa "dummy" content is absent
 from every capture. The defect is purely cosmetic: a "?" substitution artifact in how
 a redacted / grep match line is displayed, almost certainly an encoding/glyph
 substitution somewhere in the search-result rendering path.
@@ -86,17 +86,17 @@ redacts PRIVATE_MARKER assignments). A ":" surfacing as "?" is a classic charset
 substitution: a byte or code point that is dropped to "?" by a non-UTF-8 stream
 encoder, a JLine/terminal glyph fallback, or a markdown/streaming shaper rewriting a
 control or non-ASCII code point. The owner is the search-result rendering/sanitization
-layer plus the REPL output encoder — not the model and not the safety policy. The
+layer plus the REPL output encoder - not the model and not the safety policy. The
 redaction itself is correct (PRIVATE_MARKER value did not leak); only the display of a
 locator/placeholder character is corrupted.
 ```
 
 Likely code/document areas:
 
-- `src/main/java/dev/talos/tools/impl/GrepTool.java` (`searchFile`, `searchExtractedFile`, `safeSearchLine`, `truncate` — match-line assembly and truncation)
+- `src/main/java/dev/talos/tools/impl/GrepTool.java` (`searchFile`, `searchExtractedFile`, `safeSearchLine`, `truncate` - match-line assembly and truncation)
 - `src/main/java/dev/talos/cli/repl/slash/GrepCommand.java` (the `/grep` slash-command match-line formatter, same shape)
 - `src/main/java/dev/talos/safety/ProtectedContentSanitizer.java` (`sanitizeText`, `sanitizeSearchLine`, `PRIVATE_MARKER_ASSIGNMENT` redaction placeholder)
-- The REPL output / streaming markdown render path (e.g. `cli.ui.md` streaming shaper and the JLine terminal writer) — confirm the print stream is UTF-8 and that no glyph fallback rewrites the `:` or placeholder bytes to `?`
+- The REPL output / streaming markdown render path (e.g. `cli.ui.md` streaming shaper and the JLine terminal writer) - confirm the print stream is UTF-8 and that no glyph fallback rewrites the `:` or placeholder bytes to `?`
 
 Why a one-off patch is insufficient:
 
@@ -138,7 +138,7 @@ Add ticket-specific non-goals:
 First reproduce deterministically: feed a workspace line containing a PRIVATE_MARKER
 assignment to GrepTool / GrepCommand and assert the formatted match string equals
 "<relpath>:<N> | <expected redacted line>" byte-for-byte. If the assembled String is
-already correct, the corruption is downstream in the print path — instrument the
+already correct, the corruption is downstream in the print path - instrument the
 terminal/markdown writer and confirm the output stream is UTF-8 (verify the JLine
 terminal and any PrintStream are not falling back to a platform charset that maps the
 separator/placeholder code point to "?"). Fix at the single substitution point

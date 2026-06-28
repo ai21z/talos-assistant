@@ -56,7 +56,7 @@ class PtyValidatorWrapToleranceTest {
 
     @Test
     void paragraphBreaksDoNotAssemblePhrases() {
-        // A bare rail is a blank pane line — a paragraph break, not a soft
+        // A bare rail is a blank pane line - a paragraph break, not a soft
         // wrap. Joining across it would let unrelated sentences assemble a
         // required phrase.
         List<String> findings = SynchronizedCliPtyManualAuditValidator.auditTranscriptFindings("""

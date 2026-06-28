@@ -85,7 +85,7 @@ public final class CheckpointCommand implements Command {
                 + restore.deletedFiles() + " deleted)");
     }
 
-    /** T794: the timeline — newest first, with time, turn, trigger, and size. */
+    /** T794: the timeline - newest first, with time, turn, trigger, and size. */
     static String renderTimeline(List<CheckpointSummary> summaries, ZoneId zone) {
         DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(zone);
         StringBuilder sb = new StringBuilder("Checkpoints (newest first):\n");

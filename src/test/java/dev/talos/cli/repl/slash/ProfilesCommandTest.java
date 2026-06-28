@@ -17,7 +17,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** T791: /profiles list/trust/revoke — the explicit-consent surface of the trust chain. */
+/** T791: /profiles list/trust/revoke - the explicit-consent surface of the trust chain. */
 class ProfilesCommandTest {
 
     @TempDir Path tempDir;

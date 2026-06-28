@@ -6,12 +6,12 @@ import dev.talos.runtime.Result;
 import java.util.List;
 
 /**
- * /clear — resets conversation history so the next prompt starts fresh.
+ * /clear - resets conversation history so the next prompt starts fresh.
  *
  * <p>Clears both the {@code ConversationManager} (structured turns) and
  * the legacy {@code SessionMemory} (flat text buffer), which share the
  * same underlying storage. After this command, the LLM receives no prior
- * conversation context — as if the session just started.
+ * conversation context - as if the session just started.
  */
 public final class ClearCommand implements Command {
 

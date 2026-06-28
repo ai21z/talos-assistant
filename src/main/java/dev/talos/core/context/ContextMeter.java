@@ -5,7 +5,7 @@ import java.util.Objects;
 /**
  * Read-model snapshot of context-window usage for the {@code /context}
  * meter (T798). Every token figure is the chars/4 estimate the budget and
- * compaction logic themselves use — honest estimates, labeled as such by
+ * compaction logic themselves use - honest estimates, labeled as such by
  * the renderer.
  *
  * @param historyTokensEstimate    estimated tokens of all stored turns

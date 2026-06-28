@@ -37,7 +37,7 @@ hs_err_pid*
 replay_pid*
 /reports/
 
-# Qodana (JetBrains code quality) — keep config, ignore outputs
+# Qodana (JetBrains code quality) - keep config, ignore outputs
 .qodana/
 
 # ---- Temporary and scratch files

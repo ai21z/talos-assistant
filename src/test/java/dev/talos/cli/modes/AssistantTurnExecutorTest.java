@@ -43,7 +43,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link AssistantTurnExecutor} — the shared LLM turn execution
+ * Tests for {@link AssistantTurnExecutor} - the shared LLM turn execution
  * logic used by AskMode and RagMode.
  *
  * <p>Uses PLACEHOLDER transport (default LlmClient) for deterministic,
@@ -671,7 +671,7 @@ class AssistantTurnExecutorTest {
         void respects_timeout_option() {
             var ctx = scriptedContext("timeout-safe answer");
             var messages = basicMessages();
-            // Very long timeout — should still work normally
+            // Very long timeout - should still work normally
             var opts = new AssistantTurnExecutor.Options().llmTimeoutMs(60_000L);
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
@@ -2490,7 +2490,7 @@ class AssistantTurnExecutorTest {
         void readOnlyProposalFlagsUnobservedNonFixtureFilenames(@TempDir Path workspace)
                 throws Exception {
             // T762: file detection is evidence-derived, not the audit-fixture
-            // name list — claims about ANY unread file now warn. This pins the
+            // name list - claims about ANY unread file now warn. This pins the
             // capability the old hardcoded marker set could not provide.
             Files.writeString(workspace.resolve("README.md"),
                     "# Focused Audit Fixture\n\nThis workspace checks response grounding.\n");
@@ -4912,11 +4912,11 @@ class AssistantTurnExecutorTest {
         void extremely_short_timeout_triggers_timeout_handling() {
             var ctx = scriptedContext("fast answer");
             var messages = basicMessages();
-            // 1ms timeout — PLACEHOLDER is fast enough that this might not trigger,
+            // 1ms timeout - PLACEHOLDER is fast enough that this might not trigger,
             // but verifies the timeout wiring exists without errors
             var opts = new AssistantTurnExecutor.Options().llmTimeoutMs(1L);
 
-            // Should not throw — errors are caught internally
+            // Should not throw - errors are caught internally
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
             assertNotNull(out.text(), "Should always return non-null text");
         }
@@ -5168,7 +5168,7 @@ class AssistantTurnExecutorTest {
         void default_options_work() {
             var ctx = scriptedContext("default options answer");
             var messages = basicMessages();
-            // Default options — should work without any configuration
+            // Default options - should work without any configuration
             var opts = new AssistantTurnExecutor.Options();
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
@@ -5353,7 +5353,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void capabilityMentionWithoutDeflectionEndingIsNotDeflection() {
-            // Mentions a capability but ends with substantive content — should not be flagged
+            // Mentions a capability but ends with substantive content - should not be flagged
             String answer = "I can help you with this analysis. "
                     + "The index.html file contains inline CSS in a <style> block. "
                     + "The calculateBMI() function handles the BMI computation. "
@@ -6070,7 +6070,7 @@ class AssistantTurnExecutorTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  R2 — Claim-vs-action truth layer (annotate-first)
+    //  R2 - Claim-vs-action truth layer (annotate-first)
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested
@@ -6090,7 +6090,7 @@ class AssistantTurnExecutorTest {
         @DisplayName("mutation claim + zero mutating successes → annotated")
         void falseMutationClaimGetsAnnotated() {
             // Real Turn 5 pattern: answer confidently asserts an applied edit,
-            // but only read_file was invoked — no write_file / edit_file success.
+            // but only read_file was invoked - no write_file / edit_file success.
             String answer = "The changes have been applied to `index.html`.\n\n"
                     + "I updated the headline and the introductory description to sound more "
                     + "professional and authoritative, while keeping the core functionality intact.";
@@ -6121,7 +6121,7 @@ class AssistantTurnExecutorTest {
             String answer = "Based on the file contents, this is a BMI calculator written "
                     + "in a single HTML file with inline style and script blocks.";
 
-            // Both zero mutations and some mutations — neither should annotate a
+            // Both zero mutations and some mutations - neither should annotate a
             // read-only / descriptive answer.
             assertEquals(answer,
                     AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult(0)));
@@ -6269,7 +6269,7 @@ class AssistantTurnExecutorTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  R6 — No-tool grounding retry (evidence-required prompts)
+    //  R6 - No-tool grounding retry (evidence-required prompts)
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested
@@ -6279,12 +6279,12 @@ class AssistantTurnExecutorTest {
         /** A clearly-above-threshold ungrounded-shape answer (no tools were used). */
         private String longUngroundedAnswer() {
             // 900+ chars of confident-sounding but zero-evidence prose. Shaped
-            // like the real Turn 2/3/4 transcript fabrications — substantive
+            // like the real Turn 2/3/4 transcript fabrications - substantive
             // enough to slip past any deflection tier, short of sanitation.
             return "Based on the typical structure of this kind of project, the site "
                  + "is organized as a single HTML file with separate stylesheet and "
                  + "script references linked from the head and body. The CSS file "
-                 + "controls visual presentation — colors, spacing, typography — "
+                 + "controls visual presentation - colors, spacing, typography - "
                  + "while the JavaScript file handles the interactive behavior, "
                  + "especially the BMI calculation on form submission. The HTML "
                  + "provides the structural skeleton for both. In practice this "
@@ -6388,10 +6388,10 @@ class AssistantTurnExecutorTest {
 
             // Result must not be the original. It is either the retry text
             // (when PLACEHOLDER returned something substantive) or the
-            // annotated original — both acceptable. Distinguish:
+            // annotated original - both acceptable. Distinguish:
             assertNotEquals(ungrounded, out, "Result must differ from the original");
             if (out.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)) {
-                // Retry was blank/identical — original was annotated.
+                // Retry was blank/identical - original was annotated.
                 assertTrue(out.contains(ungrounded),
                         "Annotated result must preserve the original answer");
             }
@@ -6454,7 +6454,7 @@ class AssistantTurnExecutorTest {
             var ctx = newCtx();
             List<ChatMessage> messages = new ArrayList<>();
             // User asks a general knowledge question. A long, substantive
-            // explanation answering it is legitimate — must not be second-guessed.
+            // explanation answering it is legitimate - must not be second-guessed.
             messages.add(ChatMessage.user(
                     "explain the difference between BMI and body fat percentage"));
 
@@ -6488,17 +6488,17 @@ class AssistantTurnExecutorTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  N2 — Streaming-path grounding annotation
+    //  N2 - Streaming-path grounding annotation
     //
     //  These tests lock in the streaming counterpart to R6. The helper is a
-    //  pure predicate — we test it directly so the decision boundary is
+    //  pure predicate - we test it directly so the decision boundary is
     //  deterministic (independent of the PLACEHOLDER LLM's output length).
     //  One integration-level test confirms wiring by asserting absence of
     //  the annotation on a non-evidence prompt regardless of answer length.
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("N2 — Streaming grounding annotation")
+    @DisplayName("N2 - Streaming grounding annotation")
     class StreamingGroundingTests {
 
         /** Long enough to pass {@link AssistantTurnExecutor#UNGROUNDED_MIN_CHARS}. */
@@ -6625,7 +6625,7 @@ class AssistantTurnExecutorTest {
         @DisplayName("streaming execute() does not rewrite the streamed prose (annotation is additive)")
         void streaming_execute_does_not_rewrite_streamed_content() {
             // Whatever the PLACEHOLDER returned, it must appear verbatim in
-            // out.text() — the annotation may or may not be appended, but
+            // out.text() - the annotation may or may not be appended, but
             // the original streamed content is never replaced or shortened.
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
@@ -6650,14 +6650,14 @@ class AssistantTurnExecutorTest {
             // The pre-annotation text content must match in both surfaces
             // (modulo the surrounding newline padding the annotation uses).
             assertTrue(textWithoutAnnotation.startsWith(streamedWithoutAnnotation.stripTrailing()),
-                    "streamed content must appear at the start of out.text() — annotation must be additive, not a rewrite.\n"
+                    "streamed content must appear at the start of out.text() - annotation must be additive, not a rewrite.\n"
                     + "streamed=<" + streamedWithoutAnnotation + ">\n"
                     + "text=<" + textWithoutAnnotation + ">");
         }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  N1 — Transcript regression anchors
+    //  N1 - Transcript regression anchors
     //
     //  One test per transcript turn from test-output.txt (the playground run
     //  that exposed the trust layer gaps). Each test pins an exact user-prompt
@@ -6670,7 +6670,7 @@ class AssistantTurnExecutorTest {
     //  scenarios. The harness seam (ToolCallLoop) bypasses AssistantTurnExecutor,
     //  so R2/R6/N2 cannot fire there. LlmClient is final with no scripted-mode
     //  seam, so driving execute() end-to-end with scripted LLM responses would
-    //  require extracting an interface — a speculative abstraction the branch
+    //  require extracting an interface - a speculative abstraction the branch
     //  rules discourage. The static-gate pattern (already used by
     //  ClaimVsActionTests, GroundingRetryTests, StreamingGroundingTests) is
     //  the correct and lowest-risk anchor for transcript-level assertions.
@@ -6684,7 +6684,7 @@ class AssistantTurnExecutorTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("N1 — Transcript regressions (test-output.txt anchors)")
+    @DisplayName("N1 - Transcript regressions (test-output.txt anchors)")
     class TranscriptRegressions {
 
         /** Turn 2 prompt, verbatim from test-output.txt. */
@@ -6714,7 +6714,7 @@ class AssistantTurnExecutorTest {
                  + "target the form's input ids and the result container, while the "
                  + "JavaScript listens for the submit event on the form element and "
                  + "writes the computed BMI back into the result div via "
-                 + "document.getElementById. There are no obvious broken references — "
+                 + "document.getElementById. There are no obvious broken references - "
                  + "the href and src attributes match the sibling file names, and the "
                  + "class/id naming is consistent across all three files. As long as "
                  + "the files remain in the same directory the load order will resolve "
@@ -6735,7 +6735,7 @@ class AssistantTurnExecutorTest {
                  + "markup; moving to addEventListener('submit', ...) would "
                  + "separate concerns and make the event chain easier to test. "
                  + "Second, the CSS in style.css relies on element selectors like "
-                 + "'input' and 'div' that match too broadly — switching to "
+                 + "'input' and 'div' that match too broadly - switching to "
                  + "scoped class selectors (e.g. .bmi-input, .bmi-result) would "
                  + "reduce the risk of style leakage if the page ever grows. "
                  + "Third, the BMI formula in the JavaScript assumes metric "
@@ -6750,7 +6750,7 @@ class AssistantTurnExecutorTest {
         // ── T2 ────────────────────────────────────────────────────────
 
         @Test
-        @DisplayName("T2 — Turn-2 wiring fabrication shape triggers R6 retry")
+        @DisplayName("T2 - Turn-2 wiring fabrication shape triggers R6 retry")
         void t2_wiringFabrication_triggersR6() {
             var ctx = scriptedContext("grounded T2 retry answer");
             List<ChatMessage> messages = new ArrayList<>();
@@ -6777,7 +6777,7 @@ class AssistantTurnExecutorTest {
         // ── T3 ────────────────────────────────────────────────────────
 
         @Test
-        @DisplayName("T3 — Turn-3 code-fabrication shape triggers R6 retry")
+        @DisplayName("T3 - Turn-3 code-fabrication shape triggers R6 retry")
         void t3_codeFabrication_triggersR6() {
             var ctx = scriptedContext("grounded T3 retry answer");
             List<ChatMessage> messages = new ArrayList<>();
@@ -6803,13 +6803,13 @@ class AssistantTurnExecutorTest {
         // ── T4 ────────────────────────────────────────────────────────
         //
         // Turn 4 (selector-mismatch audit fabrication) is already pinned by
-        // GroundingRetryTests#firesOnTranscriptTurn4Shape. No duplicate here —
+        // GroundingRetryTests#firesOnTranscriptTurn4Shape. No duplicate here -
         // see that test's transcript-anchored prompt for the T4 regression.
 
         // ── T5 ────────────────────────────────────────────────────────
 
         @Test
-        @DisplayName("T5 — Turn-5 false mutation claim (verbatim) is annotated")
+        @DisplayName("T5 - Turn-5 false mutation claim (verbatim) is annotated")
         void t5_falseMutationClaim_triggersR2() {
             // Verbatim Turn-5 final narration from test-output.txt: Talos
             // invoked only read_file, then claimed the edit was applied.
@@ -6870,7 +6870,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        @DisplayName("T1 — Turn-1 under-inspection (1 read, multi-file prompt) is annotated")
+        @DisplayName("T1 - Turn-1 under-inspection (1 read, multi-file prompt) is annotated")
         void t1_underInspection_triggersN3() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -6975,7 +6975,7 @@ class AssistantTurnExecutorTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  N3 — Inspect under-completion truth layer
+    //  N3 - Inspect under-completion truth layer
     //
     //  Covers the annotate-first gate that fires when the user asked for
     //  multi-file inspection ("read the entry files", "all three", …) but
@@ -6985,7 +6985,7 @@ class AssistantTurnExecutorTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("N3 — Inspect under-completion")
+    @DisplayName("N3 - Inspect under-completion")
     class InspectUnderCompletionTests {
 
         /** Long enough to pass {@link AssistantTurnExecutor#INSPECT_MIN_CHARS}. */
@@ -7026,7 +7026,7 @@ class AssistantTurnExecutorTest {
         @Test
         @DisplayName("fires: zero reads but tools were invoked (e.g. only list_dir-less path)")
         void fires_when_tools_invoked_but_no_reads() {
-            // A turn that used a non-read tool (hypothetical) — still under-inspected.
+            // A turn that used a non-read tool (hypothetical) - still under-inspected.
             var messages = msgsWith("Read all the entry files and summarize.");
             String answer = longAnswer();
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
@@ -7073,7 +7073,7 @@ class AssistantTurnExecutorTest {
             String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
                     longAnswer(), messages, loopResult);
             assertEquals(longAnswer(), out,
-                    "mutating success means the turn did real work — signal is noise");
+                    "mutating success means the turn did real work - signal is noise");
         }
 
         @Test

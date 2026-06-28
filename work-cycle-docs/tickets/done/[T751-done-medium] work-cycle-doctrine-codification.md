@@ -17,31 +17,31 @@ the script implements written rules, not folklore.
 ## Evidence Analysis
 
 - Ordering contradiction: AGENTS.md "Versioned Candidate Loop" lists
-  "2. Bump the patch version. 3. Update CHANGELOG.md." — but
+  "2. Bump the patch version. 3. Update CHANGELOG.md." - but
   `work-test-cycle.md` (~89-94) and the step-by-step runbook require
   changelog-notes-in-Unreleased BEFORE the bump, and `scripts/bump-patch.ps1`
   **hard-fails** on an empty Unreleased section (lines 56-62, verified). The
   script and runbooks agree; AGENTS.md (the highest authority) has it
-  backwards — a drafting slip with authority status.
+  backwards - a drafting slip with authority status.
 - Dirty-tree downgrade rule: enforced consistently in practice
   (`lane-labeled-two-model-prompt-bank-audit-20260520.md`: "evidence is valid
   for local stabilization, not a clean versioned candidate packet"; T280/T284
   precedent; the 0.10.1 packet treated it as binding) but absent from
-  AGENTS.md and all five doctrine docs — practice is stricter than doctrine.
+  AGENTS.md and all five doctrine docs - practice is stricter than doctrine.
 - Stale operator prompt: `full-e2e-audit-operator-prompt.md` hardcodes
-  "Branch: v0.9.0-beta-dev. Do not merge to main." — beta-dev now carries
+  "Branch: v0.9.0-beta-dev. Do not merge to main." - beta-dev now carries
   0.10.x and audits run from feature branches; the prompt should reference
   "the current audit branch recorded in the packet" rather than a hardcoded
   name.
 - Template contradiction: `templates/evaluation-finding-ticket-template.md`
   (~200-204) says "Do not update CHANGELOG.md unless this is candidate
-  closeout" — but bump-patch.ps1 requires material Unreleased content at cut
+  closeout" - but bump-patch.ps1 requires material Unreleased content at cut
   time, so per-ticket Unreleased accumulation is the only sequence that
   works; the wave already practices it.
 
 ## Architectural Hypothesis
 
-n/a — documentation-only ticket.
+n/a - documentation-only ticket.
 
 ## Architecture Metadata
 
@@ -64,7 +64,7 @@ Refactor scope: bounded doc edits; no prompt-bank or fixture changes
 2. AGENTS.md: add the dirty-tree evidence-downgrade rule to the audit/evidence
    doctrine ("a dirty working tree downgrades live evidence to local
    stabilization grade; clean committed candidates are required for release
-   packets") — codifying existing precedent.
+   packets") - codifying existing precedent.
 3. Operator prompt: replace the hardcoded branch line with packet-anchored
    branch language.
 4. Ticket template: amend the CHANGELOG note to require a one-line
@@ -81,7 +81,7 @@ Refactor scope: bounded doc edits; no prompt-bank or fixture changes
 ## Tests
 
 - Docs-only; `git diff --check` clean. Existing docs tests
-  (ReadmePrivacyCopyTest etc.) unaffected — verify with focused docs test run.
+  (ReadmePrivacyCopyTest etc.) unaffected - verify with focused docs test run.
 
 ## Acceptance Criteria
 

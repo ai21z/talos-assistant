@@ -52,7 +52,7 @@ public final class TalosKnowledgeEngine {
         RagService.Answer answer = ragService.ask(
                 request.workspace(), request.query(), request.topK());
         // Prefer packed context (actual input to model) over raw retrieved set.
-        // packedContext is null on the net-disabled stub path — fall back to Prepared.
+        // packedContext is null on the net-disabled stub path - fall back to Prepared.
         var snippets = answer.packedContext() != null
                 ? answer.packedContext().snippets()
                 : (answer.prepared() != null ? answer.prepared().snippets()

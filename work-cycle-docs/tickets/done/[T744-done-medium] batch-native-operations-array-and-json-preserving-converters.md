@@ -10,16 +10,16 @@ Owner: unassigned
 ## Problem
 
 `talos.apply_workspace_batch` requires `operations_json`: a JSON array encoded
-INSIDE a JSON string — double encoding, the hardest emission task in the bank
+INSIDE a JSON string - double encoding, the hardest emission task in the bank
 for a q4 14B model (the harness's own scripted fixture needs triple-escaping
 to express one copy operation). Two of three full-bank failures concentrated
 on this scenario. A native array parameter removes the amplifier and lets the
-T739 grammar constrain every key and brace — but the argument converters
+T739 grammar constrain every key and brace - but the argument converters
 destroy container values today, so the converters must be fixed first.
 
 ## Evidence Analysis
 
-- Schema: `runtime/workspace/BatchWorkspaceApplyTool.java:36-39` —
+- Schema: `runtime/workspace/BatchWorkspaceApplyTool.java:36-39` -
   `operations_json` is `{"type":"string"}` whose content must itself be a JSON
   array; harness fixture triple-escapes
   (`SynchronizedApprovalAuditMain.java:1974-1976`).
@@ -27,15 +27,15 @@ destroy container values today, so the converters must be fixed first.
   array root or `{operations:[...]}` object.
 - **Converter gap (blocking precondition):**
   - `runtime/ToolCallParser.extractParams:424` uses
-    `entry.getValue().asText("")` — Jackson returns `""` for container nodes,
+    `entry.getValue().asText("")` - Jackson returns `""` for container nodes,
     so an array argument silently becomes empty string.
   - `runtime/toolcall/ToolCallSupport.convertNativeToolCalls:58-70` uses
-    `String.valueOf(entry.getValue())` — CompatChatClient deserializes
+    `String.valueOf(entry.getValue())` - CompatChatClient deserializes
     arguments to `Map<String,Object>` (CompatChatClient.java:353-375), so a
     list value stringifies as Java `toString` (`[{op=mkdir, path=docs}]`),
     not JSON.
 - Without the converter fix, advertising an array parameter actively breaks
-  batch calls — worse than the status quo.
+  batch calls - worse than the status quo.
 
 ## Architectural Hypothesis
 
@@ -65,7 +65,7 @@ fixture remains on legacy form for back-compat proof
 
 1. Converters preserve JSON: container-valued arguments (object/array) are
    serialized with Jackson (`writeValueAsString`/`node.toString()`), never
-   `asText("")` or `String.valueOf` — in BOTH `ToolCallParser.extractParams`
+   `asText("")` or `String.valueOf` - in BOTH `ToolCallParser.extractParams`
    and `ToolCallSupport.convertNativeToolCalls`. Scalars unchanged.
 2. `BatchWorkspaceApplyTool` schema gains a native `operations` array
    parameter (op/from/to/path/new_name/overwrite/recursive object items);
@@ -91,7 +91,7 @@ fixture remains on legacy form for back-compat proof
 ## Acceptance Criteria
 
 - Focused tests green for ToolCallParser/ToolCallSupport/BatchWorkspaceApplyTool.
-- Full `test` lane green (converter change is generic — watch for fixture
+- Full `test` lane green (converter change is generic - watch for fixture
   fallout).
 - Scripted sync scenario `workspace-batch-apply-approved` still passes
   (`runSynchronizedApprovalAudit` scripted mode) proving legacy form intact.
@@ -114,11 +114,11 @@ fixture remains on legacy form for back-compat proof
   string; `WorkspaceBatchPlanParser` already accepted the `operations` param
   key, so execution needed no change.
 - Note: schema `required:["operations"]` constrains live grammar-enforced
-  model emissions only — tool execution validates via the parser, so legacy
+  model emissions only - tool execution validates via the parser, so legacy
   scripted fixtures and old transcripts using `operations_json` keep working
   (proven by the unchanged scripted bank tests).
 - Tests green: ToolCallParserTest +1 (container preservation),
   ToolCallSupportTest +2 (container JSON, scalar legacy),
   BatchWorkspaceApplyToolTest +2 (native array execution identical to legacy;
   schema advertisement). Full `test` + `e2eTest` lanes BUILD SUCCESSFUL
-  (2m10s) — no converter fallout across the 4799-test suite.
+  (2m10s) - no converter fallout across the 4799-test suite.

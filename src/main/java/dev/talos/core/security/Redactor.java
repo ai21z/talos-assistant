@@ -41,7 +41,7 @@ public final class Redactor {
                     "|(?:(?<=\\s)|(?<=^))(/[^\\s\"'<>|/]{1,200}(?:/[^\\s\"'<>|]{1,200})+)"
     );
 
-    // IPv4 with octet validation (0–255). Excludes loopback 127.x.x.x.
+    // IPv4 with octet validation (0-255). Excludes loopback 127.x.x.x.
     private static final Pattern IPV4 = Pattern.compile(
             "\\b(?!127(?:\\.\\d{1,3}){3})" +
             "((?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?))\\b"

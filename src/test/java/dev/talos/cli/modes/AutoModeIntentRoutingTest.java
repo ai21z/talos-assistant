@@ -22,7 +22,7 @@ class AutoModeIntentRoutingTest {
     void listFilesQueriesRouteToAssistForToolHandling() {
         // "list files" queries route through PromptClassifier normally.
         // "what files are here?" now routes to RETRIEVE because "here" is
-        // a workspace proximity signal — the user is asking about THIS workspace.
+        // a workspace proximity signal - the user is asking about THIS workspace.
         assertEquals(PromptClassifier.Route.RETRIEVE,
                 PromptClassifier.route("what files are here?"));
         assertEquals(PromptClassifier.Route.ASSIST,

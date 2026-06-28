@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>The 3-arg/blank-pins shape is the characterization baseline (the
  * pre-T802 prompt is byte-identical); the pinned variant adds exactly
  * one user-role {@code [PinnedFiles]} message immediately before the
- * current user line — file content as conversation data, never system
+ * current user line - file content as conversation data, never system
  * authority.
  */
 class UnifiedAssistantModeMessageShapeTest {

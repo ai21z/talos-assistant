@@ -21,7 +21,7 @@ public final class IndexPathResolver {
     }
 
     /**
-     * Same layout under an explicit Talos home — lets diagnostics probe the
+     * Same layout under an explicit Talos home - lets diagnostics probe the
      * index location without touching the real {@code ~/.talos} in tests.
      */
     public static Path getIndexDirectory(Path talosHome, Path workspace) {

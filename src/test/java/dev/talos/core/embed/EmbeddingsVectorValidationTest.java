@@ -83,7 +83,7 @@ class EmbeddingsVectorValidationTest {
 
         @Test
         void stripsControlChars() {
-            // \x01 (SOH), \x02 (STX), \x7F (DEL) — should be stripped
+            // \x01 (SOH), \x02 (STX), \x7F (DEL) - should be stripped
             String result = EmbeddingsClient.normalizeEmbedInput("hello\u0001world\u0002test\u007F");
             assertEquals("helloworldtest", result);
             assertFalse(result.contains("\u0001"));

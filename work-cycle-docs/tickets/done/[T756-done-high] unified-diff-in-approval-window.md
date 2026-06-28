@@ -9,7 +9,7 @@ Owner: external assistant
 
 ## Problem
 
-The flagship trust surface — the approval window — showed only a 60-char
+The flagship trust surface - the approval window - showed only a 60-char
 escaped `replace:`/`with:` pair for edits and a 5-line head preview for
 writes. AGENTS.md priority 9 demands "clear diffs before mutation where
 practical" and every reference CLI ships colored unified diffs at consent
@@ -24,13 +24,13 @@ diff builder), `dev.talos.runtime.TurnProcessor` (detail assembly + trace),
 `dev.talos.cli.ui.ApprovalPromptRenderer` (color), `dev.talos.cli.approval.
 CliApprovalGate` (risk-scope companion fix)
 New or changed tools: none
-Risk, approval, and protected paths: diff preview fail-closes — protected
+Risk, approval, and protected paths: diff preview fail-closes - protected
 path / oversized (>2 MiB) / binary / unreadable / outside-workspace →
 skipped with machine-readable reason, never a partial diff; every rendered
 line passes ProtectedContentPolicy.sanitizeText
 Checkpoint, evidence, verification, and repair: n/a
 Outcome and trace: new `APPROVAL_DIFF_PREVIEW` event (diffHash, added,
-removed, diffLineCount, truncated, skippedReason — hash and counts only,
+removed, diffLineCount, truncated, skippedReason - hash and counts only,
 never diff text; DEFAULT redaction doctrine)
 Refactor scope: the named files; no approval-flow restructuring
 
@@ -41,11 +41,11 @@ Refactor scope: the named files; no approval-flow restructuring
    "no changes" note. Edit → diff of the spliced unique old_string match.
 2. Caps: 60 diff lines + "(N more diff lines)" marker; line length capped
    at 70 so the 4-space-indented diff stays under the renderer's 74-column
-   wrap threshold (width-80 prompt) — wrap() word-wrap collapses
+   wrap threshold (width-80 prompt) - wrap() word-wrap collapses
    whitespace and would shear diff indentation.
 3. Strictly additive detail: every legacy line byte-identical; the diff
    block is the final detail section. PTY validator pins only the
-   "Allow? [...]" prompt string — unchanged.
+   "Allow? [...]" prompt string - unchanged.
 4. Color renderer-owned: +/green, -/red, @@ and marker/gray via CliTheme;
    ColorPolicy.NEVER yields byte-identical plain ASCII (sgr returns "").
    Colorization scoped to the diff block so "- item" prose lines are never
@@ -53,12 +53,12 @@ Refactor scope: the named files; no approval-flow restructuring
    indistinguishable from prose after strip, and the block is structurally
    last).
 5. Companion fix: `CliApprovalGate.inferRisk` scans only the detail before
-   the "diff (+" marker — diff bodies quoting "remove"/"delete" in user
+   the "diff (+" marker - diff bodies quoting "remove"/"delete" in user
    code must not flip the risk label to "destructive".
 
 ## Dependency
 
-`io.github.java-diff-utils:java-diff-utils:4.12` — pure Java, zero
+`io.github.java-diff-utils:java-diff-utils:4.12` - pure Java, zero
 transitive runtime dependencies (verified via Gradle dependency tree),
 Apache-2.0. Version pinned in gradle.properties (`javaDiffUtilsVersion`).
 
@@ -84,7 +84,7 @@ Apache-2.0. Version pinned in gradle.properties (`javaDiffUtilsVersion`).
 ## Known Follow-Ups
 
 - One manual Windows-Terminal PTY visual cycle at wave closeout (approval
-  window grew; chrome strings unchanged — cheap insurance, owner step).
+  window grew; chrome strings unchanged - cheap insurance, owner step).
 - FULL_DEBUG trace mode could carry the diff text; deliberately not built
   (mode exists but is unused).
 

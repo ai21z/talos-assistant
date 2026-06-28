@@ -30,7 +30,7 @@ public final class EmbeddingsFactory {
      * to {@code "disabled"}.
      * <p>
      * When the resolved model name matches a known built-in profile, the
-     * built-in is used as <em>defaults</em> — not as an unconditional
+     * built-in is used as <em>defaults</em> - not as an unconditional
      * replacement. Any config overrides for provider, dimensions,
      * query_instruction, document_instruction, max_input_tokens, or normalize
      * take precedence. If the resolved profile matches the built-in exactly,
@@ -63,7 +63,7 @@ public final class EmbeddingsFactory {
         boolean defaultNorm  = builtIn == null || builtIn.normalize();
 
         int dims         = CfgUtil.intAt(embedCfg, "dimensions", defaultDims);
-        // Instruction prefixes may intentionally have trailing whitespace — do NOT trim.
+        // Instruction prefixes may intentionally have trailing whitespace - do NOT trim.
         String qInstr    = rawStringOr(embedCfg.get("query_instruction"), defaultQInstr);
         String dInstr    = rawStringOr(embedCfg.get("document_instruction"), defaultDInstr);
         boolean instrAware = qInstr != null || dInstr != null;
@@ -149,7 +149,7 @@ public final class EmbeddingsFactory {
         String s = String.valueOf(o).trim();
         return s.isEmpty() ? fallback : s;
     }
-    /** Like {@link #stringOr} but preserves whitespace — required for instruction prefixes. */
+    /** Like {@link #stringOr} but preserves whitespace - required for instruction prefixes. */
     private static String rawStringOr(Object o, String fallback) {
         if (o == null) return fallback;
         String s = String.valueOf(o);

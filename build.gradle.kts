@@ -25,7 +25,7 @@ fun generatedAtIso(): String = Class.forName("java.time.Instant").getMethod("now
  *
  * This preserves the "candidate packet exists even when evidence is malformed"
  * guarantee. A malformed upstream file (truncated SARIF, corrupt JUnit XML,
- * etc.) must not wipe the whole packet — it must produce an explicit
+ * etc.) must not wipe the whole packet - it must produce an explicit
  * "summary-generation-failed" artifact for the reviewer.
  */
 fun writeSummarySoft(target: java.io.File, summaryName: String, version: String, payloadBuilder: () -> Any) {

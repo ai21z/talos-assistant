@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * T795 contract: {@code /undo} is an approval-gated restore of the newest
  * checkpoint with a safety checkpoint captured first.
  *
- * <p>This file's T787 revision pinned the OPPOSITE behavior — the pre-T795
+ * <p>This file's T787 revision pinned the OPPOSITE behavior - the pre-T795
  * {@code /undo} popped an in-memory stack and wrote files (including
  * protected paths) with no approval gate. That trust hole is closed; the
  * diff of this rewrite is the behavioral-delta documentation.
@@ -115,7 +115,7 @@ class UndoCommandTest {
             assertEquals("original", Files.readString(workspace.resolve("app.js")));
             assertTrue(first.toString().contains("/undo again to redo"), first.toString());
 
-            // The safety checkpoint is now the newest — a second /undo redoes.
+            // The safety checkpoint is now the newest - a second /undo redoes.
             Result second = undoCmd.execute("", ctxApproving(approvals));
 
             assertInstanceOf(Result.Ok.class, second);

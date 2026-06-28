@@ -39,17 +39,17 @@ class ToolProgressUXTest {
         @Test
         @DisplayName("extracts summary after 'Warning: '")
         void extracts_warning_text() {
-            String output = "Updated index.html (10 lines). Warning: HTML issues — unclosed <div>. [verification: WARN]";
+            String output = "Updated index.html (10 lines). Warning: HTML issues - unclosed <div>. [verification: WARN]";
             String summary = ToolCallLoop.extractVerificationSummary(output);
-            assertEquals("HTML issues — unclosed <div>", summary);
+            assertEquals("HTML issues - unclosed <div>", summary);
         }
 
         @Test
         @DisplayName("extracts summary without status tag")
         void extracts_without_tag() {
-            String output = "Edited data.json. Warning: JSON parse failed — unexpected token";
+            String output = "Edited data.json. Warning: JSON parse failed - unexpected token";
             String summary = ToolCallLoop.extractVerificationSummary(output);
-            assertEquals("JSON parse failed — unexpected token", summary);
+            assertEquals("JSON parse failed - unexpected token", summary);
         }
 
         @Test
@@ -162,7 +162,7 @@ class ToolProgressUXTest {
 
             // Simulate what ToolCallLoop does internally
             ToolResult result = ToolResult.ok(
-                    "Updated index.html (10 lines). Warning: HTML issues — unclosed <div>. [verification: WARN]",
+                    "Updated index.html (10 lines). Warning: HTML issues - unclosed <div>. [verification: WARN]",
                     VerificationStatus.WARN);
 
             // Replicate ToolCallLoop's emitToolResult logic
@@ -173,7 +173,7 @@ class ToolProgressUXTest {
 
             assertEquals(1, events.size());
             assertEquals("warning", events.get(0).action());
-            assertEquals("HTML issues — unclosed <div>", events.get(0).detail());
+            assertEquals("HTML issues - unclosed <div>", events.get(0).detail());
         }
 
         @Test
@@ -217,7 +217,7 @@ class ToolProgressUXTest {
             var sink = recordingSink(events);
 
             ToolResult result = ToolResult.ok(
-                    "Updated bad.json. Warning: JSON parse failed — unexpected token. [verification: FAIL]",
+                    "Updated bad.json. Warning: JSON parse failed - unexpected token. [verification: FAIL]",
                     VerificationStatus.FAIL);
 
             if (result.verification() != null && !result.verification().acceptable()) {
@@ -276,7 +276,7 @@ class ToolProgressUXTest {
             ToolProgressSink throwingSink = (name, action, detail) -> {
                 throw new RuntimeException("UI error");
             };
-            // ToolCallLoop wraps calls in try-catch — this verifies the contract
+            // ToolCallLoop wraps calls in try-catch - this verifies the contract
             assertDoesNotThrow(() -> {
                 try {
                     throwingSink.onToolProgress("test", "executing", null);

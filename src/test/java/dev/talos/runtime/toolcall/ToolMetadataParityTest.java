@@ -102,7 +102,7 @@ class ToolMetadataParityTest {
         for (var descriptor : registry.descriptors()) {
             assertTrue(GOLDEN.containsKey(descriptor.name()),
                     "unpinned tool registered: " + descriptor.name()
-                            + " — add a golden metadata row before shipping it");
+                            + " - add a golden metadata row before shipping it");
         }
         assertEquals(GOLDEN.size(), registry.descriptors().size(),
                 "golden table and registry must stay the same size");
@@ -111,7 +111,7 @@ class ToolMetadataParityTest {
     @Test
     void canonicalDescriptorCatalogMatchesTheBootstrapRegistry() {
         // T761: defaultVisibleToolNames derives from plan() over
-        // CanonicalToolDescriptors — this pin keeps that catalog from rotting
+        // CanonicalToolDescriptors - this pin keeps that catalog from rotting
         // when tools are added or their metadata changes.
         var canonical = CanonicalToolDescriptors.registry().descriptors();
         var bootstrap = bootstrapEquivalentRegistry().descriptors();

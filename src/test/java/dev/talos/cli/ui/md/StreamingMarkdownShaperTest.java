@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * T777: trusted streaming markdown. The load-bearing invariant is
- * markers-visible/colorize-only — stripping ANSI from the styled stream
+ * markers-visible/colorize-only - stripping ANSI from the styled stream
  * recovers the plain wrapped text byte-for-byte, so transcript
  * string-matching can never regress and column math stays plain.
  */

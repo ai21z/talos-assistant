@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * dishonest. When a scenario needs those, use {@link ScenarioResult}
  * via {@link ScenarioRunner#run(ScenarioDefinition)} instead.
  *
- * <p>The primary assertion surface is answer text — which is exactly
+ * <p>The primary assertion surface is answer text - which is exactly
  * what the executor-seam gates (R2 / R6 / N2 / N3) produce. See
  * §8 N4 of {@code docs/architecture/talos-harness-main-plan.md}
  * for the seam design.

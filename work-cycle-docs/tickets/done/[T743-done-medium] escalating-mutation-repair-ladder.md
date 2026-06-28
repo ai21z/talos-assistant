@@ -17,12 +17,12 @@ one retry that changed nothing about the constraint envelope.
 
 ## Evidence Analysis
 
-- Malformed-debris bypass: `cli/modes/AssistantTurnExecutor.java:599-603` —
+- Malformed-debris bypass: `cli/modes/AssistantTurnExecutor.java:599-603` -
   `looksLikeMalformedProtocolArrayDebris/looksLikeMalformedToolProtocol`
   answers are shaped into a no-action notice and returned BEFORE
   `mutationRequestRetryIfNeeded` at line 606. r1 trace confirms:
   `PROTOCOL_SANITIZED` → `OUTCOME_RENDERED FAILED`, no retry events.
-- Retry suppression gates: `cli/modes/MissingMutationRetry.java:97-98` —
+- Retry suppression gates: `cli/modes/MissingMutationRetry.java:97-98` -
   `failureDecision().shouldStop()` and `hasInvalidMutatingFailure` both return
   early; an almost-valid `operations_json` failing with INVALID_PARAMS gets no
   re-prompt.
@@ -32,7 +32,7 @@ one retry that changed nothing about the constraint envelope.
   retry went out with identical AUTO + default sampling (r3's provider body IS
   the retry request).
 - Standard practice (constrained re-ask per guidance/outlines; OpenAI
-  structured-outputs retry guidance): escalate constraints on retry — harder
+  structured-outputs retry guidance): escalate constraints on retry - harder
   tool choice, cooler sampling, echo the exact parse error.
 
 ## Architectural Hypothesis
@@ -94,7 +94,7 @@ Refactor scope: the two named classes + tests
 
 ## Known Risks
 
-- ATE is a 3,305-line hub (Wave 5 unwinds it) — keep the routing change
+- ATE is a 3,305-line hub (Wave 5 unwinds it) - keep the routing change
   minimal and covered by tests; no opportunistic refactoring here.
 
 ## 2026-06-10 completion evidence
@@ -110,7 +110,7 @@ Refactor scope: the two named classes + tests
 - Scope refinement found during testing: pre-approval policy rejections
   (sandbox escape "Path not allowed before approval", source-evidence
   "blocked before approval", forbidden targets) reuse INVALID_PARAMS and are
-  EXCLUDED from the generic corrected retry — the deterministic e2e scenario
+  EXCLUDED from the generic corrected retry - the deterministic e2e scenario
   pack (scenario 28 path-escape) and the source-evidence executor test caught
   the over-broad first version; discriminator: pre-approval rejections
   consistently carry "before approval" in their messages.

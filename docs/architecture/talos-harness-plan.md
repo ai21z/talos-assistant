@@ -609,20 +609,20 @@ Should be enriched later with:
 
 ## 10. Recommended implementation order
 
-## Phase 0 — Documentation + evaluation baseline
+## Phase 0 - Documentation + evaluation baseline
 Create the scenario harness foundation first.
 
 **Why first:** measure before changing too much.
 
 ### Deliverables
 - scenario harness package
-- first 5–8 scenarios
+- first 5-8 scenarios
 - strict mode option for tool naming
 - clean workspace/session execution
 
 ---
 
-## Phase 1 — Runtime phase harness
+## Phase 1 - Runtime phase harness
 Introduce phase-aware execution.
 
 ### Deliverables
@@ -636,7 +636,7 @@ Talos becomes easier to steer because the runtime helps separate inspect/plan/ap
 
 ---
 
-## Phase 2 — Task-level verifier
+## Phase 2 - Task-level verifier
 Add `TaskVerifier` and make verify phase meaningful.
 
 ### Deliverables
@@ -649,7 +649,7 @@ Fewer false “done” moments.
 
 ---
 
-## Phase 3 — Loop reset / degradation policy
+## Phase 3 - Loop reset / degradation policy
 Add smarter reset logic.
 
 ### Deliverables
@@ -662,7 +662,7 @@ Fewer exhausting repair spirals.
 
 ---
 
-## Phase 4 — Strict evaluation mode and cleanup
+## Phase 4 - Strict evaluation mode and cleanup
 Separate UX-friendly runtime from truthful benchmark runtime.
 
 ### Deliverables
@@ -692,26 +692,26 @@ Separate UX-friendly runtime from truthful benchmark runtime.
 
 These are not blockers for starting harness work, but they need explicit decisions.
 
-### Discussion 1 — Should Talos eventually gain a controlled local command tool?
+### Discussion 1 - Should Talos eventually gain a controlled local command tool?
 Without a shell/test-runner tool, Talos verification remains mostly static/file-based.
 This is acceptable for now, but limits top-tier development verification.
 
-### Discussion 2 — Should phase be visible to the user?
+### Discussion 2 - Should phase be visible to the user?
 Options:
 - invisible runtime-only state
 - lightweight visible status (“Inspecting… Planning… Applying… Verifying…”)
 
-### Discussion 3 — Should verification be automatic or opt-in?
+### Discussion 3 - Should verification be automatic or opt-in?
 For high-risk apply tasks, the recommendation is **automatic verify-after-apply**.
 But user control and latency trade-offs need discussion.
 
-### Discussion 4 — Should XML compatibility be fully removed later?
+### Discussion 4 - Should XML compatibility be fully removed later?
 Current active architecture is native-first + JSON fallback. XML should not influence future harness design, but full compatibility removal can be decided separately.
 
-### Discussion 5 — How far should strict evaluation mode diverge from user mode?
+### Discussion 5 - How far should strict evaluation mode diverge from user mode?
 We need truthful quality measurement without making everyday Talos frustrating.
 
-### Discussion 6 — Should task contracts be inferred or explicit?
+### Discussion 6 - Should task contracts be inferred or explicit?
 For example, whether Talos infers `FILE_FIX` vs `FULL_REWRITE`, or whether the runtime derives a contract only from clear user instructions.
 
 ---

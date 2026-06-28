@@ -13,7 +13,7 @@ import java.util.Objects;
  * preflight, first-run) can verify the environment without starting
  * anything or string-matching {@code Health.message()}.
  *
- * <p>The manager delegates its validation here — there is exactly one
+ * <p>The manager delegates its validation here - there is exactly one
  * source of truth for these failure strings, which are pinned by
  * {@code LlamaCppServerManagerTest} and {@code LlamaCppPreflightTest}.
  */

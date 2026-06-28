@@ -67,7 +67,7 @@ public final class CliApprovalGate implements ApprovalGate {
     /**
      * JLine / REPL-integrated with a live terminal width source (T773).
      * The bordered approval window follows the terminal width (clamped
-     * 60–120); the prompt strings themselves are width-independent and
+     * 60-120); the prompt strings themselves are width-independent and
      * stay byte-frozen via {@link dev.talos.cli.ui.ApprovalPromptText}.
      */
     public CliApprovalGate(Function<String, String> lineReader, PrintStream out, Runnable prePromptHook,
@@ -186,7 +186,7 @@ public final class CliApprovalGate implements ApprovalGate {
 
     /**
      * COLUMNS is consulted only when a live terminal exists but cannot report
-     * its width — the approval window never read COLUMNS before T773, so
+     * its width - the approval window never read COLUMNS before T773, so
      * redirected/scripted output must not start depending on it.
      */
     private int windowWidth() {

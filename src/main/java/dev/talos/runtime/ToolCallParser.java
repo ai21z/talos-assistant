@@ -27,13 +27,13 @@ import java.util.regex.Pattern;
  * <p>The text fallback accepts multiple formats, in priority order:
  * <ol>
  *   <li><b>Code-fenced JSON</b> (<em>active fallback</em>): {@code ```json ... ```} blocks
- *       containing a {@code "name"} key — the instructed text fallback format when
+ *       containing a {@code "name"} key - the instructed text fallback format when
  *       native tool calling is unavailable.</li>
  *   <li><b>Bare JSON</b> (<em>catch-all</em>): JSON objects with {@code "talos."} prefix
- *       at line boundaries — for models that skip both wrappers.</li>
- *   <li><b>XML tags</b> (<em>deprecated compatibility — checked last</em>):
+ *       at line boundaries - for models that skip both wrappers.</li>
+ *   <li><b>XML tags</b> (<em>deprecated compatibility - checked last</em>):
  *       {@code <tool_call>}, {@code <function_call>}, {@code <tool>}, {@code <function>}
- *       — retained temporarily for models that may still emit XML from training habits
+ *       - retained temporarily for models that may still emit XML from training habits
  *       or cached context. No prompt path instructs this format. Emits a deprecation
  *       warning when matched. Scheduled for removal once native tool calling has been
  *       stable across model versions.</li>
@@ -57,7 +57,7 @@ public final class ToolCallParser {
      * payloads with literal newlines and tabs inside string values. RFC-8259
      * forbids unescaped control chars in strings; Jackson rejects them by
      * default with {@code "Unrecognized character escape (CTRL-CHAR, code 10)"}.
-     * That rejection silently drops valid tool calls — we observed three
+     * That rejection silently drops valid tool calls - we observed three
      * consecutive turns in a real transcript where qwen called
      * {@code talos.edit_file} but the parser ate every payload.
      *
@@ -66,9 +66,9 @@ public final class ToolCallParser {
      * framework (LangChain, OpenClaw, llama.cpp server) does for the same reason.
      *
      * <ul>
-     *   <li>{@code ALLOW_UNESCAPED_CONTROL_CHARS} — accept literal LF/CR/TAB
+     *   <li>{@code ALLOW_UNESCAPED_CONTROL_CHARS} - accept literal LF/CR/TAB
      *       inside string values (the actual cause of the dropped tool calls).</li>
-     *   <li>{@code ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER} — tolerate
+     *   <li>{@code ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER} - tolerate
      *       over-escaping like {@code \\'} or {@code \\$} that some models
      *       produce when generating code-bearing arguments.</li>
      * </ul>
@@ -79,7 +79,7 @@ public final class ToolCallParser {
             .build();
 
     /** Variant XML tags: tool_call, function_call, tool, function.
-     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML variants.
+     *  DEPRECATED COMPATIBILITY ONLY - retained for models that emit XML variants.
      *  JSON code fences are the actively instructed text fallback.
      *  Scheduled for removal once native tool calling is stable across model versions. */
     private static final Pattern VARIANT_TAG_PATTERN = Pattern.compile(
@@ -116,10 +116,10 @@ public final class ToolCallParser {
         List<ToolCall> calls = new ArrayList<>();
         Set<String> consumedPayloads = new HashSet<>();
 
-        // Pass 1: code-fenced JSON blocks — ACTIVE fallback format (instructed)
+        // Pass 1: code-fenced JSON blocks - ACTIVE fallback format (instructed)
         extractFromPattern(CODE_FENCE_PATTERN, 1, llmResponse, calls, consumedPayloads);
 
-        // Pass 2: bare JSON (only if no code-fenced blocks were found — avoids
+        // Pass 2: bare JSON (only if no code-fenced blocks were found - avoids
         // double-parsing when the model wraps AND bare-emits the same call)
         if (calls.isEmpty()) {
             extractFromPattern(BARE_JSON_PATTERN, 1, llmResponse, calls, consumedPayloads);
@@ -130,17 +130,17 @@ public final class ToolCallParser {
         // contain literal brace characters (e.g. CSS rules in old_string/new_string,
         // JavaScript function bodies in content). Uses call-identity deduplication to
         // avoid re-adding anything Pass 2 already found.
-        // Only runs for responses that start with '{' — i.e. raw-JSON-only model output.
+        // Only runs for responses that start with '{' - i.e. raw-JSON-only model output.
         extractAdjacentStandaloneToolJsons(llmResponse, calls);
 
-        // Pass 3: XML-tagged blocks — DEPRECATED COMPATIBILITY ONLY (checked last).
+        // Pass 3: XML-tagged blocks - DEPRECATED COMPATIBILITY ONLY (checked last).
         //         Not actively instructed. Retained only for models that still emit
         //         XML from training habits. Will be removed once native calling is stable.
         int preXmlCount = calls.size();
         extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
         if (calls.size() > preXmlCount) {
             XmlCompatTelemetry.recordParserFallback(calls.subList(preXmlCount, calls.size()));
-            LOG.warn("XML tool-call format detected — this is deprecated. "
+            LOG.warn("XML tool-call format detected - this is deprecated. "
                     + "The model should use native tool calling or JSON code-fence format.");
         }
 

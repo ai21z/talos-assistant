@@ -49,7 +49,7 @@ public final class ToolValidation {
 
     /**
      * Require that the named parameter is present and non-empty
-     * (allows whitespace-only values — useful for parameters like
+     * (allows whitespace-only values - useful for parameters like
      * {@code old_string} where whitespace is semantically significant).
      *
      * @return an error {@link ToolResult} if the param is null or empty; {@code null} if valid
@@ -85,7 +85,7 @@ public final class ToolValidation {
     public sealed interface PathResult permits PathResult.Ok, PathResult.Err {
         /** Path resolved and all checks passed. */
         record Ok(Path path) implements PathResult {}
-        /** One of the checks failed — return this error to the caller. */
+        /** One of the checks failed - return this error to the caller. */
         record Err(ToolResult error) implements PathResult {}
     }
 

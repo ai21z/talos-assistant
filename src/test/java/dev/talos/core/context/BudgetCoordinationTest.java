@@ -12,15 +12,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Integration-style tests for the P0 budget coordination fix.
  *
- * <p>Verifies that the full flow — build history → measure tokens →
- * pack snippets with history deduction → assemble messages — keeps
+ * <p>Verifies that the full flow - build history → measure tokens →
+ * pack snippets with history deduction → assemble messages - keeps
  * the total estimated tokens within the configured context window.
  *
  * <p>Before this fix, history tokens were allocated independently
  * (25% of context) and not deducted from the snippet budget, causing
  * the assembled context to exceed the model's context window.
  */
-@DisplayName("P0 — Budget Coordination: history + snippets within context window")
+@DisplayName("P0 - Budget Coordination: history + snippets within context window")
 class BudgetCoordinationTest {
 
     /**
@@ -174,7 +174,7 @@ class BudgetCoordinationTest {
         int totalFix = 100 + 20 + historyTokens + snippetsFix + 100 + (int)(contextMax * 0.30);
 
         assertTrue(totalOldBug > contextMax,
-                "Pre-fix total (" + totalOldBug + ") should exceed budget — this was the bug");
+                "Pre-fix total (" + totalOldBug + ") should exceed budget - this was the bug");
         assertTrue(totalFix <= contextMax,
                 "Fixed total (" + totalFix + ") should stay within budget");
     }

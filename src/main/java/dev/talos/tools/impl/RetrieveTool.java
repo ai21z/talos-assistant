@@ -18,8 +18,8 @@ import java.util.List;
  *
  * <p>Parameters:
  * <ul>
- *   <li>{@code query} — the search query (required)</li>
- *   <li>{@code top_k} — number of results to return (optional, default from config)</li>
+ *   <li>{@code query} - the search query (required)</li>
+ *   <li>{@code top_k} - number of results to return (optional, default from config)</li>
  * </ul>
  */
 public final class RetrieveTool implements TalosTool {

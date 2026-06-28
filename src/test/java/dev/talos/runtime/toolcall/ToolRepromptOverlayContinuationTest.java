@@ -51,7 +51,7 @@ class ToolRepromptOverlayContinuationTest {
         assertEquals(1, recorded.requests().size());
         String payload = messageContents(recorded.requests().getFirst());
         assertTrue(payload.contains("[Expected target progress]"), payload);
-        assertTrue(payload.contains("[Current task — stay focused on this]"), payload);
+        assertTrue(payload.contains("[Current task - stay focused on this]"), payload);
         assertFalse(state.messages.stream()
                         .map(ChatMessage::content)
                         .filter(content -> content != null)

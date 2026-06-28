@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Step-1 live-path test: prove that {@link ScopeGuard} is consulted during
  * the real mutation path (TurnProcessor.executeTool) and that its warning
- * is surfaced through the approval gate — the user sees it at decision
+ * is surfaced through the approval gate - the user sees it at decision
  * time instead of only appearing in logs.
  */
 class TurnProcessorScopeGuardTest {
@@ -52,7 +52,7 @@ class TurnProcessorScopeGuardTest {
         Context ctx = Context.builder(new Config()).build();
 
         // Simulate an active turn where the user asked for web redesign.
-        TurnUserRequestCapture.set("please redesign this site — tweak the homepage");
+        TurnUserRequestCapture.set("please redesign this site - tweak the homepage");
 
         ToolCall call = new ToolCall("test.write", Map.of(
                 "path", "math_operations.py",
@@ -75,7 +75,7 @@ class TurnProcessorScopeGuardTest {
         Session s = new Session(WS, new Config());
         Context ctx = Context.builder(new Config()).build();
 
-        TurnUserRequestCapture.set("redesign this site — update index.html");
+        TurnUserRequestCapture.set("redesign this site - update index.html");
 
         ToolCall call = new ToolCall("test.write", Map.of(
                 "path", "index.html",
@@ -127,7 +127,7 @@ class TurnProcessorScopeGuardTest {
     }
 
     /**
-     * Prompt 4 — scope-guard override for remembered AUTO_APPROVE policy.
+     * Prompt 4 - scope-guard override for remembered AUTO_APPROVE policy.
      *
      * <p>When the user has answered "a" earlier this session to remember
      * approvals for in-workspace writes, a subsequent drift to an off-scope
@@ -157,7 +157,7 @@ class TurnProcessorScopeGuardTest {
 
         // Simulate a turn where the user's request is web-scoped, but the
         // model drifted to a Python file inside the workspace.
-        TurnUserRequestCapture.set("please redesign this site — tweak the homepage");
+        TurnUserRequestCapture.set("please redesign this site - tweak the homepage");
         ToolCall drift = new ToolCall("test.write", Map.of(
                 "path", WS.resolve("math_operations.py").toString(),
                 "content", "print('hi')"));
@@ -195,7 +195,7 @@ class TurnProcessorScopeGuardTest {
         Session s = new Session(WS, new Config());
         Context ctx = Context.builder(new Config()).build();
 
-        TurnUserRequestCapture.set("redesign this site — tweak the homepage");
+        TurnUserRequestCapture.set("redesign this site - tweak the homepage");
         ToolCall onScope = new ToolCall("test.write", Map.of(
                 "path", WS.resolve("style.css").toString(),
                 "content", "body{}"));

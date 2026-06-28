@@ -16,12 +16,12 @@ import java.util.Optional;
 import java.util.function.IntSupplier;
 
 /**
- * /context — show context-window usage (T803).
+ * /context - show context-window usage (T803).
  *
  * <p>Renders the {@link ContextMeter} read model: an honest, estimate-
  * labeled view of what occupies the window, both mode budgets, the
  * auto-compaction rule, the last compaction attempt, the prompt's
- * pinned bytes, and the engine-side context size — including the
+ * pinned bytes, and the engine-side context size - including the
  * silent divergence between {@code limits.llm_context_max_tokens} and
  * {@code engines.llama_cpp.context}, which this command surfaces but
  * does not reconcile.
@@ -35,7 +35,7 @@ public final class ContextCommand implements Command {
 
     /**
      * @param terminalWidth        live terminal width, null when scripted
-     * @param assistModeCompaction the single bootstrap compaction-mode flag —
+     * @param assistModeCompaction the single bootstrap compaction-mode flag -
      *                             the same value feeds MemoryUpdateListener
      *                             and /compact, so the three can never drift
      */
@@ -93,7 +93,7 @@ public final class ContextCommand implements Command {
 
     // ── Rows ─────────────────────────────────────────────────────────────
 
-    /** ASCII usage bar — PTY-safe, scaled to the live terminal width. */
+    /** ASCII usage bar - PTY-safe, scaled to the live terminal width. */
     static String meterBar(int used, int budget, int terminalWidth) {
         int barWidth = Math.max(10, Math.min(40, terminalWidth - 50));
         int safeBudget = Math.max(1, budget);
@@ -127,7 +127,7 @@ public final class ContextCommand implements Command {
 
     /**
      * The engine-side context row. llama.cpp is sized independently by
-     * {@code engines.llama_cpp.context} — when the two keys diverge, say
+     * {@code engines.llama_cpp.context} - when the two keys diverge, say
      * so and name the unsafe direction. Reconciliation is deliberately
      * out of scope (deferred); this row makes the divergence visible.
      */

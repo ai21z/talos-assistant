@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * T799: session instance ids and {@link SessionStore#listSessions}.
- * One workspace, many sessions — legacy bare-hash files, per-run
+ * One workspace, many sessions - legacy bare-hash files, per-run
  * instance files, and orphan crash logs all list under the workspace
  * hash prefix, newest first.
  */
@@ -86,7 +86,7 @@ class JsonSessionStoreListTest {
         assertEquals(1, sessions.size());
         SessionSummary summary = sessions.get(0);
         assertEquals(crashed, summary.sessionId());
-        assertFalse(summary.hasSnapshot(), "crash log only — no snapshot");
+        assertFalse(summary.hasSnapshot(), "crash log only - no snapshot");
         assertTrue(summary.hasTurnLog());
         assertEquals(2, summary.turnCount());
         assertEquals(first, summary.createdAt(), "createdAt synthesized from the first row");

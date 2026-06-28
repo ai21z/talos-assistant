@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  * Workspace template commands (T806): {@code <workspace>/.talos/commands/*.md}.
  *
  * <p>A template named {@code review.md} makes {@code /review} expand to the
- * file's content and run through the unmodified prompt pipeline — workspace
+ * file's content and run through the unmodified prompt pipeline - workspace
  * content is untrusted, so a template gets exactly typed-input capability:
  * the same classification, the same tool policy, the same approvals as if
  * the user had typed the text. Expansion is single-level (the result is
@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * protected CONTROL path the model cannot write with an ordinary approval.
  *
  * <p>This catalog is deliberately NOT registered into {@link
- * dev.talos.cli.repl.slash.CommandRegistry} — {@code register()} overwrites
+ * dev.talos.cli.repl.slash.CommandRegistry} - {@code register()} overwrites
  * blindly, so a workspace file could shadow a built-in. Lookup order is
  * builtin-wins by construction: the router consults templates only on a
  * registry miss, and names colliding with built-ins or aliases are dropped
@@ -56,7 +56,7 @@ public final class WorkspaceCommandTemplates {
     }
 
     /**
-     * Scan {@code <workspace>/.talos/commands} once. Never throws — a
+     * Scan {@code <workspace>/.talos/commands} once. Never throws - a
      * broken template directory must not break startup; offenders are
      * skipped with a log line.
      */

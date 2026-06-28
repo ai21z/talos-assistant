@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * <p>Previously this logic lived inline in AssistantTurnExecutor and its
  * file detection was a hardcoded list of the AGENTS.md audit fixture's
  * filenames (.env, config.json, index.html, notes.md, report.docx,
- * script.js, styles.css) — teaching-to-the-test: audit answers were
+ * script.js, styles.css) - teaching-to-the-test: audit answers were
  * checked, real-workspace answers were not. File detection is now
  * evidence-derived: any filename-shaped mention in the answer is checked
  * against what the tools actually read or touched this turn.
@@ -44,7 +44,7 @@ public final class ReadOnlyProposalGroundingGuard {
             "suggest",
             "suggestions");
 
-    /** Generic ecosystem command/dependency claims — not fixture-specific. */
+    /** Generic ecosystem command/dependency claims - not fixture-specific. */
     private static final Set<String> UNVERIFIED_COMMAND_OR_DEPENDENCY_MARKERS = Set.of(
             "npm install",
             "npm start",

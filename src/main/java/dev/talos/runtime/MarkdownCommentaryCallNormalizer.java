@@ -14,7 +14,7 @@ import java.util.Map;
  *
  * <p>Runs once, in {@link TurnProcessor}'s call-normalization sequence,
  * BEFORE pre-approval validation, the approval preview, trace capture,
- * checkpointing, and execution — so all of them see identical bytes and the
+ * checkpointing, and execution - so all of them see identical bytes and the
  * user approves exactly what is written. The tools themselves no longer
  * sanitize: {@link ContentSanitizer#sanitize} is not idempotent (stripping
  * shifts its trailing scan window), so a second pass could alter approved

@@ -12,11 +12,11 @@ package dev.talos.cli.ui;
  *
  * <p>Two forms exist deliberately:
  * <ul>
- *   <li><b>Core form</b> ({@link #SESSION_PROMPT}, {@link #ONCE_PROMPT}) — the
+ *   <li><b>Core form</b> ({@link #SESSION_PROMPT}, {@link #ONCE_PROMPT}) - the
  *       unindented prompt text that transcript validators substring-match and
  *       the scripted harness records in approval events.</li>
  *   <li><b>Line form</b> ({@link #SESSION_PROMPT_LINE}, {@link #ONCE_PROMPT_LINE})
- *       — the exact string production passes to the terminal line reader:
+ *       - the exact string production passes to the terminal line reader:
  *       two-space indent matching the approval window rail, one trailing space
  *       before the cursor. Derived from the core form so the two can never
  *       drift apart.</li>

@@ -96,7 +96,7 @@ public class Config implements EngineConfig {
                 loadedFrom = "classpath:config/default-config.yaml";
             }
         } catch (Exception ignored) {
-            // Keep going with empty map — we'll backfill defaults next
+            // Keep going with empty map - we'll backfill defaults next
         }
 
         data.putAll(loaded);

@@ -26,7 +26,7 @@ import java.util.List;
  * <ol>
  *   <li>Describe how local model engines are configured</li>
  *   <li>Run the doctor preflight probes and print honest per-check results
- *       (T785 — this flow used to print an unverified "Setup complete")</li>
+ *       (T785 - this flow used to print an unverified "Setup complete")</li>
  *   <li>Write the sentinel file to skip on next launch</li>
  * </ol>
  *
@@ -67,14 +67,14 @@ public final class TerminalFirstRun {
     private static List<ProbeResult> runDefaultProbes() {
         Config cfg = new Config();
         Path workspace = Path.of(".").toAbsolutePath().normalize();
-        // Default probes only — first-run must never load a model on the GPU.
+        // Default probes only - first-run must never load a model on the GPU.
         return DoctorEngine.run(DoctorContext.of(cfg, workspace), DoctorEngine.defaultProbes());
     }
 
     static boolean run(DoctorRunner doctor, PrintStream out, Path sentinel) {
         out.println();
         out.println("  ╭──────────────────────────────────────╮");
-        out.println("  │       Talos — First Run Setup        │");
+        out.println("  │       Talos - First Run Setup        │");
         out.println("  ╰──────────────────────────────────────╯");
         out.println();
 
@@ -90,7 +90,7 @@ public final class TerminalFirstRun {
         }
 
         if (results == null) {
-            // First-run must never crash the launcher — degrade to a notice.
+            // First-run must never crash the launcher - degrade to a notice.
             out.println("  Preflight checks could not run (" + probeError + ").");
             out.println("  Run 'talos doctor' after startup to verify the environment.");
         } else {
@@ -101,7 +101,7 @@ public final class TerminalFirstRun {
             boolean warned = results.stream()
                     .anyMatch(r -> r.status() == ProbeResult.Status.WARN);
             if (failed > 0) {
-                out.println("  Setup incomplete — " + failed + " check(s) failed.");
+                out.println("  Setup incomplete - " + failed + " check(s) failed.");
                 out.println("  Fix the items above, then run 'talos doctor' to re-check.");
                 out.println("  Configure models with 'talos setup models'.");
             } else if (warned) {
@@ -148,7 +148,7 @@ public final class TerminalFirstRun {
             if (System.console() != null) {
                 return System.console().readLine();
             }
-            // Fallback for IDE/non-interactive — just return empty (accept default)
+            // Fallback for IDE/non-interactive - just return empty (accept default)
             return "";
         } catch (Exception e) {
             return "";

@@ -10,7 +10,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for Point 4 — in-flight tool-result compaction helpers in
+ * Unit tests for Point 4 - in-flight tool-result compaction helpers in
  * {@link ToolCallLoop}.
  *
  * <p>These tests exercise the pure static helpers directly so they don't

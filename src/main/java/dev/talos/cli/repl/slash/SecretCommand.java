@@ -75,7 +75,7 @@ public final class SecretCommand implements Command {
                 try {
                     if (audit.isEnabled()) {
                         auditSafe("secret.get.hidden_due_to_audit", key);
-                        return new Result.Info("audit.enabled=true — refusing to print secret. Use ':audit off' to temporarily view, or use the key programmatically.");
+                        return new Result.Info("audit.enabled=true - refusing to print secret. Use ':audit off' to temporarily view, or use the key programmatically.");
                     }
                     // Show redacted echo only (length), not the raw content
                     int len = v.get().length;

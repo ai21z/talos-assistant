@@ -18,7 +18,7 @@ import java.util.Optional;
  *
  * <p>A declaration is inert until the user explicitly reviews and pins it
  * ({@code /profiles trust} shows the full declaration plus its SHA-256).
- * The pin records the hash of the declaration's raw bytes — ANY byte change
+ * The pin records the hash of the declaration's raw bytes - ANY byte change
  * (including line endings, by design) returns the workspace to an untrusted
  * state and requires re-consent. Pins live under
  * {@code ~/.talos/trust/workspace-profiles/<workspace-hash>.json}, outside
@@ -30,7 +30,7 @@ public final class WorkspaceProfileTrustStore {
     public enum TrustState {
         /** No declaration file exists in the workspace. */
         NONE_DECLARED,
-        /** The declaration failed validation — nothing can register or run. */
+        /** The declaration failed validation - nothing can register or run. */
         INVALID,
         /** A valid declaration exists but has never been pinned. */
         UNTRUSTED_NEW,
@@ -127,12 +127,12 @@ public final class WorkspaceProfileTrustStore {
         try {
             Files.deleteIfExists(pinFile(workspaceId(workspace)));
         } catch (Exception ignored) {
-            // Best effort — an undeletable pin keeps the stricter state only
+            // Best effort - an undeletable pin keeps the stricter state only
             // if the bytes still match; nothing fails open.
         }
     }
 
-    /** A corrupted, mismatched, or unreadable pin reads as absent — fail closed. */
+    /** A corrupted, mismatched, or unreadable pin reads as absent - fail closed. */
     public Optional<Pin> readPin(String workspaceId) {
         Path file = pinFile(workspaceId);
         if (!Files.isRegularFile(file)) {

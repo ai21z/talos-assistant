@@ -57,7 +57,7 @@ class ToolRepromptMessageOverlayTest {
             assertEquals("""
                     [Expected target progress] Continue this mutation task. Remaining expected target paths not successfully mutated in this turn: script.js. Use the visible write/edit tools to mutate these exact paths before answering. Similar filenames are not substitutes. For small static web files, prefer talos.write_file with complete file content. Do not claim completion until static verification passes.""",
                     state.messages.get(3).content());
-            assertEquals("[Current task — stay focused on this] " + "x".repeat(500) + "…",
+            assertEquals("[Current task - stay focused on this] " + "x".repeat(500) + "…",
                     state.messages.get(4).content());
         }
 

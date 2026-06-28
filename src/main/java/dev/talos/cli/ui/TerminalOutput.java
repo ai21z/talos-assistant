@@ -12,10 +12,10 @@ import java.nio.charset.Charset;
  * <p>JLine tracks the terminal's cursor/column/virtual-line state from the
  * characters that pass through {@code terminal.writer()}. Any write that
  * bypasses it (a raw {@code System.out.print}) diverges that model from
- * reality, and the next {@code readLine()} redraw then corrupts the display —
+ * reality, and the next {@code readLine()} redraw then corrupts the display -
  * the documented Apr 2026 incident spliced leaked scrollback into the prompt
- * line. The fix is structural: every byte the interactive session prints —
- * banner, render engine, approval window, spinner, notices — flows through
+ * line. The fix is structural: every byte the interactive session prints -
+ * banner, render engine, approval window, spinner, notices - flows through
  * one {@link PrintStream} backed by the terminal's writer, so JLine stays
  * authoritative over everything that reaches the terminal.
  *
@@ -30,7 +30,7 @@ public final class TerminalOutput {
     public static PrintStream printStreamFor(Terminal terminal) {
         // outputEncoding(), not encoding(): since JLine 3.30 the writer
         // encodes output with the stdout-specific charset (which can differ
-        // from encoding() — observed UTF-8 vs windows-1252 in T781). Both
+        // from encoding() - observed UTF-8 vs windows-1252 in T781). Both
         // sides of this adapter must use the writer's actual charset or
         // non-ASCII chrome mangles to '?'.
         Charset charset = terminal.outputEncoding();

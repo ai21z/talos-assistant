@@ -16,7 +16,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** T793: checkpoint read model — true ordering, trigger, tolerance, safety capture. */
+/** T793: checkpoint read model - true ordering, trigger, tolerance, safety capture. */
 class FileBundleCheckpointStoreReadModelTest {
 
     @TempDir Path tempDir;

@@ -4,7 +4,7 @@ import java.util.List;
  * A single composable stage in the retrieval pipeline.
  * Each stage receives the current candidates and returns a {@link StageOutput}
  * carrying the updated candidate list and an optional diagnostic note.
- * Stages must be stateless — all per-invocation state is returned in the output.
+ * Stages must be stateless - all per-invocation state is returned in the output.
  * The pipeline runner records trace entries automatically.
  */
 public interface RetrievalStage {

@@ -63,7 +63,7 @@ import java.util.stream.Collectors;
  *
  * <p>Constructs all services, tools, commands, and runtime components,
  * then wires them into a ready-to-use {@link ReplRouter}. This is the
- * single place that knows <em>what gets created</em> — the router only
+ * single place that knows <em>what gets created</em> - the router only
  * knows <em>how to dispatch</em>.
  *
  * <p>Separated from {@code ReplRouter} so that:
@@ -95,7 +95,7 @@ public final class TalosBootstrap {
     /**
      * Create a fully wired {@link ReplRouter} ready for the REPL loop.
      *
-     * @param session    session state (k, debug) — typically the RunCmd instance
+     * @param session    session state (k, debug) - typically the RunCmd instance
      * @param cfg        loaded configuration
      * @param out        output stream (typically System.out)
      * @param workspace  workspace root directory
@@ -127,7 +127,7 @@ public final class TalosBootstrap {
         // ── P2 Ctrl-C wiring ─────────────────────────────────────────────
         // JLine saves & restores the INT handler around its own readLine(),
         // so a handler we install here only fires when the terminal is NOT
-        // actively reading a prompt — which is exactly the window during
+        // actively reading a prompt - which is exactly the window during
         // which an LLM call can be in flight. Pressing Ctrl-C at the prompt
         // still raises UserInterruptException (handled elsewhere); pressing
         // it mid-generation flips this flag, which LlmClient's watchdog and
@@ -142,7 +142,7 @@ public final class TalosBootstrap {
                         sig -> cancelFlag.set(true));
             } catch (Exception ignored) {
                 // Some test terminals reject signal installation; fall back
-                // silently — the LLM still has the wall-clock + idle watchdog.
+                // silently - the LLM still has the wall-clock + idle watchdog.
             }
         }
         llm.setCancelSupplier(cancelFlag::get);
@@ -151,7 +151,7 @@ public final class TalosBootstrap {
         // ── Workspace verification profiles (T789/T790) ─────────────────
         // Loaded once at startup; ws: profiles register ONLY when the
         // declaration is content-hash TRUSTED. Untrusted/invalid states are
-        // carried for instructive plan-time rejections — they never reach
+        // carried for instructive plan-time rejections - they never reach
         // an approval prompt.
         var workspaceProfilesLoaded = WorkspaceCommandProfilesLoader.load(workspace);
         var profileTrustStore = new WorkspaceProfileTrustStore();
@@ -262,7 +262,7 @@ public final class TalosBootstrap {
         Session        runtimeSession = new Session(workspace, cfg, memory, sessionStore);
         // Session-scoped approval policy sits above the gate. Without this,
         // the REPL falls back to ALWAYS_ASK and the user's "a = yes for
-        // session" choice has no effect — the tri-state gate still reports
+        // session" choice has no effect - the tri-state gate still reports
         // APPROVED_REMEMBER but the policy never flips the flag, because
         // ApprovalPolicy.ALWAYS_ASK.rememberApproval is a no-op.
         dev.talos.runtime.SessionApprovalPolicy approvalPolicy =
@@ -325,8 +325,8 @@ public final class TalosBootstrap {
         //
         // Single-writer design (T774): `out` IS the authoritative stream.
         // In interactive mode RunCmd passes a terminal-backed PrintStream
-        // (TerminalOutput.printStreamFor), so every character — streamed
-        // chunks, banner, approval window, spinner — flows through JLine's
+        // (TerminalOutput.printStreamFor), so every character - streamed
+        // chunks, banner, approval window, spinner - flows through JLine's
         // terminal writer and its cursor/column/virtual-line model never
         // diverges from the screen. The pre-T774 dual-writer split (raw
         // System.out beside terminal.writer()) caused the Apr 2026 display
@@ -362,7 +362,7 @@ public final class TalosBootstrap {
 
         // ── Post-turn hooks ──────────────────────────────────────────────
         var memoryListener = new MemoryUpdateListener(conversationManager, llm, memory);
-        // Auto mode routes to UnifiedAssistantMode by default — use the larger
+        // Auto mode routes to UnifiedAssistantMode by default - use the larger
         // assist-mode compaction budget (55%, 10-pair threshold) to prevent
         // premature context loss during multi-turn editing sessions.
         // T803: ONE flag feeds the listener, /context, and /compact so the
@@ -390,7 +390,7 @@ public final class TalosBootstrap {
         // collision guard sees every built-in name and alias (builtin-wins;
         // a workspace help.md can never shadow /help). The templates-aware
         // HelpCommand then deliberately overwrites the plain one registered
-        // above — same spec, richer dependencies.
+        // above - same spec, richer dependencies.
         WorkspaceCommandTemplates templates =
                 WorkspaceCommandTemplates.load(workspace, registry.names());
         registry.register(new HelpCommand(registry, templates));
@@ -426,7 +426,7 @@ public final class TalosBootstrap {
 
     /**
      * Register all slash commands.
-     * Extracted as a static method for readability — each command is a one-liner.
+     * Extracted as a static method for readability - each command is a one-liner.
      */
     private static void registerCommands(CommandRegistry registry, SessionState session,
                                           Config cfg, Context ctx, ModeController modes,
@@ -458,7 +458,7 @@ public final class TalosBootstrap {
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, workspace, terminalWidth));
-        // T799: /last must read the ACTIVE session's log — the injected id,
+        // T799: /last must read the ACTIVE session's log - the injected id,
         // not a re-derived workspace hash (the pre-T799 silent breaker).
         registry.register(new ExplainLastTurnCommand(workspace, sessionStore,
                 activeSessionStartedAt, activeSessionId));
@@ -498,7 +498,7 @@ public final class TalosBootstrap {
         return assessment.sensitive() ? assessment.warning() : "";
     }
 
-    /** T790: an invalid declaration registers nothing — say so once, visibly. */
+    /** T790: an invalid declaration registers nothing - say so once, visibly. */
     private static String buildWorkspaceProfilesNotice(
             WorkspaceCommandProfilesLoader.Loaded loaded) {
         WorkspaceCommandProfiles profiles = loaded == null
@@ -514,7 +514,7 @@ public final class TalosBootstrap {
     /**
      * The newest stored session for this workspace (legacy bare-hash and
      * instance files compete on createdAt), or the legacy id itself when
-     * nothing is stored — keeping the pre-T799 lookup behavior byte-for-byte
+     * nothing is stored - keeping the pre-T799 lookup behavior byte-for-byte
      * for empty stores.
      */
     static String latestSessionId(SessionStore store, String workspaceId) {
@@ -597,16 +597,16 @@ public final class TalosBootstrap {
     /**
      * Fallback: replay the per-turn JSONL log into memory. Invoked only
      * when the snapshot yielded zero turns (missing file or empty turns
-     * list) — i.e., the crash-recovery path.
+     * list) - i.e., the crash-recovery path.
      *
      * <p><b>Status-gated replay.</b> Only records whose {@code status} is
-     * {@code "ok"} — or blank, for legacy pre-status JSONL lines written
-     * before the status field existed — are re-injected into
+     * {@code "ok"} - or blank, for legacy pre-status JSONL lines written
+     * before the status field existed - are re-injected into
      * {@link SessionMemory}. Records tagged {@code "error"},
      * {@code "aborted"}, {@code "info"}, or {@code "stream"} are skipped.
      *
      * <p><b>Why:</b> without this filter the reconcile path blindly
-     * resurrected whatever assistantText the JSONL held — including
+     * resurrected whatever assistantText the JSONL held - including
      * wall-clock-timed-out repetition-loop bodies and error-turn residue.
      * In one real incident (gemma4:26b, test-output.txt Apr 2026) a model
      * entered a repetition attractor, the turn was aborted at the 300s
@@ -668,8 +668,8 @@ public final class TalosBootstrap {
         if (rec == null) return false;
         String status = rec.status();
         // Accept "ok" and "" (legacy records written before the status
-        // field existed). Anything else — "error", "aborted", "info",
-        // "stream", or a future tag — is non-conversational and must
+        // field existed). Anything else - "error", "aborted", "info",
+        // "stream", or a future tag - is non-conversational and must
         // not re-enter SessionMemory.
         if (status != null && !status.isEmpty() && !"ok".equals(status)) return false;
         String u = rec.userInput();

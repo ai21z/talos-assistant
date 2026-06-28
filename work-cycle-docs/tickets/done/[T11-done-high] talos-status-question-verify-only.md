@@ -138,11 +138,11 @@ behavior:
 
 ## Tests Run
 
-- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest.priorChangeStatusQuestionsAreNotMutationIntent" --tests "dev.talos.runtime.task.TaskContractResolverTest.statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable"` — passed after implementation
-- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest"` — passed
-- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.statusQuestionBlocksMutationBeforeApproval"` — passed
-- `./gradlew.bat e2eTest` — passed
-- `./gradlew.bat check` — passed
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest.priorChangeStatusQuestionsAreNotMutationIntent" --tests "dev.talos.runtime.task.TaskContractResolverTest.statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable"` - passed after implementation
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest"` - passed
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.statusQuestionBlocksMutationBeforeApproval"` - passed
+- `./gradlew.bat e2eTest` - passed
+- `./gradlew.bat check` - passed
 
 ## Work-Test-Cycle Loop Used
 

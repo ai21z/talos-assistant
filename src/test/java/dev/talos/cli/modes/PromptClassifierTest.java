@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * It requires question context to distinguish code inquiries from brand names
  * and proper nouns.
  *
- * <p>Test counts are intentionally kept lean: 3–5 representative samples per
+ * <p>Test counts are intentionally kept lean: 3-5 representative samples per
  * category. Regression guards for specific bugs are preserved as individual tests.
  */
 class PromptClassifierTest {
@@ -989,7 +989,7 @@ class PromptClassifierTest {
     })
     void here_in_question_routes_to_retrieve(String input) {
         assertEquals(RETRIEVE, PromptClassifier.route(input),
-                "'" + input + "' should trigger retrieval — 'here' = the workspace");
+                "'" + input + "' should trigger retrieval - 'here' = the workspace");
     }
 
     @ParameterizedTest
@@ -1000,7 +1000,7 @@ class PromptClassifierTest {
     })
     void workspace_in_question_routes_to_retrieve(String input) {
         assertEquals(RETRIEVE, PromptClassifier.route(input),
-                "'" + input + "' should trigger retrieval — mentions 'workspace'");
+                "'" + input + "' should trigger retrieval - mentions 'workspace'");
     }
 
     @ParameterizedTest
@@ -1010,14 +1010,14 @@ class PromptClassifierTest {
     })
     void working_on_in_question_routes_to_retrieve(String input) {
         assertEquals(RETRIEVE, PromptClassifier.route(input),
-                "'" + input + "' should trigger retrieval — 'working on' = current project");
+                "'" + input + "' should trigger retrieval - 'working on' = current project");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"I'm here to help", "I am here", "hello, I'm here"})
     void here_without_question_stays_assist(String input) {
         assertEquals(ASSIST, PromptClassifier.route(input),
-                "'" + input + "' should stay ASSIST — 'here' without question context");
+                "'" + input + "' should stay ASSIST - 'here' without question context");
     }
 
     @Test

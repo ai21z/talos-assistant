@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory;
  *
  * <p>The assistant response is extracted from the {@link TurnResult}
  * using {@link #extractText(Result)}, which handles all text-carrying
- * result types — including {@link Result.Streamed} (the primary streaming
+ * result types - including {@link Result.Streamed} (the primary streaming
  * path) and {@link Result.Ok} (non-streaming / tool-call fallback).
  */
 public final class MemoryUpdateListener implements SessionListener {
@@ -48,7 +48,7 @@ public final class MemoryUpdateListener implements SessionListener {
         this.memory = memory;
     }
 
-    /** Constructor without LLM — compaction is disabled. */
+    /** Constructor without LLM - compaction is disabled. */
     public MemoryUpdateListener(ConversationManager conversationManager) {
         this(conversationManager, null, null);
     }
@@ -72,11 +72,11 @@ public final class MemoryUpdateListener implements SessionListener {
 
         String answer = extractText(result.result());
         if (answer != null && !answer.isBlank()) {
-            // BUG #1 fix — strip Talos's UI status chrome before persisting
+            // BUG #1 fix - strip Talos's UI status chrome before persisting
             // to history. Otherwise the model sees its own previous turn
             // decorated with "[Used N tool(s)…]" and "✓ Edited X…" status
             // lines, learns to imitate the format, and starts emitting them
-            // as PROSE on later turns without actually calling any tool —
+            // as PROSE on later turns without actually calling any tool -
             // a confidence-trick failure mode (4 fabricated turns observed
             // in a real qwen2.5-coder transcript). Render-side chrome must
             // never be part of the model's training surface.
@@ -85,7 +85,7 @@ public final class MemoryUpdateListener implements SessionListener {
             if (forHistory.isBlank()) return;
             conversationManager.addTurn(userInput, forHistory);
 
-            // Trigger compaction check (non-blocking — if LLM is null, this is a no-op)
+            // Trigger compaction check (non-blocking - if LLM is null, this is a no-op)
             if (llm != null) {
                 try {
                     boolean compacted = assistMode
@@ -102,7 +102,7 @@ public final class MemoryUpdateListener implements SessionListener {
     }
 
     /**
-     * BUG #1 fix — strip Talos's own UI status chrome from assistant text
+     * BUG #1 fix - strip Talos's own UI status chrome from assistant text
      * before persisting to conversation history.
      *
      * <p><b>Why:</b> {@code AssistantTurnExecutor.appendSummary} appends
@@ -115,11 +115,11 @@ public final class MemoryUpdateListener implements SessionListener {
      * qwen2.5-coder:14b, real transcript Apr 2026) memorize the format
      * after one exposure and start emitting fake {@code [Used 2 tool(s)…]}
      * / {@code ✓ Edited X…} blocks as plain prose on subsequent turns
-     * without calling any tool — a confidence-trick failure mode where
+     * without calling any tool - a confidence-trick failure mode where
      * the assistant convincingly claims work it never did. Render-side
      * chrome must never be part of the model's training surface.
      *
-     * <p>The stripped patterns are intentionally narrow — only whole-line
+     * <p>The stripped patterns are intentionally narrow - only whole-line
      * matches against known Talos-emitted prefixes are removed; actual
      * model prose containing brackets is preserved.
      */
@@ -184,12 +184,12 @@ public final class MemoryUpdateListener implements SessionListener {
      *
      * <p>Only LLM response types are memorized:
      * <ul>
-     *   <li>{@link Result.Ok}       — non-streamed LLM answers (tool-call fallback, non-interactive)</li>
-     *   <li>{@link Result.Streamed}  — streamed LLM answers (primary path; uses fullText, excludes suffix)</li>
+     *   <li>{@link Result.Ok}       - non-streamed LLM answers (tool-call fallback, non-interactive)</li>
+     *   <li>{@link Result.Streamed}  - streamed LLM answers (primary path; uses fullText, excludes suffix)</li>
      * </ul>
      *
      * <p>System messages (Info, TrustedInfo), errors, tables, and streaming lifecycle
-     * markers are NOT memorized — they are not conversational exchanges.
+     * markers are NOT memorized - they are not conversational exchanges.
      *
      * @param r the result to extract text from
      * @return the text content, or null if the result type is not memorizable

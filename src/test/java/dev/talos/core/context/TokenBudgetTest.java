@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link TokenBudget} — token estimation and budget allocation.
+ * Tests for {@link TokenBudget} - token estimation and budget allocation.
  */
 class TokenBudgetTest {
 

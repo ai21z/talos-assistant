@@ -94,7 +94,7 @@ class LuceneStoreMetadataRoundTripTest {
     @Test
     void bm25_lineEndOnly_recognizedAsHavingContent(@TempDir Path dir) {
         // Edge case: only lineEnd is set (malformed/partial metadata).
-        // extractMetadata must not treat this as empty — lineEnd > 0
+        // extractMetadata must not treat this as empty - lineEnd > 0
         // signals that some metadata was stored.
         var meta = new ChunkMetadata(null, -1, 42, null);
         try (var store = new LuceneStore(dir, 0)) {

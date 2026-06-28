@@ -13,7 +13,7 @@ import java.util.Objects;
  * Summarizes older conversation turns into a compact sketch so that
  * the context window isn't wasted on verbatim history from 20 turns ago.
  *
- * <p>The compactor is stateless — it receives a list of turns and produces
+ * <p>The compactor is stateless - it receives a list of turns and produces
  * a plain-text sketch. The caller ({@link ConversationManager}) decides
  * <em>when</em> to compact and stores the result.
  *
@@ -23,12 +23,12 @@ import java.util.Objects;
  *       {@code buildHistory()} due to token budget overflow).</li>
  *   <li>Caller passes those turns + any existing sketch to
  *       {@link #compact(String, List, LlmClient)}.</li>
- *   <li>Compactor asks the LLM to produce a 2–4 sentence summary.</li>
+ *   <li>Compactor asks the LLM to produce a 2-4 sentence summary.</li>
  *   <li>Caller stores the returned sketch and discards the old turns.</li>
  * </ol>
  *
  * <p>If the LLM call fails (timeout, connection error, malformed output),
- * the compactor reports failure with the existing sketch unchanged — never loses context.
+ * the compactor reports failure with the existing sketch unchanged - never loses context.
  *
  * @see ConversationManager
  */
@@ -49,11 +49,11 @@ public final class ConversationCompactor {
             - The user's current goal or task
             - Key decisions or facts established so far
             - Important file names, symbols, or technical details mentioned
-            - Any specific creative output the user was iterating on (code, ASCII art, prose, diagrams) — preserve enough detail to continue refinement
+            - Any specific creative output the user was iterating on (code, ASCII art, prose, diagrams) - preserve enough detail to continue refinement
             - The direction of iteration: what the user liked, what they wanted changed
             
             Return ONLY the summary text. No JSON, no markdown, no bullet points.
-            Be factual and compact — every word should carry information.
+            Be factual and compact - every word should carry information.
             When the user was refining a specific artifact, include a brief description of its current state so the next turn can build on it.""";
 
     /**

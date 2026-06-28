@@ -240,7 +240,7 @@ class EmbeddingsFactoryTest {
     }
     @Test
     void profileResolutionAloneDoesNotThrowForUnsupportedProvider() {
-        // profileFrom is pure resolution — no transport construction
+        // profileFrom is pure resolution - no transport construction
         Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");

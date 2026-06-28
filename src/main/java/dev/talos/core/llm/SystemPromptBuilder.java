@@ -12,10 +12,10 @@ import java.util.Set;
  *
  * <p>Assembles a system prompt from reusable sections:
  * <ol>
- *   <li><b>Identity</b> — who Talos is (always present)</li>
- *   <li><b>Mode section</b> — mode-specific behavior rules (ask vs rag)</li>
- *   <li><b>Tool section</b> — available tools, auto-generated from registry</li>
- *   <li><b>Conversation section</b> — continuity rules (when history exists)</li>
+ *   <li><b>Identity</b> - who Talos is (always present)</li>
+ *   <li><b>Mode section</b> - mode-specific behavior rules (ask vs rag)</li>
+ *   <li><b>Tool section</b> - available tools, auto-generated from registry</li>
+ *   <li><b>Conversation section</b> - continuity rules (when history exists)</li>
  * </ol>
  *
  * <p>Each section is loaded from a classpath resource or falls back to a
@@ -185,7 +185,7 @@ public final class SystemPromptBuilder {
                 if (!manifest.isEmpty()) {
                     sb.append("\n\n").append(manifest);
                 } else {
-                    // Path doesn't exist on disk (yet) — still inject the path for awareness
+                    // Path doesn't exist on disk (yet) - still inject the path for awareness
                     sb.append("\n\nWorkspace: ").append(workspace.toAbsolutePath().toString().replace('\\', '/'));
                 }
             }
@@ -382,12 +382,12 @@ public final class SystemPromptBuilder {
             {"name": "tool_name", "parameters": {"key": "value"}}
             ```
             
-            Example — reading a file:
+            Example - reading a file:
             ```json
             {"name": "talos.read_file", "parameters": {"path": "src/Main.java"}}
             ```
             
-            Example — creating/writing a file:
+            Example - creating/writing a file:
             ```json
             {"name": "talos.write_file", "parameters": {"path": "output/summary.txt", "content": "This is the file content.\\nLine two.\\n"}}
             ```
@@ -418,7 +418,7 @@ public final class SystemPromptBuilder {
     private static final String DEFAULT_TOOLS_PREAMBLE_NATIVE = """
             Available Tools
             You have access to the following tools. The runtime handles tool invocation \
-            format automatically — just decide WHICH tool to call and with WHAT parameters.
+            format automatically - just decide WHICH tool to call and with WHAT parameters.
             
             FILE CREATION AND MODIFICATION (CRITICAL):
             - You CAN create files. You have talos.write_file. USE IT.
@@ -565,8 +565,8 @@ public final class SystemPromptBuilder {
             - If you created or discussed something in a previous turn, remember it and build on it.
             - Treat every follow-up as continuing the same conversation thread.
             - YOUR LAST RESPONSE is the most important context. If the user says "make it better" or "try again", work from your most recent output.
-            - When refining creative output (ASCII art, code, prose), modify the specific artifact — do NOT start from scratch.
-            - NEVER say "I don't have access to our previous conversation" — the history IS provided to you.
+            - When refining creative output (ASCII art, code, prose), modify the specific artifact - do NOT start from scratch.
+            - NEVER say "I don't have access to our previous conversation" - the history IS provided to you.
             - If a [Conversation context] summary appears, treat it as established facts.""";
 
     /**

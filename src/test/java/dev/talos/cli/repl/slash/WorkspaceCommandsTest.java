@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Uses {@code @TempDir} for isolated filesystem operations.
  */
-@DisplayName("REPL commands — workspace-bound")
+@DisplayName("REPL commands - workspace-bound")
 class WorkspaceCommandsTest {
 
     @TempDir

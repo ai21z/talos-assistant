@@ -29,7 +29,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
      * Monotonic capture sequence (T795): two checkpoints captured within the
      * same clock tick (the undo safety checkpoint follows the original by
      * milliseconds) would tie on createdAt and fall to a RANDOM UUID
-     * tiebreak — making "newest" a coin flip. The sequence disambiguates
+     * tiebreak - making "newest" a coin flip. The sequence disambiguates
      * same-instant captures within a session; cross-session ordering stays
      * on createdAt.
      */
@@ -177,7 +177,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             metadata.put("turnNumber", turnNumber);
             metadata.put("traceId", traceId == null ? "" : traceId);
             metadata.put("backend", backend == null || backend.isBlank() ? "file-bundle" : backend);
-            // T793: optional human trigger; schemaVersion stays 1 — pre-T793
+            // T793: optional human trigger; schemaVersion stays 1 - pre-T793
             // readers ignore unknown keys, pre-T793 checkpoints render
             // "(unknown)".
             metadata.put("trigger", trigger == null ? "" : trigger);
@@ -290,7 +290,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
 
     @Override
     public List<String> listIds(Path workspace) {
-        // T793: ids now follow the summary ordering — truly newest-first by
+        // T793: ids now follow the summary ordering - truly newest-first by
         // createdAt instead of reverse-lexicographic on random UUIDs.
         return listSummaries(workspace).stream().map(CheckpointSummary::id).toList();
     }

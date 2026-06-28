@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T789: trust pins are explicit consent records over declaration bytes —
+ * T789: trust pins are explicit consent records over declaration bytes -
  * never written implicitly, any byte change invalidates them, and a
  * corrupted pin fails closed to untrusted.
  */

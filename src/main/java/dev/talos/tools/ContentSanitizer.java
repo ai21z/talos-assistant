@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  * the runtime's pre-approval normalization step
  * ({@code dev.talos.runtime.MarkdownCommentaryCallNormalizer}), so the bytes
  * the user approves are exactly the bytes written. {@code sanitize} is NOT
- * idempotent — stripping shifts the trailing scan window, so a second pass
+ * idempotent - stripping shifts the trailing scan window, so a second pass
  * can strip an earlier legitimate fence. Tools must not re-sanitize.
  */
 public final class ContentSanitizer {
@@ -73,7 +73,7 @@ public final class ContentSanitizer {
     public static String sanitize(String content, String filePath) {
         if (content == null || content.isEmpty()) return content;
 
-        // Exempt markdown files — triple backticks are valid content
+        // Exempt markdown files - triple backticks are valid content
         if (filePath != null && MD_EXTENSION.matcher(filePath).find()) {
             return content;
         }
@@ -87,7 +87,7 @@ public final class ContentSanitizer {
         // Skip past the fence line itself
         int fenceEnd = afterFence.indexOf('\n');
         if (fenceEnd < 0) {
-            // Fence is the very last line — could be legitimate EOF fence
+            // Fence is the very last line - could be legitimate EOF fence
             // Only strip if there's nothing after it
             return content;
         }
@@ -142,7 +142,7 @@ public final class ContentSanitizer {
 
     /**
      * Matches lines that look like plain English sentences (not code).
-     * Used after markdown has been detected — continuation sentences
+     * Used after markdown has been detected - continuation sentences
      * in LLM explanations (e.g., "This final version is complete.").
      */
     private static final Pattern PLAIN_PROSE = Pattern.compile(
@@ -158,7 +158,7 @@ public final class ContentSanitizer {
      * <p>Strategy: the first non-blank line must match a markdown pattern.
      * Subsequent lines may be markdown, plain English prose, or blank.
      * If we find a line that looks like code (doesn't match markdown,
-     * prose, or blank), we conservatively return false — but only if
+     * prose, or blank), we conservatively return false - but only if
      * no markdown was yet detected. Once markdown is confirmed, plain
      * prose continuation is allowed.
      */
@@ -175,10 +175,10 @@ public final class ContentSanitizer {
             if (MARKDOWN_COMMENTARY.matcher(trimmed).find()) {
                 foundMarkdown = true;
             } else if (foundMarkdown && PLAIN_PROSE.matcher(trimmed).find()) {
-                // Plain English after confirmed markdown — continuation text, OK
+                // Plain English after confirmed markdown - continuation text, OK
                 continue;
             } else if (!foundMarkdown) {
-                // First non-blank line isn't markdown — not a commentary block
+                // First non-blank line isn't markdown - not a commentary block
                 return false;
             } else {
                 // After confirmed markdown, a non-prose line could be code

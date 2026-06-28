@@ -7,9 +7,9 @@ package dev.talos.tools;
  * user confirmation is required before executing a tool.
  *
  * <ul>
- *   <li>{@link #READ_ONLY} — no side effects; always auto-approved</li>
- *   <li>{@link #WRITE} — modifies files or state; requires approval</li>
- *   <li>{@link #DESTRUCTIVE} — deletes data or has irreversible effects; requires approval</li>
+ *   <li>{@link #READ_ONLY} - no side effects; always auto-approved</li>
+ *   <li>{@link #WRITE} - modifies files or state; requires approval</li>
+ *   <li>{@link #DESTRUCTIVE} - deletes data or has irreversible effects; requires approval</li>
  * </ul>
  */
 public enum ToolRiskLevel {

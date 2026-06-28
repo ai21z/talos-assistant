@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * T803: the /context meter. Every figure comes from the T798
- * ContextMeter read model — the same estimates the budget and
+ * ContextMeter read model - the same estimates the budget and
  * compaction logic actually use, labeled as estimates.
  */
 class ContextCommandTest {
@@ -47,7 +47,7 @@ class ContextCommandTest {
 
     /**
      * {@code new Config()} reads the developer's real ~/.talos/config.yaml
-     * (the T783 hermeticity lesson) — strip every key that feeds backend
+     * (the T783 hermeticity lesson) - strip every key that feeds backend
      * resolution or the engine row before the test plants its own.
      */
     private static Config cleanConfig() {

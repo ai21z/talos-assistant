@@ -691,7 +691,7 @@ class ToolSurfacePlannerTest {
     void expectedTargetReadDefaultsMatchTheRuntimeEnforcedSurface() {
         // T761 drift fix: read-only turns with expected targets advertised
         // four read tools while plan() (the runtime-enforced surface) allowed
-        // only talos.read_file — the model could be advertised tools the
+        // only talos.read_file - the model could be advertised tools the
         // runtime denies. Defaults now derive from plan(), so they agree.
         for (String request : List.of(
                 "Read config.json and tell me the name.",

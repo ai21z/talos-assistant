@@ -28,17 +28,17 @@ import java.util.regex.PatternSyntaxException;
  *
  * <p>Parameters:
  * <ul>
- *   <li>{@code pattern} — text or regex pattern to search for (required)</li>
- *   <li>{@code include} — single glob pattern for file names, e.g. "*.java" or "*.{js,css}" (optional)</li>
- *   <li>{@code max_results} — maximum total matching lines to return (optional, default: 50)</li>
- *   <li>{@code regex} — "true" to treat pattern as regex (optional, default: false)</li>
+ *   <li>{@code pattern} - text or regex pattern to search for (required)</li>
+ *   <li>{@code include} - single glob pattern for file names, e.g. "*.java" or "*.{js,css}" (optional)</li>
+ *   <li>{@code max_results} - maximum total matching lines to return (optional, default: 50)</li>
+ *   <li>{@code regex} - "true" to treat pattern as regex (optional, default: false)</li>
  * </ul>
  */
 public final class GrepTool implements TalosTool {
 
     private static final String NAME = "talos.grep";
     private static final int DEFAULT_MAX_RESULTS = 50;
-    private static final long MAX_FILE_SIZE = 1024 * 1024L; // 1 MiB — skip huge files
+    private static final long MAX_FILE_SIZE = 1024 * 1024L; // 1 MiB - skip huge files
 
     // Directories to always skip during walk
     private static final List<String> SKIP_DIRS = List.of(

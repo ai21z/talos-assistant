@@ -8,14 +8,14 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * /compact — force a compaction now (T804).
+ * /compact - force a compaction now (T804).
  *
  * <p>Thin command over {@link ConversationManager#compactNow}: the
  * forced path skips the pair-threshold and over-budget gates and runs
- * even when the failure breaker is open (explicit user intent — a
+ * even when the failure breaker is open (explicit user intent - a
  * forced failure still counts toward the breaker, a forced success
  * resets it). Outcomes are reported honestly: performed with counts,
- * nothing-to-compact, or failed with the full status — and a failed
+ * nothing-to-compact, or failed with the full status - and a failed
  * compaction never loses history.
  */
 public final class CompactCommand implements Command {
@@ -25,7 +25,7 @@ public final class CompactCommand implements Command {
     /**
      * @param assistModeCompaction the single bootstrap compaction-mode
      *                             flag shared with MemoryUpdateListener
-     *                             and /context — the budget /compact
+     *                             and /context - the budget /compact
      *                             enforces is the budget the meter shows
      */
     public CompactCommand(boolean assistModeCompaction) {
@@ -66,7 +66,7 @@ public final class CompactCommand implements Command {
                 : new Result.Info(formatOutcome(outcome));
     }
 
-    /** Pure outcome formatting — unit-testable without a model. */
+    /** Pure outcome formatting - unit-testable without a model. */
     static String formatOutcome(ConversationManager.CompactionOutcome outcome) {
         if (outcome.performed()) {
             return "Compacted: " + outcome.summarizedPairs()

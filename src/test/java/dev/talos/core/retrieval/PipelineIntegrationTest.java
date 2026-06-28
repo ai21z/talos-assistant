@@ -65,7 +65,7 @@ class PipelineIntegrationTest {
     @Test
     void bm25_only_overlapping_chunks_dedup_to_distinct_paths() throws Exception {
         try (var store = new LuceneStore(tempDir, 0)) {
-            // Same file, multiple chunks — all should match query
+            // Same file, multiple chunks - all should match query
             store.add("src/Search.java#0", "Lucene search query parsing and indexing engine", null);
             store.add("src/Search.java#1", "Lucene BM25 scoring and retrieval ranking", null);
             store.add("src/Other.java#0", "Completely unrelated topic about cooking", null);
@@ -78,7 +78,7 @@ class PipelineIntegrationTest {
             List<RetrievalCandidate> candidates = result.candidates();
 
             // Both Search.java chunks are different paths (they have different #N suffixes)
-            // so both may appear — dedup is by exact path, not by base file
+            // so both may appear - dedup is by exact path, not by base file
             Set<String> paths = candidates.stream()
                     .map(RetrievalCandidate::path)
                     .collect(Collectors.toSet());

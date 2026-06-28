@@ -39,7 +39,7 @@ class PathNormalizationTest {
 
     @Test
     void backslash_paths_stored_as_is_by_luceneStore() throws Exception {
-        // LuceneStore.add() stores the path as given — normalization is the Indexer's job.
+        // LuceneStore.add() stores the path as given - normalization is the Indexer's job.
         // This test documents the current contract: LuceneStore is a dumb store.
         try (var store = new LuceneStore(tempDir, 0)) {
             store.add("src\\main\\Bar.java#0", "public class Bar {}", null);
@@ -52,7 +52,7 @@ class PathNormalizationTest {
             // Forward-slash query would NOT find it (different term)
             String textSlash = store.getTextByPath("src/main/Bar.java#0");
             assertNull(textSlash,
-                    "LuceneStore stores paths verbatim — normalization is the Indexer's responsibility");
+                    "LuceneStore stores paths verbatim - normalization is the Indexer's responsibility");
         }
     }
 
@@ -70,7 +70,7 @@ class PathNormalizationTest {
 
         var result = dedup.process(req, candidates).candidates();
         assertEquals(2, result.size(),
-                "DedupStage compares raw paths — different separators = different candidates");
+                "DedupStage compares raw paths - different separators = different candidates");
     }
 
     @Test
@@ -125,7 +125,7 @@ class PathNormalizationTest {
 
             assertEquals("utility class content", store.getTextByPath("src/Util.java#0"));
             assertNull(store.getTextByPath("src\\Util.java#0"),
-                    "getTextByPath uses TermQuery — must match exact stored path");
+                    "getTextByPath uses TermQuery - must match exact stored path");
             assertNull(store.getTextByPath("src/Util.java"),
                     "getTextByPath requires full path including chunk suffix");
         }

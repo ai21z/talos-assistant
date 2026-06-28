@@ -71,7 +71,7 @@ class CheckpointCommandTest {
 
     /**
      * T787 pinned the pre-T793 ordering (reverse-lexicographic on random
-     * UUIDs — arbitrary). T793 deliberately flipped the listing to true
+     * UUIDs - arbitrary). T793 deliberately flipped the listing to true
      * createdAt-descending; this test now pins THAT, with fabricated
      * timestamps that would invert any id-based ordering.
      */

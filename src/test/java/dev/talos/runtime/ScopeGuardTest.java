@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link ScopeGuard} — the narrow mutating-target scope guard.
+ * Tests for {@link ScopeGuard} - the narrow mutating-target scope guard.
  *
  * <p>Driven by the real Talos CLI transcript failures (Turns 3 and 5 in
  * {@code test-output.txt}): during a clearly web-scoped redesign request
@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * and must <b>not</b> fire for generic requests where the scope is
  * unclear.
  */
-@DisplayName("ScopeGuard — narrow mutating-target scope guard")
+@DisplayName("ScopeGuard - narrow mutating-target scope guard")
 class ScopeGuardTest {
 
     // ── looksLikeWebScopedRequest ────────────────────────────────────

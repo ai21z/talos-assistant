@@ -13,17 +13,17 @@ import java.util.regex.Pattern;
  *
  * <p><b>Architecture (native-first pipeline):</b>
  * <ul>
- *   <li><b>Native tool calls (primary path)</b> never appear in the text stream —
+ *   <li><b>Native tool calls (primary path)</b> never appear in the text stream -
  *       they are emitted as {@link dev.talos.spi.types.TokenChunk#ofToolCalls} chunks
  *       and captured directly by {@link dev.talos.core.llm.LlmClient#chatStreamFull},
  *       bypassing this filter entirely.</li>
- *   <li><b>JSON code fences (active text fallback)</b> — suppressed when the content
+ *   <li><b>JSON code fences (active text fallback)</b> - suppressed when the content
  *       matches a tool-call signature ({@code "name": "talos."}).</li>
- *   <li><b>Bare standalone JSON (compat fallback)</b> — buffered until a complete
+ *   <li><b>Bare standalone JSON (compat fallback)</b> - buffered until a complete
  *       top-level object is available, then suppressed only if it parses as a
  *       Talos tool call.</li>
- *   <li><b>XML tags (deprecated compatibility)</b> — {@code <tool_call>},
- *       {@code <function_call>}, {@code <tool>}, {@code <function>} — retained
+ *   <li><b>XML tags (deprecated compatibility)</b> - {@code <tool_call>},
+ *       {@code <function_call>}, {@code <tool>}, {@code <function>} - retained
  *       temporarily for models that emit XML from training habits. Not actively
  *       instructed. Scheduled for removal once native calling is stable.</li>
  * </ul>
@@ -66,21 +66,21 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private State state = State.PASSTHROUGH;
 
     /** Opening XML tags that start suppression.
-     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML from training habits.
+     *  DEPRECATED COMPATIBILITY ONLY - retained for models that emit XML from training habits.
      *  Scheduled for removal. */
     private static final Pattern OPEN_TAG = Pattern.compile(
             "<(tool_call|function_call|tool|function)>"
     );
 
     /** Closing XML tags that end suppression.
-     *  DEPRECATED COMPATIBILITY ONLY — retained alongside OPEN_TAG.
+     *  DEPRECATED COMPATIBILITY ONLY - retained alongside OPEN_TAG.
      *  Scheduled for removal. */
     private static final Pattern CLOSE_TAG = Pattern.compile(
             "</(tool_call|function_call|tool|function)>"
     );
 
     /** All possible opening XML tag strings (for prefix matching at chunk boundaries).
-     *  DEPRECATED COMPATIBILITY ONLY — retained alongside OPEN_TAG.
+     *  DEPRECATED COMPATIBILITY ONLY - retained alongside OPEN_TAG.
      *  Scheduled for removal. */
     private static final String[] OPEN_TAG_STRINGS = {
             "<tool_call>", "<function_call>", "<tool>", "<function>"
@@ -140,7 +140,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
      *
      * <p>Call this after the stream completes (e.g., after {@code chatStream()} returns).
      * If currently inside a suppressed block, the partial block is discarded (it was
-     * tool-call content that never closed — safe to drop). If buffering a code fence
+     * tool-call content that never closed - safe to drop). If buffering a code fence
      * that never completed, the buffered content is emitted (it was not a tool call).
      */
     public void flush() {
@@ -152,17 +152,17 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                     break;
                 case BUFFERING_FENCE:
                     if (isJsonFenceOpening(fenceOpening) && buffer.toString().isBlank()) {
-                        // Blank, incomplete JSON fence — protocol debris.
+                        // Blank, incomplete JSON fence - protocol debris.
                         emitPendingProtocolPrefix(true);
                     } else {
-                        // Never completed — emit opening fence + content as regular text
+                        // Never completed - emit opening fence + content as regular text
                         emitPendingProtocolPrefix(false);
                         delegate.accept(fenceOpening + buffer);
                     }
                     break;
                 case BUFFERING_BARE_JSON:
                     if (looksLikeIncompleteBareToolJson(buffer.toString())) {
-                        // Incomplete protocol debris — discard
+                        // Incomplete protocol debris - discard
                         emitPendingProtocolPrefix(true);
                     } else {
                         emitPendingProtocolPrefix(false);
@@ -179,7 +179,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                     break;
                 case SUPPRESSING_XML:
                 case SUPPRESSING_FENCE:
-                    // Incomplete tool-call block — discard
+                    // Incomplete tool-call block - discard
                     emitPendingProtocolPrefix(true);
                     break;
             }
@@ -218,7 +218,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     }
 
     /**
-     * DEPRECATED COMPATIBILITY ONLY: In XML suppressing mode — look for closing tag.
+     * DEPRECATED COMPATIBILITY ONLY: In XML suppressing mode - look for closing tag.
      * Retained temporarily for models that emit XML tool-call tags from training habits.
      * Not actively instructed. Scheduled for removal.
      * Returns true if progress was made (should loop again).
@@ -226,7 +226,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private boolean drainSuppressingXml() {
         Matcher cm = CLOSE_TAG.matcher(buffer);
         if (cm.find()) {
-            // Found closing tag — discard everything up to and including it
+            // Found closing tag - discard everything up to and including it
             XmlCompatTelemetry.recordStreamSuppressedXmlBlock();
             String remainder = buffer.substring(cm.end());
             buffer.setLength(0);
@@ -346,18 +346,18 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         String text = buffer.toString();
         Matcher cm = CODE_FENCE_CLOSE.matcher(text);
         if (cm.find()) {
-            // We have the full code fence content — check if it's a tool call
+            // We have the full code fence content - check if it's a tool call
             String fenceContent = text.substring(0, cm.start());
             boolean toolCallFence = ToolCallParser.looksLikeStandaloneToolJson(fenceContent)
                     || looksLikeIncompleteBareToolJson(fenceContent);
             boolean emptyJsonFence = isJsonFenceOpening(fenceOpening) && fenceContent.isBlank();
             if (!toolCallFence && !emptyJsonFence) {
-                // Not a tool call — emit the opening fence + content + closing fence.
+                // Not a tool call - emit the opening fence + content + closing fence.
                 emitPendingProtocolPrefix(false);
                 String full = fenceOpening + text.substring(0, cm.end());
                 delegate.accept(full);
             } else {
-                // Tool-call or empty JSON protocol debris — suppress the fence.
+                // Tool-call or empty JSON protocol debris - suppress the fence.
                 emitPendingProtocolPrefix(true);
             }
             finishFenceBuffer(text.substring(cm.end()));
@@ -395,7 +395,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         // Check for narrow malformed JSON-array protocol debris.
         int arrayStart = findProtocolArrayStart(text);
 
-        // None found — try to emit safe prefix
+        // None found - try to emit safe prefix
         if (xmlStart < 0 && fenceStart < 0 && jsonStart < 0 && arrayStart < 0) {
             int safeEnd = findSafeEmitEnd(text);
             if (safeEnd > 0) {
@@ -437,14 +437,14 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
         switch (kind) {
             case XML -> {
-                // XML tag — enter XML suppression
+                // XML tag - enter XML suppression
                 String remainder = text.substring(om.end());
                 buffer.setLength(0);
                 buffer.append(remainder);
                 state = State.SUPPRESSING_XML;
             }
             case FENCE -> {
-                // Code fence — enter fence buffering.
+                // Code fence - enter fence buffering.
                 // Store only the content AFTER the opening fence (```json\n)
                 // so the close-fence pattern doesn't match the opening fence.
                 String remainder = text.substring(fm.end());

@@ -57,7 +57,7 @@ class SessionTest {
     }
 
     @Test void nullStoreThrows() {
-        // CCR-016: primary constructor rejects null store — callers must pass
+        // CCR-016: primary constructor rejects null store - callers must pass
         // NoOpSessionStore() explicitly to opt into the ephemeral default.
         assertThrows(NullPointerException.class,
                 () -> new Session(WS, new Config(), new SessionMemory(), null));

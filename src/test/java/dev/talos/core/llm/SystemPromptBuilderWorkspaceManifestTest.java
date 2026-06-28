@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * R7 — Verifies that a workspace manifest is already injected into the
+ * R7 - Verifies that a workspace manifest is already injected into the
  * system prompt by {@link SystemPromptBuilder#withWorkspace(Path)} via
  * {@link dev.talos.core.util.WorkspaceManifest}.
  *
@@ -31,13 +31,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * mode (ASK / RAG / UNIFIED) composes its system prompt. The test asserts
  * on the final composed string, not on internal helpers.
  */
-@DisplayName("R7 — SystemPromptBuilder workspace manifest wiring")
+@DisplayName("R7 - SystemPromptBuilder workspace manifest wiring")
 class SystemPromptBuilderWorkspaceManifestTest {
 
     @Test
     @DisplayName("prompt contains 'Workspace:' header and relative file paths when withWorkspace() is used")
     void workspaceManifestIsInjected(@TempDir Path workspace) throws IOException {
-        // Populate a tiny tree — relative paths only, no noise directories.
+        // Populate a tiny tree - relative paths only, no noise directories.
         Files.createDirectories(workspace.resolve("src"));
         Files.writeString(workspace.resolve("src/Main.java"), "class Main {}");
         Files.writeString(workspace.resolve("README.md"),
@@ -59,7 +59,7 @@ class SystemPromptBuilderWorkspaceManifestTest {
         assertTrue(prompt.contains("README.md"),
                 "Prompt must list README.md. Prompt was:\n" + prompt);
 
-        // README excerpt is included — but this is a *grounding aid*, not a
+        // README excerpt is included - but this is a *grounding aid*, not a
         // substitute for reading files. The excerpt header is required; the
         // contents are allowed but bounded elsewhere.
         assertTrue(prompt.contains("README (excerpt):"),
@@ -79,12 +79,12 @@ class SystemPromptBuilderWorkspaceManifestTest {
         assertTrue(prompt.contains("a.txt"),
                 "Path must be listed. Prompt was:\n" + prompt);
         assertFalse(prompt.contains(secret),
-                "Manifest is a grounding aid — it must NOT leak file contents. "
+                "Manifest is a grounding aid - it must NOT leak file contents. "
                 + "Prompt was:\n" + prompt);
     }
 
     @Test
-    @DisplayName("manifest is bounded — MANIFEST_MAX_CHARS (2000) cap is honored even for busy workspaces")
+    @DisplayName("manifest is bounded - MANIFEST_MAX_CHARS (2000) cap is honored even for busy workspaces")
     void manifestIsBounded(@TempDir Path workspace) throws IOException {
         // Create enough files to blow past the 80-entry tree cap and the 2000-char total cap.
         for (int i = 0; i < 200; i++) {
@@ -99,12 +99,12 @@ class SystemPromptBuilderWorkspaceManifestTest {
         // section boundary introduced by SystemPromptBuilder). A loose upper
         // bound is sufficient here: the manifest's own internal cap is 2000,
         // so in practice the contribution can't exceed that plus a trailing
-        // "\n...". We assert a generous ceiling — 2500 chars — to guard the
+        // "\n...". We assert a generous ceiling - 2500 chars - to guard the
         // intent (bounded) without becoming brittle to formatting changes.
         int workspaceIdx = prompt.indexOf("Workspace:");
         assertTrue(workspaceIdx >= 0, "manifest must appear in prompt");
 
-        // Find the next double-newline after the manifest — that's where
+        // Find the next double-newline after the manifest - that's where
         // SystemPromptBuilder splices the next section.
         int end = prompt.indexOf("\n\n", workspaceIdx + 1);
         if (end < 0) end = prompt.length();

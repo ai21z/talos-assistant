@@ -22,7 +22,7 @@ public final class ConfigProbe implements DoctorProbe {
     }
 
     // Discrete parameters (rather than Config.Report) because Report's
-    // constructor is package-private to core — this keeps the decision
+    // constructor is package-private to core - this keeps the decision
     // hermetically testable.
     static ProbeResult decide(String loadedFrom,
                               String userConfigPath,

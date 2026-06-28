@@ -9,16 +9,16 @@ package dev.talos.harness;
  */
 public enum ScenarioApprovalPolicy {
 
-    /** All tool calls are silently approved — fastest, lowest friction. */
+    /** All tool calls are silently approved - fastest, lowest friction. */
     APPROVE_ALL,
 
     /** First write approval is remembered for the session, later writes auto-approve. */
     APPROVE_REMEMBER_WRITES,
 
-    /** All write/edit calls are silently denied — useful for read-only scenarios. */
+    /** All write/edit calls are silently denied - useful for read-only scenarios. */
     DENY_WRITES,
 
-    /** All calls are denied — tests that verify denied-tool-call behavior. */
+    /** All calls are denied - tests that verify denied-tool-call behavior. */
     DENY_ALL
 }
 

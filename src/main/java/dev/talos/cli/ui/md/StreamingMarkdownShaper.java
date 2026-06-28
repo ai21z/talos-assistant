@@ -9,19 +9,19 @@ import dev.talos.cli.ui.StreamingAnswerShaper;
  *
  * <p>Sits between sanitized chunk text and the answer-pane stream in fully
  * capable interactive mode. "Trusted" because sanitization and redaction
- * already happened upstream — model text can never smuggle ANSI through
+ * already happened upstream - model text can never smuggle ANSI through
  * this layer; every escape code is renderer-emitted via {@link CliTheme}.
  *
  * <p>Per logical line, the shaper classifies the line start (heading,
  * bullet, ``` fence delimiter, prose), wraps prose-family lines through the
  * T776 {@link StreamingAnswerShaper} (classification needs only a few
  * buffered characters, so completed rows still stream mid-line), and styles
- * each wrapped row via {@link MarkdownLineStyler} — markers stay visible,
+ * each wrapped row via {@link MarkdownLineStyler} - markers stay visible,
  * so stripping ANSI always recovers the plain wrapped text.
  *
  * <p>Fenced code blocks toggle on ``` delimiter lines: content lines buffer
  * per line, preserve every character (no whitespace collapse), and hard-cut
- * at the pane width — word-wrapping code would corrupt indentation. An
+ * at the pane width - word-wrapping code would corrupt indentation. An
  * unterminated fence at stream close flushes its content plain; nothing is
  * ever swallowed.
  */
@@ -239,7 +239,7 @@ public final class StreamingMarkdownShaper implements StreamShaper {
                     ? MarkdownLineStyler.LineClass.HEADING
                     : MarkdownLineStyler.LineClass.PROSE;
         }
-        // Bullet: "- ", "* ", or "12. " (no indent tracking — pane prose).
+        // Bullet: "- ", "* ", or "12. " (no indent tracking - pane prose).
         if (prefix.charAt(0) == '-' || prefix.charAt(0) == '*') {
             if (len < 2) return null;
             return prefix.charAt(1) == ' '

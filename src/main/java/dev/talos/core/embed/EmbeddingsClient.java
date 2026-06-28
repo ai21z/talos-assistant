@@ -123,7 +123,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 Map<String,Object> body = new LinkedHashMap<>();
                 body.put("model", model);
                 body.put(ep.param, cleaned);
-                // Ask Ollama to truncate input that exceeds model context —
+                // Ask Ollama to truncate input that exceeds model context -
                 // prevents server-side NaN when input is too long for the model.
                 body.put("truncate", Boolean.TRUE);
                 String json = mapper.writeValueAsString(body);
@@ -150,7 +150,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 if (vec != null && vec.length > 0) {
                     if (!isValidVector(vec)) {
                         attemptFailures.add(ep.path + " " + ep.param + " -> invalid vector");
-                        LOG.warn("Embedding vector invalid (NaN/Inf/zero) from {} {} — skipping",
+                        LOG.warn("Embedding vector invalid (NaN/Inf/zero) from {} {} - skipping",
                                 SafeLogFormatter.value(ep.path), SafeLogFormatter.value(ep.param));
                         continue;
                     }
@@ -232,7 +232,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
     /**
      * Normalizes text before sending to the embedding model.
      * Strips control characters (except newline/tab), collapses runs of whitespace,
-     * and trims — reducing the chance of NaN embeddings from models that choke on
+     * and trims - reducing the chance of NaN embeddings from models that choke on
      * unusual input. Empty/blank input becomes a single space to avoid zero-length
      * requests.
      * Package-private for testability.
@@ -361,7 +361,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 if (item instanceof List<?> vec) {
                     float[] arr = toFloatArray(vec);
                     if (!isValidVector(arr)) {
-                        LOG.warn("Batch embedding contains invalid vector (NaN/Inf/zero) — rejecting batch");
+                        LOG.warn("Batch embedding contains invalid vector (NaN/Inf/zero) - rejecting batch");
                         return null;
                     }
                     results.add(arr);

@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * CodeBlockToolExtractor safety net fires and FileWriteTool actually
  * writes the files to disk.
  *
- * <p>This test does NOT call the LLM — it simulates an LLM response
+ * <p>This test does NOT call the LLM - it simulates an LLM response
  * containing code blocks with filenames and verifies the full pipeline:
  * CodeBlockToolExtractor → ToolCallLoop → TurnProcessor → FileWriteTool → disk.
  */

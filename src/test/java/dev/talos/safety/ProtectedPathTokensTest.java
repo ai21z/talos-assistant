@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>This commit pins CURRENT (substring-matching) behavior, including the
  * known false positives the 2026-06-10 evaluation flagged (tokenizer.java
  * et al.). The consolidation commit flips the marked expectations to the
- * equals-or-suffix word-run rule — the test diff IS the behavioral-delta
+ * equals-or-suffix word-run rule - the test diff IS the behavioral-delta
  * documentation.
  */
 class ProtectedPathTokensTest {
@@ -19,7 +19,7 @@ class ProtectedPathTokensTest {
     // (T787 pinned the pre-existing gap: these all classified "".) The
     // wave-4 verification-profile declaration lives at
     // <workspace>/.talos/profiles.yaml and template commands under
-    // .talos/commands/ — content that influences what Talos executes, so
+    // .talos/commands/ - content that influences what Talos executes, so
     // the model cannot write it with an ordinary write approval anymore.
 
     @Test
@@ -156,7 +156,7 @@ class ProtectedPathTokensTest {
 
     @Test
     void knownRemainingLimitationLexerTokenSourceFiles() {
-        // "Token.java" has the literal word run — it stays protected before
+        // "Token.java" has the literal word run - it stays protected before
         // and after T759. A source-extension exemption is a separate policy
         // decision, out of scope (documented in the ticket).
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("token.java"));

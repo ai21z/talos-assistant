@@ -4,7 +4,7 @@ import org.junit.jupiter.api.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Phase 0 scenario harness — 10 deterministic, LLM-free scenarios.
+ * Phase 0 scenario harness - 10 deterministic, LLM-free scenarios.
  *
  * Scripted responses use XML tool call format so there are no escaping issues.
  * The ToolCallParser supports XML as a compatibility fallback.
@@ -97,7 +97,7 @@ class Phase0ScenariosTest {
 
         try (var result = ScenarioRunner.run(scenario)) {
             // The loop may re-prompt the placeholder LLM which can produce more tool calls.
-            // We only assert the nudge appeared — that is what B2 guarantees.
+            // We only assert the nudge appeared - that is what B2 guarantees.
             assertTrue(result.toolsInvoked() >= 1, "At least 1 tool should be invoked");
             boolean nudge = result.anyToolResultContains("did not read this file")
                          || result.anyToolResultContains("read_file");

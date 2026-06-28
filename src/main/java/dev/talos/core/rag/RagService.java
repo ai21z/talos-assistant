@@ -56,8 +56,8 @@ public class RagService {
     public static final class Prepared {
         private final List<ContextResult.Snippet> snippets;
         private final List<String> citations;
-        private final RetrievalTrace trace; // nullable — absent on error path
-        private final String errorReason;   // nullable — set when retrieval failed
+        private final RetrievalTrace trace; // nullable - absent on error path
+        private final String errorReason;   // nullable - set when retrieval failed
         private final List<SymbolHit> symbolHits;
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
@@ -319,7 +319,7 @@ public class RagService {
      * whose citations come from the pre-packed retrieval set (i.e. {@link Prepared#citations()}),
      * and whose {@link Answer#packedContext()} is {@code null} because context packing
      * never runs (no model will consume it). Callers must therefore treat a null
-     * {@code packedContext} as "no packing was performed" — not as "packing produced
+     * {@code packedContext} as "no packing was performed" - not as "packing produced
      * nothing." The {@link Answer#prepared()} field is still populated, so the full
      * retrieved snippet set is available for inspection.
      * <p>
@@ -337,7 +337,7 @@ public class RagService {
             Prepared prepared = prepare(ws, question, kOverride);
 
             // Net-disabled stub path: skip LLM + context packing for fast tests / air-gap.
-            // packedContext is null because no packing is performed — no model will consume it.
+            // packedContext is null because no packing is performed - no model will consume it.
             // Citations come from the pre-packed retrieval set (Prepared).
             // See Javadoc above for full semantics.
             Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
@@ -365,7 +365,7 @@ public class RagService {
                 if (text == null) text = "";
 
                 // Defensive: strip any tool-call blocks the model may emit.
-                // The rag-ask path has no tool dispatcher — tool calls are never
+                // The rag-ask path has no tool dispatcher - tool calls are never
                 // valid here. They leak when the model sees tool-call format
                 // instructions in retrieved context (e.g., tools-preamble.txt).
                 text = ToolProtocolText.stripToolCalls(text);

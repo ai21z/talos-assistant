@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p><b>Architecture (native-first pipeline):</b>
  * <ol>
  *   <li><b>Native tool calls (primary):</b> Structured {@code NativeToolCall}
- *       objects from the engine — no text parsing needed.</li>
+ *       objects from the engine - no text parsing needed.</li>
  *   <li><b>JSON code fences (active text fallback):</b> Instructed in prompts
  *       when native calling is unavailable.</li>
  *   <li><b>XML tags (deprecated compatibility only):</b> Parsed and suppressed
@@ -76,7 +76,7 @@ class NativeToolPipelineTest {
             assertEquals("talos.write_file", calls.get(0).toolName());
             assertEquals("test.html", calls.get(0).param("path"));
             assertEquals("<script>alert('hi')</script>", calls.get(0).param("content"),
-                    "HTML content must be preserved through native path — no SUS_HTML stripping");
+                    "HTML content must be preserved through native path - no SUS_HTML stripping");
         }
 
         @Test
@@ -234,7 +234,7 @@ class NativeToolPipelineTest {
     // ── XML compatibility (deprecated, not active) ────────────────────────
 
     @Nested
-    @DisplayName("XML compatibility — deprecated, parsed for transition only, NOT instructed")
+    @DisplayName("XML compatibility - deprecated, parsed for transition only, NOT instructed")
     class XmlCompatibility {
 
         @Test
@@ -296,7 +296,7 @@ class NativeToolPipelineTest {
         }
 
         @Test
-        @DisplayName("no prompt path instructs XML — fallback uses JSON, native uses nothing")
+        @DisplayName("no prompt path instructs XML - fallback uses JSON, native uses nothing")
         void noPromptPathInstructsXml() {
             var registry = new ToolRegistry();
             registry.register(stubTool("talos.read_file", "Read a file"));
@@ -319,7 +319,7 @@ class NativeToolPipelineTest {
         }
 
         @Test
-        @DisplayName("XML compat code is parsing-only — JSON is the instructed format")
+        @DisplayName("XML compat code is parsing-only - JSON is the instructed format")
         void xmlIsParsingOnlyNotInstructed() {
             // Prove XML parsing still works (deprecated compatibility)
             String xmlResponse = "<tool_call>{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"x\"}}</tool_call>";
@@ -337,28 +337,28 @@ class NativeToolPipelineTest {
         }
 
         @Test
-        @DisplayName("active paths do NOT depend on XML — JSON and native are sufficient")
+        @DisplayName("active paths do NOT depend on XML - JSON and native are sufficient")
         void activePathsDoNotDependOnXml() {
-            // Native path: structured NativeToolCall — no XML involved
+            // Native path: structured NativeToolCall - no XML involved
             var ntc = new NativeToolCall("call_0", "talos.read_file", Map.of("path", "x.txt"));
             var calls = ToolCallLoop.convertNativeToolCalls(List.of(ntc));
             assertEquals(1, calls.size());
             assertEquals("talos.read_file", calls.get(0).toolName());
 
-            // JSON fallback path: code-fenced JSON — no XML involved
+            // JSON fallback path: code-fenced JSON - no XML involved
             String jsonResponse = "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"y.txt\"}}\n```";
             List<ToolCall> jsonCalls = ToolCallParser.parse(jsonResponse);
             assertEquals(1, jsonCalls.size());
             assertEquals("talos.read_file", jsonCalls.get(0).toolName());
 
-            // Both paths work without any XML — XML is deprecated compat only
+            // Both paths work without any XML - XML is deprecated compat only
         }
     }
 
     // ── Executor behavior ────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("Executor behavior — tool-loop entry and code-block detection")
+    @DisplayName("Executor behavior - tool-loop entry and code-block detection")
     class ExecutorBehavior {
 
         @Test
@@ -369,7 +369,7 @@ class NativeToolPipelineTest {
 
             // ToolCallParser.containsToolCalls should NOT detect code blocks
             assertFalse(ToolCallParser.containsToolCalls(responseWithCodeBlock),
-                    "Code blocks with filename hints must NOT be treated as tool calls — " +
+                    "Code blocks with filename hints must NOT be treated as tool calls - " +
                     "they should not trigger tool-loop entry");
         }
 
@@ -470,7 +470,7 @@ class NativeToolPipelineTest {
         }
 
         @Test
-        @DisplayName("2-arg ChatMessage constructor drops toolCalls and toolCallId — proving the fix is necessary")
+        @DisplayName("2-arg ChatMessage constructor drops toolCalls and toolCallId - proving the fix is necessary")
         void twoArgConstructorDropsStructure() {
             // This demonstrates why the fix was necessary:
             // the old sanitization used 2-arg constructor which dropped tool structure
@@ -503,7 +503,7 @@ class NativeToolPipelineTest {
             ToolCall call = new ToolCall("talos.write_file", Map.of("content", "data"));
             ToolCall repaired = ToolCallLoop.repairMissingPath(call);
 
-            // Must return as-is — no path inference
+            // Must return as-is - no path inference
             assertNull(repaired.param("path"),
                     "Missing path must NOT be inferred for mutating tools");
             assertEquals("talos.write_file", repaired.toolName());
@@ -602,7 +602,7 @@ class NativeToolPipelineTest {
     // ── Architecture truthfulness ────────────────────────────────────────
 
     @Nested
-    @DisplayName("Architecture truthfulness — prompts, comments, behavior all align")
+    @DisplayName("Architecture truthfulness - prompts, comments, behavior all align")
     class ArchitectureTruthfulness {
 
         @Test
@@ -657,14 +657,14 @@ class NativeToolPipelineTest {
         @Test
         @DisplayName("Sanitize XML compat block protection works for both formats")
         void sanitizeProtectsBothFormats() {
-            // XML format (deprecated compat) — still protected during sanitization
+            // XML format (deprecated compat) - still protected during sanitization
             String xmlInput = "<tool_call>{\"name\":\"talos.write_file\",\"parameters\":"
                     + "{\"content\":\"<script>x</script>\"}}</tool_call>";
             String xmlSanitized = Sanitize.sanitizeForOutputPreservingToolCalls(xmlInput);
             assertTrue(xmlSanitized.contains("<script>"),
                     "XML tool_call block content must be protected from SUS_HTML stripping");
 
-            // JSON format (active fallback) — protected during sanitization
+            // JSON format (active fallback) - protected during sanitization
             String jsonInput = "```json\n{\"name\":\"talos.write_file\",\"parameters\":"
                     + "{\"content\":\"<script>y</script>\"}}\n```";
             String jsonSanitized = Sanitize.sanitizeForOutputPreservingToolCalls(jsonInput);

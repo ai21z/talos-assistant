@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Verifies the Talos home and its logs directory are writable — they hold
+ * Verifies the Talos home and its logs directory are writable - they hold
  * the first-run sentinel, secrets, session files, and the managed
  * llama.cpp server log.
  */

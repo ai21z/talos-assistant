@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code /verify} — run one trusted workspace verification profile, behind
+ * {@code /verify} - run one trusted workspace verification profile, behind
  * the same plan validation and a per-run approval.
  *
  * <p>The declaration and trust state are evaluated live, so a profile pinned

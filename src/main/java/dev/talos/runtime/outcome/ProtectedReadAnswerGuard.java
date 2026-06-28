@@ -172,7 +172,7 @@ public final class ProtectedReadAnswerGuard {
      * sit at offset 0 of runtime-replaced answers, so head scoping cannot
      * miss them. Whole-answer matching destroyed long grounded answers whose
      * tail carried a legitimate caveat ("the raw value cannot be shared").
-     * A refusal buried past the head passes through — an answer-quality
+     * A refusal buried past the head passes through - an answer-quality
      * trade only; disclosure control lives in the suppression/handoff/
      * redaction layers, not here.
      */
@@ -310,7 +310,7 @@ public final class ProtectedReadAnswerGuard {
         // T759: delegates to the single canonical classifier (the local
         // substring copy false-positived on names like tokenizer.java).
         // Delta vs the old copy: CONTROL-kind hints (.git, .gnupg) now count
-        // as protected too — consistent with the workspace-resolved branch
+        // as protected too - consistent with the workspace-resolved branch
         // beside this check, which already included CONTROL.
         return dev.talos.runtime.policy.ProtectedContentPolicy.looksProtectedPathString(pathHint);
     }

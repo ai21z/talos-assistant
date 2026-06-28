@@ -97,7 +97,7 @@ public final class CommandToolPlanner {
                     + " is not available: this workspace declares no verification"
                     + " profiles (.talos/profiles.yaml).";
             case INVALID -> "Workspace profile " + profile
-                    + " is not available: the declaration is invalid — "
+                    + " is not available: the declaration is invalid - "
                     + registry.workspaceRejectionReason()
                     + " Nothing was registered.";
             case UNTRUSTED_NEW, UNTRUSTED_CHANGED -> "Workspace profile " + profile

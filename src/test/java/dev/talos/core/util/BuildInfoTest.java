@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * R7 — Coverage for the build-identity helper.
+ * R7 - Coverage for the build-identity helper.
  *
  * <p>Tests run from exploded class files in the Gradle test classpath, so the
  * jar-manifest attributes that {@link BuildInfo#version()} etc. read through
@@ -17,12 +17,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * metadata, while other fields must still gracefully fall back to
  * {@code "unknown"} rather than NPE or fabrication.
  *
- * <p>These tests do <b>not</b> require git to be available — the optional
+ * <p>These tests do <b>not</b> require git to be available - the optional
  * {@code META-INF/talos-build.properties} resource is not shipped on the
  * test classpath by default, so {@link BuildInfo#commitSha()} and
  * {@link BuildInfo#branch()} are expected to return {@code "unknown"}.
  */
-@DisplayName("R7 — BuildInfo")
+@DisplayName("R7 - BuildInfo")
 class BuildInfoTest {
 
     @Test
@@ -50,7 +50,7 @@ class BuildInfoTest {
         // so this MUST be the fallback value. If a future change adds that
         // resource to tests, this assertion will correctly flag it.
         assertEquals(BuildInfo.UNKNOWN, BuildInfo.commitSha(),
-                "No META-INF/talos-build.properties on test classpath — "
+                "No META-INF/talos-build.properties on test classpath - "
                 + "commitSha() must fall back to 'unknown'.");
     }
 
@@ -58,7 +58,7 @@ class BuildInfoTest {
     @DisplayName("branch() returns 'unknown' when build-props resource is absent")
     void branchUnknownWithoutResource() {
         assertEquals(BuildInfo.UNKNOWN, BuildInfo.branch(),
-                "No META-INF/talos-build.properties on test classpath — "
+                "No META-INF/talos-build.properties on test classpath - "
                 + "branch() must fall back to 'unknown'.");
     }
 

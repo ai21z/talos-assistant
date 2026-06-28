@@ -20,7 +20,7 @@ public final class Sanitize {
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");
 
     /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants).
-     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML from training habits.
+     *  DEPRECATED COMPATIBILITY ONLY - retained for models that emit XML from training habits.
      *  JSON code-fenced tool calls are the actively instructed text fallback format.
      *  Scheduled for removal once native tool calling is stable across model versions. */
     private static final Pattern TOOL_CALL_BLOCK = Pattern.compile(
@@ -152,7 +152,7 @@ public final class Sanitize {
     /**
      * Sanitizes message content for multi-turn chat (messages sent to the model).
      *
-     * <p>Only strips control characters — does NOT strip HTML. Messages in the
+     * <p>Only strips control characters - does NOT strip HTML. Messages in the
      * tool-call pipeline may contain file content with legitimate HTML/script tags
      * (e.g., tool results from read_file). Stripping those would give the model an
      * incorrect view of the file, causing it to generate wrong edits.
@@ -194,7 +194,7 @@ public final class Sanitize {
      *
      * <p>JSON code fences are the actively instructed text fallback.
      * XML tags are DEPRECATED COMPATIBILITY support for models that
-     * emit XML from training habits or cached context — not actively
+     * emit XML from training habits or cached context - not actively
      * instructed, scheduled for removal.
      *
      * <p>The algorithm: find all tool_call blocks (both formats),
@@ -207,7 +207,7 @@ public final class Sanitize {
         collectRegions(JSON_TOOL_CALL_FENCE, s, protectedRegions);
 
         if (protectedRegions.isEmpty()) {
-            // No tool_call blocks — apply SUS_HTML to the entire string
+            // No tool_call blocks - apply SUS_HTML to the entire string
             return SUS_HTML.matcher(s).replaceAll("");
         }
 
@@ -220,7 +220,7 @@ public final class Sanitize {
         for (int[] region : protectedRegions) {
             int start = region[0];
             int end = region[1];
-            if (start < lastEnd) continue; // overlapping region — skip
+            if (start < lastEnd) continue; // overlapping region - skip
             // Sanitize prose before this block
             String before = s.substring(lastEnd, start);
             result.append(SUS_HTML.matcher(before).replaceAll(""));

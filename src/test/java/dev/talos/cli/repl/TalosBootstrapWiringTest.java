@@ -15,7 +15,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Prompt 6 — bootstrap wiring integration confidence.
+ * Prompt 6 - bootstrap wiring integration confidence.
  *
  * <p>The Prompt 3 policy layer and the Prompt 2 per-turn durability both
  * live in {@code dev.talos.runtime} and are exhaustively unit-tested in
@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <ul>
  *   <li>{@link TurnProcessor#approvalPolicy()} returns a real
- *       {@link SessionApprovalPolicy} — not the {@link ApprovalPolicy#ALWAYS_ASK}
+ *       {@link SessionApprovalPolicy} - not the {@link ApprovalPolicy#ALWAYS_ASK}
  *       default. (Regression guard against the pre-fix HEAD where the
  *       policy existed in code but was never instantiated by bootstrap.)</li>
  *   <li>{@link MemoryUpdateListener} is registered as a post-turn listener
@@ -62,7 +62,7 @@ class TalosBootstrapWiringTest {
         ApprovalPolicy policy = tp.approvalPolicy();
         assertNotNull(policy);
         assertInstanceOf(SessionApprovalPolicy.class, policy,
-                "live REPL path must use SessionApprovalPolicy, not ALWAYS_ASK — "
+                "live REPL path must use SessionApprovalPolicy, not ALWAYS_ASK - "
                         + "otherwise the user's 'a = yes for session' choice silently "
                         + "does nothing (pre-fix regression).");
     }
@@ -77,21 +77,21 @@ class TalosBootstrapWiringTest {
         TurnProcessor tp = router.turnProcessor();
 
         assertTrue(tp.hasListenerOfType(MemoryUpdateListener.class),
-                "MemoryUpdateListener must be registered — without it, "
+                "MemoryUpdateListener must be registered - without it, "
                         + "conversation history is never committed.");
         assertTrue(tp.hasListenerOfType(ActiveTaskContextUpdateListener.class),
-                "ActiveTaskContextUpdateListener must be registered — without it, "
+                "ActiveTaskContextUpdateListener must be registered - without it, "
                         + "post-turn proposals, denials, and verifier findings "
                         + "never become follow-up context.");
         assertTrue(tp.hasListenerOfType(JsonTurnLogAppender.class),
-                "JsonTurnLogAppender must be registered — without it, "
+                "JsonTurnLogAppender must be registered - without it, "
                         + "the per-turn JSONL durability is silently inactive "
                         + "and crash recovery degrades to the close-only snapshot.");
     }
 
     /**
      * Single-writer contract (T774): the bootstrap writes streamed chunks
-     * through the ONE supplied {@code out} stream — there is no second,
+     * through the ONE supplied {@code out} stream - there is no second,
      * terminal-writer side channel. In production RunCmd supplies a
      * terminal-backed stream ({@code TerminalOutput.printStreamFor}), so
      * JLine's cursor/column model sees every character that reaches the
@@ -118,7 +118,7 @@ class TalosBootstrapWiringTest {
                 new java.io.PrintStream(suppliedSink),
                 WS, reader);
 
-        // Drive one chunk directly through the wired stream sink — same
+        // Drive one chunk directly through the wired stream sink - same
         // path a live streaming turn would exercise, but without depending
         // on mode/placeholder/turn-executor internals.
         router.context().streamSink().accept("CHUNK-PROBE");

@@ -10,11 +10,11 @@ import java.util.function.IntSupplier;
  * <ol>
  *   <li>A live terminal width (JLine {@code Terminal.getWidth()} via the
  *       supplied {@link IntSupplier}), clamped to [{@value #MIN},
- *       {@value #MAX}] — below 60 the bordered surfaces degrade into
+ *       {@value #MAX}] - below 60 the bordered surfaces degrade into
  *       wrap-noise, above 120 prose lines become unreadable.</li>
  *   <li>The {@code COLUMNS} environment variable (POSIX shells; never set
  *       by default on Windows), clamped the same way.</li>
- *   <li>The caller's surface default, returned unclamped — redirected and
+ *   <li>The caller's surface default, returned unclamped - redirected and
  *       scripted paths have no terminal, so today's fixed-width output
  *       (answer pane 96, approval window 80, banner 80) stays
  *       byte-identical by construction.</li>

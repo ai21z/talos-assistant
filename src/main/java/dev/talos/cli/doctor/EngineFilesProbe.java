@@ -4,8 +4,8 @@ import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.engine.llamacpp.LlamaCppPreflight;
 
 /**
- * Verifies the managed llama.cpp files statically — server binary present,
- * model file present, GGUF architecture supported — without starting
+ * Verifies the managed llama.cpp files statically - server binary present,
+ * model file present, GGUF architecture supported - without starting
  * anything. Delegates to the same validation the engine runs before launch.
  */
 public final class EngineFilesProbe implements DoctorProbe {

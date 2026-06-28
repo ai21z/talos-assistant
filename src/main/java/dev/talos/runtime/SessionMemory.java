@@ -30,14 +30,14 @@ public final class SessionMemory implements ConversationMemory {
 
     /**
      * Maximum characters retained in the legacy rolling text window.
-     * Generous budget — the structured turns list is the primary constraint;
+     * Generous budget - the structured turns list is the primary constraint;
      * this only caps the backward-compatible flat buffer.
      */
     public static final int MAX_CHARS = 64_000;
 
     /**
      * Maximum number of structured ChatMessage entries retained.
-     * 200 entries = 100 user/assistant exchanges — enough for long sessions
+     * 200 entries = 100 user/assistant exchanges - enough for long sessions
      * while staying well within typical model context windows.
      */
     private static final int MAX_TURNS = 200;

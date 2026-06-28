@@ -28,7 +28,7 @@ class OllamaEngineSystemMergeTest {
     @Test
     void mainPromptPlusTaskAnchor_concatenatedNotReplaced() {
         String main = "You are a local assistant. Behavior rules: ...";  // ~7k chars in prod
-        String anchor = "[Current task — stay focused on this] make index.html darker";
+        String anchor = "[Current task - stay focused on this] make index.html darker";
 
         String merged = OllamaEngine.mergeSystemMessages(List.of(main, anchor));
 

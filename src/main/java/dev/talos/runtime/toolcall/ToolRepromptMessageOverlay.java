@@ -73,7 +73,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
     private void applyCurrentTaskAnchor(String userTask) {
         if (userTask == null || userTask.isBlank()) return;
         String pinned = userTask.length() <= 500 ? userTask : userTask.substring(0, 500) + "…";
-        addSystem("[Current task — stay focused on this] " + pinned, "[Current task");
+        addSystem("[Current task - stay focused on this] " + pinned, "[Current task");
     }
 
     private void addSystem(String content, String cleanupPrefix) {

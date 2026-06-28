@@ -463,7 +463,7 @@ class SystemPromptBuilderTest {
                 "Native read-only mode should keep read-only tool descriptors");
         assertFalse(prompt.contains("- **talos.edit_file**"),
                 "Native read-only mode should filter mutating tool descriptors");
-        assertFalse(prompt.contains("runtime handles tool invocation format automatically — just decide WHICH tool"),
+        assertFalse(prompt.contains("runtime handles tool invocation format automatically - just decide WHICH tool"),
                 "Native read-only mode should not use the writable native preamble");
     }
 

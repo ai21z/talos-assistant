@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
  * <p><b>Driven directly by the real Talos CLI transcript</b>
  * ({@code test-output.txt}, Turn 6, qwen2.5-coder:14b, April 2026):
  * the model emitted a pedagogical "step-by-step" answer containing
- * literal Python-style variable names, then — in the SAME turn —
+ * literal Python-style variable names, then - in the SAME turn -
  * issued {@code write_file} tool calls whose {@code content} argument
  * was the variable name itself:
  *
@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * back ("preview: &lt;updated_index_html_content&gt;") so the user's
  * "y" reflex finished the destruction.
  *
- * <p>A warning-in-approval-detail would not have saved that user —
+ * <p>A warning-in-approval-detail would not have saved that user -
  * they pressed y after seeing two small "28 bytes, 1 lines" writes
  * land. The only safe posture for this failure class is <b>reject
  * at tool-call time</b>: the call is definitionally garbage, the
@@ -32,9 +32,9 @@ import java.util.regex.Pattern;
  *
  * <p><b>Deliberately lexical, not semantic.</b> We only catch the
  * "content is exactly one angle-bracketed placeholder identifier"
- * shape observed in the transcript. Any realistic file content —
+ * shape observed in the transcript. Any realistic file content -
  * even a tiny stub like {@code <html></html>} or {@code // TODO}
- * — has more structure and passes through untouched.
+ * - has more structure and passes through untouched.
  */
 public final class TemplatePlaceholderGuard {
 
@@ -100,7 +100,7 @@ public final class TemplatePlaceholderGuard {
     /**
      * Human-readable explanation fed back to the model when a call is
      * rejected. Phrased so the model understands the rejection is about
-     * its own output, not about user permissions — prevents the same
+     * its own output, not about user permissions - prevents the same
      * "permissions" hallucination loop the denial-wording fix in
      * {@code TurnProcessor} already reshapes.
      */
@@ -112,7 +112,7 @@ public final class TemplatePlaceholderGuard {
                 + snippet + "\"), not real content. "
                 + "Emit the full actual file content directly in the tool call; "
                 + "do NOT use placeholder variables like <updated_foo> that you "
-                + "intend the user or another step to fill in — tool calls execute "
+                + "intend the user or another step to fill in - tool calls execute "
                 + "verbatim, there is no templating layer.";
     }
 }

@@ -74,7 +74,7 @@ class ConversationCompactionTest {
                     ChatMessage.assistant("Talos is a local-first workspace assistant.")
             );
             String result = ConversationCompactor.compact(null, turns, llm);
-            // PLACEHOLDER mode returns something — exact text depends on implementation
+            // PLACEHOLDER mode returns something - exact text depends on implementation
             // but it should not be null, not be empty, and should be different from null
             assertNotNull(result);
         }
@@ -402,7 +402,7 @@ class ConversationCompactionTest {
                 cm.addTurn("short q" + i, "short a" + i);
             }
 
-            // With 1M token budget, 25% = 250K tokens — 10 short turns easily fit
+            // With 1M token budget, 25% = 250K tokens - 10 short turns easily fit
             assertFalse(cm.maybeCompact(llm));
         }
 
@@ -467,7 +467,7 @@ class ConversationCompactionTest {
          * T797 pin, deliberately updated by T805: auto compaction is no
          * longer silent. It sets the status AND the one-shot event (T798)
          * that drives the render-side {@code [context compacted: ...]}
-         * notice — which is interactive chrome only and never enters
+         * notice - which is interactive chrome only and never enters
          * history (defensive stripper entry pinned by UiChromeContractTest).
          */
         @Test
@@ -850,7 +850,7 @@ class ConversationCompactionTest {
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(8192));
             cm.setSketch("x".repeat(1000)); // ~250 tokens
 
-            // Budget of 10 tokens — sketch alone exceeds it
+            // Budget of 10 tokens - sketch alone exceeds it
             List<ChatMessage> history = cm.buildHistory(10);
             // Sketch is omitted because it doesn't fit
             assertTrue(history.isEmpty() || !history.getFirst().content().contains("Conversation context"));
@@ -952,7 +952,7 @@ class ConversationCompactionTest {
         void listener_withoutLlm_noCompaction() {
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(8192));
-            // No LLM — old constructor
+            // No LLM - old constructor
             var listener = new dev.talos.runtime.MemoryUpdateListener(cm);
 
             var result = new dev.talos.runtime.TurnResult(

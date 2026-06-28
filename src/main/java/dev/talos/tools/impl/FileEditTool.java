@@ -151,7 +151,7 @@ public final class FileEditTool implements TalosTool {
             String updated = content.replace(oldString, newString);
 
             // Undo snapshots moved to the governed checkpoint machinery
-            // (T795/T796) — captured pre-approval by the runtime, not here.
+            // (T795/T796) - captured pre-approval by the runtime, not here.
             Files.writeString(resolved, updated);
 
             // Report what changed

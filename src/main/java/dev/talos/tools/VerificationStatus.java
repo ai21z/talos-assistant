@@ -6,11 +6,11 @@ package dev.talos.tools;
  * <p>Represents the semantic result of post-write content verification,
  * enabling the runtime and model to distinguish between:
  * <ul>
- *   <li>{@link #PASS} — mutation succeeded, verification passed</li>
- *   <li>{@link #WARN} — mutation succeeded, verification found non-fatal issues</li>
- *   <li>{@link #FAIL} — mutation succeeded at filesystem level, but content is invalid</li>
- *   <li>{@link #INTEGRITY_FAIL} — mutation read-back failed or did not match approved bytes</li>
- *   <li>{@link #UNKNOWN} — mutation succeeded, no semantic validator available</li>
+ *   <li>{@link #PASS} - mutation succeeded, verification passed</li>
+ *   <li>{@link #WARN} - mutation succeeded, verification found non-fatal issues</li>
+ *   <li>{@link #FAIL} - mutation succeeded at filesystem level, but content is invalid</li>
+ *   <li>{@link #INTEGRITY_FAIL} - mutation read-back failed or did not match approved bytes</li>
+ *   <li>{@link #UNKNOWN} - mutation succeeded, no semantic validator available</li>
  * </ul>
  *
  * <p>Attached to {@link ToolResult} as optional metadata. Null for non-write tools.

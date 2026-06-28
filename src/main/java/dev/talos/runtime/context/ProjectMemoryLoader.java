@@ -232,7 +232,7 @@ public final class ProjectMemoryLoader {
      * is the product's designated model-facing memory surface. T788 made the
      * workspace {@code .talos} directory a protected CONTROL segment so the
      * model cannot WRITE it with an ordinary approval (memory injection via
-     * a tool write now escalates through the protected-path flow) — but
+     * a tool write now escalates through the protected-path flow) - but
      * Talos itself still reads exactly this file into the prompt as
      * untrusted context; that is its purpose. Nothing else under
      * {@code .talos} is exempt: {@code .talos/profiles.yaml} (verification

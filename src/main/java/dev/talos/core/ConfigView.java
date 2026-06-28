@@ -9,7 +9,7 @@ import java.util.Map;
  * <p>Provides type-safe accessors like {@code cfg.rag().topK()} instead of
  * raw {@code CfgUtil.intAt(CfgUtil.map(cfg.data.get("rag")), "top_k", 6)}.
  *
- * <p>All accessors are computed on each call (no caching) — this keeps the
+ * <p>All accessors are computed on each call (no caching) - this keeps the
  * view consistent with any mutations to the underlying map (e.g., ENV
  * overrides, user config overlays, or runtime changes via commands).
  *

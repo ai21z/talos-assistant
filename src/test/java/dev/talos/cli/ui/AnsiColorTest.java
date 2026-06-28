@@ -144,7 +144,7 @@ class AnsiColorTest {
     void isEnabled_returns_boolean_without_exception() {
         // Just verify it doesn't throw
         boolean result = AnsiColor.isEnabled();
-        assertTrue(result || !result); // tautology — we only care about no-throw
+        assertTrue(result || !result); // tautology - we only care about no-throw
     }
 
     @Test

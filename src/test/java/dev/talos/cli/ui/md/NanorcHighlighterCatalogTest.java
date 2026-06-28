@@ -23,7 +23,7 @@ class NanorcHighlighterCatalogTest {
     @Test
     void bundledDefinitionsLoadFromTheClasspath() {
         // Assumption-verifying test for the classpath: URL form of
-        // SyntaxHighlighter.build — if this fails, switch the catalog to a
+        // SyntaxHighlighter.build - if this fails, switch the catalog to a
         // Path-based loader.
         for (String lang : new String[]{"java", "python", "javascript", "json",
                 "yaml", "bash", "diff", "xml", "html", "css"}) {

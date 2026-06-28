@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * questions still surface test code.
  *
  * <p>Insert between {@link RrfFusionStage} and {@link RerankerStage} in the
- * default pipeline. Stateless — all decisions are returned via {@link StageOutput}.
+ * default pipeline. Stateless - all decisions are returned via {@link StageOutput}.
  */
 public final class SourceBoostStage implements RetrievalStage {
 
@@ -127,7 +127,7 @@ public final class SourceBoostStage implements RetrievalStage {
     static float factorForSourceType(SourceType type, String path) {
         return switch (type) {
             case CODE_FILE -> {
-                // CODE_FILE could be prod or test — resolve via path
+                // CODE_FILE could be prod or test - resolve via path
                 String p = path.toLowerCase(Locale.ROOT).replace('\\', '/');
                 if (isTestPath(p)) yield TEST_PENALTY;
                 if (isProdPath(p)) yield PROD_BOOST;
@@ -150,11 +150,11 @@ public final class SourceBoostStage implements RetrievalStage {
      * Production paths get boosted, test/doc paths get penalized,
      * and unclassified paths pass through unchanged.
      *
-     * <p>Legacy path-only classification — used as fallback when metadata
+     * <p>Legacy path-only classification - used as fallback when metadata
      * does not carry a {@link SourceIdentity}.
      */
     static float classifyPath(String pathLower) {
-        // Check test first — more specific than prod (src/test overrides src/main)
+        // Check test first - more specific than prod (src/test overrides src/main)
         if (isTestPath(pathLower)) return TEST_PENALTY;
         if (isProdPath(pathLower)) return PROD_BOOST;
         if (isDocsPath(pathLower)) return DOCS_PENALTY;

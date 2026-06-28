@@ -1,4 +1,4 @@
-# Release Gate Ledger (GATES.json) — Schema v1
+# Release Gate Ledger (GATES.json) - Schema v1
 
 T749. Every release packet report gains a machine-checkable verdict layer:
 a `*GATES.json` file beside the prose report under `work-cycle-docs/reports/`.
@@ -7,13 +7,13 @@ The prose explains; the ledger is what tooling (and future Talos gates) checks.
 
 ## Rules
 
-- `sha` MUST be captured from `git rev-parse` (tooling), never typed by hand —
+- `sha` MUST be captured from `git rev-parse` (tooling), never typed by hand -
   the 0.10.1 packet shipped a hand-extended invalid SHA that survived until a
   forensic pass.
 - One ledger per packet; filename `<packet-report-name>-GATES.json` or
   `GATES.json` inside a packet-named directory.
 - A gate whose evidence has been superseded keeps its row with status
-  `SUPERSEDED` and a pointer in `notes` — rows are append-only history.
+  `SUPERSEDED` and a pointer in `notes` - rows are append-only history.
 
 ## Schema
 

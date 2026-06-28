@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Repo-wide rules (zero violations at introduction): directory/filename
  * status-token consistency for bracketed tickets, and ticket-ID uniqueness
  * across open/ + done/. Strict template rules (filename vocabulary and a body
- * {@code Status:} line) apply only to tickets numbered T739 and above —
+ * {@code Status:} line) apply only to tickets numbered T739 and above -
  * a numeric grandfather threshold in the spirit of the architecture ratchet:
  * new work cannot regress, the 80+ legacy variants stay untouched.
  */

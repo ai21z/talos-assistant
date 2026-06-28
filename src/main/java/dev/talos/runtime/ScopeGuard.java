@@ -111,13 +111,13 @@ public final class ScopeGuard {
      *   <li>{@code targetPath} is null/blank, or</li>
      *   <li>the user request does not look web-scoped, or</li>
      *   <li>the target path has no extension (could be a Makefile,
-     *       Dockerfile, etc. — out of scope for this narrow guard), or</li>
+     *       Dockerfile, etc. - out of scope for this narrow guard), or</li>
      *   <li>the extension is in the web allow-list.</li>
      * </ul>
      *
      * <p>Returns {@code true} only when the user request is clearly
      * web-scoped AND the target file's extension is outside the web
-     * allow-list — the exact failure shape observed in the transcript.
+     * allow-list - the exact failure shape observed in the transcript.
      */
     public static boolean looksLikeOffScopeMutationTarget(String userRequest, String targetPath) {
         if (targetPath == null || targetPath.isBlank()) return false;
@@ -125,7 +125,7 @@ public final class ScopeGuard {
 
         String base = basename(targetPath);
         int dot = base.lastIndexOf('.');
-        if (dot <= 0) return false; // no extension — narrow guard stays silent
+        if (dot <= 0) return false; // no extension - narrow guard stays silent
         String ext = base.substring(dot + 1).toLowerCase();
         return !WEB_SAFE_EXTENSIONS.contains(ext);
     }

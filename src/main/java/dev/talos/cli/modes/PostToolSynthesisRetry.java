@@ -76,12 +76,12 @@ final class PostToolSynthesisRetry {
                     + "Now answer that exact request directly and concretely, "
                     + "using the tool results you received. "
                     + "Do not say the question is missing. "
-                    + "Do not ask what I want — answer the question above.";
+                    + "Do not ask what I want - answer the question above.";
         } else {
             retryPrompt = "You already gathered the needed evidence using tools. "
                     + "Now answer the original question directly and concretely, "
                     + "using the tool results you received. "
-                    + "Do not ask what I want — answer the question.";
+                    + "Do not ask what I want - answer the question.";
         }
 
         messages.add(ChatMessage.assistant(answer));

@@ -13,25 +13,25 @@ import java.util.List;
  *
  * <h3>What it does</h3>
  * <ol>
- *   <li><b>Sort</b> — descending by score (highest first)</li>
- *   <li><b>Normalize</b> — scale scores to [0, 1] relative to the top candidate</li>
- *   <li><b>Threshold</b> — drop candidates whose normalized score falls below
+ *   <li><b>Sort</b> - descending by score (highest first)</li>
+ *   <li><b>Normalize</b> - scale scores to [0, 1] relative to the top candidate</li>
+ *   <li><b>Threshold</b> - drop candidates whose normalized score falls below
  *       {@code minRelativeScore}</li>
- *   <li><b>Cap</b> — limit output to at most {@code maxResults} candidates</li>
- *   <li><b>Re-tag</b> — update the source tag to "rerank" with normalized scores</li>
+ *   <li><b>Cap</b> - limit output to at most {@code maxResults} candidates</li>
+ *   <li><b>Re-tag</b> - update the source tag to "rerank" with normalized scores</li>
  * </ol>
  *
  * <h3>Why this matters</h3>
- * <p>After RRF fusion, candidates have scores in a narrow band (typically 0.01–0.03).
- * Without filtering, all fused candidates pass through to context packing — including
+ * <p>After RRF fusion, candidates have scores in a narrow band (typically 0.01-0.03).
+ * Without filtering, all fused candidates pass through to context packing - including
  * low-confidence noise that wastes the LLM's context window. This reranker removes
  * candidates that scored far below the best match, ensuring only meaningfully
  * relevant chunks reach the LLM.
  *
  * <h3>Defaults</h3>
  * <ul>
- *   <li>{@code minRelativeScore = 0.25} — drop anything below 25% of the top score</li>
- *   <li>{@code maxResults = 8} — cap at 8 candidates (focused context)</li>
+ *   <li>{@code minRelativeScore = 0.25} - drop anything below 25% of the top score</li>
+ *   <li>{@code maxResults = 8} - cap at 8 candidates (focused context)</li>
  * </ul>
  *
  * <p>Both values are configurable at construction time and via the config key
@@ -78,7 +78,7 @@ public final class ScoreThresholdReranker implements Reranker {
         // 2. Determine the top score for normalization
         float topScore = sorted.getFirst().score();
         if (topScore <= 0f) {
-            // All scores are zero or negative — can't meaningfully threshold.
+            // All scores are zero or negative - can't meaningfully threshold.
             // Return up to maxResults, preserving input order.
             LOG.debug("Rerank: all scores ≤ 0, returning top {} of {} candidates",
                     Math.min(maxResults, sorted.size()), sorted.size());

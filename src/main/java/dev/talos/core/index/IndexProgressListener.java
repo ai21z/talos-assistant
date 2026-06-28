@@ -3,7 +3,7 @@ package dev.talos.core.index;
 /**
  * Callback for live indexing progress.
  *
- * <p>Implementations must be thread-safe — the indexer may invoke
+ * <p>Implementations must be thread-safe - the indexer may invoke
  * {@link #onFileComplete} from multiple virtual threads concurrently.
  */
 @FunctionalInterface

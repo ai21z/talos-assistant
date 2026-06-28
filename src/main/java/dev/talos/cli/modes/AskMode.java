@@ -59,7 +59,7 @@ public final class AskMode implements Mode {
         long responseMaxChars = CfgUtil.longAt(lim, "response_max_chars", 10 * 1024 * 1024L);
         long llmTimeoutMs     = CfgUtil.longAt(lim, "llm_timeout_ms", 300_000L);
 
-        // System prompt — composed from sections, tool-aware, history-aware
+        // System prompt - composed from sections, tool-aware, history-aware
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
@@ -70,7 +70,7 @@ public final class AskMode implements Mode {
                 .withHistory(hasHistory)
                 .build();
 
-        // Build conversation history — AskMode uses a larger budget (55% vs 25%)
+        // Build conversation history - AskMode uses a larger budget (55% vs 25%)
         // because there are no RAG snippets competing for context space.
         // This is critical for multi-turn creative tasks.
         List<ChatMessage> history = List.of();

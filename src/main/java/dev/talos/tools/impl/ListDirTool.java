@@ -16,9 +16,9 @@ import java.util.stream.Stream;
  *
  * <p>Parameters:
  * <ul>
- *   <li>{@code path} — relative path to the directory within the workspace (required)</li>
- *   <li>{@code max_depth} — maximum directory depth to traverse (optional, default: 1)</li>
- *   <li>{@code max_entries} — maximum number of entries to return (optional, default: 200)</li>
+ *   <li>{@code path} - relative path to the directory within the workspace (required)</li>
+ *   <li>{@code max_depth} - maximum directory depth to traverse (optional, default: 1)</li>
+ *   <li>{@code max_entries} - maximum number of entries to return (optional, default: 200)</li>
  * </ul>
  *
  * <p>Output format: one entry per line. Directories are suffixed with {@code /}.

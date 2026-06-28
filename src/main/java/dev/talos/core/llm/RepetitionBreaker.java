@@ -5,7 +5,7 @@ package dev.talos.core.llm;
  * responses.
  *
  * <p><b>Why this exists.</b> {@code LlmClient.withWallClockBudget} has two
- * pre-existing guards — a wall-clock budget (default 300s) and an idle-chunk
+ * pre-existing guards - a wall-clock budget (default 300s) and an idle-chunk
  * watchdog (default 30s). Neither observes chunk <i>content</i>. A local
  * model that falls into a repetition attractor keeps emitting tokens at a
  * normal rate, so {@code lastChunkAt} keeps advancing and the idle watchdog
@@ -24,8 +24,8 @@ package dev.talos.core.llm;
  *
  * <p><b>Why the defaults.</b> {@code substringLen=48} × {@code maxRepeats=6}
  * means the detector only trips after at least 288 characters of back-to-back
- * identical substring. Legitimate model output — even repetitive code
- * formatting, markdown lists, or JSON arrays — does not exhibit exact
+ * identical substring. Legitimate model output - even repetitive code
+ * formatting, markdown lists, or JSON arrays - does not exhibit exact
  * 48-char repeats six times in a row. The transcript's degenerate "[...]
  * The user's prompt is 'The user's prompt is '..." pattern does. Tuning
  * happens via the constructor; defaults live in
@@ -39,13 +39,13 @@ package dev.talos.core.llm;
  */
 final class RepetitionBreaker {
 
-    /** 48 characters — long enough that exact repeats don't happen in legitimate prose. */
+    /** 48 characters - long enough that exact repeats don't happen in legitimate prose. */
     static final int DEFAULT_SUBSTRING_LEN = 48;
 
-    /** 6 consecutive repeats — 288+ characters of sustained degenerate output. */
+    /** 6 consecutive repeats - 288+ characters of sustained degenerate output. */
     static final int DEFAULT_MAX_REPEATS = 6;
 
-    /** 2048-character rolling window — covers multiple pathological repeats without O(n²) cost. */
+    /** 2048-character rolling window - covers multiple pathological repeats without O(n²) cost. */
     static final int DEFAULT_WINDOW_SIZE = 2048;
 
     private final int substringLen;
@@ -78,7 +78,7 @@ final class RepetitionBreaker {
      * @param chunk new streamed text (may be empty; null is treated as empty)
      * @return {@code true} if the breaker just transitioned to tripped
      *         (only on the transition, not on subsequent calls while
-     *         already tripped — this lets callers act exactly once).
+     *         already tripped - this lets callers act exactly once).
      */
     boolean onChunk(String chunk) {
         if (tripped) return false;
@@ -91,7 +91,7 @@ final class RepetitionBreaker {
 
         if (tail.length() < substringLen * maxRepeats) return false;
 
-        // Probe: the last substringLen characters of the tail — i.e., what
+        // Probe: the last substringLen characters of the tail - i.e., what
         // the model has MOST RECENTLY emitted. Counting non-overlapping
         // occurrences across the whole tail catches the repetition-attractor
         // pattern where the probe itself is a chunk of the looping output.
@@ -109,7 +109,7 @@ final class RepetitionBreaker {
         return false;
     }
 
-    /** True once the breaker has detected pathological repetition. Monotonic — never resets. */
+    /** True once the breaker has detected pathological repetition. Monotonic - never resets. */
     boolean tripped() {
         return tripped;
     }

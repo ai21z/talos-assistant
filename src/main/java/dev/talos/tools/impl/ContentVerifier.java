@@ -71,16 +71,16 @@ final class ContentVerifier {
 
     private static VerifyResult verifyJson(String content) {
         if (content == null || content.isBlank()) {
-            return new VerifyResult(VerificationStatus.FAIL, "JSON parse failed — empty content");
+            return new VerifyResult(VerificationStatus.FAIL, "JSON parse failed - empty content");
         }
         try {
             var tree = JSON_MAPPER.readTree(content);
             if (tree == null) {
-                return new VerifyResult(VerificationStatus.FAIL, "JSON parse failed — empty or null content");
+                return new VerifyResult(VerificationStatus.FAIL, "JSON parse failed - empty or null content");
             }
             return new VerifyResult(VerificationStatus.PASS, "valid JSON");
         } catch (Exception e) {
-            return new VerifyResult(VerificationStatus.FAIL, "JSON parse failed — " + brief(e));
+            return new VerifyResult(VerificationStatus.FAIL, "JSON parse failed - " + brief(e));
         }
     }
 
@@ -89,7 +89,7 @@ final class ContentVerifier {
             new com.fasterxml.jackson.dataformat.yaml.YAMLMapper().readTree(content);
             return new VerifyResult(VerificationStatus.PASS, "valid YAML");
         } catch (Exception e) {
-            return new VerifyResult(VerificationStatus.FAIL, "YAML parse failed — " + brief(e));
+            return new VerifyResult(VerificationStatus.FAIL, "YAML parse failed - " + brief(e));
         }
     }
 
@@ -104,7 +104,7 @@ final class ContentVerifier {
                     new org.xml.sax.helpers.DefaultHandler());
             return new VerifyResult(VerificationStatus.PASS, "valid XML");
         } catch (Exception e) {
-            return new VerifyResult(VerificationStatus.FAIL, "XML parse failed — " + brief(e));
+            return new VerifyResult(VerificationStatus.FAIL, "XML parse failed - " + brief(e));
         }
     }
 
@@ -143,7 +143,7 @@ final class ContentVerifier {
                 ? String.join("; ", warnings)
                 : String.join("; ", warnings.subList(0, 3))
                   + " (+" + (warnings.size() - 3) + " more)";
-        return new VerifyResult(VerificationStatus.WARN, "HTML issues — " + detail);
+        return new VerifyResult(VerificationStatus.WARN, "HTML issues - " + detail);
     }
 
     /**
@@ -156,14 +156,14 @@ final class ContentVerifier {
 
         // CSS files should never contain HTML structural tags
         if (lower.contains("<!doctype") || lower.contains("<html"))
-            warnings.add("contains HTML markup (<!DOCTYPE or <html>) — wrong content type for CSS");
+            warnings.add("contains HTML markup (<!DOCTYPE or <html>) - wrong content type for CSS");
         if (lower.contains("<body") || lower.contains("<head"))
-            warnings.add("contains HTML structural tags (<body>/<head>) — wrong content type for CSS");
+            warnings.add("contains HTML structural tags (<body>/<head>) - wrong content type for CSS");
         if (lower.contains("<script"))
-            warnings.add("contains <script> tag — wrong content type for CSS");
+            warnings.add("contains <script> tag - wrong content type for CSS");
 
         if (warnings.isEmpty()) return new VerifyResult(VerificationStatus.PASS, "CSS content OK");
-        return new VerifyResult(VerificationStatus.WARN, "CSS issues — " + String.join("; ", warnings));
+        return new VerifyResult(VerificationStatus.WARN, "CSS issues - " + String.join("; ", warnings));
     }
 
     /**
@@ -177,13 +177,13 @@ final class ContentVerifier {
 
         // JS files should never contain closing script tags (that's inline HTML, not a .js file)
         if (lower.contains("</script>"))
-            warnings.add("contains </script> tag — this is a standalone JS file, not an inline script");
+            warnings.add("contains </script> tag - this is a standalone JS file, not an inline script");
         // JS files should never contain HTML document structure
         if (lower.contains("<!doctype") || lower.contains("<html"))
-            warnings.add("contains HTML markup — wrong content type for JS file");
+            warnings.add("contains HTML markup - wrong content type for JS file");
 
         if (warnings.isEmpty()) return new VerifyResult(VerificationStatus.PASS, "JS content OK");
-        return new VerifyResult(VerificationStatus.WARN, "JS issues — " + String.join("; ", warnings));
+        return new VerifyResult(VerificationStatus.WARN, "JS issues - " + String.join("; ", warnings));
     }
 
     private static int countSubstring(String haystack, String needle) {

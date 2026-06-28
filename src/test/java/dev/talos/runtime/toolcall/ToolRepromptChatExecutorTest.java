@@ -93,7 +93,7 @@ class ToolRepromptChatExecutorTest {
                 "test reprompt");
 
         assertFalse(continueLoop);
-        assertEquals("[Model 'missing-model' not found — tool loop aborted. "
+        assertEquals("[Model 'missing-model' not found - tool loop aborted. "
                 + missing.guidance() + "]", state.currentText);
         assertTrue(state.currentNativeCalls.isEmpty());
     }

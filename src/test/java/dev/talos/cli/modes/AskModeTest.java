@@ -39,7 +39,7 @@ class AskModeTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  buildMessages (structured /api/chat messages — primary code path)
+    //  buildMessages (structured /api/chat messages - primary code path)
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
@@ -115,7 +115,7 @@ class AskModeTest {
     @Test
     void handle_does_not_update_memory_directly() throws Exception {
         // Memory updates are now centralized in TurnProcessor via MemoryUpdateListener.
-        // AskMode.handle() should NOT call memory.update() — that's the TurnProcessor's job.
+        // AskMode.handle() should NOT call memory.update() - that's the TurnProcessor's job.
         var memory = new SessionMemory();
         var ctx = Context.builder(placeholderConfig()).memory(memory).build();
         var mode = new AskMode();
@@ -157,7 +157,7 @@ class AskModeTest {
         mode.handle("first question", WS, ctx);
         mode.handle("second question", WS, ctx);
 
-        // Memory should remain empty — only TurnProcessor writes to it
+        // Memory should remain empty - only TurnProcessor writes to it
         assertFalse(memory.hasContent(),
                 "AskMode should not accumulate turns in memory directly");
     }
@@ -172,14 +172,14 @@ class AskModeTest {
         Optional<Result> r1 = mode.handle("make me ascii art", WS, ctx);
         assertTrue(r1.isPresent());
 
-        // Turn 2 — AskMode reads history from ConversationManager
+        // Turn 2 - AskMode reads history from ConversationManager
         // (history would be populated by TurnProcessor, not by AskMode)
         Optional<Result> r2 = mode.handle("a cat please", WS, ctx);
         assertTrue(r2.isPresent());
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Fast-path tests (exact echo, think tags) — no memory interaction
+    //  Fast-path tests (exact echo, think tags) - no memory interaction
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test

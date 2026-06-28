@@ -26,12 +26,12 @@ public interface ApprovalGate {
     boolean approve(String description, String detail);
 
     /**
-     * Tri-state approval — lets a gate distinguish "yes, once" from
+     * Tri-state approval - lets a gate distinguish "yes, once" from
      * "yes, and remember for the session" from "no".
      *
      * <p>Default implementation delegates to {@link #approve(String, String)}
      * and maps the boolean to {@link ApprovalResponse#APPROVED} /
-     * {@link ApprovalResponse#DENIED} — so existing gates keep working.
+     * {@link ApprovalResponse#DENIED} - so existing gates keep working.
      * Gates that want to surface a "remember" option should override this
      * method.
      *

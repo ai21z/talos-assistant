@@ -75,7 +75,7 @@ public final class RenderEngine {
     /**
      * @param terminalWidth live terminal width source (JLine
      *                      {@code Terminal::getWidth}), or {@code null} for
-     *                      redirected/scripted paths — those keep the fixed
+     *                      redirected/scripted paths - those keep the fixed
      *                      pre-T772 width so output bytes never change.
      */
     public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive,
@@ -186,7 +186,7 @@ public final class RenderEngine {
 
     /**
      * T805: one muted line when the automatic compactor just summarized
-     * older exchanges — the user must see their context change shape.
+     * older exchanges - the user must see their context change shape.
      * Interactive-only: scripted/redirected transcripts stay unchanged,
      * and the line never enters any Result (render-side chrome with a
      * defensive UiChrome stripper entry).
@@ -390,7 +390,7 @@ public final class RenderEngine {
      * with, so one answer is always internally consistent (T772).
      *
      * <p>COLUMNS is consulted only when a live terminal exists but cannot
-     * report its width — the pane never read COLUMNS before T772, so
+     * report its width - the pane never read COLUMNS before T772, so
      * redirected/scripted output must not start depending on it.
      */
     private AnswerPaneRenderer answerRenderer() {
@@ -421,7 +421,7 @@ public final class RenderEngine {
     }
 
     /**
-     * Width-reactive wrapping (T776) — and from T777 markdown styling — is
+     * Width-reactive wrapping (T776) - and from T777 markdown styling - is
      * an interactive-only enhancement. Every degraded mode (redirected,
      * scripted, NO_COLOR, ASCII glyphs, dumb terminal) keeps the historical
      * pass-through stream bytes: the evidence chain string-matches those

@@ -36,7 +36,7 @@ public final class ApprovalPromptRenderer {
         if (!safeDetail.isBlank()) {
             sb.append(blank());
             // The diff block is the final detail section (TurnProcessor
-            // appends it last), so once entered it never closes — diff
+            // appends it last), so once entered it never closes - diff
             // context lines are indistinguishable from prose after strip().
             boolean inDiffBlock = false;
             for (String line : safeDetail.lines().toList()) {

@@ -3,7 +3,7 @@
 > **Status:** research analysis (discussion-only, no code changed)
 > **Author:** evidence pass over `.external assistant/` reference resources
 > **Scope:** how the strongest local/CLI agent harnesses actually handle context window
-> management, codebase retrieval, memory, and prompt economics — and what that implies for Talos.
+> management, codebase retrieval, memory, and prompt economics - and what that implies for Talos.
 
 ---
 
@@ -12,7 +12,7 @@
 The earlier Talos retrieval review argued that Talos should evolve from a single Lucene/vector
 RAG index toward a typed, routed, trust-labelled context architecture. That argument was sound
 in the abstract, but it was grounded only in vendor blog posts (model provider Contextual Retrieval,
-BGE-M3 / Qwen3 model cards) — **not** in how the best shipping agents are actually built.
+BGE-M3 / Qwen3 model cards) - **not** in how the best shipping agents are actually built.
 
 This document fixes that. It is a **deep, evidence-based extraction of the BEST techniques** used
 by four reputable agent codebases and two Manning books that ship in this repo under `.external assistant/`.
@@ -50,7 +50,7 @@ line numbers are cited.
 
 ---
 
-## Part 1 — The cross-system consensus (what everyone agrees on)
+## Part 1 - The cross-system consensus (what everyone agrees on)
 
 Seven patterns appear in **three or more** of the resources. These are the high-confidence
 "best techniques."
@@ -81,7 +81,7 @@ Both books back this explicitly:
 **Takeaway:** vector search is the *fallback for scale*, not the primary code-retrieval mechanism.
 The primary mechanisms are (1) walk the structure, (2) exact keyword/BM25, (3) read the file.
 
-### C2. Memory is hierarchical Markdown files, loaded by tier — not vectorized by default
+### C2. Memory is hierarchical Markdown files, loaded by tier - not vectorized by default
 
 | System | Memory model | Evidence |
 |---|---|---|
@@ -110,11 +110,11 @@ This is the most universal engineering pattern, and the numbers are concrete:
 
 The `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3` breaker is independently corroborated by the leak
 article: a single comment notes 1,279 sessions had 50+ consecutive failures, *"wasting ~250K API
-calls/day globally"* — fixed by disabling compaction after 3 failures (A1 lines 64-68).
+calls/day globally"* - fixed by disabling compaction after 3 failures (A1 lines 64-68).
 
 **Common sub-rules:** (a) never split a tool call from its result; (b) always keep a recent tail
 verbatim; (c) only the *middle* is lossy; (d) verify the summary didn't drop facts (Gemini's Probe);
-(e) fail safe — stop compacting rather than loop.
+(e) fail safe - stop compacting rather than loop.
 
 ### C4. Prompt-cache economics are a first-class architectural constraint
 
@@ -123,8 +123,8 @@ This is the theme Talos most under-weights, and it is everywhere in the stronges
 - System prompt is split into **memoized vs volatile** sections; the cache-busting escape hatch is
   literally named `DANGEROUS_uncachedSystemPromptSection` (R1 `src/constants/systemPromptSections.ts:17-38, 60-68`).
 - **Sticky latches** prevent mode toggles from busting the cache (`promptCache1hEligible`,
-  `afkModeHeaderLatched`, `fastModeHeaderLatched`, `thinkingClearLatched`) — comments warn mode
-  headers can cause *"50–70K token cache churn"* (R1 `src/bootstrap/state.ts:202-255`).
+  `afkModeHeaderLatched`, `fastModeHeaderLatched`, `thinkingClearLatched`) - comments warn mode
+  headers can cause *"50-70K token cache churn"* (R1 `src/bootstrap/state.ts:202-255`).
 - Cache breaks are *deliberately injected* via a `[CACHE_BREAKER: …]` marker only when needed
   (R1 `src/context.ts:22-34, 116-149`).
 - The agent/tool list is moved into attachments specifically to keep the tool schema static and
@@ -135,8 +135,8 @@ OpenClaw codifies the same doctrine as architecture rules: *"deterministic promp
 (R4 `AGENTS.md:26-51`). The article confirms it drives the codebase: `promptCacheBreakDetection.ts`
 tracks 14 cache-break vectors (A1 line 89).
 
-**Takeaway:** context assembly order must be *stable and tiered* — static/cacheable content first,
-volatile content last — or you pay (latency + tokens) on every turn.
+**Takeaway:** context assembly order must be *stable and tiered* - static/cacheable content first,
+volatile content last - or you pay (latency + tokens) on every turn.
 
 ### C5. Progressive disclosure: load a compact index first, expand on demand
 
@@ -152,7 +152,7 @@ Agents do **not** dump everything into context. They load a small catalog and pu
   (R2 `utils/memoryDiscovery.ts:512-648`).
 
 The books give the *why*: B1 §1.5.3 "Bigger context is not always better" cites **Context Rot** and
-the **"Lost in the Middle"** effect — *"we should not simply provide more information but rather
+the **"Lost in the Middle"** effect - *"we should not simply provide more information but rather
 selectively provide only highly relevant information"* (`:540-557`).
 
 ### C6. Tool gating is allow / ask / deny, layered with trust scope and a classifier
@@ -182,33 +182,33 @@ into memory"* (B2 `:509-513`).
 
 ---
 
-## Part 2 — The two books' organizing frameworks
+## Part 2 - The two books' organizing frameworks
 
 These give a vocabulary that unifies the per-system findings.
 
-### Framework F1 — The five context-engineering strategies (B1 §1.5.4, `:558-606`)
+### Framework F1 - The five context-engineering strategies (B1 §1.5.4, `:558-606`)
 
 > *Context engineering can be broadly categorized into five strategies.*
 
-1. **Generation** — use LLM output in context (plans, reflection). [B1 Ch7]
-2. **Retrieval** — bring external info in (web, DB, file read, vector DB). [B1 Ch3/5/6]
-3. **Write** — persist context out (long-term memory, scratchpad, files). [B1 Ch6/8]
-4. **Reduce** — shrink context (summarize, delete, filter) → fights Context Rot. [B1 Ch6]
-5. **Isolate** — separate tasks/tools (sandboxes, specialized agents). [B1 Ch8/9]
+1. **Generation** - use LLM output in context (plans, reflection). [B1 Ch7]
+2. **Retrieval** - bring external info in (web, DB, file read, vector DB). [B1 Ch3/5/6]
+3. **Write** - persist context out (long-term memory, scratchpad, files). [B1 Ch6/8]
+4. **Reduce** - shrink context (summarize, delete, filter) → fights Context Rot. [B1 Ch6]
+5. **Isolate** - separate tasks/tools (sandboxes, specialized agents). [B1 Ch8/9]
 
 Memory (B1 Ch6) is explicitly the hub where Retrieval + Write + Reduce converge (`:607-609`).
 
-### Framework F2 — The search taxonomy (B1 §5.2)
+### Framework F2 - The search taxonomy (B1 §5.2)
 
 Four methods, each best for a different job (`:4703-4830`):
 
-- **Structure-based** — explore the file/folder tree like a developer; best for code repos (`:4672-4677`).
-- **Keyword (BM25/TF-IDF)** — exact identifiers, error codes, config keys; unbeatable for code symbols (`:4733-4752`).
-- **Vector (embeddings + cosine/Euclidean)** — semantic/synonym recall in natural language (`:4766-4796`).
-- **Graph** — entity/relationship traversal, multi-hop questions (`:4808-4830`).
+- **Structure-based** - explore the file/folder tree like a developer; best for code repos (`:4672-4677`).
+- **Keyword (BM25/TF-IDF)** - exact identifiers, error codes, config keys; unbeatable for code symbols (`:4733-4752`).
+- **Vector (embeddings + cosine/Euclidean)** - semantic/synonym recall in natural language (`:4766-4796`).
+- **Graph** - entity/relationship traversal, multi-hop questions (`:4808-4830`).
 - → **Hybrid** (keyword + vector) is "widely used in practice" (`:4801-4805`).
 
-### Framework F3 — Three-layer memory (B1 Ch6 overview, `:4572-4574`)
+### Framework F3 - Three-layer memory (B1 Ch6 overview, `:4572-4574`)
 
 1. **Conversation history management** during a task (the Reduce/compaction loop).
 2. **Session handling** so different users/tasks keep separate history.
@@ -219,12 +219,12 @@ stores, (3) = external assistant.md/MEMORY.md + dream/distillation.
 
 ---
 
-## Part 3 — What this means for Talos (grounded translation)
+## Part 3 - What this means for Talos (grounded translation)
 
 Talos already verified state (from the code review preceding this doc):
 
 - Pipeline `Bm25 → Knn → RrfFusion(60) → SourceBoost → Reranker(ScoreThreshold) → Dedup`
-  (`src/main/java/dev/talos/core/rag/RagService.java:251-259`) — clean stateless stages.
+  (`src/main/java/dev/talos/core/rag/RagService.java:251-259`) - clean stateless stages.
 - Rich Lucene metadata, structure-aware chunker, `cache.db` with `sessions`/`memory` tables,
   `SessionMemory` rolling buffer, private-mode RAG gating.
 - **Gaps:** vectors default to `false` in code (`Config.java:262`) vs `true` in the shipped YAML;
@@ -235,7 +235,7 @@ Talos already verified state (from the code review preceding this doc):
 Mapping the reference techniques onto Talos, in priority order:
 
 1. **Adopt structure + keyword first; demote vectors to a recall signal (C1, F2).**
-   Talos already has BM25 + KNN + RRF — keep it. But the reference systems prove the *highest-value*
+   Talos already has BM25 + KNN + RRF - keep it. But the reference systems prove the *highest-value*
    code retrieval is structure-based + exact symbol search. Talos's planned **symbol index** is the
    single biggest dev-assistant upgrade, and it is *more* important than any embedding-model swap.
    Vectors are the scale fallback (B1 §5.1.3), not the spine.
@@ -249,7 +249,7 @@ Mapping the reference techniques onto Talos, in priority order:
 
 3. **Introduce hierarchical Markdown project memory (C2, C5).**
    A `TALOS.md` / `.talos/rules.md` hierarchy (global < workspace < repo < dir), loaded by tier with
-   deterministic precedence and a size budget + truncation — exactly Gemini/external assistant/OpenClaw. Treat
+   deterministic precedence and a size budget + truncation - exactly Gemini/external assistant/OpenClaw. Treat
    workspace-provided instructions as **untrusted until displayed/accepted** (C6). This is cheaper
    and more trustworthy than vectorizing memory, and aligns with Talos's "no hidden state" ethos
    (OpenClaw: *"there is no hidden state"*, R4 `docs/concepts/memory.md:9-11`).
@@ -257,8 +257,8 @@ Mapping the reference techniques onto Talos, in priority order:
 4. **Make context assembly cache-stable and tiered (C4).**
    Order the prompt static→volatile, carry prepared facts forward instead of re-running broad loaders
    each turn (OpenClaw `AGENTS.md:26-51`). Talos already has `ContextLedger` and `TokenBudget`; add an
-   explicit cacheable/volatile split. This is latency + cost scalability — directly answering the
-   "easily and fast scalable" requirement — without touching the model.
+   explicit cacheable/volatile split. This is latency + cost scalability - directly answering the
+   "easily and fast scalable" requirement - without touching the model.
 
 5. **Route retrieval by task type (C1 + F1 Isolate).**
    Talos already classifies tasks (`TaskType`/`TaskContract`). Wire it: ASK → docs/source; EDIT →
@@ -271,23 +271,23 @@ Mapping the reference techniques onto Talos, in priority order:
 
 7. **Keep memory writes gated and roles non-theatrical (C7, F1).**
    If long-term memory is added, gate writes (importance/scope/TTL/provenance/privacy) and use
-   *roles*, not autonomous background agents — consistent with Talos doctrine and with every
+   *roles*, not autonomous background agents - consistent with Talos doctrine and with every
    reference system's warning against uncontrolled autonomy (and the article's KAIROS cautionary tale,
    A1 lines 70-80).
 
 ### What to explicitly NOT copy
 
-- **Anti-distillation, undercover mode, native attestation DRM** (A1) — these are vendor-hostile,
+- **Anti-distillation, undercover mode, native attestation DRM** (A1) - these are vendor-hostile,
   trust-eroding behaviours antithetical to Talos's local/visible/auditable vision.
-- **A repo-wide *vector* code index as the primary retrieval path** — no reference coding agent does
+- **A repo-wide *vector* code index as the primary retrieval path** - no reference coding agent does
   this; it is the wrong first investment.
-- **Bigger/fancier embedding models before the engine is coherent** — model choice is the last 10%.
+- **Bigger/fancier embedding models before the engine is coherent** - model choice is the last 10%.
 
 ---
 
 ## Confidence and limits
 
-- **High confidence** on C1–C7: each is corroborated by ≥3 independent resources with file/line or
+- **High confidence** on C1-C7: each is corroborated by ≥3 independent resources with file/line or
   page citations.
 - **Medium confidence** on exact numeric thresholds: they are quoted from the cited lines but versions
   drift; treat them as design references, not constants to copy.
@@ -305,6 +305,6 @@ Mapping the reference techniques onto Talos, in priority order:
 | R2 | `.external assistant/gemini-cli/packages/core/src/...` (memoryDiscovery, memoryContextManager, chatCompressionService, bfsFileSearch, policy, mcp-client, environmentContext, prompts/snippets) |
 | R3 | `.external assistant/hermes-agent/` (trajectory_compressor.py, hermes_state.py, toolset_distributions.py, tools/skills_hub.py, providers/) |
 | R4 | `.external assistant/openclaw/` (VISION.md, AGENTS.md, docs/concepts/{compaction,memory,memory-search,memory-builtin}.md, packages/memory-host-sdk/src/host/*) |
-| B1 | `.external assistant/Build_an_AI_Agent_(From_Scratch)_v5_MEAP.pdf` — §1.5 context engineering, Ch5 search, Ch6 memory |
-| B2 | `.external assistant/Build_a_Multi-Agent_System_(MEAP-Book).pdf` — Ch1 memory model, Ch7 memory, Ch9 multi-agent |
-| A1 | `.external assistant/alex000kim-article (1).txt` — local coding assistant source-leak analysis |
+| B1 | `.external assistant/Build_an_AI_Agent_(From_Scratch)_v5_MEAP.pdf` - §1.5 context engineering, Ch5 search, Ch6 memory |
+| B2 | `.external assistant/Build_a_Multi-Agent_System_(MEAP-Book).pdf` - Ch1 memory model, Ch7 memory, Ch9 multi-agent |
+| A1 | `.external assistant/alex000kim-article (1).txt` - local coding assistant source-leak analysis |

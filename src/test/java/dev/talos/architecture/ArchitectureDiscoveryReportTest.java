@@ -413,15 +413,15 @@ class ArchitectureDiscoveryReportTest {
             }
         }
 
-        sb.append("### Hard-guard candidates (currently clean — promote deliberately, do not auto-merge)\n\n");
+        sb.append("### Hard-guard candidates (currently clean - promote deliberately, do not auto-merge)\n\n");
         if (cleanBoundaries.isEmpty()) {
             sb.append("- none currently clean\n");
         } else {
             for (String c : cleanBoundaries) {
-                sb.append("- ").append(c).append(" — 0 edges today; would extend the existing 6-rule ratchet\n");
+                sb.append("- ").append(c).append(" - 0 edges today; would extend the existing 6-rule ratchet\n");
             }
         }
-        sb.append("\n### Report-only candidates (nonzero today — keep observing, review before guarding)\n\n");
+        sb.append("\n### Report-only candidates (nonzero today - keep observing, review before guarding)\n\n");
         if (dirtyBoundaries.isEmpty()) {
             sb.append("- none\n");
         } else {
@@ -433,7 +433,7 @@ class ArchitectureDiscoveryReportTest {
         sb.append("- `api` and `app` remain unconstrained by design (seam + composition root).\n");
         sb.append("- High fan-in on shared model/record types is expected and not inherently a defect.\n");
         sb.append("\n### Needs human review\n\n");
-        sb.append("- The highest fan-out classes in section 2 (likely orchestration hubs) — confirm they are ")
+        sb.append("- The highest fan-out classes in section 2 (likely orchestration hubs) - confirm they are ")
                 .append("intended coordinators, not accidental god-classes.\n");
         sb.append("- Any non-trivial SCC or mutual package edge in section 6.\n");
         sb.append("- Intra-`runtime` subpackage coupling (policy/toolcall/turn/verification/trace) is invisible ")

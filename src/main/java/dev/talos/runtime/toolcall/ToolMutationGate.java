@@ -11,7 +11,7 @@ import dev.talos.tools.ToolRegistry;
  * <p>Doctrine (AGENTS.md, "Risky operations must fail closed"): a tool the
  * registry cannot resolve, or whose metadata is unavailable, is treated as
  * MUTATING and CHECKPOINT-REQUIRED. The previous hand-maintained name lists
- * had the opposite default — a registered mutating tool missing from the
+ * had the opposite default - a registered mutating tool missing from the
  * list silently bypassed intent blocking, pre-approval validation, and
  * checkpoint capture.
  *
@@ -20,7 +20,7 @@ import dev.talos.tools.ToolRegistry;
  * exists for name-only call sites and as the documented home of the
  * fail-closed default. Static heuristics/telemetry callers that classify
  * names without a registry keep using
- * {@link dev.talos.tools.ToolAliasPolicy} via {@link ToolCallSupport} —
+ * {@link dev.talos.tools.ToolAliasPolicy} via {@link ToolCallSupport} -
  * those are not gates and keep the unknown→false default.
  */
 public final class ToolMutationGate {

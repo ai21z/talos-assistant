@@ -17,12 +17,12 @@ import java.util.List;
 /**
  * Probes the llama.cpp server. Default mode never starts anything: a
  * managed server that is simply not running is a WARN (Talos starts it
- * automatically on first prompt — that is the product contract), while a
+ * automatically on first prompt - that is the product contract), while a
  * connect-only server that is unreachable is a FAIL (nothing will start it).
  *
  * <p>{@code --start} mode is opt-in end-to-end verification: it selects the
  * engine inside try-with-resources and runs a one-word chat, so the managed
- * server (and the model on the GPU) is always released again — if the probe
+ * server (and the model on the GPU) is always released again - if the probe
  * started it, the probe stops it; an externally owned server is never
  * touched.
  */
@@ -78,7 +78,7 @@ public final class ServerProbe implements DoctorProbe {
     private ProbeResult unreachable(LlamaCppPreflight.Report preflight, String cause) {
         if (preflight.managed()) {
             return ProbeResult.warn(id(),
-                    "managed server not running (" + cause + ") — Talos starts it automatically"
+                    "managed server not running (" + cause + ") - Talos starts it automatically"
                             + " on first prompt; use 'talos doctor --start' to verify end to end");
         }
         return ProbeResult.fail(id(),
@@ -91,7 +91,7 @@ public final class ServerProbe implements DoctorProbe {
                                      LlamaCppPreflight.Report preflight) {
         if (preflight.managed() && !preflight.filesOk()) {
             return ProbeResult.skip(id(),
-                    "managed files invalid — fix the engine-files failure first");
+                    "managed files invalid - fix the engine-files failure first");
         }
         try (EngineRegistry registry = new EngineRegistry(ctx.cfg())) {
             registry.select(runtime.backend(), runtime.model());

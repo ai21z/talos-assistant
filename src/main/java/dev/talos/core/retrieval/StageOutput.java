@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Immutable output of a single pipeline stage execution.
  * Carries the updated candidate list and an optional diagnostic note
- * (e.g., skip reason). This keeps stages stateless — the note is a
+ * (e.g., skip reason). This keeps stages stateless - the note is a
  * value returned from the invocation, not stored in the stage.
  */
 public record StageOutput(List<RetrievalCandidate> candidates, String note) {

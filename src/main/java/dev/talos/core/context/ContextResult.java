@@ -12,7 +12,7 @@ import java.util.*;
 public final class ContextResult {
 
     /**
-     * A single packed snippet — path, sanitized text, and optional structured metadata.
+     * A single packed snippet - path, sanitized text, and optional structured metadata.
      * Metadata enables richer citation rendering (line ranges, heading context, language).
      */
     public record Snippet(String path, String text, ChunkMetadata metadata) {
@@ -70,7 +70,7 @@ public final class ContextResult {
     /** Total token budget (context window size). */
     public int budgetTokens() { return budgetTokens; }
 
-    /** Budget utilization as a fraction (0.0–1.0+). */
+    /** Budget utilization as a fraction (0.0-1.0+). */
     public double utilization() {
         return budgetTokens > 0 ? (double) estimatedTokens / budgetTokens : 0.0;
     }

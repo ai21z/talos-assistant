@@ -163,13 +163,13 @@ class JsonTurnLogAppenderTest {
         String sid = "sid-status";
         JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
 
-        // Error turn — blank assistantText, status must say "error".
+        // Error turn - blank assistantText, status must say "error".
         appender.onTurnComplete(
                 new TurnResult(new Result.Error("boom", 500), 1), "do thing");
-        // Info turn — also blank assistantText, but clearly not an error.
+        // Info turn - also blank assistantText, but clearly not an error.
         appender.onTurnComplete(
                 new TurnResult(new Result.Info("rebuilt index"), 2), "/reindex");
-        // Ok turn — non-streaming success path.
+        // Ok turn - non-streaming success path.
         appender.onTurnComplete(
                 new TurnResult(new Result.Ok("done"), 3), "ping");
 
@@ -202,7 +202,7 @@ class JsonTurnLogAppenderTest {
 
         appender.onTurnComplete(
                 new TurnResult(new Result.Streamed(
-                        "[turn aborted: streaming chat exceeded 300s wall-clock budget — "
+                        "[turn aborted: streaming chat exceeded 300s wall-clock budget - "
                                 + "model is hung or producing tokens too slowly.]", ""),
                         3),
                 "describe the repo");
@@ -277,7 +277,7 @@ class JsonTurnLogAppenderTest {
         // keep loading after the schema bump.
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sid-legacy";
-        // Use the 10-arg back-compat constructor — status defaults to "".
+        // Use the 10-arg back-compat constructor - status defaults to "".
         store.appendTurn(sid, new TurnRecord(1, java.time.Instant.now(), 10L,
                 "u", "a", List.of(), 0, 0, 0, ""));
         List<TurnRecord> recs = store.loadTurns(sid);
@@ -300,7 +300,7 @@ class JsonTurnLogAppenderTest {
                 new TurnResult(new Result.Info("rebuilt index"), 1),
                 "/reindex");
 
-        // Info results aren't tracked in conversation memory — but we still
+        // Info results aren't tracked in conversation memory - but we still
         // record the turn's runtime truth so the audit log is complete.
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(1, loaded.size());

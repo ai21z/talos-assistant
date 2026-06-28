@@ -134,7 +134,7 @@ public final class StartupBannerRenderer {
                 new String[]{"Model", fitModel(s.model(), rightValueWidth)},
                 new String[]{"Engine", fitEngine(s.engine(), rightValueWidth)},
                 new String[]{"Index", fitIndex(s.index(), rightValueWidth)}));
-        // T791: additive verify row — absent (blank) renders byte-identically
+        // T791: additive verify row - absent (blank) renders byte-identically
         // to the pre-T791 banner.
         if (!s.verify().isBlank()) {
             rightRows.add(new String[]{"Verify", fitText(s.verify(), rightValueWidth)});

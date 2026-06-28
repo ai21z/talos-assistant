@@ -3,7 +3,7 @@ package dev.talos.spi.types;
 /**
  * Provider-neutral sampling controls for a chat request.
  *
- * <p>Null fields mean "unset" — the backend's own defaults apply. Set fields
+ * <p>Null fields mean "unset" - the backend's own defaults apply. Set fields
  * are emitted on the wire (llama.cpp accepts temperature/top_p/top_k/seed on
  * /v1/chat/completions). Tool-obligation turns use {@link #NEAR_GREEDY}
  * because quantized 14B-class models emit tool-call JSON far more reliably

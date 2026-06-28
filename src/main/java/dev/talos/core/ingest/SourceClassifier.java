@@ -13,7 +13,7 @@ import dev.talos.spi.types.SourceType;
  * <p>This is the single entry point for source classification at ingest time.
  * {@link Chunker} calls it to attach identity to every {@link ParsedChunk}.
  *
- * <p>Stateless utility — all methods are static.
+ * <p>Stateless utility - all methods are static.
  */
 public final class SourceClassifier {
 

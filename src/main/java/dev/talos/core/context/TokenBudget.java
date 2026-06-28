@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * Encapsulates token estimation and budget allocation for context packing.
- * Uses a lightweight chars/4 heuristic — dependency-free, conservative, and
+ * Uses a lightweight chars/4 heuristic - dependency-free, conservative, and
  * good enough until a model-specific tokenizer is warranted.
  *
  * <p>Budget layout for a typical call:

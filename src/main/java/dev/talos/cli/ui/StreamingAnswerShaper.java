@@ -8,7 +8,7 @@ package dev.talos.cli.ui;
  * sits between sanitized chunk text and {@link AnswerPaneRenderer.Stream}
  * and injects {@code '\n'} so the streamed body rows are byte-identical to
  * what {@link AnswerPaneRenderer#renderBlock} would produce for the same
- * full text — the block wrapper is the parity oracle, replicated
+ * full text - the block wrapper is the parity oracle, replicated
  * incrementally:
  * <ul>
  *   <li>a line that fits {@code maxWidth} is emitted verbatim at its
@@ -17,7 +17,7 @@ package dev.talos.cli.ui;
  *       mode: whitespace runs collapse, rows fill greedily, words longer
  *       than the width hard-split into width-sized rows;</li>
  *   <li>greedy filling is prefix-stable, so completed rows stream out as
- *       soon as the next word cannot fit — the latency bound is one row
+ *       soon as the next word cannot fit - the latency bound is one row
  *       plus one in-flight word, never the whole answer.</li>
  * </ul>
  *

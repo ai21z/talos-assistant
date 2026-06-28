@@ -10,14 +10,14 @@ import java.util.Map;
  *
  * <p>A scenario has:
  * <ul>
- *   <li><b>name</b> — human-readable label used in assertion messages</li>
- *   <li><b>initialFiles</b> — files to pre-populate the workspace with</li>
- *   <li><b>scriptedResponse</b> — the LLM response string the runner injects into the loop.
+ *   <li><b>name</b> - human-readable label used in assertion messages</li>
+ *   <li><b>initialFiles</b> - files to pre-populate the workspace with</li>
+ *   <li><b>scriptedResponse</b> - the LLM response string the runner injects into the loop.
  *       This may contain one or more tool call blocks (JSON or XML format). The loop
  *       executes them against the real tool registry, so filesystem side-effects are real.</li>
- *   <li><b>approvalPolicy</b> — controls how write/edit approvals are resolved
+ *   <li><b>approvalPolicy</b> - controls how write/edit approvals are resolved
  *       without interactive user input</li>
- *   <li><b>executionPhase</b> — optional forced phase for policy scenarios</li>
+ *   <li><b>executionPhase</b> - optional forced phase for policy scenarios</li>
  * </ul>
  *
  * <p>Scenarios are intentionally simple: one scripted LLM response, one workspace state.

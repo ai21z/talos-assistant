@@ -16,14 +16,14 @@ import java.util.regex.Pattern;
  *
  * <h3>Routing layers</h3>
  * <ol>
- *   <li><b>COMMAND</b> — structural file operations (open, show, ls, dir)</li>
- *   <li><b>RETRIEVE</b> — workspace framing, file references, PascalCase identifiers
+ *   <li><b>COMMAND</b> - structural file operations (open, show, ls, dir)</li>
+ *   <li><b>RETRIEVE</b> - workspace framing, file references, PascalCase identifiers
  *       in question/action context, or identifiers confirmed in workspace index</li>
- *   <li><b>Sticky retrieval</b> — non-social follow-ups inherit retrieval context</li>
- *   <li><b>ASSIST</b> — default LLM conversation, no retrieval</li>
+ *   <li><b>Sticky retrieval</b> - non-social follow-ups inherit retrieval context</li>
+ *   <li><b>ASSIST</b> - default LLM conversation, no retrieval</li>
  * </ol>
  *
- * <p>False retrieval is worse than missed retrieval — when in doubt, be an assistant.
+ * <p>False retrieval is worse than missed retrieval - when in doubt, be an assistant.
  */
 public final class PromptClassifier {
 
@@ -33,7 +33,7 @@ public final class PromptClassifier {
     public enum Route {
         /** Structural file command: open, show, view, ls, list, dir */
         COMMAND,
-        /** Strong workspace signal present — invoke retrieval pipeline */
+        /** Strong workspace signal present - invoke retrieval pipeline */
         RETRIEVE,
         /** Default: plain LLM conversation, no retrieval */
         ASSIST
@@ -52,7 +52,7 @@ public final class PromptClassifier {
         ")"
     );
 
-    /** "show me [the] &lt;file&gt;" — compound command prefix (supports quoted paths). */
+    /** "show me [the] &lt;file&gt;" - compound command prefix (supports quoted paths). */
     private static final Pattern SHOW_ME_PREFIX = Pattern.compile(
         "(?i)^\\s*show\\s+me\\s+(?:the\\s+)?"
     );
@@ -186,7 +186,7 @@ public final class PromptClassifier {
 
     // ── Public API ───────────────────────────────────────────────────────
 
-    /** Routes a prompt (stateless — no conversation context). */
+    /** Routes a prompt (stateless - no conversation context). */
     public static Route route(String input) {
         return route(input, null);
     }
@@ -226,7 +226,7 @@ public final class PromptClassifier {
         }
         steps.add("no show-me-file match");
 
-        // Layer 1c: action-verb gate — mutation/inspection actions route to
+        // Layer 1c: action-verb gate - mutation/inspection actions route to
         // ASSIST (tool-calling path) even if they mention files or the workspace.
         // "edit index.html" is a tool action, not a retrieval query.
         // "create settings.json" is a tool action, not a retrieval query.
@@ -242,11 +242,11 @@ public final class PromptClassifier {
                 steps.add("mutation/inspection intent, no code entity → tool path");
                 return new RouteResult(Route.ASSIST, "action intent (tool-calling)", steps);
             }
-            steps.add("mutation/inspection but targets code entity — continuing to retrieval");
+            steps.add("mutation/inspection but targets code entity - continuing to retrieval");
         } else if (isAction) {
-            steps.add("action-like but not mutation/inspection — continuing");
+            steps.add("action-like but not mutation/inspection - continuing");
         } else {
-            steps.add("not action-like — continuing");
+            steps.add("not action-like - continuing");
         }
 
         // Layer 2: strong retrieval signals (unconditional)
@@ -317,7 +317,7 @@ public final class PromptClassifier {
         }
 
         // Layer 4: everything else → be an assistant
-        return new RouteResult(Route.ASSIST, "default — no retrieval evidence", steps);
+        return new RouteResult(Route.ASSIST, "default - no retrieval evidence", steps);
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────
@@ -363,7 +363,7 @@ public final class PromptClassifier {
 
     /**
      * True if input starts with an imperative action verb ("write", "create", "fix", etc.).
-     * Does NOT trigger retrieval alone — only gates the PascalCase/tech-noun checks.
+     * Does NOT trigger retrieval alone - only gates the PascalCase/tech-noun checks.
      */
     static boolean isActionLike(String lower) {
         String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");

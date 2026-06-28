@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * {@code /doctor} — runs the environment preflight from inside the REPL.
+ * {@code /doctor} - runs the environment preflight from inside the REPL.
  *
  * <p>Deliberately never starts the managed server (that is the CLI-only
  * {@code talos doctor --start}): a slash command must not block the session

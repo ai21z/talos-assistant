@@ -44,8 +44,8 @@ Primary taxonomy bucket: MODEL_COMPETENCE
 The defects are qwen2.5-coder-14b reasoning/planning weaknesses (ungrounded negative assertion, wrong edit-shape selection, salience-over-retrieval grounding). The runtime correctly surfaced and contained the only dangerous case (the destructive rewrite) via approval, and no leak or false mutation landed.
 
 Secondary buckets:
-- ACTION_OBLIGATION — the model skipped the obligated grounding action (a search before a no-results claim) and chose a heavier-than-required mutation shape.
-- INTENT_BOUNDARY — "append a line" is an additive-intent boundary that a full-file rewrite oversteps.
+- ACTION_OBLIGATION - the model skipped the obligated grounding action (a search before a no-results claim) and chose a heavier-than-required mutation shape.
+- INTENT_BOUNDARY - "append a line" is an additive-intent boundary that a full-file rewrite oversteps.
 
 Blocker level: candidate-follow-up
 
@@ -78,7 +78,7 @@ Reduce qwen2.5-coder-14b's ungrounded-claim and destructive-edit-shape patterns 
 ## Non-Goals
 
 - No LLM classifier or second model call in any policy decision. Deterministic policy can only steer, not adjudicate model intent.
-- Not "fix qwen's competence" — steering reduces the failure rate for detectable shapes; the residual is documented, not claimed solved.
+- Not "fix qwen's competence" - steering reduces the failure rate for detectable shapes; the residual is documented, not claimed solved.
 - No model swap, fine-tune, or change to the pinned managed models.
 - Not a change to approval, checkpoint, redaction, or verification guarantees (those held and stay as-is).
 - Not a reimplementation of T850's name-non-invention grounding; cross-ref and defer the codename case there.
@@ -131,6 +131,6 @@ Reduce qwen2.5-coder-14b's ungrounded-claim and destructive-edit-shape patterns 
 
 ## Known Follow-Ups
 
-- T850 (qwen read-only grounding / name non-invention) — owns the codename/named-token case cross-referenced here.
+- T850 (qwen read-only grounding / name non-invention) - owns the codename/named-token case cross-referenced here.
 - Future-milestone: broader per-model competence steering catalogue if more recurring qwen shapes surface in later audits.
 - Revisit after T842 closeout to confirm the steers reduced the observed failure rate on the pinned models.

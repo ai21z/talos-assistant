@@ -37,7 +37,7 @@ class TerminalFirstRunTest {
                     ProbeResult.pass("config", "ok"),
                     ProbeResult.pass("engine-files", "present")));
 
-            assertTrue(out.text.contains("Talos — First Run Setup"));
+            assertTrue(out.text.contains("Talos - First Run Setup"));
             assertTrue(out.text.contains("PASS  config"));
             assertTrue(out.text.contains("Setup verified. Starting Talos..."));
             assertFalse(out.text.contains("✓ Setup complete"),
@@ -65,7 +65,7 @@ class TerminalFirstRunTest {
 
             assertTrue(out.text.contains("FAIL  engine-files"));
             assertTrue(out.text.contains("fix: run 'talos setup models'"));
-            assertTrue(out.text.contains("Setup incomplete — 2 check(s) failed."));
+            assertTrue(out.text.contains("Setup incomplete - 2 check(s) failed."));
             assertTrue(out.text.contains("run 'talos doctor' to re-check"));
             assertTrue(out.text.contains("Configure models with 'talos setup models'."));
             assertFalse(out.text.contains("Setup verified"));
@@ -74,7 +74,7 @@ class TerminalFirstRunTest {
             assertTrue(out.returned,
                     "first-run must not lock the user out of the REPL (Main exits on false)");
             assertTrue(Files.exists(out.sentinel),
-                    "the sentinel is written on failure too — orientation is shown once;"
+                    "the sentinel is written on failure too - orientation is shown once;"
                             + " recurring checks live in 'talos doctor'");
         }
 

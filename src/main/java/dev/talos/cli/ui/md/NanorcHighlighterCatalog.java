@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>JLine's uber-jar ships the {@link SyntaxHighlighter} nanorc engine but
  * zero syntax definitions; Talos bundles its own minimal, project-licensed
  * definitions under {@code /nanorc/} (GNU nano's files are GPLv3 and are
- * deliberately NOT vendored — owner decision). Definitions cover keywords,
+ * deliberately NOT vendored - owner decision). Definitions cover keywords,
  * strings, comments, and numbers; they are a rendering nicety, so every
  * failure path (unknown language, missing resource, parse error) degrades
  * to plain text rather than ever failing a turn.
@@ -47,7 +47,7 @@ final class NanorcHighlighterCatalog {
 
     /**
      * Highlights one complete code line, or returns {@code null} when no
-     * highlighter is available for the language — callers fall back to the
+     * highlighter is available for the language - callers fall back to the
      * plain path.
      */
     AttributedString highlight(String language, String line) {

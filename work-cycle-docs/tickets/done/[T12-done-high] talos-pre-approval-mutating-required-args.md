@@ -110,11 +110,11 @@ tool loop as structured `INVALID_PARAMS` failures.
 
 ## Tests Run
 
-- `./gradlew.bat test --tests "dev.talos.runtime.TurnProcessorTest.writeFileMissingContentFailsBeforeApproval" --tests "dev.talos.runtime.TurnProcessorTest.writeFileMissingPathFailsBeforeApproval" --tests "dev.talos.runtime.TurnProcessorTest.editFileMissingRequiredArgsFailBeforeApproval" --tests "dev.talos.runtime.TurnProcessorTest.validWriteFileStillRequestsApproval"` — failed before implementation for the two `write_file` cases, then passed after implementation
-- `./gradlew.bat test --tests "dev.talos.runtime.TurnProcessorTest"` — passed
-- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.writeFileMissingContentBlocksBeforeApproval"` — passed
-- `./gradlew.bat e2eTest` — passed
-- `./gradlew.bat check` — passed
+- `./gradlew.bat test --tests "dev.talos.runtime.TurnProcessorTest.writeFileMissingContentFailsBeforeApproval" --tests "dev.talos.runtime.TurnProcessorTest.writeFileMissingPathFailsBeforeApproval" --tests "dev.talos.runtime.TurnProcessorTest.editFileMissingRequiredArgsFailBeforeApproval" --tests "dev.talos.runtime.TurnProcessorTest.validWriteFileStillRequestsApproval"` - failed before implementation for the two `write_file` cases, then passed after implementation
+- `./gradlew.bat test --tests "dev.talos.runtime.TurnProcessorTest"` - passed
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.writeFileMissingContentBlocksBeforeApproval"` - passed
+- `./gradlew.bat e2eTest` - passed
+- `./gradlew.bat check` - passed
 
 ## Work-Test-Cycle Loop Used
 

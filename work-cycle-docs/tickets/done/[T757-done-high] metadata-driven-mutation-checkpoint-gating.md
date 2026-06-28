@@ -14,7 +14,7 @@ forbidden target, expected target), and checkpoint capture all keyed off
 `ToolCallSupport`'s hand-maintained READ_ONLY_TOOLS/MUTATING_TOOLS name
 sets. A registered mutating tool missing from those lists FAILED OPEN: no
 intent block on read-only contracts, no pre-approval path validation, no
-checkpoint — it executed with approval only. Meanwhile every tool already
+checkpoint - it executed with approval only. Meanwhile every tool already
 declares the truth at registration via `ToolOperationMetadata`
 (mutatesWorkspace, requiresCheckpoint). THREE duplicate classification
 sources existed (ToolCallSupport lists, per-tool metadata, ToolAliasPolicy
@@ -50,7 +50,7 @@ ToolCallSupport (path-repair concern, future pathRoles derivation noted)
    registry → mutating=true, checkpoint-required=true (doctrine home,
    AGENTS.md fail-closed list).
 3. `ToolCallSupport.isMutatingTool/isReadOnlyTool` delegate to
-   `ToolAliasPolicy` (verified equivalent for every pinned shape — the
+   `ToolAliasPolicy` (verified equivalent for every pinned shape - the
    alias entries in the deleted lists were dead: classification always
    went through localCanonicalName). ~14 static heuristic/telemetry
    consumers keep the unknown→false default; they are not gates.
@@ -64,22 +64,22 @@ ToolCallSupport (path-repair concern, future pathRoles derivation noted)
 - A future registered mutating tool absent from any name list is now
   intent-blocked, path-validated, and checkpointed (previously failed open).
 - Metadata-mutating stub/test tools with no target path now fail closed at
-  checkpoint capture ("Checkpoint requires a target path") — surfaced in
+  checkpoint capture ("Checkpoint requires a target path") - surfaced in
   two ApprovalGatedToolTest stubs, fixed by giving them target paths.
 - Workspace escapes by metadata-mutating tools outside the legacy lists
   are now caught by the pre-approval sandbox validator (INVALID_PARAMS,
   "Path not allowed before approval") before the declarative permission
-  layer's DENIED — earlier and stricter; SessionApprovalPolicyTest updated
+  layer's DENIED - earlier and stricter; SessionApprovalPolicyTest updated
   with the rationale.
 
 ## Known Risks / Residual
 
-- Bare `ToolDescriptor(name, description)` defaults to READ_ONLY metadata —
+- Bare `ToolDescriptor(name, description)` defaults to READ_ONLY metadata -
   a registration-side fail-open the gate cannot see. NOT changed this wave
   (would ripple through dozens of test stubs); the ToolMetadataParityTest
   golden table forces every newly registered tool to declare a pinned row.
 - TurnProcessor's effectiveRisk/apply_workspace_batch approval special case
-  deliberately unchanged — approval routing is not this ticket.
+  deliberately unchanged - approval routing is not this ticket.
 
 ## Tests / Evidence
 

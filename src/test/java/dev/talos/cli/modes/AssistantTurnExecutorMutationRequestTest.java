@@ -2,11 +2,11 @@ package dev.talos.cli.modes;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 /**
- * Regression tests for Point 3 — missing-mutation detection marker set
+ * Regression tests for Point 3 - missing-mutation detection marker set
  * in {@link AssistantTurnExecutor#looksLikeMutationRequest(String)}.
  *
  * <p>Positive prompts are taken verbatim from the real test-output.txt
- * transcript (Turns 5, 6, 7 — "edit / modify / change" requests where
+ * transcript (Turns 5, 6, 7 - "edit / modify / change" requests where
  * Talos read, listed, and then deflected without calling write_file
  * or edit_file).
  */

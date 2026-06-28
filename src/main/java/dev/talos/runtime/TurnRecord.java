@@ -12,7 +12,7 @@ import java.util.List;
  * truth for auditability and crash recovery without turning the session
  * store into a generic event log.
  *
- * <p>All components are nullable-safe — blank strings and empty lists
+ * <p>All components are nullable-safe - blank strings and empty lists
  * instead of {@code null}, so JSON round-tripping is lossless.
  *
  * @param turnNumber              1-based turn index within the session

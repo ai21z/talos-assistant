@@ -28,8 +28,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * true-PTY manual-audit validator requires it verbatim in real-terminal
  * transcripts, and the talosbench live-prompt matrix forbids it in redirected
  * deny-path transcripts. This test holds all of those surfaces to the same
- * bytes. Every expectation is a string literal typed here — never a constant
- * compared with itself — so no surface can silently re-pin the contract.
+ * bytes. Every expectation is a string literal typed here - never a constant
+ * compared with itself - so no surface can silently re-pin the contract.
  *
  * <p>If this test fails, an evidence surface drifted: recorded manual-audit
  * packets and talosbench banks reference these bytes, so a deliberate change
@@ -112,7 +112,7 @@ class ApprovalPromptContractTest {
             }
         }
         assertFalse(allowEntries.isEmpty(),
-                "talosbench-cases.json no longer forbids any approval-prompt substring — "
+                "talosbench-cases.json no longer forbids any approval-prompt substring - "
                         + "the redirected-deny-path evidence contract was removed");
         for (String entry : allowEntries) {
             assertTrue(SESSION_LITERAL.startsWith(entry),
@@ -137,6 +137,6 @@ class ApprovalPromptContractTest {
             }
         }
         return fail("tools/manual-eval/talosbench-cases.json not found within 4 levels above "
-                + System.getProperty("user.dir") + " — adjust the walk-up or the bank moved");
+                + System.getProperty("user.dir") + " - adjust the walk-up or the bank moved");
     }
 }

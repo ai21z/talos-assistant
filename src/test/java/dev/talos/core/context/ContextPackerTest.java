@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link ContextPacker} — unified context assembly.
+ * Tests for {@link ContextPacker} - unified context assembly.
  */
 class ContextPackerTest {
 
@@ -95,7 +95,7 @@ class ContextPackerTest {
     @Test
     void pack_reservationOnlyWithExactlyTwoBaseFiles() {
         var packer = new ContextPacker(BIG_BUDGET);
-        // Only one base file — reservation has no special effect
+        // Only one base file - reservation has no special effect
         var pinned = List.of(snip("A.java#0", "content"));
 
         ContextResult result = packer.pack(SYS, QUERY, pinned, List.of(), true);

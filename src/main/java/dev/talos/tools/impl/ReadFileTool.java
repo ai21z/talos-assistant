@@ -24,9 +24,9 @@ import java.util.Map;
  *
  * <p>Parameters:
  * <ul>
- *   <li>{@code path} — relative path to the file within the workspace (required)</li>
- *   <li>{@code max_lines} — maximum number of lines to return (optional, default: 500)</li>
- *   <li>{@code offset} — 1-based starting line number (optional, default: 1)</li>
+ *   <li>{@code path} - relative path to the file within the workspace (required)</li>
+ *   <li>{@code max_lines} - maximum number of lines to return (optional, default: 500)</li>
+ *   <li>{@code offset} - 1-based starting line number (optional, default: 1)</li>
  * </ul>
  */
 public final class ReadFileTool implements TalosTool {
@@ -126,7 +126,7 @@ public final class ReadFileTool implements TalosTool {
             String output = sb.toString();
             if (output.length() > MAX_OUTPUT_CHARS) {
                 output = output.substring(0, MAX_OUTPUT_CHARS)
-                        + "\n... [output truncated at 16K chars — use talos.grep to search for specific content, "
+                        + "\n... [output truncated at 16K chars - use talos.grep to search for specific content, "
                         + "or request a specific range with offset + max_lines]";
             }
 

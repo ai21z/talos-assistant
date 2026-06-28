@@ -22,7 +22,7 @@ import java.util.Optional;
  */
 public interface SessionStore {
 
-    /** Persist session state (idempotent — overwrites on same ID). */
+    /** Persist session state (idempotent - overwrites on same ID). */
     void save(SessionData data);
 
     /** Load a previously saved session, or empty if absent. */

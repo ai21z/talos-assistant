@@ -15,7 +15,7 @@ answer as a refusal, and matched refusal markers ANYWHERE in the answer
 
 1. Truthfulness: a blank model answer after a granted protected-read
    approval was repaired with the trace reason "generic model refusal
-   replaced..." — untruthful; the model refused nothing.
+   replaced..." - untruthful; the model refused nothing.
 2. Whole-answer marker matching destroyed long grounded answers whose TAIL
    carried a legitimate caveat ("the raw value cannot be shared") but did
    not literally contain the evidence-summary substring.
@@ -23,15 +23,15 @@ answer as a refusal, and matched refusal markers ANYWHERE in the answer
 ## Design
 
 - Predicate split: `isBlankAnswer` (blank after a successful approved
-  protected read is STILL repaired with the evidence answer — shipping an
-  empty final answer after a granted approval is worse — but the trace
+  protected read is STILL repaired with the evidence answer - shipping an
+  empty final answer after a granted approval is worse - but the trace
   reason now says "blank model answer replaced with current approved read
   evidence") and `isProtectedReadRefusal` (markers retained verbatim,
   matched only within the first 240 chars of the stripped answer:
   REFUSAL_HEAD_CHARS, matching the repo's singleLine convention).
 - Head scoping is safe for runtime-injected markers ("approval blocked",
   "protected content was redacted"): they always sit at offset 0 of
-  runtime-replaced answers. A refusal buried past the head passes through —
+  runtime-replaced answers. A refusal buried past the head passes through -
   an answer-quality trade only; disclosure control lives in the
   suppression/handoff/redaction layers, not in this guard.
 - The evidence escape hatch (answers containing the read-evidence
@@ -63,7 +63,7 @@ Refactor scope: the single guard method split; no pipeline reordering
 
 - `ProtectedReadAnswerGuardTest`: blank answer repaired with the truthful
   blank-specific trace reason; tail caveat past the 240-char head does NOT
-  trigger repair (the key new behavior — this answer was destroyed before);
+  trigger repair (the key new behavior - this answer was destroyed before);
   head-positioned refusal still repaired; tokenizer.java read does not
   engage the guard at all (T759 interplay); all pre-existing repair/
   pass-through tests green unchanged (their markers are answer-initial).

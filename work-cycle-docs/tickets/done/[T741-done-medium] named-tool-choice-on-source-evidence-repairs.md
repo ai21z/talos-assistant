@@ -22,12 +22,12 @@ policy stopped the scenario (`t325-python-command-boundary`, fail-closed after
   `SOURCE_EVIDENCE_BEFORE_DERIVED_WRITE FAILED` ×4 with the explicit
   "Call talos.read_file first" diagnostic; only `TOOL_CALL_PARSED talos.grep`
   between blocks; then fail-closed stop.
-- `ProviderRequestControlPolicy.java:67-68`: `namedTool` is always `""` —
+- `ProviderRequestControlPolicy.java:67-68`: `namedTool` is always `""` -
   NAMED is never used anywhere despite `LlamaCppEngine.java:47`
   (`namedToolChoice=true`) and `CompatChatClient.java:254-261` serializing the
   correct OpenAI named-function shape.
 - The repair planner that owns this re-prompt:
-  `runtime/toolcall/SourceEvidenceReadBeforeWriteRepairPlanner.java` — builds
+  `runtime/toolcall/SourceEvidenceReadBeforeWriteRepairPlanner.java` - builds
   REQUIRED controls at line 136 and the repair frame (`repairMessages`,
   105-126) that names both the required tool and the exact missing path.
 - When the runtime already knows the exact tool and target, free choice is
@@ -36,7 +36,7 @@ policy stopped the scenario (`t325-python-command-boundary`, fail-closed after
 ## Architectural Hypothesis
 
 The repair planners are the right owner: they know the required tool by name
-at construction time. No policy inference needed — pass NAMED explicitly.
+at construction time. No policy inference needed - pass NAMED explicitly.
 
 ## Architecture Metadata
 
@@ -73,7 +73,7 @@ Refactor scope: the named planners + tests
 
 - Planner unit tests asserting NAMED + tool name + (post-T740) near-greedy
   sampling in the built controls; REQUIRED fallback when unsupported.
-- `CompatChatClientTest` named-shape serialization (may already exist —
+- `CompatChatClientTest` named-shape serialization (may already exist -
   extend if not).
 
 ## Acceptance Criteria
@@ -89,7 +89,7 @@ Refactor scope: the named planners + tests
   `talos.read_file`; `SourceEvidencePostReadWriteRepairPlanner` pins NAMED
   `talos.write_file` (its frame narrows the surface to write_file and names
   it explicitly); `SourceEvidenceExactRepairPlanner` keeps REQUIRED (required
-  tool ambiguous: write_file or edit_file) — all three now carry
+  tool ambiguous: write_file or edit_file) - all three now carry
   `SamplingControls.NEAR_GREEDY`; REQUIRED fallback preserved when the
   backend lacks named support.
 - Tests green: new `SourceEvidenceReadBeforeWriteRepairPlannerTest` (NAMED +

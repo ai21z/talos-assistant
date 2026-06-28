@@ -10,11 +10,11 @@ package dev.talos.runtime;
  * of the session.
  *
  * <p>Destructive operations must never auto-approve regardless of prior
- * remembered approvals — the policy enforces that, not the enum.
+ * remembered approvals - the policy enforces that, not the enum.
  */
 public enum ApprovalResponse {
 
-    /** One-time approval — do not remember. */
+    /** One-time approval - do not remember. */
     APPROVED,
 
     /** Approved AND remember: auto-approve similar in-workspace edits for the session. */

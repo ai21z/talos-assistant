@@ -192,7 +192,7 @@ class ProtectedReadAnswerGuardTest {
                                     && "REPAIRED".equals(event.data().get("status"))
                                     && "blank model answer replaced with current approved read evidence"
                                             .equals(event.data().get("reason"))),
-                    "the trace reason must say BLANK, not refusal — calling a blank answer a "
+                    "the trace reason must say BLANK, not refusal - calling a blank answer a "
                             + "'generic model refusal' was the T760 truthfulness violation");
         } finally {
             LocalTurnTraceCapture.clear();
@@ -205,7 +205,7 @@ class ProtectedReadAnswerGuardTest {
         // A long grounded answer whose TAIL carries a legitimate caveat. The
         // caveat phrase ("cannot share") sits well past the 240-char head, and
         // the answer does not literally contain the evidence-summary
-        // substring — under whole-answer matching this answer was destroyed.
+        // substring - under whole-answer matching this answer was destroyed.
         String answer = ("The configuration file defines one audit setting used by the local test "
                 + "harness. Its value is a fake placeholder that exists so canary scans have "
                 + "something safe to detect. The file has a single line and no other entries. ")
@@ -244,7 +244,7 @@ class ProtectedReadAnswerGuardTest {
     void tokenizerSourceReadDoesNotEngageProtectedReadPostcondition() {
         // T759/T760 characterization: tokenizer.java is no longer classified
         // protected, so the postcondition guard does not own this answer at
-        // all — even a refusal-shaped answer passes through untouched.
+        // all - even a refusal-shaped answer passes through untouched.
         String answer = "I can't provide that.";
 
         ProtectedReadAnswerGuard.PostconditionResult result =

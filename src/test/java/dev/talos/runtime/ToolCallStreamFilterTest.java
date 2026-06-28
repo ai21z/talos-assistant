@@ -258,7 +258,7 @@ class ToolCallStreamFilterTest {
             List<String> chunks = new ArrayList<>();
             ToolCallStreamFilter filter = new ToolCallStreamFilter(chunks::add);
             filter.accept("text <tool_call>{\"name\":\"x\"}");
-            // No closing tag — flush should discard the partial block
+            // No closing tag - flush should discard the partial block
             filter.flush();
             assertEquals("text ", String.join("", chunks));
         }
@@ -728,7 +728,7 @@ class ToolCallStreamFilterTest {
             List<String> chunks = new ArrayList<>();
             ToolCallStreamFilter filter = new ToolCallStreamFilter(chunks::add);
             filter.accept("text ```json\n{\"just_data\": true");
-            // No closing ``` — flush should emit as regular content (not a complete tool call)
+            // No closing ``` - flush should emit as regular content (not a complete tool call)
             filter.flush();
             String result = String.join("", chunks);
             assertTrue(result.contains("text"), "Text should be emitted");

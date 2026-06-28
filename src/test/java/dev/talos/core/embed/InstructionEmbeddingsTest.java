@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link InstructionEmbeddings} — prefix injection, delegation, batch path.
+ * Tests for {@link InstructionEmbeddings} - prefix injection, delegation, batch path.
  */
 class InstructionEmbeddingsTest {
 

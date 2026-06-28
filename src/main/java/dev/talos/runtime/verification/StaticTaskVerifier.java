@@ -240,7 +240,7 @@ public final class StaticTaskVerifier {
     /**
      * T792: a user-approved, successful, verification-class run_command
      * ordered after the last successful mutation upgrades a would-be
-     * READBACK_ONLY verdict to PASSED. Additive only — FAILED is never
+     * READBACK_ONLY verdict to PASSED. Additive only - FAILED is never
      * overridden, and ambiguous evidence changes nothing (fail closed).
      */
     private static TaskVerificationResult withCommandVerificationUpgrade(

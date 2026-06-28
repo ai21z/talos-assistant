@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class PathInferenceTest {
 
     /**
-     * write_file with missing path: should NOT infer — returns call as-is.
+     * write_file with missing path: should NOT infer - returns call as-is.
      * The tool itself will produce a "missing path" error.
      */
     @Test
@@ -37,13 +37,13 @@ class PathInferenceTest {
         ToolCall result = ToolCallLoop.repairMissingPath(call);
 
         assertSame(call, result,
-                "Should return original call as-is — no path inference for mutating tools");
+                "Should return original call as-is - no path inference for mutating tools");
         assertNull(result.param("path"),
-                "Path should remain null — tool will produce its own error");
+                "Path should remain null - tool will produce its own error");
     }
 
     /**
-     * edit_file with missing path: should NOT infer — returns call as-is.
+     * edit_file with missing path: should NOT infer - returns call as-is.
      */
     @Test
     void repair_doesNotInferPathForEditFile() {
@@ -54,7 +54,7 @@ class PathInferenceTest {
         ToolCall result = ToolCallLoop.repairMissingPath(call);
 
         assertSame(call, result,
-                "Should return original call as-is — no path inference for mutating tools");
+                "Should return original call as-is - no path inference for mutating tools");
     }
 
     /**
@@ -87,7 +87,7 @@ class PathInferenceTest {
     }
 
     /**
-     * Non-write tools are not checked at all — returned as-is.
+     * Non-write tools are not checked at all - returned as-is.
      */
     @Test
     void repair_noRepairForReadFile() {
@@ -113,7 +113,7 @@ class PathInferenceTest {
 
     /**
      * Exact reproduction of test-output.txt Turn 3 failure scenario.
-     * The model called write_file with only "content" — no "path" at all.
+     * The model called write_file with only "content" - no "path" at all.
      * Previously this would infer "index.html" from context. Now it must
      * return the call as-is so the tool produces a clear error and the
      * model retries with an explicit path.
@@ -126,9 +126,9 @@ class PathInferenceTest {
         ToolCall result = ToolCallLoop.repairMissingPath(call);
 
         assertSame(call, result,
-                "Should NOT infer path — the old inference silently wrote to wrong targets");
+                "Should NOT infer path - the old inference silently wrote to wrong targets");
         assertNull(result.param("path"),
-                "Path should remain null — FileWriteTool will produce a clear error");
+                "Path should remain null - FileWriteTool will produce a clear error");
         assertEquals("<!DOCTYPE html>\n<html>...", result.param("content"),
                 "Content should be preserved unchanged");
     }

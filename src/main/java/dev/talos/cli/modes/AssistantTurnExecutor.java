@@ -110,7 +110,7 @@ public final class AssistantTurnExecutor {
      * (JSON code fences, bare JSON, or XML compatibility tags).
      *
      * <p>Code-block file-write detection ({@link dev.talos.runtime.CodeBlockToolExtractor})
-     * is intentionally NOT included here. Code-block writes are disabled — they only
+     * is intentionally NOT included here. Code-block writes are disabled - they only
      * produce a warning inside {@link ToolCallLoop#run}. Routing them through the
      * tool-loop entry gate would be misleading.
      */
@@ -220,7 +220,7 @@ public final class AssistantTurnExecutor {
                 // When the response is tool-call-only, the stream filter suppresses
                 // all chunks so the rawSink (which normally stops the spinner) never
                 // fires. Without this explicit stop, the spinner keeps running while
-                // the tool-call loop (and approval gate) execute — making it look
+                // the tool-call loop (and approval gate) execute - making it look
                 // like Talos is still "thinking" when it's actually waiting for input.
                 if (ctx.onStreamComplete() != null) {
                     try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
@@ -246,7 +246,7 @@ public final class AssistantTurnExecutor {
                             out.append(resolution.answer());
                         }
                     } else {
-                        // No tool calls — content was streamed; record full text for memory.
+                        // No tool calls - content was streamed; record full text for memory.
                         // Streaming no-tool branch. We cannot silently retry here
                         // because prose is already on the terminal, so truthfulness
                         // must be enforced by visible annotation of high-risk shapes.
@@ -1993,7 +1993,7 @@ public final class AssistantTurnExecutor {
      *       without flagging genuinely substantive answers that happen to mention a capability.</li>
      * </ol>
      *
-     * <p>Answers over 1500 chars always pass — they are long enough to be substantive.
+     * <p>Answers over 1500 chars always pass - they are long enough to be substantive.
      */
     static boolean isDeflection(String answer) {
         return PostToolSynthesisRetry.isDeflection(answer);
@@ -2114,7 +2114,7 @@ public final class AssistantTurnExecutor {
                 answer, plan, messages, loopResult, extraMutationSuccesses);
     }
 
-    // ── Point 3 — Missing-mutation retry ─────────────────────────────────
+    // ── Point 3 - Missing-mutation retry ─────────────────────────────────
 
     /**
      * True iff the latest user request contains an unambiguous mutation
@@ -2423,16 +2423,16 @@ public final class AssistantTurnExecutor {
      *
      * <p>Fires when <b>all</b> of the following hold:
      * <ol>
-     *   <li>The tool loop ran and invoked at least one tool — if the turn
+     *   <li>The tool loop ran and invoked at least one tool - if the turn
      *       invoked zero tools, {@link #groundingRetryIfNeeded} /
      *       {@link #shouldAppendStreamingGroundingAnnotation} (R6 / N2)
      *       is the correct gate, not this one.</li>
-     *   <li>Zero mutating tool successes — a successful mutation means the
+     *   <li>Zero mutating tool successes - a successful mutation means the
      *       model did substantive work and the under-inspection signal is
      *       noise.</li>
-     *   <li>The answer is at least {@link #INSPECT_MIN_CHARS} characters —
+     *   <li>The answer is at least {@link #INSPECT_MIN_CHARS} characters -
      *       substantive enough to carry fabricated claims.</li>
-     *   <li>{@link #readOnlyToolCount(ToolCallLoop.LoopResult)} ≤ 1 —
+     *   <li>{@link #readOnlyToolCount(ToolCallLoop.LoopResult)} ≤ 1 -
      *       the Turn-1 failure shape: one read, then a confident
      *       multi-file summary.</li>
      *   <li>The latest user request contains an inspect-first marker
@@ -2453,7 +2453,7 @@ public final class AssistantTurnExecutor {
      * annotation enters {@code out} (history / memory) but may not
      * appear on the user's terminal. This matches the pre-existing
      * behavior of {@link #annotateIfFalseMutationClaim} and is a
-     * deliberate single-shape decision — when real transcript evidence
+     * deliberate single-shape decision - when real transcript evidence
      * justifies a separate streaming-visible variant, it can be added
      * symmetrically (mirroring the R6 → N2 split).
      *
@@ -2478,7 +2478,7 @@ public final class AssistantTurnExecutor {
      * Minimum answer length at which the grounding retry becomes eligible.
      *
      * <p>Chosen so that short simple answers are never second-guessed, while
-     * the transcript's long-fabrication shapes (1600+ chars in Turns 2–4) are
+     * the transcript's long-fabrication shapes (1600+ chars in Turns 2-4) are
      * comfortably inside the window. Values below 600 risk fighting the
      * short-deflection tier (≤ 500 chars) already handled elsewhere.
      */
@@ -2487,7 +2487,7 @@ public final class AssistantTurnExecutor {
     /*
      * Phrases in the <em>user request</em> that indicate the user wants the
      * answer grounded in inspected workspace contents. Kept conservative and
-     * anchored to real transcript prompt wording — we explicitly do not want
+     * anchored to real transcript prompt wording - we explicitly do not want
      * a bag-of-words net that sweeps up generic conversation.
      *
      * <p>Matched case-insensitively against the latest user message only.
@@ -2587,7 +2587,7 @@ public final class AssistantTurnExecutor {
     }
 
     /**
-     * N2 — streaming-path grounding annotation predicate.
+     * N2 - streaming-path grounding annotation predicate.
      *
      * <p>Pure detection helper, no side effects. Returns {@code true} iff the
      * streamed turn exhibits the R6 failure shape:
@@ -2596,7 +2596,7 @@ public final class AssistantTurnExecutor {
      *       characters long;</li>
      *   <li>the latest user request contains an evidence-request marker;</li>
      *   <li>the caller invoked this helper on the no-tool-call streaming
-     *       branch — zero-tools is a structural invariant of the call site,
+     *       branch - zero-tools is a structural invariant of the call site,
      *       not re-checked here.</li>
      * </ol>
      *
@@ -2677,7 +2677,7 @@ public final class AssistantTurnExecutor {
      *       helper on the no-tool-call branch, so this is a structural
      *       invariant of the call site, not a runtime re-check).</li>
      *   <li>The answer is at least {@link #UNGROUNDED_MIN_CHARS} characters
-     *       long — substantive enough that the existing deflection gate is
+     *       long - substantive enough that the existing deflection gate is
      *       not going to catch it.</li>
      *   <li>The latest user request in {@code messages} contains an
      *       evidence-request marker.</li>
@@ -2692,8 +2692,8 @@ public final class AssistantTurnExecutor {
      * visible grounding signal. Annotate-on-failure mirrors the R2
      * claim-vs-action posture.
      *
-     * <p><b>Scope note (N1 — non-streaming only):</b> this helper performs a
-     * silent retry, which is only safe on the non-streaming branch — the
+     * <p><b>Scope note (N1 - non-streaming only):</b> this helper performs a
+     * silent retry, which is only safe on the non-streaming branch - the
      * streaming branch has already emitted prose to the terminal by the time
      * this helper could fire, so a retry would double-render. The streaming
      * counterpart is {@link #shouldAppendStreamingGroundingAnnotation}, which

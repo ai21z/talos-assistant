@@ -8,13 +8,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
- * End-to-end executor-path scenarios — the N4 seam in action.
+ * End-to-end executor-path scenarios - the N4 seam in action.
  *
  * <p>These scenarios drive {@link dev.talos.cli.modes.AssistantTurnExecutor#execute}
  * through {@link ScenarioRunner#runThroughExecutor(ScenarioDefinition, String, List)}
  * with a scripted {@link dev.talos.core.llm.LlmClient}. The key
  * difference from {@link AnswerAssertionScenariosTest} is that the
- * R2 / R6 / N3 gates — which live inside the executor — actually
+ * R2 / R6 / N3 gates - which live inside the executor - actually
  * fire on this path. That closes the caveat
  * {@code AssistantTurnExecutorTest.TranscriptRegressions} carries
  * in its class Javadoc: the static-gate anchors there test each
@@ -37,9 +37,9 @@ class ExecutorScenarioTest {
         // Workspace has an index.html whose content is known. The
         // user's verbatim T5-shape request asks for a mutation, but
         // the scripted model sequence will:
-        //   (0) emit a read_file tool call — the model "inspects"
+        //   (0) emit a read_file tool call - the model "inspects"
         //       but never writes.
-        //   (1) emit the verbatim T5 false-mutation claim — no tool
+        //   (1) emit the verbatim T5 false-mutation claim - no tool
         //       calls, just prose.
         // R2 (annotateIfFalseMutationClaim) must then prepend
         // FALSE_MUTATION_ANNOTATION because mutatingToolSuccesses == 0
@@ -101,7 +101,7 @@ class ExecutorScenarioTest {
             // ── Filesystem parity: file is unchanged ───────────────
             //
             // This is the critical integrity check the static-gate
-            // test (t5_falseMutationClaim_triggersR2) cannot make —
+            // test (t5_falseMutationClaim_triggersR2) cannot make -
             // that test only exercises the annotator, not the full
             // pipeline. Here we prove that driving execute() with a
             // scripted read-only turn leaves the workspace untouched.

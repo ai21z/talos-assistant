@@ -102,7 +102,7 @@ class ToolCallSupportBoundaryCharacterizationTest {
                 ChatMessage.user("edit index.html"),
                 ChatMessage.assistant("{\"name\":\"talos.edit_file\",\"arguments\":{}}"),
                 ChatMessage.user("[tool_result: talos.edit_file]\n[error] failed\n[/tool_result]"),
-                ChatMessage.user("[compacted: talos.read_file result, 200 chars — full output elided]")
+                ChatMessage.user("[compacted: talos.read_file result, 200 chars - full output elided]")
         ));
 
         String retryPrompt = """

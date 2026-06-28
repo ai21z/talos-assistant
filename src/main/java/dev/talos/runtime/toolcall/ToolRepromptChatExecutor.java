@@ -39,13 +39,13 @@ final class ToolRepromptChatExecutor {
         } catch (EngineException.ConnectionFailed cf) {
             LOG.warn("Ollama not reachable during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
-            state.finishWithAnswer("[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]");
+            state.finishWithAnswer("[Ollama not reachable - tool loop aborted. " + cf.guidance() + "]");
             return false;
         } catch (EngineException.ModelNotFound mnf) {
             LOG.warn("Model not found during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.value(mnf.model()));
             state.finishWithAnswer(UiChrome.MODEL_NOT_FOUND_OPEN + mnf.model() + UiChrome.MODEL_NOT_FOUND_MARKER
-                    + " — tool loop aborted. " + mnf.guidance() + "]");
+                    + " - tool loop aborted. " + mnf.guidance() + "]");
             return false;
         } catch (EngineException ee) {
             LOG.warn("Engine error during {}: {}",

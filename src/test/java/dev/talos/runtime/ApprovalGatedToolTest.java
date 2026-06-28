@@ -27,7 +27,7 @@ class ApprovalGatedToolTest {
 
     @Test
     void readOnlyToolBypassesApprovalGate() {
-        // Gate that always denies — should not matter for READ_ONLY
+        // Gate that always denies - should not matter for READ_ONLY
         var registry = new ToolRegistry();
         registry.register(readOnlyTool());
 
@@ -253,7 +253,7 @@ class ApprovalGatedToolTest {
 
         var ctx = Context.builder(new Config()).build();
         var session = new Session(WS, new Config());
-        // T757: see destructiveToolApprovedExecutes — checkpoint gating needs
+        // T757: see destructiveToolApprovedExecutes - checkpoint gating needs
         // a target path for metadata-mutating calls.
         var call = new ToolCall("talos.test_write", Map.of("path", "tmp-noop-write.txt"));
 

@@ -58,7 +58,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * </ul>
  *
  * <p>Commands (colon-prefixed) bypass TurnProcessor and are handled
- * directly by the command registry — this only processes prompts.
+ * directly by the command registry - this only processes prompts.
  */
 public final class TurnProcessor {
 
@@ -74,7 +74,7 @@ public final class TurnProcessor {
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Primary constructor. All policy parameters are required — the caller
+     * Primary constructor. All policy parameters are required - the caller
      * must pass an explicit {@link ApprovalGate}, {@link ToolRegistry}, and
      * {@link ApprovalPolicy}. Pass {@link NoOpApprovalGate} /
      * {@link ApprovalPolicy#ALWAYS_ASK} explicitly if you want the default
@@ -83,7 +83,7 @@ public final class TurnProcessor {
      *
      * <p>The convenience constructors below still provide explicit
      * {@code NoOpApprovalGate} / {@link ApprovalPolicy#ALWAYS_ASK} defaults
-     * for tests and ad-hoc call sites — those are explicit wiring, not
+     * for tests and ad-hoc call sites - those are explicit wiring, not
      * policy-by-null.
      */
     public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate,
@@ -104,12 +104,12 @@ public final class TurnProcessor {
                          dev.talos.runtime.command.CommandProfileRegistry commandProfiles) {
         this.modes = modes;
         this.approvalGate = Objects.requireNonNull(approvalGate,
-                "approvalGate must not be null — pass NoOpApprovalGate() explicitly "
+                "approvalGate must not be null - pass NoOpApprovalGate() explicitly "
                         + "to keep the no-op policy (CCR-016)");
         this.toolRegistry = Objects.requireNonNull(toolRegistry,
-                "toolRegistry must not be null — pass a new ToolRegistry() explicitly");
+                "toolRegistry must not be null - pass a new ToolRegistry() explicitly");
         this.approvalPolicy = Objects.requireNonNull(approvalPolicy,
-                "approvalPolicy must not be null — pass ApprovalPolicy.ALWAYS_ASK explicitly");
+                "approvalPolicy must not be null - pass ApprovalPolicy.ALWAYS_ASK explicitly");
         this.permissionPolicy = new DeclarativePermissionPolicy(this.approvalPolicy);
         this.checkpointService = Objects.requireNonNull(checkpointService,
                 "checkpointService must not be null");
@@ -164,7 +164,7 @@ public final class TurnProcessor {
      * original user input. This centralizes memory updates, audit logging,
      * and future transcript persistence.
      *
-     * <p>Exceptions are <em>not</em> caught here — they propagate to the caller
+     * <p>Exceptions are <em>not</em> caught here - they propagate to the caller
      * (typically {@code ExecutionPipeline}) which owns the error envelope,
      * redaction, and audit logging.
      *
@@ -218,7 +218,7 @@ public final class TurnProcessor {
             long elapsedNanos = System.nanoTime() - startNanos;
 
             // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
-            // For non-RAG turns (AskMode, DevMode), this returns null — expected and correct.
+            // For non-RAG turns (AskMode, DevMode), this returns null - expected and correct.
             RetrievalTrace trace = TurnTraceCapture.consume();
             if (ctx != null && ctx.executionPhaseState() != null) {
                 TurnAuditCapture.updateFinalPhase(ctx.executionPhaseState().phase().name());
@@ -288,17 +288,17 @@ public final class TurnProcessor {
      * <p>Decision order for mutating tools:
      * <ol>
      *   <li>Resolve target path (for scope warning + policy classification).</li>
-     *   <li>Mutation-intent guard — reject write/edit calls when the original
+     *   <li>Mutation-intent guard - reject write/edit calls when the original
      *       user prompt did not explicitly request a modification.</li>
-     *   <li>Execution phase policy — reject mutating calls outside APPLY.</li>
-     *   <li>{@link ScopeGuard} — if the request is web-scoped and the target
+     *   <li>Execution phase policy - reject mutating calls outside APPLY.</li>
+     *   <li>{@link ScopeGuard} - if the request is web-scoped and the target
      *       looks obviously off-scope, a warning is prepended to the approval
      *       detail so the user sees it at decision time. Posture is warn,
      *       not block.</li>
-     *   <li>{@link ApprovalPolicy#decide} — may auto-approve in-workspace
+     *   <li>{@link ApprovalPolicy#decide} - may auto-approve in-workspace
      *       edits (if the user opted in for this session) or deny without
      *       prompting.</li>
-     *   <li>{@link ApprovalGate#approveFull} — tri-state gate that can emit
+     *   <li>{@link ApprovalGate#approveFull} - tri-state gate that can emit
      *       {@link ApprovalResponse#APPROVED_REMEMBER} to record the user's
      *       "yes for this session" preference.</li>
      * </ol>
@@ -367,7 +367,7 @@ public final class TurnProcessor {
         // bytes (T755). It runs BEFORE the exact-literal corrector on purpose:
         // the corrector is the runtime-owned ground truth for exact-write
         // contracts and, running after, restores the user's literal payload
-        // even if sanitization touched it — exactness always wins.
+        // even if sanitization touched it - exactness always wins.
         if (isWriteFileTool(call.toolName()) || isEditFileTool(call.toolName())) {
             MarkdownCommentaryCallNormalizer.Normalization sanitization =
                     isWriteFileTool(call.toolName())
@@ -456,7 +456,7 @@ public final class TurnProcessor {
             }
         }
 
-        // Path-parameter placeholder guard — applies to ALL tools regardless of
+        // Path-parameter placeholder guard - applies to ALL tools regardless of
         // risk level. Transcript-observed failure (qwen2.5-coder:14b, April 2026):
         // the model emitted planning narration with mixed real and template tool
         // calls: read_file(path=<html-file-path>). read_file is READ_ONLY so the
@@ -464,7 +464,7 @@ public final class TurnProcessor {
         // Path.of("<html-file-path>") is illegal on Windows (Illegal char '<' at
         // index 0), propagated uncaught as an InvalidPathException through
         // executeTool → ToolCallLoop → AssistantTurnExecutor, and was logged as
-        // "LLM call failed" — killing the whole turn. A placeholder path is
+        // "LLM call failed" - killing the whole turn. A placeholder path is
         // definitionally wrong for any file tool; refuse here and return a directed
         // error so the model retries with the actual workspace path.
         for (String k : pathParameterKeys()) {
@@ -478,7 +478,7 @@ public final class TurnProcessor {
             }
         }
 
-        // Template-placeholder guard — reject BEFORE the approval gate.
+        // Template-placeholder guard - reject BEFORE the approval gate.
         // Transcript-observed failure (qwen2.5-coder:14b, April 2026): the
         // model emits a pedagogical "step-by-step" answer using Python-style
         // variable names, then issues write_file / edit_file tool calls whose
@@ -486,7 +486,7 @@ public final class TurnProcessor {
         // `<updated_index_html_content>`). The approval preview just mirrors
         // the placeholder back at the user; a reflex "y" overwrites real
         // files with 28 bytes of garbage. Warning-in-approval-detail would
-        // not have saved the user — this class of payload is definitionally
+        // not have saved the user - this class of payload is definitionally
         // garbage, so we refuse it at tool-call time and feed a directed
         // error back so the model retries with real content.
         if (risk.requiresApproval()) {
@@ -513,7 +513,7 @@ public final class TurnProcessor {
                 String msg = TemplatePlaceholderGuard.rejectionMessage(
                         call.toolName(), placeholderParam, placeholderValue);
                 // Recorded as a rejected (denied) approval for audit purposes
-                // — the call never reached the gate because the payload was
+                // - the call never reached the gate because the payload was
                 // definitionally bad, but from a trust-accounting perspective
                 // it is a denied mutation, not a success.
                 TurnAuditCapture.recordToolCall(
@@ -561,7 +561,7 @@ public final class TurnProcessor {
             }
         }
 
-        // Scope guard — narrow, lexical, warn-first. Fires only for mutating
+        // Scope guard - narrow, lexical, warn-first. Fires only for mutating
         // calls where the request looks web-scoped and the target extension
         // is obviously off-scope. If it fires, the warning is surfaced to
         // the user through the approval detail (see buildApprovalDetail).
@@ -580,7 +580,7 @@ public final class TurnProcessor {
 
         // Scope-guard override: if the target looks off-scope, the user
         // MUST see the warning before the call runs. A remembered or configured
-        // ALLOW would otherwise silently bypass the warning — exactly the failure
+        // ALLOW would otherwise silently bypass the warning - exactly the failure
         // class the guard exists to catch.
         if (scopeWarning != null && permissionDecision.action() == PermissionAction.ALLOW) {
             permissionDecision = permissionDecision.forceAsk(
@@ -675,7 +675,7 @@ public final class TurnProcessor {
                         "approval denied by user for " + call.toolName());
                 // Phrasing matters: previously "Operation denied by user" caused
                 // qwen2.5-coder to hallucinate a "permissions" excuse and tell
-                // the user to "ensure you have the necessary permissions" — the
+                // the user to "ensure you have the necessary permissions" - the
                 // word "denied" anchored the wrong narrative. Reshape the error
                 // so the model interprets it as user intent, not auth failure.
                 String targetContext = approvalDeniedTargetContext(permissionDecision);
@@ -688,7 +688,7 @@ public final class TurnProcessor {
                                 + "or take a different action that does not need approval."));
             }
 
-            // Approved — record and optionally propagate the remember choice.
+            // Approved - record and optionally propagate the remember choice.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
             if (commandTool) {
@@ -733,7 +733,7 @@ public final class TurnProcessor {
         try {
             result = toolRegistry.execute(call, toolCtx);
         } catch (Exception e) {
-            LOG.warn("Tool {} threw unexpected exception: {} — returning fail result instead of crashing turn",
+            LOG.warn("Tool {} threw unexpected exception: {} - returning fail result instead of crashing turn",
                     call.toolName(), SafeLogFormatter.throwableMessage(e));
             LOG.debug("Tool execution exception stack trace suppressed; sanitized reason={}",
                     SafeLogFormatter.throwableMessage(e));
@@ -790,7 +790,7 @@ public final class TurnProcessor {
 
     /**
      * Resolve the target path from a tool call, trying common parameter name variants.
-     * Used for the approval gate display — even when the model uses non-canonical
+     * Used for the approval gate display - even when the model uses non-canonical
      * parameter names (e.g. {@code file_path} instead of {@code path}).
      */
     private static String resolvePathParam(ToolCall call) {
@@ -1514,7 +1514,7 @@ public final class TurnProcessor {
         // Unified diff block (T756): strictly additive, appended after every
         // legacy detail line so existing prompt content stays byte-identical.
         // CliApprovalGate.inferRisk deliberately ignores everything from the
-        // "diff (+" marker on — keep the marker in sync with riskScanScope().
+        // "diff (+" marker on - keep the marker in sync with riskScanScope().
         if (diffPreview != null && !diffPreview.skipped()) {
             sb.append("\n    diff (+").append(diffPreview.added())
                     .append(" -").append(diffPreview.removed()).append("):");

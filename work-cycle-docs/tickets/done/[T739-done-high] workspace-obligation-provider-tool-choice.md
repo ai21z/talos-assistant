@@ -20,12 +20,12 @@ failures trace primarily to this gap.
 ## Evidence Analysis
 
 - `src/main/java/dev/talos/runtime/policy/ProviderRequestControlPolicy.java:16`
-  defines `MUTATING_TOOLS = Set.of("talos.write_file", "talos.edit_file")` —
+  defines `MUTATING_TOOLS = Set.of("talos.write_file", "talos.edit_file")` -
   none of the six workspace tools are present.
 - The obligation switch (lines 41-65) maps `EXPLICIT_COMMAND_REQUEST`,
   `CONDITIONAL_REVIEW_FIX`, `MUTATING_TOOL_REQUIRED`,
   `REPAIR_FROM_VERIFIER_FINDINGS`, `INSPECT_REQUIRED`, `VERIFY_FROM_EVIDENCE`,
-  `LIST_DIR_ONLY`, and evidence obligations to `ToolChoiceMode.REQUIRED` —
+  `LIST_DIR_ONLY`, and evidence obligations to `ToolChoiceMode.REQUIRED` -
   there is **no branch for `ActionObligation.WORKSPACE_OPERATION_REQUIRED`**
   (enum at `runtime/policy/ActionObligation.java:10`), so the default
   `ChatRequestControls.defaults()` (AUTO) is returned.
@@ -37,7 +37,7 @@ failures trace primarily to this gap.
   `requiredToolChoice=true` and `namedToolChoice=true`;
   `CompatChatClient.java:248-263` serializes both `"required"` and the named
   function shape. Eight repair planners already use REQUIRED. T109 shipped this
-  exact mechanism for `MUTATING_TOOL_REQUIRED` — which passes the bank.
+  exact mechanism for `MUTATING_TOOL_REQUIRED` - which passes the bank.
 - The failing scenario exposes exactly one tool
   (trace `TOOL_SURFACE_SELECTED {nativeToolCount=1}`), so NAMED is available
   as the strongest constraint.
@@ -103,7 +103,7 @@ Refactor scope: ProviderRequestControlPolicy + its test only
 - Focused test run green:
   `./gradlew.bat test --tests "dev.talos.runtime.policy.ProviderRequestControlPolicyTest" --no-daemon`.
 - Provider body for a workspace-obligation turn contains `tool_choice`
-  (`"required"` or named shape) — assertable via CompatChatClient body test or
+  (`"required"` or named shape) - assertable via CompatChatClient body test or
   live provider-body capture in T746.
 - CHANGELOG `## [Unreleased]` gains a T739 entry.
 - No behavior change for non-workspace obligations.
@@ -117,7 +117,7 @@ Refactor scope: ProviderRequestControlPolicy + its test only
   mirroring the required-choice accessor;
   `AssistantTurnExecutor.chatControlsForTurn` passes both capability flags.
 - `./gradlew.bat test --tests "dev.talos.runtime.policy.ProviderRequestControlPolicyTest" --no-daemon`
-  PASS — 10 tests (6 existing regression + 4 new), including precondition
+  PASS - 10 tests (6 existing regression + 4 new), including precondition
   asserts proving the batch prompt classifies as
   `WORKSPACE_OPERATION_REQUIRED`.
 - Live provider-body confirmation (tool_choice present on a workspace turn)

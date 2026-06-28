@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * Placeholder — routing is handled in {@link ModeController#route} when
+ * Placeholder - routing is handled in {@link ModeController#route} when
  * activeMode is "auto": COMMAND → DevMode, everything else → UnifiedAssistantMode.
  *
  * @see ModeController

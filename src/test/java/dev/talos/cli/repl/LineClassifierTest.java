@@ -5,7 +5,7 @@ import org.junit.jupiter.api.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link LineClassifier} — pure input classification, no side effects.
+ * Tests for {@link LineClassifier} - pure input classification, no side effects.
  */
 @DisplayName("LineClassifier")
 class LineClassifierTest {

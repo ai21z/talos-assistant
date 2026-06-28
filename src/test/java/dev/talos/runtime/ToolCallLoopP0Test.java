@@ -115,7 +115,7 @@ class ToolCallLoopP0Test {
                     </tool_call>""";
 
             // The loop catches Exception around the re-prompt and converts
-            // the error into a textual answer — so this completes without
+            // the error into a textual answer - so this completes without
             // propagating, but the answer must NOT be a mutation summary.
             var result = loop.run(llmResponse, messages, WS, ctxWithoutLlm());
 
@@ -125,7 +125,7 @@ class ToolCallLoopP0Test {
         }
     }
 
-    // ── CCR-020 — partial-success iterations must re-prompt ────────────
+    // ── CCR-020 - partial-success iterations must re-prompt ────────────
 
     @Nested
     class PartialSuccessRepromptTests {

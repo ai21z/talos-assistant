@@ -433,7 +433,7 @@ class ToolCallParserTest {
                 """;
 
         List<ToolCall> calls = ToolCallParser.parse(response);
-        // Only the code-fenced block — bare JSON should not be double-parsed
+        // Only the code-fenced block - bare JSON should not be double-parsed
         assertEquals(1, calls.size());
         assertEquals("talos.grep", calls.get(0).toolName());
     }
@@ -488,7 +488,7 @@ class ToolCallParserTest {
 
     @Test
     void containsToolCallsDetectsAdjacentJsonWithBraceInStringValue() {
-        // Both objects have brace-containing string values — BARE_JSON_PATTERN misses both.
+        // Both objects have brace-containing string values - BARE_JSON_PATTERN misses both.
         // containsToolCalls must still return true via the Pass 2b Jackson detection path.
         String response = """
                 {
@@ -548,7 +548,7 @@ class ToolCallParserTest {
 
     @Test
     void parseTwoAdjacentStandaloneRawJsonObjects() {
-        // Both objects have simple string values — tests basic multi-object extraction
+        // Both objects have simple string values - tests basic multi-object extraction
         String response = """
                 {
                   "name": "talos.read_file",

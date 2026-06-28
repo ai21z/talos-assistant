@@ -8,7 +8,7 @@ import java.nio.file.Path;
 
 /**
  * Verifies the workspace's Lucene index directory is writable. Creating the
- * directory is the one acceptable side effect — normal indexing does the
+ * directory is the one acceptable side effect - normal indexing does the
  * same; the temp probe file is always deleted.
  */
 public final class IndexWritableProbe implements DoctorProbe {

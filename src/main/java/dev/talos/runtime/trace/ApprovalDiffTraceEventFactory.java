@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * Builds trace events for the approval-window diff preview (T756). Stores a
- * hash of the rendered (already redacted, capped) diff plus line counts —
+ * hash of the rendered (already redacted, capped) diff plus line counts -
  * never the diff text itself: diff bodies are file content, and DEFAULT
  * trace redaction stores summaries only.
  */

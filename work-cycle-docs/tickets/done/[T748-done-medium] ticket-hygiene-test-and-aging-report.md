@@ -13,13 +13,13 @@ Ticket metadata drifts because nothing validates it: T284's acceptance
 criterion pointed at a dead filename for weeks, six tickets carried stale
 `Branch: v0.9.0-beta-dev` headers through three branches, and T312's evidence
 paths were mistyped (`-capability/gptoss/` vs `-capability/artifacts-gptoss/`).
-Separately, nothing surfaces queue age — T280 sat open since May with no aging
+Separately, nothing surfaces queue age - T280 sat open since May with no aging
 signal, and open/ mixes true beta blockers with deferred-beyond-beta scope.
 
 ## Evidence Analysis
 
 - Drift instances: all found and fixed during the 2026-06-10 evidence-repair
-  pass (commits `953bf4eb`, `b9386ab2`) — the defect class is proven, the
+  pass (commits `953bf4eb`, `b9386ab2`) - the defect class is proven, the
   prevention is missing.
 - Corpus measured: 716 ticket files (19 open, 697 done). **86 filenames** fail
   the strict `[Txx-(open|done)-(high|medium|low)] slug.md` pattern (~70 legacy
@@ -29,7 +29,7 @@ signal, and open/ mixes true beta blockers with deferred-beyond-beta scope.
   (a) directory ↔ filename status-token consistency for bracketed files;
   (b) ticket-ID uniqueness across open/ + done/.
 - Strict rules are only safe with a grandfather: numeric ID threshold
-  (**Txx ≥ 739**) — monotonic IDs make it self-documenting; matches the
+  (**Txx ≥ 739**) - monotonic IDs make it self-documenting; matches the
   repo's ratchet philosophy (new work can't regress; legacy untouched) better
   than an 86-entry baseline file.
 - House docs-test pattern: `src/test/java/dev/talos/docs/ReadmePrivacyCopyTest.java`
@@ -38,7 +38,7 @@ signal, and open/ mixes true beta blockers with deferred-beyond-beta scope.
 ## Architectural Hypothesis
 
 Tickets are evidence artifacts; they deserve the same two-sided ratchet
-treatment as architecture boundaries — deterministic JUnit validation in the
+treatment as architecture boundaries - deterministic JUnit validation in the
 normal test lane, plus a cheap visibility script for queue health.
 
 ## Architecture Metadata
@@ -75,7 +75,7 @@ read-only.
 
 ## Tests
 
-- TicketHygieneTest itself (it IS the test) — plus fixture-style negative
+- TicketHygieneTest itself (it IS the test) - plus fixture-style negative
   verification during development (temp file violating a rule → assertion
   fires; removed before commit).
 - `pwsh scripts/ticket-aging.ps1` produces the listing; `-Stale 14` filters.
@@ -96,5 +96,5 @@ read-only.
   (grandfather threshold; the 80+ legacy filename variants untouched).
   Green against the full 716-file corpus.
 - `scripts/ticket-aging.ps1` landed; first run surfaced five high-priority
-  tickets 21 days stale (T274, T276, T281, T283, T286) — exactly the queue
+  tickets 21 days stale (T274, T276, T281, T283, T286) - exactly the queue
   signal the cycle lacked.

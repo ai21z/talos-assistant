@@ -334,7 +334,7 @@ class JsonScenarioPackTest {
         try (var result = ScenarioRunner.run(loaded.definition())) {
             // T755: the raw emission carries trailing markdown commentary.
             // The approval window must describe the sanitized payload
-            // (40 bytes / 2 lines — the raw payload is 89 bytes / 6 lines),
+            // (40 bytes / 2 lines - the raw payload is 89 bytes / 6 lines),
             // and the written file must equal those approved bytes exactly.
             // The trace-level hash equality (TOOL_CONTENT_SANITIZED.afterHash
             // == APPROVAL_REQUIRED.contentHash) is pinned in TurnProcessorTest.

@@ -188,7 +188,7 @@ class SlashCommandCompleterTest {
 
     @Test
     void slashModeMatchesModeAndModels() {
-        // "mode" is a prefix of "models", so both match — this is correct autocomplete behavior
+        // "mode" is a prefix of "models", so both match - this is correct autocomplete behavior
         List<Candidate> candidates = complete("/mode");
         List<String> values = candidates.stream().map(Candidate::value).toList();
         assertTrue(values.contains("/mode"), "Should contain /mode");

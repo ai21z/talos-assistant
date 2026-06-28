@@ -22,7 +22,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Prompt 1 — snapshot + JSONL reconciliation.
+ * Prompt 1 - snapshot + JSONL reconciliation.
  *
  * <p>Verifies the bootstrap load path:
  * <ul>
@@ -89,7 +89,7 @@ class TalosBootstrapReconcileTest {
                 List.of(new SessionData.Turn("user", "from-snap-u"),
                         new SessionData.Turn("assistant", "from-snap-a"))));
 
-        // JSONL has a *different* turn — must be ignored when snapshot wins.
+        // JSONL has a *different* turn - must be ignored when snapshot wins.
         store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
                 "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
 
@@ -281,7 +281,7 @@ class TalosBootstrapReconcileTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-2";
 
-        // No snapshot — simulate crash before onSessionEnd fired.
+        // No snapshot - simulate crash before onSessionEnd fired.
         store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
                 "q1", "a1", List.of(), 0, 0, 0, ""));
         store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
@@ -304,7 +304,7 @@ class TalosBootstrapReconcileTest {
         String sid = "ws-3";
 
         // Snapshot exists but empty (e.g., save fired with a session that
-        // had no turns yet — defensive case).
+        // had no turns yet - defensive case).
         store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of()));
         store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
                 "only-in-jsonl-u", "only-in-jsonl-a", List.of(), 0, 0, 0, ""));
@@ -379,7 +379,7 @@ class TalosBootstrapReconcileTest {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "ws-6";
 
-        // A turn that timed out — persisted by JsonTurnLogAppender with
+        // A turn that timed out - persisted by JsonTurnLogAppender with
         // status="aborted" (the abortedText below mirrors what LlmClient
         // emits on wall-clock expiry). The garbage prose that streamed
         // before the timeout is captured in assistantText.
@@ -387,7 +387,7 @@ class TalosBootstrapReconcileTest {
                 "user turn 1",
                 "The user's prompt is 'The user's prompt is 'The user's prompt is",
                 List.of(), 0, 0, 0, "", "aborted"));
-        // A legitimate turn afterwards — must still replay.
+        // A legitimate turn afterwards - must still replay.
         store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
                 "user turn 2", "clean reply", List.of(), 0, 0, 0, "", "ok"));
 

@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 
 /**
- * {@code talos doctor} — fast environment preflight: config loads, the
+ * {@code talos doctor} - fast environment preflight: config loads, the
  * runtime environment is bounded, the engine profile resolves, the managed
  * server binary and model file exist, the server responds (or is honestly
  * reported as not-yet-started), retrieval state is visible, and the index/home

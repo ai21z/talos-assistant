@@ -17,7 +17,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for {@link DevMode} — local file operations (open/show/view + ls/list/dir).
+ * Tests for {@link DevMode} - local file operations (open/show/view + ls/list/dir).
  *
  * <p>Uses {@link TempDir} for isolated filesystem operations and
  * {@link Context.Builder} with explicit Sandbox/Limits wiring.

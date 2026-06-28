@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * T776 activation contract: streamed answers wrap only in fully capable
  * interactive mode; every degraded mode keeps the historical pass-through
  * bytes (the rail-shear behavior is the FROZEN contract for redirected,
- * NO_COLOR, ASCII, and dumb-terminal output — the evidence chain
+ * NO_COLOR, ASCII, and dumb-terminal output - the evidence chain
  * string-matches those transcripts).
  */
 class RenderEngineStreamWrapTest {
@@ -80,7 +80,7 @@ class RenderEngineStreamWrapTest {
     @Test
     void interactiveNoColorStreamingKeepsThePassThroughBytes() {
         // Owner decision: byte-identity beats polish in degraded interactive
-        // modes — NO_COLOR terminals keep the historical unwrapped stream.
+        // modes - NO_COLOR terminals keep the historical unwrapped stream.
         var out = new ByteArrayOutputStream();
         TerminalCapabilities noColor = TerminalCapabilities.detect(
                 Map.of("NO_COLOR", "1", "WT_SESSION", "wt"), true, "Windows 11",

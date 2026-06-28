@@ -23,7 +23,7 @@ public final class ToolRegistry {
 
     /**
      * Strict-mode flag. When true, {@link #get(String)} performs exact-match
-     * lookup only — no {@code talos.} prefix insertion, no alias mapping, no
+     * lookup only - no {@code talos.} prefix insertion, no alias mapping, no
      * case-insensitive normalization.
      *
      * <p>This is a <b>measurement</b> knob, not a safety knob. It exists so
@@ -42,7 +42,7 @@ public final class ToolRegistry {
      *
      * <p>In strict mode, {@link #get(String)} short-circuits before any rescue
      * branch, so this counter is never incremented and per-turn deltas remain
-     * zero — which is exactly the contract strict measurement mode promises.
+     * zero - which is exactly the contract strict measurement mode promises.
      */
     private final AtomicInteger aliasRescueCount = new AtomicInteger();
 
@@ -51,7 +51,7 @@ public final class ToolRegistry {
         return aliasRescueCount.get();
     }
 
-    /** Default (non-strict) registry — preserves all existing behavior. */
+    /** Default (non-strict) registry - preserves all existing behavior. */
     public ToolRegistry() {
         this(false);
     }
