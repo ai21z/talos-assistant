@@ -170,6 +170,11 @@ public final class ModeController implements TurnRouter {
         return route(rawLine, workspace, requireCliContext(ctx), null);
     }
 
+    @Override
+    public String traceMode(String rawLine) {
+        return activeName == null || activeName.isBlank() ? "auto" : activeName;
+    }
+
     /** Routes with a hint. If null/blank, activeName is used. */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx, String hint) throws Exception {
         if (rawLine == null || rawLine.isBlank()) return Optional.empty();

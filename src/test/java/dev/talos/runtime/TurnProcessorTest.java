@@ -975,6 +975,35 @@ class TurnProcessorTest {
                 .build();
     }
 
+    private static void assertTraceMode(String selectedMode, String expectedMode) throws Exception {
+        ModeController modes = traceModeController();
+        if (!"auto".equals(selectedMode)) {
+            assertTrue(modes.setActive(selectedMode), selectedMode);
+        }
+        var tp = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult result = tp.process(session, "hello", ctx);
+
+        assertNotNull(result, selectedMode);
+        assertNotNull(result.audit().localTrace(), selectedMode);
+        assertEquals(expectedMode, result.audit().localTrace().mode(), selectedMode);
+        assertNotEquals("unknown", result.audit().localTrace().mode(), selectedMode);
+    }
+
+    private static ModeController traceModeController() {
+        StubMode agent = new StubMode("agent", true);
+        return new ModeController()
+                .add(new StubMode("ask", true))
+                .add(new StubMode("plan", true))
+                .add(agent)
+                .addHidden(new StubMode("rag", true))
+                .alias("chat", agent)
+                .alias("dev", agent)
+                .alias("unified", agent);
+    }
+
     private static void assertInvalidBeforeApproval(
             TurnProcessor tp,
             Session session,
@@ -1056,6 +1085,18 @@ class TurnProcessorTest {
 
         String json = MAPPER.writeValueAsString(trace);
         assertFalse(json.contains("SECRET=abc"), "local trace must not store raw prompt or answer by default");
+    }
+
+    @Test
+    void localTurnTraceRecordsCanonicalModeForAutoAskPlanAgentAndAliases() throws Exception {
+        assertTraceMode("auto", "auto");
+        assertTraceMode("ask", "ask");
+        assertTraceMode("plan", "plan");
+        assertTraceMode("agent", "agent");
+        assertTraceMode("dev", "agent");
+        assertTraceMode("chat", "agent");
+        assertTraceMode("unified", "agent");
+        assertTraceMode("rag", "rag");
     }
 
     @Test
