@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T890] `/mode ask` is now a runtime-enforced read-only ceiling. Direct
+  mutation requests return a deterministic local nudge (`Ask is read-only;
+  switch to /mode agent to make changes.`) without calling the LLM, Ask turns
+  run through `CapabilityPosture.ASK_READ_ONLY`, and the Ask prompt/resource
+  now advertises only inspection behavior instead of write/edit capability.
 - [T889] Added a shared capability-posture foundation for Ask/Plan/Agent mode
   enforcement. `AssistantTurnExecutor.Options` can now request `AGENT`,
   `ASK_READ_ONLY`, or `PLAN_READ_ONLY`; read-only postures cap the effective

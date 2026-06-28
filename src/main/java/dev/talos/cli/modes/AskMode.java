@@ -6,6 +6,13 @@ import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.CapabilityPosture;
+import dev.talos.runtime.policy.CapabilityPosturePolicy;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
+import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -21,6 +28,8 @@ import java.util.regex.Pattern;
 /** Ask mode: plain LLM chat (no RAG context). */
 public final class AskMode implements Mode {
     private static final Logger LOG = LoggerFactory.getLogger(AskMode.class);
+    static final String READ_ONLY_MUTATION_NUDGE =
+            "Ask is read-only; switch to `/mode agent` to make changes.";
     @Override public String name() { return "ask"; }
 
     @Override public boolean canHandle(String rawLine) {
@@ -54,6 +63,21 @@ public final class AskMode implements Mode {
             return Optional.of(new Result.Ok(out));
         }
 
+        TaskContract askContract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromUserRequest(rawLine),
+                workspace);
+        if (askContract.mutationRequested()) {
+            return Optional.of(new Result.Ok("\n" + READ_ONLY_MUTATION_NUDGE + "\n\n"));
+        }
+        CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
+                CapabilityPosturePolicy.apply(CapabilityPosture.ASK_READ_ONLY, askContract);
+        TaskContract effectiveContract = WorkspaceTargetReconciler.reconcile(
+                effectiveTurn.taskContract(),
+                workspace);
+        ExecutionPhase effectivePhase = effectiveTurn.phase();
+        List<String> visibleTools = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(effectiveContract, effectivePhase, ctx.toolRegistry()));
+
         // Limits
         var lim = CfgUtil.map(ctx.cfg().data.get("limits"));
         long responseMaxChars = CfgUtil.longAt(lim, "response_max_chars", 10 * 1024 * 1024L);
@@ -65,6 +89,8 @@ public final class AskMode implements Mode {
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         String system = SystemPromptBuilder.forAsk()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
+                .withVisibleToolNames(visibleTools)
+                .withReadOnlyToolMode(true)
                 .withWorkspace(workspace)
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
@@ -94,7 +120,8 @@ public final class AskMode implements Mode {
         // Execute LLM turn via shared executor
         var opts = new AssistantTurnExecutor.Options()
                 .llmTimeoutMs(llmTimeoutMs)
-                .responseMaxChars(responseMaxChars);
+                .responseMaxChars(responseMaxChars)
+                .capabilityPosture(CapabilityPosture.ASK_READ_ONLY);
 
         AssistantTurnExecutor.TurnOutput turnOut =
                 AssistantTurnExecutor.execute(messages, workspace, ctx, opts);
