@@ -254,6 +254,26 @@ class EvidenceGateTest {
     }
 
     @Test
+    void unrelatedFileSharingASatelliteSubstringDoesNotKeepTheAbsentSatellite(@TempDir Path workspace) throws Exception {
+        // T904: the named-check is word-boundary, not raw substring. "myscript.js"
+        // must NOT count as naming "script.js", so an absent inferred script.js is
+        // still dropped (no residual false-block).
+        Files.writeString(workspace.resolve("index.html"), "<h1>Acme</h1>");
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT, true, false, true,
+                Set.of("index.html", "script.js"),
+                Set.of(), Set.of(),
+                "refactor myscript.js to be cleaner",
+                "contextual-static-web-follow-up");
+
+        Set<String> targets = EvidenceGate.withoutAbsentInferredStaticWebSatellites(
+                contract, contract.expectedTargets(), workspace);
+
+        assertFalse(targets.contains("script.js"), targets.toString());  // absent + not truly named -> dropped
+        assertTrue(targets.contains("index.html"), targets.toString());
+    }
+
+    @Test
     void nonStaticWebAbsentTargetsAreNotDropped(@TempDir Path workspace) {
         TaskContract contract = new TaskContract(
                 TaskType.READ_ONLY_QA, false, false, false,

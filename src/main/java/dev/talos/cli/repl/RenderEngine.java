@@ -287,6 +287,9 @@ public final class RenderEngine {
             spinnerMonitor.notifyAll();
         }
         if (spinnerThread != null) {
+            // Bounded join: the daemon ticks every 120ms, so a clean stop completes
+            // within one frame; the 200ms cap guarantees stopSpinner never blocks the
+            // single writer thread for long (the JLine status-row path caps at 300ms).
             try { spinnerThread.join(200); }
             catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
