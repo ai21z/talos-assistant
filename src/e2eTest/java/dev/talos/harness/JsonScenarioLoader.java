@@ -30,6 +30,7 @@ public final class JsonScenarioLoader {
             builder.withUserPrompt(text(root, "userPrompt"));
             builder.withApprovalPolicy(parsePolicy(text(root, "approvalPolicy")));
             builder.withExecutionPhase(parseExecutionPhase(text(root, "executionPhase")));
+            builder.withMode(text(root, "mode"));
 
             String scriptedResponse = text(root, "scriptedResponse");
             if (!scriptedResponse.isBlank()) {

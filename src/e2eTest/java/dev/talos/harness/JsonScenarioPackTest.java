@@ -21,6 +21,7 @@ class JsonScenarioPackTest {
     @DisplayName("[json-scenario:scenarios/01-read-only-repo-question.json] 01: read-only repo question stays read-only and answers from fixture facts")
     void readOnlyRepoQuestion() {
         var loaded = JsonScenarioLoader.load("scenarios/01-read-only-repo-question.json");
+        assertEquals("auto", loaded.definition().mode());
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
@@ -34,6 +35,15 @@ class JsonScenarioPackTest {
                     .assertFileContains("src/Main.java", "class Main")
                     .assertFileNotContains("README.md", "mutated by test");
         }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/90-mode-field-smoke.json] 90: JSON scenarios can select a mode")
+    void jsonScenarioCanSelectMode() {
+        var loaded = JsonScenarioLoader.load("scenarios/90-mode-field-smoke.json");
+
+        assertEquals("plan", loaded.definition().mode());
+        assertEquals("turnProcessor", loaded.runner());
     }
 
     @Test

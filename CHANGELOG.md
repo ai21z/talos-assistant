@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T894] Added deterministic E2E mode coverage at the `TurnProcessor` route
+  seam. Scenario definitions and JSON resources can now select a mode, and the
+  new route-through harness covers Ask mutation refusal, Plan read-only posture,
+  Agent approved mutation, Auto structural commands, and legacy
+  `dev`/`chat`/`unified` aliases resolving to canonical `agent`.
 - [T893] Local turn traces now record canonical active mode instead of
   `"unknown"` for `ModeController` turns. The trace-mode seam lives on the
   `TurnRouter` port, `ModeController` reports canonical active names
