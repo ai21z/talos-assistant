@@ -64,6 +64,44 @@ class SetModelCommandTest {
     }
 
     @Test
+    void downloadedGuidanceSubstitutesResolvedProfileAndServerPath() {
+        // T902: the guidance must be copy-pasteable, not literal <name>/<llama-server>,
+        // when the GGUF maps to a canned profile and the server-path is known.
+        var downloaded = List.of(ModelRef.of("llama_cpp", "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"));
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded,
+                "qwen36vf-q6k", "C:/llama/llama-server.exe");
+
+        assertTrue(text.contains("--profile qwen36vf-q6k"), text);
+        assertTrue(text.contains("--server-path C:/llama/llama-server.exe"), text);
+        assertFalse(text.contains("<name>"), text);
+        assertFalse(text.contains("<llama-server>"), text);
+    }
+
+    @Test
+    void downloadedGuidanceQuotesServerPathWithSpaces() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "qwen2.5-coder-14b-instruct-q4_k_m", downloaded,
+                "qwen2.5-coder-14b", "C:/Program Files/llama/llama-server.exe");
+
+        assertTrue(text.contains("--server-path \"C:/Program Files/llama/llama-server.exe\""), text);
+    }
+
+    @Test
+    void downloadedGuidanceFallsBackToPlaceholdersWhenUnresolved() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "mystery-model"));
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "mystery-model", downloaded, null, "");
+
+        assertTrue(text.contains("--profile <name>"), text);
+        assertTrue(text.contains("--server-path <llama-server>"), text);
+    }
+
+    @Test
     void unknownNameWithDownloadedListFallsBackToGenericHint() {
         var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
 
