@@ -8,6 +8,7 @@ import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.*;
+import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -178,6 +179,76 @@ public final class ScenarioRunner {
 
     private static boolean isToolResultContent(String content) {
         return content != null && content.contains("[tool_result:");
+    }
+
+    /**
+     * Drive a scenario through {@link TurnProcessor#process(Session, String, RuntimeTurnContext)}.
+     *
+     * <p>This route-through seam validates the public mode controller rather
+     * than bypassing it through the raw tool loop or executor. The scenario's
+     * {@link ScenarioDefinition#mode()} is selected through
+     * {@link ModeController#setActive(String)}, so legacy aliases canonicalize
+     * the same way they do in the REPL.
+     */
+    public static TurnProcessorScenarioResult runThroughTurnProcessor(
+            ScenarioDefinition scenario,
+            List<String> scriptedResponses) {
+        var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
+        var registry = new ToolRegistry(false);
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        registry.register(new GrepTool());
+        registry.register(new ListDirTool());
+        registry.register(new RunCommandTool());
+
+        GateRecorder gate = new GateRecorder(scenario.approvalPolicy());
+        SessionApprovalPolicy approvalPolicy = new SessionApprovalPolicy();
+        ModeController modes = ModeController.defaultController();
+        String requestedMode = scenario.mode();
+        if (!modes.setActive(requestedMode)) {
+            workspace.close();
+            throw new IllegalArgumentException("Scenario mode is not selectable: " + requestedMode);
+        }
+
+        var processor = new TurnProcessor(modes, gate, registry, approvalPolicy);
+        var loop = new ToolCallLoop(processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
+        var scriptedLlm = LlmClient.scripted(scriptedResponses);
+        var cfg = new Config(null);
+        var ctx = Context.builder(cfg)
+                .sandbox(new Sandbox(workspace.path(), Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .llm(scriptedLlm)
+                .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
+                .build();
+        var session = new Session(workspace.path(), cfg);
+        String userPrompt = scenario.userPrompt().isBlank()
+                ? "scenario: " + scenario.name()
+                : scenario.userPrompt();
+
+        try {
+            TurnResult turnResult = processor.process(session, userPrompt, ctx);
+            if (turnResult == null) {
+                throw new IllegalStateException("Scenario was not handled by any mode: " + scenario.name());
+            }
+            return new TurnProcessorScenarioResult(
+                    scenario,
+                    turnResult,
+                    workspace,
+                    modes.getActiveName(),
+                    gate.asked,
+                    gate.granted,
+                    gate.denied,
+                    gate.remembered,
+                    List.of(scriptedLlm));
+        } catch (Exception e) {
+            try {
+                scriptedLlm.close();
+            } catch (Exception ignored) { }
+            workspace.close();
+            throw new RuntimeException("Failed to run TurnProcessor scenario: " + scenario.name(), e);
+        }
     }
 
     /** Run a scenario through the loop and persist snapshot + turn log for artifact assertions. */

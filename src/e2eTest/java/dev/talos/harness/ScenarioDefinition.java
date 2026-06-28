@@ -2,7 +2,9 @@ package dev.talos.harness;
 
 import dev.talos.runtime.phase.ExecutionPhase;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -18,6 +20,8 @@ import java.util.Map;
  *   <li><b>approvalPolicy</b> - controls how write/edit approvals are resolved
  *       without interactive user input</li>
  *   <li><b>executionPhase</b> - optional forced phase for policy scenarios</li>
+ *   <li><b>mode</b> - optional public/legacy mode selected before route-through
+ *       scenarios run; defaults to {@code auto}</li>
  * </ul>
  *
  * <p>Scenarios are intentionally simple: one scripted LLM response, one workspace state.
@@ -30,17 +34,38 @@ public record ScenarioDefinition(
         String userPrompt,
         String scriptedResponse,
         ScenarioApprovalPolicy approvalPolicy,
-        ExecutionPhase executionPhase
+        ExecutionPhase executionPhase,
+        String mode
 ) {
+
+    public ScenarioDefinition {
+        initialFiles = initialFiles == null
+                ? Map.of()
+                : Collections.unmodifiableMap(new LinkedHashMap<>(initialFiles));
+        userPrompt = userPrompt == null ? "" : userPrompt;
+        scriptedResponse = scriptedResponse == null ? "" : scriptedResponse;
+        approvalPolicy = approvalPolicy == null ? ScenarioApprovalPolicy.APPROVE_ALL : approvalPolicy;
+        mode = normalizeMode(mode);
+    }
+
+    /** Back-compat constructor; route-through scenarios default to auto mode. */
+    public ScenarioDefinition(String name,
+                              Map<String, String> initialFiles,
+                              String userPrompt,
+                              String scriptedResponse,
+                              ScenarioApprovalPolicy approvalPolicy,
+                              ExecutionPhase executionPhase) {
+        this(name, initialFiles, userPrompt, scriptedResponse, approvalPolicy, executionPhase, "auto");
+    }
 
     /** Construct with a default {@link ScenarioApprovalPolicy#APPROVE_ALL} policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String scriptedResponse) {
-        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null);
+        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null, "auto");
     }
 
     /** Back-compat constructor with user prompt and default approval policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String userPrompt, String scriptedResponse) {
-        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null);
+        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null, "auto");
     }
 
     // ── Builder ──────────────────────────────────────────────────────
@@ -57,6 +82,7 @@ public record ScenarioDefinition(
         private String scriptedResponse = "";
         private ScenarioApprovalPolicy policy = ScenarioApprovalPolicy.APPROVE_ALL;
         private ExecutionPhase executionPhase;
+        private String mode = "auto";
 
         private Builder(String name) {
             this.name = name;
@@ -95,10 +121,21 @@ public record ScenarioDefinition(
             return this;
         }
 
+        /** Select the mode for TurnProcessor route-through scenarios (default: auto). */
+        public Builder withMode(String mode) {
+            this.mode = normalizeMode(mode);
+            return this;
+        }
+
         public ScenarioDefinition build() {
             return new ScenarioDefinition(
-                    name, Map.copyOf(files), userPrompt, scriptedResponse, policy, executionPhase);
+                    name, new LinkedHashMap<>(files), userPrompt, scriptedResponse, policy, executionPhase, mode);
         }
+    }
+
+    private static String normalizeMode(String mode) {
+        if (mode == null || mode.isBlank()) return "auto";
+        return mode.trim().toLowerCase(Locale.ROOT);
     }
 }
 
