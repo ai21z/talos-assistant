@@ -259,32 +259,12 @@ public class SetupCmd implements Callable<Integer> {
     }
 
     private static Map<String, ModelProfile> profiles() {
+        // T902: sourced from the shared LlamaCppModelProfiles registry so the
+        // canned profiles here and the /set model switch guidance never drift.
         Map<String, ModelProfile> out = new LinkedHashMap<>();
-        out.put("qwen2.5-coder-14b", new ModelProfile(
-                "qwen2.5-coder-14b",
-                "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
-                "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
-                true));
-        out.put("gpt-oss-20b", new ModelProfile(
-                "gpt-oss-20b",
-                "ggml-org/gpt-oss-20b-GGUF",
-                "gpt-oss-20b-mxfp4.gguf",
-                true));
-        out.put("qwen36vf-q4km", new ModelProfile(
-                "qwen36vf-q4km",
-                "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
-                "Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf",
-                true));
-        out.put("qwen36vf-q6k", new ModelProfile(
-                "qwen36vf-q6k",
-                "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
-                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf",
-                true));
-        out.put("deepseek-v2lite-q4km", new ModelProfile(
-                "deepseek-v2lite-q4km",
-                "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
-                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
-                false));
+        for (var p : dev.talos.engine.llamacpp.LlamaCppModelProfiles.profiles().values()) {
+            out.put(p.alias(), new ModelProfile(p.alias(), p.hfRepo(), p.hfFile(), p.nativeCalling()));
+        }
         return Map.copyOf(out);
     }
 
