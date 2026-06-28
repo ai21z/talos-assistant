@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PromptInspectorTest {
 
     @Test
-    void renderNextAutoUsesUnifiedPromptWithMetadata() {
+    void renderNextAutoUsesAgentPromptWithMetadata() {
         Context ctx = context(new Config());
 
         PromptRender render = PromptInspector.renderNext(
@@ -33,14 +33,30 @@ class PromptInspectorTest {
                 ctx);
 
         assertEquals("auto", render.requestedMode());
-        assertEquals("unified", render.resolvedMode());
+        assertEquals("agent", render.resolvedMode());
         assertEquals(0, render.historyMessages());
         assertTrue(render.tools().contains("talos.read_file"));
-        assertTrue(render.sections().contains("mode:unified"));
+        assertTrue(render.sections().contains("mode:agent"));
         assertTrue(render.sections().contains("tools:native"));
         assertTrue(render.systemPrompt().contains("Available Tools"));
         assertEquals("user", render.messages().get(render.messages().size() - 1).role());
         assertEquals("Check the workspace.", render.messages().get(render.messages().size() - 1).content());
+    }
+
+    @Test
+    void renderNextLegacyAgentAliasesResolveToCanonicalAgent() {
+        for (String alias : List.of("dev", "chat", "unified", "agent")) {
+            PromptRender render = PromptInspector.renderNext(
+                    alias,
+                    "Create README.md",
+                    Path.of(".").toAbsolutePath().normalize(),
+                    fullToolContext(new Config()));
+
+            assertEquals(alias, render.requestedMode());
+            assertEquals("agent", render.resolvedMode(), alias);
+            assertTrue(render.sections().contains("mode:agent"), alias);
+            assertTrue(render.tools().contains("talos.write_file"), alias);
+        }
     }
 
     @Test
@@ -181,6 +197,51 @@ class PromptInspectorTest {
     }
 
     @Test
+    void renderNextAskMutationPreviewShowsReadOnlyToolSurface() {
+        PromptRender render = PromptInspector.renderNext(
+                "ask",
+                "Create a README.md file.",
+                Path.of(".").toAbsolutePath().normalize(),
+                fullToolContext(new Config()));
+
+        assertEquals("ask", render.resolvedMode());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.read_file"));
+        assertFalse(render.tools().contains("talos.write_file"));
+        assertFalse(render.tools().contains("talos.edit_file"));
+        assertTrue(render.registryTools().contains("talos.write_file"));
+        assertTrue(render.systemPrompt().contains("Ask is read-only"));
+        assertTrue(render.messages().stream()
+                .anyMatch(message -> message.content() != null
+                        && message.content().contains("[CurrentTurnCapability]")
+                        && message.content().contains("mutationAllowed: false")
+                        && message.content().contains("visibleTools: talos.read_file")
+                        && message.content().contains("obligation: INSPECT_REQUIRED")));
+    }
+
+    @Test
+    void renderNextPlanMutationPreviewShowsReadOnlyPlanSurface() {
+        PromptRender render = PromptInspector.renderNext(
+                "plan",
+                "Create a README.md file.",
+                Path.of(".").toAbsolutePath().normalize(),
+                commandToolContext(new Config()));
+
+        assertEquals("plan", render.resolvedMode());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.read_file"));
+        assertFalse(render.tools().contains("talos.write_file"));
+        assertFalse(render.tools().contains("talos.edit_file"));
+        assertFalse(render.tools().contains("talos.run_command"));
+        assertTrue(render.systemPrompt().contains("Plan is read-only"));
+        assertTrue(render.messages().stream()
+                .anyMatch(message -> message.content() != null
+                        && message.content().contains("[CurrentTurnCapability]")
+                        && message.content().contains("phase: INSPECT")
+                        && message.content().contains("obligation: INSPECT_REQUIRED")));
+    }
+
+    @Test
     void fromMessagesReportsPerTurnNativeToolSurfaceWhenPresent() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
@@ -192,7 +253,7 @@ class PromptInspectorTest {
 
         PromptRender render = PromptInspector.fromMessages(
                 "auto",
-                "unified",
+                "agent",
                 Path.of(".").toAbsolutePath().normalize(),
                 ctx,
                 true,
@@ -215,7 +276,7 @@ class PromptInspectorTest {
 
         PromptRender render = PromptInspector.fromMessages(
                 "auto",
-                "unified",
+                "agent",
                 Path.of(".").toAbsolutePath().normalize(),
                 ctx,
                 true,

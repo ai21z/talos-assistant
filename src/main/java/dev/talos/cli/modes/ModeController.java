@@ -12,16 +12,16 @@ import java.util.*;
 /**
  * Router over registered Mode strategies with an active-mode concept.
  *
- * <h3>Auto-mode routing (unified-first)</h3>
+ * <h3>Auto-mode routing (agent-first)</h3>
  * <p>Uses {@link PromptClassifier} for classification, but only deterministic
  * commands dispatch to a separate mode:
  * <ul>
  *   <li>{@code COMMAND}  → DevMode (structural file ops: ls, dir, show, open)</li>
- *   <li>Everything else → UnifiedAssistantMode (tools + retrieval-as-tool)</li>
+ *   <li>Everything else -> Agent (tools + retrieval-as-tool)</li>
  * </ul>
  *
  * <p>RagMode is still available via explicit {@code /mode rag} but is never
- * selected by auto-mode. The unified assistant handles retrieval by calling
+ * selected by auto-mode. Agent handles retrieval by calling
  * {@code talos.retrieve} as a tool when it needs workspace context.
  *
  * <p>When mode is explicitly set (not "auto"), that mode handles the input
@@ -192,11 +192,11 @@ public final class ModeController implements TurnRouter {
     }
 
     /**
-     * Auto-mode: deterministic commands → DevMode, everything else → UnifiedAssistantMode.
+     * Auto-mode: deterministic commands -> structural handler, everything else -> Agent.
      *
      * <p>The PromptClassifier still classifies for diagnostics (route hint, lastRoute tracking),
      * but only COMMAND triggers deterministic dispatch. RETRIEVE and ASSIST both go to
-     * the unified assistant, which decides when to retrieve via tools.
+     * Agent, which decides when to retrieve via tools.
      */
     private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
 
@@ -212,7 +212,7 @@ public final class ModeController implements TurnRouter {
             }
         }
 
-        // Everything else → UnifiedAssistantMode (via "chat" alias → unified)
+        // Everything else -> Agent (legacy chat/dev/unified aliases resolve there).
         Optional<Result> r = tryMode(resolveAgent(), rawLine, workspace, ctx);
         if (r.isPresent()) {
             updateLastRoute(route);
@@ -266,9 +266,9 @@ public final class ModeController implements TurnRouter {
     /**
      * Creates a default controller with standard modes registered.
      *
-     * <p>Registration order matters for sweep fallback.
-     * "chat" is registered as an alias for UnifiedAssistantMode (used by auto-mode).
-     * AskMode remains registered for backward compatibility and explicit /mode ask.
+     * <p>Registration order matters for advertised mode ordering.
+     * Legacy chat/dev/unified aliases resolve to Agent without being advertised.
+     * Ask and Plan are explicit read-only public postures.
      */
     public static ModeController defaultController() {
         AskMode askMode = new AskMode();

@@ -34,7 +34,7 @@ public class PromptRenderCmd implements Runnable {
     @CommandLine.Option(names = {"--root", "--workspace"}, description = "Workspace root (default: .)")
     Path root;
 
-    @CommandLine.Option(names = "--mode", description = "Prompt mode: auto, unified, ask, or rag")
+    @CommandLine.Option(names = "--mode", description = "Prompt mode: auto, ask, plan, agent, or hidden legacy rag")
     String mode = "auto";
 
     @CommandLine.Option(names = "--input", description = "Optional user input to include as the final user message")

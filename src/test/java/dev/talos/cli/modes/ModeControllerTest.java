@@ -304,7 +304,7 @@ class ModeControllerTest {
 
         mc.route("List names only at workspace root. Does ideas exist here? Answer from evidence only.", WS, ctx);
 
-        assertTrue(ask.invoked, "Natural evidence prompt should route to unified assistant");
+        assertTrue(ask.invoked, "Natural evidence prompt should route to Agent");
         assertFalse(dev.invoked, "Natural evidence prompt must not route to DevMode path extraction");
         assertFalse(rag.invoked, "Natural evidence prompt should not route to legacy rag mode");
     }

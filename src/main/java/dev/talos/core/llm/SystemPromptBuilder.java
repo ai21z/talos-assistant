@@ -74,7 +74,7 @@ public final class SystemPromptBuilder {
         return new SystemPromptBuilder(Mode.RAG);
     }
 
-    /** Create a builder for unified assistant mode (tools + retrieval-as-tool). */
+    /** Create a builder for the Agent assistant prompt (tools + retrieval-as-tool). */
     public static SystemPromptBuilder forUnified() {
         return new SystemPromptBuilder(Mode.UNIFIED);
     }

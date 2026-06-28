@@ -381,9 +381,14 @@ class SimpleCommandsTest {
             String text = cmd.execute("", ctx).toString();
             assertTrue(text.contains("Available:"), text);
             assertTrue(text.contains("agent"), text);
+            assertTrue(text.contains("plan"), text);
+            assertTrue(text.contains("ask"), text);
             assertTrue(text.contains("auto"), text);
             assertFalse(text.contains("unified"), text);
             assertFalse(text.contains("dev"), text);
+            assertFalse(text.contains("chat"), text);
+            assertFalse(text.contains("rag"), text);
+            assertFalse(text.contains("web"), text);
         }
 
         @Test void reserved_web_mode_is_rejected_and_does_not_switch() {
@@ -396,6 +401,7 @@ class SimpleCommandsTest {
         @Test void spec_summary_lists_agent_and_marks_web_reserved() {
             String summary = cmd.spec().summary();
             assertTrue(summary.contains("agent"), summary);
+            assertTrue(summary.contains("plan"), summary);
             assertTrue(summary.contains("web reserved"), summary);
             assertFalse(summary.contains("chat"), "advertise the canonical name, not the chat alias: " + summary);
         }
@@ -452,7 +458,7 @@ class SimpleCommandsTest {
 
             assertInstanceOf(Result.Ok.class, r);
             String text = r.toString();
-            assertTrue(text.contains("Switch mode: auto, ask, agent (web reserved)"), text);
+            assertTrue(text.contains("Switch mode: auto, ask, plan, agent (web reserved)"), text);
             assertTrue(text.contains("(web reserved)"), text);
             assertTrue(text.contains("Inspect the latest turn from structured audit data"), text);
             assertFalse(text.contains("structured aud..."), text);
