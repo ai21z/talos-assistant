@@ -3,6 +3,7 @@ package dev.talos.core.llm;
 import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
@@ -106,6 +107,30 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
     }
 
     @Test
+    void readOnlyCapabilityPostureCapsMutationTurnToInspectSurfaceAndPromptTools() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+        List<ChatMessage> messages = messages("Create a README.md file.");
+
+        AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options().capabilityPosture(CapabilityPosture.ASK_READ_ONLY));
+
+        List<String> names = toolNames(resolver.lastRequest);
+        assertEquals(List.of("talos.read_file"), names);
+
+        String frame = currentTurnCapabilityFrame(messages);
+        assertTrue(frame.contains("mutationAllowed: false"), frame);
+        assertTrue(frame.contains("phase: INSPECT"), frame);
+        assertEquals("visibleTools: talos.read_file", frameLine(frame, "visibleTools:"));
+        assertTrue(frame.contains("obligation: INSPECT_REQUIRED"), frame);
+        assertFalse(frameLine(frame, "visibleTools:").contains("talos.write_file"), frame);
+        assertFalse(frameLine(frame, "visibleTools:").contains("talos.edit_file"), frame);
+    }
+
+    @Test
     void broadStaticWebRewriteSendsWriteFileButNotEditFile() {
         RecordingResolver resolver = new RecordingResolver();
         Context ctx = context(resolver);
@@ -190,6 +215,22 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
 
     private static List<String> toolNames(ChatRequest request) {
         return request.tools.stream().map(ToolSpec::name).sorted().toList();
+    }
+
+    private static String currentTurnCapabilityFrame(List<ChatMessage> messages) {
+        return messages.stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(ChatMessage::content)
+                .filter(content -> content != null && content.startsWith("[CurrentTurnCapability]"))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static String frameLine(String frame, String prefix) {
+        return frame.lines()
+                .filter(line -> line.startsWith(prefix))
+                .findFirst()
+                .orElseThrow();
     }
 
     private static Config engineConfig() {
