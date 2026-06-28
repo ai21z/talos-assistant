@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T888] The mode router now has a catalog-backed public surface for the
+  Ask/Plan/Agent refactor foundation: canonical `agent` is selectable, legacy
+  `chat`/`dev`/`unified` aliases resolve to `agent`, `rag` remains hidden but
+  functional, explicit modes no longer sweep into other modes, and the reserved
+  `web` stub is unsweepable.
 - [T887] Interactive prompts now get one blank line after a submitted non-empty
   `talos [mode] >` input before Talos starts route, slash-command, rate-limit, or
   answer output. The gap is interactive-only, so scripted/redirected transcripts

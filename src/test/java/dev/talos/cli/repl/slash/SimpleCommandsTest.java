@@ -339,12 +339,12 @@ class SimpleCommandsTest {
 
         @Test void switch_to_dev() {
             cmd.execute("dev", ctx);
-            assertEquals("dev", modes.getActiveName());
+            assertEquals("agent", modes.getActiveName());
         }
 
         @Test void switch_to_chat() {
             cmd.execute("chat", ctx);
-            assertEquals("chat", modes.getActiveName());
+            assertEquals("agent", modes.getActiveName());
         }
 
         @Test void switch_to_ask() {
@@ -380,8 +380,10 @@ class SimpleCommandsTest {
         @Test void bare_mode_lists_available_modes() {
             String text = cmd.execute("", ctx).toString();
             assertTrue(text.contains("Available:"), text);
-            assertTrue(text.contains("unified"), text);
+            assertTrue(text.contains("agent"), text);
             assertTrue(text.contains("auto"), text);
+            assertFalse(text.contains("unified"), text);
+            assertFalse(text.contains("dev"), text);
         }
 
         @Test void reserved_web_mode_is_rejected_and_does_not_switch() {
@@ -391,9 +393,9 @@ class SimpleCommandsTest {
             assertEquals("auto", modes.getActiveName(), "must not trap into the reserved web stub");
         }
 
-        @Test void spec_summary_lists_unified_and_marks_web_reserved() {
+        @Test void spec_summary_lists_agent_and_marks_web_reserved() {
             String summary = cmd.spec().summary();
-            assertTrue(summary.contains("unified"), summary);
+            assertTrue(summary.contains("agent"), summary);
             assertTrue(summary.contains("web reserved"), summary);
             assertFalse(summary.contains("chat"), "advertise the canonical name, not the chat alias: " + summary);
         }
@@ -450,7 +452,7 @@ class SimpleCommandsTest {
 
             assertInstanceOf(Result.Ok.class, r);
             String text = r.toString();
-            assertTrue(text.contains("Switch mode: auto, dev, rag, ask, unified (web reserved)"), text);
+            assertTrue(text.contains("Switch mode: auto, ask, agent (web reserved)"), text);
             assertTrue(text.contains("(web reserved)"), text);
             assertTrue(text.contains("Inspect the latest turn from structured audit data"), text);
             assertFalse(text.contains("structured aud..."), text);

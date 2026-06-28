@@ -28,8 +28,9 @@ import java.util.*;
  * directly. Explicit mode selection overrides the router.
  */
 public final class ModeController implements TurnRouter {
-    private final List<Mode> order = new ArrayList<>();
-    private final Map<String, Mode> byName = new HashMap<>();
+    private final List<ModeEntry> order = new ArrayList<>();
+    private final Map<String, ModeEntry> byName = new HashMap<>();
+    private Mode structuralMode;
     private String activeName = "auto";
     private Runnable promptRefreshCallback;
 
@@ -42,19 +43,45 @@ public final class ModeController implements TurnRouter {
 
     /** Adds a mode to the controller's registry. */
     public ModeController add(Mode m) {
-        if (m != null) {
-            order.add(m);
-            byName.put(m.name().toLowerCase(Locale.ROOT), m);
-        }
+        return register(m, m != null && m.available(), m != null && !m.available());
+    }
+
+    /** Adds a selectable compatibility mode that is intentionally not advertised. */
+    public ModeController addHidden(Mode m) {
+        return register(m, false, false);
+    }
+
+    /** Sets the deterministic structural-command handler used by auto and agent modes. */
+    ModeController structuralMode(Mode m) {
+        this.structuralMode = m;
         return this;
     }
 
     /** Registers an alias for an existing mode (does not appear in sweep order). */
     public ModeController alias(String alias, Mode m) {
         if (alias != null && m != null) {
-            byName.put(alias.toLowerCase(Locale.ROOT), m);
+            ModeEntry entry = entryFor(m);
+            if (entry != null) {
+                byName.put(normalize(alias), entry);
+            }
         }
         return this;
+    }
+
+    private ModeController register(Mode m, boolean advertised, boolean reserved) {
+        if (m == null) return this;
+        String canonical = normalize(m.name());
+        ModeEntry entry = new ModeEntry(canonical, m, advertised && !reserved, reserved);
+        order.add(entry);
+        byName.put(canonical, entry);
+        return this;
+    }
+
+    private ModeEntry entryFor(Mode mode) {
+        for (ModeEntry entry : order) {
+            if (entry.mode() == mode) return entry;
+        }
+        return null;
     }
 
     /** Sets a callback to refresh the REPL prompt when mode changes. */
@@ -82,8 +109,11 @@ public final class ModeController implements TurnRouter {
     /** Returns the active mode name ("rag", "dev", "auto", "chat", etc.). */
     public String getActiveName() { return activeName; }
 
-    /** Gets the active Mode if not "auto". */
-    public Optional<Mode> getActive() { return Optional.ofNullable(byName.get(activeName)); }
+    /** Gets the active Mode if registered. */
+    public Optional<Mode> getActive() {
+        ModeEntry entry = byName.get(activeName);
+        return entry == null ? Optional.empty() : Optional.of(entry.mode());
+    }
 
     /**
      * Sets the active mode. Returns true if accepted. "auto" (the router default)
@@ -93,10 +123,10 @@ public final class ModeController implements TurnRouter {
      */
     public boolean setActive(String name) {
         if (name == null || name.isBlank()) return false;
-        String n = name.toLowerCase(Locale.ROOT).trim();
-        Mode m = byName.get(n);
-        if ("auto".equals(n) || (m != null && m.available())) {
-            this.activeName = n;
+        String n = normalize(name);
+        ModeEntry entry = byName.get(n);
+        if ("auto".equals(n) || (entry != null && entry.selectable())) {
+            this.activeName = "auto".equals(n) ? "auto" : entry.canonicalName();
             if (promptRefreshCallback != null) {
                 promptRefreshCallback.run();
             }
@@ -114,8 +144,8 @@ public final class ModeController implements TurnRouter {
     public List<String> availableModeNames() {
         LinkedHashSet<String> names = new LinkedHashSet<>();
         names.add("auto");
-        for (Mode m : order) {
-            if (m.available()) names.add(m.name().toLowerCase(Locale.ROOT));
+        for (ModeEntry entry : order) {
+            if (entry.advertised() && entry.selectable()) names.add(entry.canonicalName());
         }
         return List.copyOf(names);
     }
@@ -123,8 +153,8 @@ public final class ModeController implements TurnRouter {
     /** Registered modes reserved/unavailable for selection (e.g. the web stub). */
     public List<String> reservedModeNames() {
         List<String> names = new ArrayList<>();
-        for (Mode m : order) {
-            if (!m.available()) names.add(m.name().toLowerCase(Locale.ROOT));
+        for (ModeEntry entry : order) {
+            if (entry.reserved()) names.add(entry.canonicalName());
         }
         return List.copyOf(names);
     }
@@ -144,23 +174,21 @@ public final class ModeController implements TurnRouter {
     public Optional<Result> route(String rawLine, Path workspace, Context ctx, String hint) throws Exception {
         if (rawLine == null || rawLine.isBlank()) return Optional.empty();
 
-        String h = (hint == null || hint.isBlank()) ? activeName : hint.toLowerCase(Locale.ROOT).trim();
+        String h = (hint == null || hint.isBlank()) ? activeName : normalize(hint);
 
         // ── Auto-mode: assistant-first routing ───────────────────────────
         if ("auto".equals(h)) {
             return routeAuto(rawLine, workspace, ctx);
         }
 
-        // ── Explicit mode: use the selected mode, fallback to sweep ──────
-        Optional<Result> r = tryMode(byName.get(h), rawLine, workspace, ctx);
-        if (r.isPresent()) return r;
-
-        // Explicit mode failed - sweep all modes in registration order
-        for (Mode m : order) {
-            r = tryMode(m, rawLine, workspace, ctx);
-            if (r.isPresent()) return r;
+        // ── Explicit mode: hard boundary, no sweep into other modes ───────
+        ModeEntry entry = byName.get(h);
+        if (entry == null || !entry.selectable()) return Optional.empty();
+        if (isAgent(entry) && structuralMode != null && isStructuralCommand(rawLine)) {
+            Optional<Result> structural = tryMode(structuralMode, rawLine, workspace, ctx);
+            if (structural.isPresent()) return structural;
         }
-        return Optional.empty();
+        return tryMode(entry.mode(), rawLine, workspace, ctx);
     }
 
     /**
@@ -177,7 +205,7 @@ public final class ModeController implements TurnRouter {
 
         // Deterministic: structural commands (ls, dir, show, open) → DevMode
         if (route == PromptClassifier.Route.COMMAND) {
-            Optional<Result> r = tryMode(byName.get("dev"), rawLine, workspace, ctx);
+            Optional<Result> r = tryMode(structuralMode, rawLine, workspace, ctx);
             if (r.isPresent()) {
                 updateLastRoute(route);
                 return r;
@@ -185,7 +213,7 @@ public final class ModeController implements TurnRouter {
         }
 
         // Everything else → UnifiedAssistantMode (via "chat" alias → unified)
-        Optional<Result> r = tryMode(resolveChat(), rawLine, workspace, ctx);
+        Optional<Result> r = tryMode(resolveAgent(), rawLine, workspace, ctx);
         if (r.isPresent()) {
             updateLastRoute(route);
             return r;
@@ -228,9 +256,11 @@ public final class ModeController implements TurnRouter {
     /**
      * Resolves the chat mode - prefers "chat" alias, falls back to "ask".
      */
-    private Mode resolveChat() {
-        Mode m = byName.get("chat");
-        return m != null ? m : byName.get("ask");
+    private Mode resolveAgent() {
+        ModeEntry m = byName.get("chat");
+        if (m == null) m = byName.get("agent");
+        if (m == null) m = byName.get("ask");
+        return m == null ? null : m.mode();
     }
 
     /**
@@ -242,15 +272,39 @@ public final class ModeController implements TurnRouter {
      */
     public static ModeController defaultController() {
         AskMode askMode = new AskMode();
-        UnifiedAssistantMode unifiedMode = new UnifiedAssistantMode();
+        UnifiedAssistantMode agentMode = new UnifiedAssistantMode();
         return new ModeController()
-                .add(new DevMode())
-                .add(new RagMode())
+                .structuralMode(new DevMode())
+                .addHidden(new RagMode())
                 .add(askMode)
-                .add(unifiedMode)
+                .add(agentMode)
                 .add(new WebMode())
                 .add(new AutoMode())
-                .alias("chat", unifiedMode)  // auto-mode resolveChat() → unified
-                .alias("ask", askMode);       // explicit /mode ask still works
+                .alias("chat", agentMode)
+                .alias("unified", agentMode)
+                .alias("dev", agentMode)
+                .alias("ask", askMode);
+    }
+
+    private static String normalize(String name) {
+        return name == null ? "" : name.toLowerCase(Locale.ROOT).trim();
+    }
+
+    private static boolean isAgent(ModeEntry entry) {
+        return entry != null && "agent".equals(entry.canonicalName());
+    }
+
+    private PromptClassifier.Route classify(String rawLine) {
+        return PromptClassifier.route(rawLine, lastRoute, symbolChecker);
+    }
+
+    private boolean isStructuralCommand(String rawLine) {
+        return classify(rawLine) == PromptClassifier.Route.COMMAND;
+    }
+
+    private record ModeEntry(String canonicalName, Mode mode, boolean advertised, boolean reserved) {
+        boolean selectable() {
+            return mode != null && mode.available() && !reserved;
+        }
     }
 }
