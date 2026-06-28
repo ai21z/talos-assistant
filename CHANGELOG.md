@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- [T904] Review nits from the T898-T901 self-review: the T900 read-evidence named-check
+  now uses a word-boundary match (so "refactor myscript.js" no longer keeps an absent
+  script.js required), the legacy spinner join-cap is documented, and the status-row
+  spinner test-coverage gap is documented (a deterministic test needs a pseudo-TTY).
+- [T903] ShellCommandHint no longer swallows prose that starts with the binary name plus
+  a subcommand-homonym verb ("talos run the tests please", "talos status of the repo")
+  unless the line is short or carries a flag, so such prompts reach the model; and it now
+  detects path-qualified invocations (./talos, /usr/local/bin/talos, C:\...\talos.exe).
+- [T902] /set model guidance for a downloaded-but-unconfigured GGUF is now copy-pasteable:
+  it leads with the concrete hf_repo/hf_file config edit (resolved from a shared
+  LlamaCppModelProfiles registry that SetupCmd also uses, so the two never drift) and
+  names the equivalent setup profile. The earlier attempt substituted the absolute
+  server_path, which the render layer's privacy redaction stripped to [path]; the
+  config-edit route contains no absolute path and survives redaction. No weakening of the
+  redaction; the no-hot-swap restart reality is still stated honestly.
 - [T901] Live "working" indicator during model generation and the tool loop. The
   spinner started once before a turn and stopped on first output, never resuming, so
   multi-tool / long-generation rounds (observed at 144s and 271s) showed a bare cursor.
