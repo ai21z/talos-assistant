@@ -288,6 +288,22 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void readThenCreateCopyProjectsReadSourceAsEvidenceNotMutationTarget() {
+        // T895: "Read X and create Y" names X as a READ source, not a mutation target.
+        // X must be source evidence (MUST_READ), only Y must be mutated. Otherwise the read
+        // source falsely shows as a remaining mutation obligation and blocks a successful copy.
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read helper.py and create a new file named helper_copy.py containing the exact same code as helper.py.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationAllowed());
+        assertEquals("explicit-read-then-mutation-request", contract.classificationReason());
+        assertEquals(Set.of("helper_copy.py"), contract.expectedTargets(),
+                "read source helper.py must NOT be a required mutation target");
+        assertEquals(Set.of("helper.py"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
     void readThenUpdateMeQuestionStaysReadOnly() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Read README.md and update me on what it says.");

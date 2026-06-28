@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T895] Read-then-copy no longer false-blocks: a "read X and create Y" request now
+  projects the read source X as source evidence (read-only) instead of a required
+  mutation target, so writing only Y satisfies the contract (no `BLOCKED_BY_POLICY`
+  for not mutating a file the user only asked to read). Guarded so "read then mutate
+  the same file", "read the current files then rewrite them", and forbidden-target
+  ("do not edit scripts.js") shapes keep their existing mutation targets, and a
+  genuinely-unmutated write target still blocks (anti-overclaim preserved). Fixes the
+  scn-16 outcome-truth violation found in the post-refactor sweep.
 - [T894] Added deterministic E2E mode coverage at the `TurnProcessor` route
   seam. Scenario definitions and JSON resources can now select a mode, and the
   new route-through harness covers Ask mutation refusal, Plan read-only posture,
