@@ -3,7 +3,11 @@ package dev.talos.cli.repl.slash;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.runtime.Result;
+import dev.talos.spi.types.ModelRef;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,6 +32,45 @@ class SetModelCommandTest {
         assertTrue(text.contains("Model not found: ollama/gpt-oss:20b"), text);
         assertTrue(text.contains("Tip: /models"), text);
         assertFalse(text.contains("configured/running GGUF"), text);
+    }
+
+    @Test
+    void downloadedButUnconfiguredGgufGetsActionableSwitchGuidance() {
+        // T899: the user typed a bare downloaded GGUF name; /set model 404'd with a
+        // bare "Tip: /models". It must instead explain it is on disk-but-unconfigured
+        // and how to actually switch.
+        var downloaded = List.of(
+                ModelRef.of("llama_cpp", "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"),
+                ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded);
+
+        assertTrue(text.contains("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"), text);
+        assertTrue(text.toLowerCase(Locale.ROOT).contains("downloaded but not configured"), text);
+        assertTrue(text.contains("talos setup models"), text);
+        assertTrue(text.contains("restart Talos"), text);
+        assertFalse(text.contains("Tip: /models"), text);
+    }
+
+    @Test
+    void downloadedMatchIsCaseAndGgufSuffixInsensitive() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "QWEN2.5-CODER-14B-INSTRUCT-Q4_K_M.gguf", downloaded);
+
+        assertTrue(text.toLowerCase(Locale.ROOT).contains("downloaded but not configured"), text);
+    }
+
+    @Test
+    void unknownNameWithDownloadedListFallsBackToGenericHint() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
+
+        String text = SetModelCommand.modelNotFoundMessage("totally-unknown-model", downloaded);
+
+        assertTrue(text.contains("Model not found: totally-unknown-model"), text);
+        assertTrue(text.contains("Tip: /models"), text);
     }
 
     @Test
