@@ -1,6 +1,6 @@
-# [T906-open-medium] Shell-command hint still swallows short prose
+# [T906-done-medium] Shell-command hint still swallows short prose
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -15,7 +15,7 @@ Priority: medium
 - File diff summary: none
 - Approval choices: none
 - Checkpoint id: n/a
-- Verification status: focused tests pass, but review found an uncovered false positive
+- Verification status: focused red/green regression added and passing locally
 
 Redacted prompt sequence:
 
@@ -208,10 +208,25 @@ Add broader commands if runtime code changes:
 - No candidate bump.
 - Add a `CHANGELOG.md` `Unreleased` line when complete.
 
+## Resolution - 2026-06-30
+
+- Replaced the known-subcommand `tokens.length <= 3` heuristic with a narrower
+  syntactic boundary: exact two-token command, flag-bearing command, or the
+  documented `talos setup models` positional command shape.
+- Added `ShellCommandHintTest` regressions proving `talos run tests`,
+  `talos status repo`, and `talos diagnose issue` reach the model instead of
+  receiving the shell-command hint.
+- Kept the existing useful hints for `talos doctor`, `talos status --verbose`,
+  `talos setup models --write --force`, `talos setup models`, and
+  path-qualified invocations such as `./talos setup`.
+- Focused evidence: `.\gradlew.bat test --tests
+  "dev.talos.cli.repl.ShellCommandHintTest" --no-daemon` failed red on the
+  three short-prose examples, then passed after the heuristic change.
+
 ## Known Risks
 
-- Tightening too far could let real shell invocations fall through to the
-  model again.
+- A clean installed-product smoke should still verify the REPL hint after the
+  next global install/candidate build.
 
 ## Known Follow-Ups
 

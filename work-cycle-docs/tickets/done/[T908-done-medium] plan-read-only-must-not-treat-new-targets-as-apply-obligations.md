@@ -1,6 +1,6 @@
-# [T908-open-medium] Plan read-only must not treat new targets as apply obligations
+# [T908-done-medium] Plan read-only must not treat new targets as apply obligations
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -18,7 +18,9 @@ Priority: medium
 - File diff summary: none for Plan probes; `plan-refuse.txt` and `plan-only.txt` were not created
 - Approval choices: none; Plan did not request approval
 - Checkpoint id: n/a
-- Verification status: live installed audit found a current-turn/repair-control contradiction; deterministic regression not yet added
+- Verification status: deterministic regression added; focused T908 gate,
+  adjacent posture/reprompt gate, ticket/wiki hygiene, standalone wiki lint,
+  diff check, and full `check` green
 
 Additional installed-product corroboration:
 
@@ -289,12 +291,28 @@ Refactor scope:
 
 ## Tests / Evidence
 
-Required deterministic regression:
+Added deterministic regression:
 
-- Unit test: `PlanModeTest` for create-new-file plan/refusal with read-only tools only
-- Integration/executor test: `ToolCallLoop` or prompt-debug test proving no expected-target mutation overlay under Plan read-only
-- JSON e2e scenario: optional mode-specific scenario once mode selection is available in the scenario harness
-- Trace assertion: Plan trace has mutationAllowed=false, no write tools, no approval, and no read of the nonexistent output target
+- Unit test: `CapabilityPosturePolicyTest.planReadOnlyDoesNotTreatCreateTargetAsReadEvidence`
+  proves direct Plan create targets are removed from read evidence under
+  `PLAN_READ_ONLY`.
+- Unit test: `CapabilityPosturePolicyTest.askReadOnlyDoesNotTreatCreateTargetAsReadEvidence`
+  proves the same create-target ceiling under `ASK_READ_ONLY`.
+- Unit test: `CapabilityPosturePolicyTest.planReadOnlyDoesNotTreatNewFilePlanTargetAsReadEvidence`
+  covers the audited "Plan how to add a new file ..." shape.
+- Unit test: `CapabilityPosturePolicyTest.readOnlyCreateFromSourceKeepsSourceEvidenceButDropsOutputTarget`
+  preserves source evidence while dropping the output target in read-only
+  posture.
+- Guard test: `CapabilityPosturePolicyTest.readOnlyEditTargetCanStillBeReadForPlanning`
+  prevents overcorrecting existing edit targets.
+- Unit test: `EvidenceObligationPolicyTest.planReadOnlyCreateTargetDoesNotRequireTargetRead`
+  proves the effective Plan contract does not produce `READ_TARGET_REQUIRED`.
+- Prompt/frame test: `PlanModeTest.createOnlyPlanTargetDoesNotBecomeReadTargetInPromptFrame`
+  proves the model prompt no longer advertises `READ_TARGET_REQUIRED`, "read
+  the named target before answering", or `requiredTargets: plan-only.txt`.
+- Reprompt test: `ToolRepromptObligationSelectorTest.expectedTargetFactsBeforeMutationProgressDoNotRaiseObligationOrFeedOverlayTargets`
+  proves inactive expected-target facts do not feed mutation-progress overlay
+  targets.
 
 Manual/TalosBench rerun:
 
@@ -309,10 +327,21 @@ Commands:
 .\gradlew.bat test --tests "dev.talos.cli.modes.PlanModeTest" --tests "dev.talos.runtime.policy.EvidenceObligationPolicyTest" --no-daemon
 ```
 
-Add broader commands if runtime code changes:
+Executed focused gate:
 
 ```powershell
-.\gradlew.bat test --tests "dev.talos.runtime.toolcall.*" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.policy.CapabilityPosturePolicyTest" --tests "dev.talos.runtime.policy.EvidenceObligationPolicyTest" --tests "dev.talos.cli.modes.PlanModeTest" --tests "dev.talos.runtime.toolcall.ToolRepromptObligationSelectorTest" --no-daemon --rerun-tasks
+```
+
+Executed adjacent shared-policy gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest" --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --tests "dev.talos.runtime.toolcall.ToolRepromptMessageOverlayTest" --tests "dev.talos.runtime.toolcall.ToolRepromptRequestBuilderTest" --tests "dev.talos.core.llm.ToolCallRepromptStageToolSurfaceTest" --no-daemon --rerun-tasks
+```
+
+Executed broader runtime gate:
+
+```powershell
 .\gradlew.bat check --no-daemon
 ```
 

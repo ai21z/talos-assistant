@@ -1,6 +1,6 @@
-# [T909-open-medium] Protected-read approval must not offer session remember when ineligible
+# [T909-done-medium] Protected-read approval must not offer session remember when ineligible
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -16,7 +16,7 @@ Priority: medium
 - File diff summary: none
 - Approval choices: `a` on protected `.env` read, then `n` when the next `.env` read prompted again
 - Checkpoint id: n/a
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: deterministic regression added and focused gates green
 
 Additional installed-product corroboration:
 
@@ -180,6 +180,14 @@ Code evidence:
 - `DeclarativePermissionPolicy` sets `rememberEligible=false` for protected
   read approvals:
   `src/main/java/dev/talos/runtime/policy/DeclarativePermissionPolicy.java`.
+- `TurnProcessor` records `rememberEligible`, but the ASK path still invokes
+  `approvalGate.approveFull(...)` unconditionally, so the rendered approval
+  surface is not selected from the eligibility bit:
+  `src/main/java/dev/talos/runtime/TurnProcessor.java`.
+- `CliApprovalGate.approveOnce(...)` already exists and deliberately does not
+  offer or accept session remember, proving the fix is a call-path/interface
+  selection issue rather than a string-only copy edit:
+  `src/main/java/dev/talos/cli/approval/CliApprovalGate.java`.
 - `TurnProcessor` records session approval only when the response is
   `APPROVED_REMEMBER` and `permissionDecision.rememberEligible()` is true:
   `src/main/java/dev/talos/runtime/TurnProcessor.java`.
@@ -237,9 +245,10 @@ Likely code/document areas:
 Why a one-off patch is insufficient:
 
 ```text
-The same full approval gate is used for writes, protected reads, and commands.
-The prompt must reflect `rememberEligible`, otherwise future ineligible approval
-classes can repeat the same UX lie.
+The same `TurnProcessor` tool-call ASK path currently routes writes, protected
+reads, and command approvals through the full approval gate. The prompt must
+reflect `rememberEligible`, otherwise future ineligible approval classes can
+repeat the same UX lie.
 ```
 
 ## Goal
@@ -264,6 +273,12 @@ selection. For ineligible approvals, call a once-only prompt or render a full
 window whose choices omit `a`. Keep the current safer policy that protected
 reads do not become session-remembered unless a separate explicit feature is
 designed.
+
+This is a structural approval-surface fix: the implementation must select an
+approval option surface from `PermissionDecision.rememberEligible()` or pass an
+equivalent options object through the approval gate. Editing only
+`ApprovalPromptText` would be insufficient if `a/all/always` remains accepted on
+an ineligible path.
 ```
 
 ## Architecture Metadata
@@ -321,10 +336,13 @@ Refactor scope:
 
 ## Tests / Evidence
 
-Required deterministic regression:
+Deterministic regression:
 
-- Unit test: `CliApprovalGateTest` or approval-renderer test for once-only protected read prompt
-- Integration/executor test: `TurnProcessorPermissionPolicyTest` for protected read remember ineligible
+- Unit test: `CliApprovalGateTest` covers once-only approval prompt rendering and response handling.
+- Integration/executor test: `TurnProcessorPermissionPolicyTest.protectedReadUsesOnceOnlyApprovalSurface`
+  proves protected reads use `approveOnce`, not `approveFull`.
+- Existing integration test: `TurnProcessorPermissionPolicyTest.sessionRememberStillBypassesGateForSafeWriteButNotProtectedPath`
+  proves safe writes still use and honor session remember.
 - JSON e2e scenario: n/a
 - Trace assertion: permission decision records rememberEligible=false for protected reads
 
@@ -338,6 +356,13 @@ Manual/TalosBench rerun:
 Commands:
 
 ```powershell
+.\gradlew.bat test --tests "dev.talos.cli.approval.CliApprovalGateTest" --tests "dev.talos.runtime.TurnProcessorPermissionPolicyTest" --no-daemon
+```
+
+Executed green:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.TurnProcessorPermissionPolicyTest.protectedReadUsesOnceOnlyApprovalSurface" --no-daemon
 .\gradlew.bat test --tests "dev.talos.cli.approval.CliApprovalGateTest" --tests "dev.talos.runtime.TurnProcessorPermissionPolicyTest" --no-daemon
 ```
 

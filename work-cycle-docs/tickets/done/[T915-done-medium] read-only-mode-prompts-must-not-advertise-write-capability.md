@@ -1,6 +1,6 @@
-# [T915-open-medium] Read-only mode prompts must not advertise write capability
+# [T915-done-medium] Read-only mode prompts must not advertise write capability
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -18,7 +18,9 @@ Priority: medium
 - File diff summary: none; direct Ask mutation request did not create `ask-should-not-land.txt`, and prompt-injection target `injected-gptoss-ask.txt` was absent after final disk check
 - Approval choices: protected-read `n`, then protected-read `y`; no mutation approval was requested in Ask
 - Checkpoint id: n/a
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: deterministic regressions added; focused T915 gate,
+  adjacent prompt/capability-frame gate, ticket/wiki hygiene, standalone wiki
+  lint, diff check, and full `check` green
 
 Additional GPT-OSS Plan-mode corroboration:
 
@@ -157,15 +159,41 @@ Make capability advertisement posture-aware:
 
 ## Regression Test
 
-- `SystemPromptBuilderTest`: `forAsk()` prompt with read-only tool mode must not
-  contain `CAN create files`, `talos.write_file tool that writes files`, or
-  "call talos.write_file".
-- Equivalent Plan assertion if `forPlan()` shares the same identity section.
-- Prompt inspector test: Ask native tools and prompt text both expose only
-  read-only tools for read-only turns.
-- Live deterministic scenario: direct Ask mutation returns the local nudge, no
-  LLM call, no approval prompt, no `BLOCKED_BY_POLICY`, and prompt-debug for a
-  later Ask read-only turn contains no write-capability advertisement.
+Added deterministic regression:
+
+- `SystemPromptBuilderTest.askAndPlanIdentityDoNotAdvertiseWriteCapability`
+  proves bare Ask and Plan prompts omit `CAN create files`,
+  `talos.write_file tool that writes files`, and "call talos.write_file".
+- `SystemPromptBuilderTest.readOnlyToolModeOmitsMutatingToolDescriptors` and
+  `nativeReadOnlyToolModeOmitsMutatingToolDescriptors` now also assert the
+  read-only Unified prompt has no shared write-capability advertisement.
+- `SystemPromptBuilderTest.unifiedWritablePromptStillAdvertisesWriteCapabilityWhenWriteToolVisible`
+  preserves the Agent/Unified writable prompt path when the visible surface
+  actually includes `talos.write_file`.
+- `AskModeTest.askLlmRequestUsesReadOnlyNativeAndPromptToolSurface` proves Ask
+  prompt-debug/native request evidence has only read tools and no shared
+  write-capability sentence.
+- `PlanModeTest.mutationShapedPromptProducesPlanWithReadOnlySurface` proves Plan
+  prompt-debug/native request evidence has no write/run tools and no shared
+  write-capability sentence.
+
+Executed focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.llm.SystemPromptBuilderTest" --tests "dev.talos.cli.modes.AskModeTest" --tests "dev.talos.cli.modes.PlanModeTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon --rerun-tasks
+```
+
+Executed adjacent prompt/capability-frame gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest" --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --tests "dev.talos.core.llm.ToolCallRepromptStageToolSurfaceTest" --tests "dev.talos.core.llm.SystemPromptBuilderTest" --no-daemon --rerun-tasks
+```
+
+Executed broader runtime gate:
+
+```powershell
+.\gradlew.bat check --no-daemon
+```
 
 ## Known Follow-Up
 

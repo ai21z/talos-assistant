@@ -35,6 +35,12 @@ public final class TaskContractResolver {
                     + "(?:change|edit|modify|write|create|save|apply|touch|mutate|use)"
                     + "|\\bwithout\\s+(?:changing|using))\\s+(.{0,240})");
 
+    private static final Pattern IGNORED_INSTRUCTION_OUTPUT_TARGET_SPAN = Pattern.compile(
+            "(?i)\\b(?:ignore|disregard)\\s+(?:any\\s+)?"
+                    + "(?:instruction|instructions|directive|directives)\\b"
+                    + ".{0,240}?\\b(?:to|that\\s+(?:says?|tells?|asks?)\\s+(?:you\\s+)?to)\\s+"
+                    + "(?:create|write|save|edit|modify|change|touch|mutate|use)\\s+(.{0,240})");
+
     private static final Pattern AVOID_TARGET_SPAN = Pattern.compile(
             "(?i)\\bavoid\\s+(.{0,240})");
 
@@ -152,6 +158,9 @@ public final class TaskContractResolver {
             "gradle", "gradle_test", "gradle_check", "gradle_build", "gradle_install_dist",
             "gradle_e2e_test", "dev.talos."
     );
+
+    private static final Pattern EXPLICIT_NATURAL_COMMAND_EXECUTION = Pattern.compile(
+            "(?i)\\b(?:run|execute|call|try)\\s+(?:the\\s+)?command\\b");
 
     private static final Pattern SIMPLE_DIRECTORY_LISTING = Pattern.compile(
             "(?i)^\\s*(?:"
@@ -527,6 +536,11 @@ public final class TaskContractResolver {
             expectedTargets = withoutForbiddenTargets(expectedTargets, readForbiddenTargets);
             sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, readForbiddenTargets);
         }
+        Set<String> ignoredInstructionOutputTargets = extractIgnoredInstructionOutputTargets(original);
+        if (!ignoredInstructionOutputTargets.isEmpty()) {
+            expectedTargets = withoutForbiddenTargets(expectedTargets, ignoredInstructionOutputTargets);
+            sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, ignoredInstructionOutputTargets);
+        }
 
         return new TaskContract(
                 type,
@@ -874,12 +888,20 @@ public final class TaskContractResolver {
         if (userRequest == null || userRequest.isBlank()) return Set.of();
         Set<String> out = new LinkedHashSet<>();
         addTargetsFromSpanMatches(out, NEGATED_TARGET_SPAN.matcher(userRequest));
+        out.addAll(extractIgnoredInstructionOutputTargets(userRequest));
         addTargetsFromSpanMatches(out, AVOID_TARGET_SPAN.matcher(userRequest));
         addTargetsFromSpanMatches(out, LEAVE_TARGET_ALONE_SPAN.matcher(userRequest));
         out.addAll(extractPreserveUnchangedTargets(userRequest));
         addTailwindNegativeLocalArtifactTargets(out, userRequest);
         addFrontendFrameworkNegativeLocalArtifactTargets(out, userRequest);
         addDirectNotTargets(out, userRequest);
+        return Set.copyOf(out);
+    }
+
+    private static Set<String> extractIgnoredInstructionOutputTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        Set<String> out = new LinkedHashSet<>();
+        addTargetsFromSpanMatches(out, IGNORED_INSTRUCTION_OUTPUT_TARGET_SPAN.matcher(userRequest));
         return Set.copyOf(out);
     }
 
@@ -1133,6 +1155,7 @@ public final class TaskContractResolver {
         if (looksUnsupportedPythonCommandExecutionRequest(lower)) return true;
         if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
         if (!lower.contains("command")) return false;
+        if (EXPLICIT_NATURAL_COMMAND_EXECUTION.matcher(lower).find()) return true;
         return lower.contains("if it can't run")
                 || lower.contains("if it cannot run")
                 || lower.contains("safe command")

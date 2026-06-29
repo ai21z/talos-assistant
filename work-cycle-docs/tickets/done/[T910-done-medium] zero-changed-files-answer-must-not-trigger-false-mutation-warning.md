@@ -1,6 +1,6 @@
-# [T910-open-medium] Zero changed-files answer must not trigger false mutation warning
+# [T910-done-medium] Zero changed-files answer must not trigger false mutation warning
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -16,7 +16,7 @@ Priority: medium
 - File diff summary: none; final disk check showed `ask-edge.txt` and `injected.txt` absent, README unchanged
 - Approval choices: none
 - Checkpoint id: n/a
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: live installed audit reproduced; deterministic regression added and passing
 
 Redacted prompt sequence:
 
@@ -138,6 +138,23 @@ no/none/zero/no files/no file/nothing wording before broad `i created` and
 answer when no mutation history exists.
 ```
 
+## Implementation Evidence
+
+- Added no-change and positive-claim phrase matrices to
+  `MutationFailureAnswerRendererTest`.
+- Added the executor-wrapper regression
+  `AssistantTurnExecutorTest.ClaimVsActionTests.zeroChangedFilesAnswerIsNotAnnotated`.
+- `MutationFailureAnswerRenderer.containsMutationClaim(...)` now applies
+  marker-local no-change handling:
+  - first-person markers such as `I created` and `I modified` are ignored only
+    when their own phrase says `zero/no files` or `nothing`;
+  - passive `changes were applied` markers are ignored only when directly scoped
+    by `no/zero changes`;
+  - contradictory answers such as `No files were modified, but I created
+    report.md` still trigger `FALSE_MUTATION_ANNOTATION`.
+- Existing direct changed-files questions continue to use the runtime mutation
+  ledger path when no mutation history exists.
+
 ## Architecture Metadata
 
 Capability:
@@ -219,6 +236,17 @@ Add broader commands if runtime code changes:
 .\gradlew.bat check --no-daemon
 ```
 
+Actual verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.outcome.MutationFailureAnswerRendererTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest$ClaimVsActionTests"
+.\gradlew.bat test --tests "dev.talos.runtime.outcome.*" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest"
+.\gradlew.bat test --tests "dev.talos.docs.TicketHygieneTest" --tests "dev.talos.wiki.WikiLintStructuralTest"
+.\gradlew.bat check --no-daemon
+```
+
+All are green.
+
 ## Work-Test Cycle Notes
 
 - Use the inner dev loop.
@@ -233,4 +261,3 @@ Add broader commands if runtime code changes:
 ## Known Follow-Ups
 
 - None.
-

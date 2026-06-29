@@ -450,6 +450,7 @@ class ExplainLastTurnCommandTest {
         String text = ((Result.TrustedInfo) result).text;
         assertTrue(text.contains("Local trace: trc-local"), text);
         assertTrue(text.contains("Schema: 2"), text);
+        assertTrue(text.contains("Mode: auto"), text);
         assertTrue(text.contains("Redaction: DEFAULT"), text);
         assertTrue(text.contains("Prompt Audit"), text);
         assertTrue(text.contains("actionObligation: MUTATING_TOOL_REQUIRED"), text);
@@ -462,6 +463,72 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("Verification: FAILED - Static verification failed"), text);
         assertTrue(text.contains("scripts.js missing"), text);
         assertTrue(text.contains("Outcome: FAILED"), text);
+    }
+
+    @Test
+    void traceViewRendersPlanModeFromLocalTrace() {
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-plan-mode",
+                        "sid",
+                        2,
+                        "2026-06-28T21:00:00Z")
+                .mode("plan")
+                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                        "FILE_CREATE",
+                        false,
+                        false,
+                        true,
+                        List.of("plan-refuse.txt"),
+                        List.of(),
+                        "plan-mode-read-only"))
+                .toolSurface(List.of("talos.read_file"), List.of("talos.read_file"), "plan read-only")
+                .build();
+        TurnRecord turn = record(
+                2,
+                "Create plan-refuse.txt.",
+                "Plan is read-only; switch to /mode agent to apply changes.",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("Mode: plan"), text);
+        assertTrue(text.contains("Task contract: FILE_CREATE mutationAllowed=false"), text);
+        assertTrue(text.contains("Visible tools: talos.read_file"), text);
+    }
+
+    @Test
+    void traceViewRendersCanonicalAgentModeForLegacyAliasResolvedTrace() {
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-agent-alias",
+                        "sid",
+                        3,
+                        "2026-06-28T21:05:00Z")
+                .mode("agent")
+                .toolSurface(
+                        List.of("talos.read_file", "talos.write_file"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        "legacy alias resolved to canonical agent")
+                .build();
+        TurnRecord turn = record(
+                3,
+                "Apply the requested edit.",
+                "Edit prepared.",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("Mode: agent"), text);
+        assertFalse(text.contains("Mode: dev"), text);
+        assertFalse(text.contains("Mode: chat"), text);
+        assertFalse(text.contains("Mode: unified"), text);
     }
 
     @Test

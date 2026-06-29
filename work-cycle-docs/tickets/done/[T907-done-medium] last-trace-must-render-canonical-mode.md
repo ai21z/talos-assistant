@@ -1,6 +1,6 @@
-# [T907-open-medium] Last trace must render canonical mode
+# [T907-done-medium] Last trace must render canonical mode
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -16,7 +16,7 @@ Priority: medium
 - File diff summary: none
 - Approval choices: none for read-only mode probes; later approval probes separately verified deny/yes/session behavior
 - Checkpoint id: n/a
-- Verification status: live installed audit found a trace-rendering gap; deterministic regression not yet added
+- Verification status: focused renderer regression added and passing locally
 
 Redacted prompt sequence:
 
@@ -239,10 +239,23 @@ Add broader commands if runtime code changes:
 - No candidate bump.
 - Add a `CHANGELOG.md` `Unreleased` line when complete.
 
+## Resolution - 2026-06-30
+
+- `/last trace` now renders `Mode: <value>` in the Local Trace block from
+  `LocalTurnTrace.mode()`, using `none recorded` only for old/blank trace
+  records.
+- `ExplainLastTurnCommandTest` now pins the stored-trace command path, a Plan
+  read-only trace, and a legacy-alias-resolved Agent trace.
+- No mode routing, approval, permission, checkpoint, or trace schema behavior
+  changed.
+- Focused evidence: `.\gradlew.bat test --tests
+  "dev.talos.cli.repl.slash.ExplainLastTurnCommandTest" --no-daemon` failed
+  red on the missing `Mode:` lines, then passed after the renderer change.
+
 ## Known Risks
 
-- A purely renderer-level fix could pass unit tests while another trace path
-  still omits mode. Keep the installed `/last trace` smoke in the closeout.
+- A clean installed-product smoke should still confirm the rendered mode line
+  after the next global install/candidate build.
 
 ## Known Follow-Ups
 

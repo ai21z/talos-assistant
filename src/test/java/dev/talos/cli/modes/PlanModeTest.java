@@ -14,7 +14,9 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,25 +63,100 @@ class PlanModeTest {
         assertFalse(prompt.contains("- **talos.write_file**"), prompt);
         assertFalse(prompt.contains("- **talos.edit_file**"), prompt);
         assertFalse(prompt.contains("- **talos.run_command**"), prompt);
+        assertFalse(prompt.contains("You CAN create files"), prompt);
+        assertFalse(prompt.contains("talos.write_file tool that writes files"), prompt);
+        assertFalse(prompt.contains("When the user asks you to create or write a file, call talos.write_file"),
+                prompt);
+        assertFalse(prompt.contains("Never say \"I cannot create files\""), prompt);
     }
 
     @Test
-    void commandRequestDoesNotExposeRunCommandInPlanMode() throws Exception {
+    void createOnlyPlanTargetDoesNotBecomeReadTargetInPromptFrame() throws Exception {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 engineConfig(),
-                List.of(new LlmClient.StreamResult("Plan the verification steps without running commands.", List.of())),
+                List.of(new LlmClient.StreamResult("1. Create plan-only.txt in Agent mode.\n2. Verify content.", List.of())),
                 8192);
         var ctx = Context.builder(engineConfig())
                 .llm(recorded.client())
                 .toolRegistry(toolRegistry())
                 .build();
 
-        new PlanMode().handle("Run Gradle check and plan any fixes.", WS, ctx);
+        Optional<Result> result = new PlanMode().handle(
+                "Plan how to add a new file plan-only.txt with exactly PLAN ONLY. Do not edit anything.",
+                WS,
+                ctx);
 
+        assertTrue(result.isPresent());
         ChatRequest request = recorded.requests().getFirst();
-        assertFalse(toolNames(request).contains("talos.run_command"), toolNames(request).toString());
+        assertFalse(toolNames(request).contains("talos.write_file"), toolNames(request).toString());
+        assertFalse(toolNames(request).contains("talos.edit_file"), toolNames(request).toString());
         String prompt = joinedMessages(request);
-        assertFalse(prompt.contains("- **talos.run_command**"), prompt);
+        assertFalse(prompt.contains("evidenceObligation: READ_TARGET_REQUIRED"), prompt);
+        assertFalse(prompt.contains("read the named target before answering"), prompt);
+        assertFalse(prompt.contains("requiredTargets: plan-only.txt"), prompt);
+    }
+
+    @Test
+    void commandRequestReturnsReadOnlyNudgeWithoutCallingLlm() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                engineConfig(),
+                List.of(new LlmClient.StreamResult("should not be called", List.of())),
+                8192);
+        var ctx = Context.builder(engineConfig())
+                .llm(recorded.client())
+                .toolRegistry(toolRegistry())
+                .build();
+
+        Optional<Result> result = new PlanMode().handle(
+                "Run the command Get-ChildItem -Name to list workspace files. "
+                        + "If Plan mode cannot run commands, say so plainly and do not inspect files just to compensate.",
+                WS,
+                ctx);
+
+        assertTrue(result.isPresent());
+        String body = result.get().toString();
+        assertTrue(body.contains("Plan is read-only"), body);
+        assertTrue(body.contains("cannot run commands"), body);
+        assertTrue(body.contains("/mode agent"), body);
+        assertTrue(recorded.requests().isEmpty(), "Plan command refusal must not call the LLM");
+    }
+
+    @Test
+    void noToolDirectAnswerPromptDoesNotInjectWorkspaceManifest(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # Plan fixture
+                Visible project codename: PLAN-ARC-42
+                """);
+        Files.writeString(workspace.resolve(".env"), "TALOS_FAKE_SECRET=must-not-enter-prompt\n");
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                engineConfig(),
+                List.of(new LlmClient.StreamResult(
+                        "I cannot verify the codename without inspecting files.",
+                        List.of())),
+                8192);
+        var ctx = Context.builder(engineConfig())
+                .llm(recorded.client())
+                .toolRegistry(toolRegistry())
+                .build();
+
+        Optional<Result> result = new PlanMode().handle(
+                "Without reading or listing any files, tell me the workspace codename. "
+                        + "If you cannot know it from current verified evidence, say exactly: "
+                        + "I cannot verify the codename without inspecting files.",
+                workspace,
+                ctx);
+
+        assertTrue(result.isPresent());
+        assertEquals(1, recorded.requests().size());
+        ChatRequest request = recorded.requests().getFirst();
+        assertTrue(toolNames(request).isEmpty(), toolNames(request).toString());
+        String prompt = joinedMessages(request);
+        assertFalse(prompt.contains("File structure:"), prompt);
+        assertFalse(prompt.contains("README (excerpt):"), prompt);
+        assertFalse(prompt.contains("PLAN-ARC-42"), prompt);
+        assertFalse(prompt.contains(".env"), prompt);
+        assertFalse(prompt.contains("must-not-enter-prompt"), prompt);
     }
 
     private static Config engineConfig() {

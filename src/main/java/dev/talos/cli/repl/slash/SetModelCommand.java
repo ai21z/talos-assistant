@@ -90,18 +90,34 @@ public final class SetModelCommand implements Command {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("\"").append(matched).append("\" is downloaded but not configured, so it is not selectable here yet.");
-        sb.append("\nManaged llama.cpp binds one GGUF at launch (no hot-swap). To switch, edit ~/.talos/config.yaml under engines.llama_cpp:");
+        sb.append("\nManaged llama.cpp binds one GGUF at launch (no hot-swap). To switch, edit ~/.talos/config.yaml with this redaction-safe patch:");
         if (profile != null) {
-            sb.append("\n  hf_repo: \"").append(profile.hfRepo()).append("\"");
-            sb.append("\n  hf_file: \"").append(profile.hfFile()).append("\"");
+            sb.append(cannedProfileConfigPatch(profile));
             sb.append("\nthen restart Talos and confirm with /models.");
-            sb.append("\n(Or run in your terminal: talos setup models --profile ").append(profile.alias())
-                    .append(" --server-path <your engines.llama_cpp.server_path> --write --force)");
+            sb.append("\nTemplate alternative (fill in your local llama-server path): talos setup models --profile ")
+                    .append(profile.alias())
+                    .append(" --server-path <your engines.llama_cpp.server_path> --write --force");
         } else {
             sb.append("\n  hf_file: \"").append(matched).append(".gguf\"   (and set hf_repo to its Hugging Face repo, or use model_path)");
             sb.append("\nthen restart Talos and confirm with /models.");
         }
         return sb.toString();
+    }
+
+    private static String cannedProfileConfigPatch(LlamaCppModelProfiles.CannedProfile profile) {
+        String alias = yamlScalar(profile.alias());
+        return "\n  llm:"
+                + "\n    model: \"" + alias + "\""
+                + "\n  engines:"
+                + "\n    llama_cpp:"
+                + "\n      model: \"" + alias + "\""
+                + "\n      hf_repo: \"" + yamlScalar(profile.hfRepo()) + "\""
+                + "\n      hf_file: \"" + yamlScalar(profile.hfFile()) + "\"";
+    }
+
+    private static String yamlScalar(String value) {
+        if (value == null) return "";
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /** Returns the on-disk GGUF name matching {@code sanitized} (ignoring case, a

@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,70 @@ class ExpectedTargetProgressAccountingTest {
         List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
 
         assertTrue(remaining.isEmpty(), remaining.toString());
+    }
+
+    @Test
+    void existingSingleFileStaticWebRedesignDoesNotHardRequireAbsentUnnamedSatellites(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><style>body { font-family: sans-serif; }</style></head>
+                <body><main>Old page</main></body></html>
+                """);
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create a single-file static webpage in index.html with inline styles."),
+                ChatMessage.assistant("Created index.html."),
+                ChatMessage.user("Make this page better with a complete redesign, modern styling, and interaction."));
+        assertEquals(
+                Set.of("index.html", "style.css", "script.js"),
+                WorkspaceTargetReconciler.reconcile(
+                        TaskContractResolver.fromMessages(messages),
+                        workspace)
+                        .expectedTargets());
+        LoopState state = state(messages, workspace);
+        state.toolOutcomes.add(outcome("talos.write_file", "index.html"));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertTrue(remaining.isEmpty(), remaining.toString());
+    }
+
+    @Test
+    void staticWebCreateStillHardRequiresConventionalSatellitesAfterOnlyHtmlMutation(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<!doctype html><html><body>Created</body></html>\n");
+        LoopState state = state(
+                "Create a modern synthwave website here with CSS styling and JavaScript interaction.",
+                workspace);
+        state.toolOutcomes.add(outcome("talos.write_file", "index.html"));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertEquals(List.of("script.js", "style.css"), remaining);
+    }
+
+    @Test
+    void explicitStaticWebSatellitesRemainHardTargetsForExistingSingleFileRedesign(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html><head><style>body { font-family: sans-serif; }</style></head>
+                <body><main>Old page</main></body></html>
+                """);
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create a single-file static webpage in index.html with inline styles."),
+                ChatMessage.assistant("Created index.html."),
+                ChatMessage.user(
+                        "Make this page better with a complete redesign. "
+                                + "Use exactly index.html, style.css, and script.js."));
+        LoopState state = state(messages, workspace);
+        state.toolOutcomes.add(outcome("talos.write_file", "index.html"));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertEquals(List.of("script.js", "style.css"), remaining);
     }
 
     @Test
@@ -158,6 +224,18 @@ class ExpectedTargetProgressAccountingTest {
                 "",
                 List.of(),
                 new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(userRequest))),
+                workspace,
+                null,
+                null,
+                5,
+                0);
+    }
+
+    private static LoopState state(List<ChatMessage> messages, Path workspace) {
+        return new LoopState(
+                "",
+                List.of(),
+                new ArrayList<>(messages),
                 workspace,
                 null,
                 null,

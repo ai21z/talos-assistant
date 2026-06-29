@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Renders final-answer truthfulness text for failed or blocked mutation turns. */
 public final class MutationFailureAnswerRenderer {
@@ -39,6 +40,22 @@ public final class MutationFailureAnswerRenderer {
             "has been updated to",
             "has been modified to"
     );
+    private static final String PAST_MUTATION_ACTION =
+            "(?:updated|edited|changed|applied|written|wrote|created|modified|saved|replaced)";
+    private static final String PAST_MUTATION_ACTION_SEQUENCE =
+            PAST_MUTATION_ACTION + "(?:\\s+(?:or|and)\\s+" + PAST_MUTATION_ACTION + ")*";
+    private static final Pattern FIRST_PERSON_ZERO_FILE_MUTATION = Pattern.compile(
+            "\\bi\\s+(?:have\\s+|['’]ve\\s+)?"
+                    + PAST_MUTATION_ACTION_SEQUENCE
+                    + "\\s+(?:exactly\\s+)?(?:zero|0|no)\\s+files?\\b");
+    private static final Pattern FIRST_PERSON_NOTHING_MUTATION = Pattern.compile(
+            "\\bi\\s+(?:have\\s+|['’]ve\\s+)?"
+                    + PAST_MUTATION_ACTION_SEQUENCE
+                    + "\\s+nothing\\b");
+    private static final Pattern PASSIVE_NO_CHANGE_MUTATION = Pattern.compile(
+            "\\b(?:no|zero|0)\\s+(?:file\\s+)?changes?\\s+"
+                    + "(?:have\\s+been\\s+|has\\s+been\\s+|were\\s+|was\\s+)?"
+                    + PAST_MUTATION_ACTION_SEQUENCE + "\\b");
 
     public static final String FALSE_MUTATION_ANNOTATION =
             "[Truth check: the response below claims a file was changed, "
@@ -79,9 +96,47 @@ public final class MutationFailureAnswerRenderer {
         if (answer == null || answer.isBlank()) return false;
         String lower = answer.toLowerCase();
         for (String marker : MUTATION_CLAIM_MARKERS) {
-            if (lower.contains(marker)) return true;
+            int start = lower.indexOf(marker);
+            while (start >= 0) {
+                if (!isNoChangeMarkerContext(lower, marker, start)) return true;
+                start = lower.indexOf(marker, start + marker.length());
+            }
         }
         return false;
+    }
+
+    private static boolean isNoChangeMarkerContext(String lower, String marker, int markerStart) {
+        if (lower == null || marker == null || markerStart < 0) return false;
+        int markerEnd = Math.min(lower.length(), markerStart + marker.length());
+        int sentenceEnd = sentenceEnd(lower, markerEnd);
+        if (marker.startsWith("i ")) {
+            String firstPersonWindow = lower.substring(
+                    markerStart,
+                    Math.min(sentenceEnd, markerStart + 140));
+            return FIRST_PERSON_ZERO_FILE_MUTATION.matcher(firstPersonWindow).find()
+                    || FIRST_PERSON_NOTHING_MUTATION.matcher(firstPersonWindow).find();
+        }
+        if (marker.startsWith("changes ") || marker.startsWith("the changes ")) {
+            String passiveWindow = lower.substring(
+                    Math.max(0, markerStart - 18),
+                    Math.min(sentenceEnd, markerEnd + 60));
+            return PASSIVE_NO_CHANGE_MUTATION.matcher(passiveWindow).find();
+        }
+        return false;
+    }
+
+    private static int sentenceEnd(String text, int from) {
+        if (text == null || text.isBlank()) return 0;
+        int start = Math.max(0, from);
+        int end = text.length();
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '.' || c == '!' || c == '?' || c == '\n') {
+                end = i + 1;
+                break;
+            }
+        }
+        return end;
     }
 
     public static String annotateIfFalseMutationClaim(String answer, ToolCallLoop.LoopResult loopResult) {

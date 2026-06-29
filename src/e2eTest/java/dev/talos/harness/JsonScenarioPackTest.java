@@ -671,8 +671,9 @@ class JsonScenarioPackTest {
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
                     .assertAnswerContains("[Used 3 tool(s): talos.list_dir, talos.read_file")
-                    .assertAnswerContains("Confirmed from the files")
-                    .assertAnswerContains("references script.js")
+                    .assertAnswerContains("I inspected the current-turn static web files")
+                    .assertAnswerContains("index.html: linked JavaScript was not inspected in this turn: `script.js`")
+                    .assertAnswerNotContains("Confirmed from the files")
                     .assertAnswerNotContains("without being able to see");
         }
     }

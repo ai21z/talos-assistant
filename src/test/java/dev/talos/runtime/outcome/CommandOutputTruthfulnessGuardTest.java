@@ -54,6 +54,40 @@ class CommandOutputTruthfulnessGuardTest {
     }
 
     @Test
+    void commandApprovalDenialClaimWithoutDeniedRunCommandIsWithheld() {
+        String answer = "The command was not executed because approval was denied.";
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Run the command Get-ChildItem -Name to list workspace file names. "
+                                + "I will deny command approval."),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertTrue(result.answer().startsWith(
+                "[Command approval truth check: no talos.run_command approval denial was recorded.]"),
+                result.answer());
+        String lower = result.answer().toLowerCase(java.util.Locale.ROOT);
+        assertFalse(lower.contains("approval was denied"), result.answer());
+        assertFalse(lower.contains("approval denied"), result.answer());
+    }
+
+    @Test
+    void commandApprovalDenialClaimWithDeniedRunCommandPassesUnchanged() {
+        String answer = "The command was not executed because approval was denied.";
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Run the approved Gradle command profile."),
+                        loopResult(deniedRunCommand()));
+
+        assertFalse(result.unsupportedCommandOutputClaim());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
     void honestUnavailableCommandAnswerPassesUnchanged() {
         String answer = "I did not run git status because talos.run_command was not available this turn.";
 
@@ -127,6 +161,11 @@ class CommandOutputTruthfulnessGuardTest {
     private static ToolCallLoop.ToolOutcome succeededRunCommand(String summary) {
         return new ToolCallLoop.ToolOutcome(
                 "talos.run_command", "", true, false, false, summary, "");
+    }
+
+    private static ToolCallLoop.ToolOutcome deniedRunCommand() {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.run_command", "", false, false, true, "", "User did not approve the command.");
     }
 
     private static ToolCallLoop.LoopResult loopResult(ToolCallLoop.ToolOutcome... outcomes) {

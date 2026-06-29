@@ -1,6 +1,6 @@
-# [T917-open-medium] Static web verifier should not require CSS for JS-only fix
+# [T917-done-medium] Static web verifier should not require CSS for JS-only fix
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -18,7 +18,7 @@ Priority: medium
 - Approval choices: none on this turn; prior write session approval was reused
 - Checkpoint id: `chk-148afac2-4481-499f-9c7e-96b953a68c54`
 - Final disk state: `script.js` changed from `.missing-button` to `.cta-button`; `scripts.js` unchanged
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: live installed audit reproduced; deterministic regression added and passing
 
 Redacted prompt sequence:
 
@@ -60,10 +60,23 @@ workspace with no CSS primary file.
 
 Code evidence:
 
-- `StaticTaskVerifier.verifyStaticWeb(...)` adds the exact failure when primary
-  HTML/CSS/JS files are not all present:
+- The static-web verifier path adds the exact failure when primary HTML/CSS/JS
+  files are not all present:
   `src/main/java/dev/talos/runtime/verification/StaticTaskVerifier.java`.
-- Existing verifier tests assert this message for some incomplete surfaces:
+- `StaticTaskVerifier.verifySmallWebWorkspace(...)` already has partial functional
+  paths gated by `profile.targetSurface().allowsFunctionalPartial()`, so the
+  fix should refine contract-sensitive partial verification rather than remove
+  the full-surface verifier:
+  `src/main/java/dev/talos/runtime/verification/StaticTaskVerifier.java`.
+- `TargetScopeStaticVerifier.verify(...)` enforces expected, forbidden, and
+  similar-target mutation scope before static-web coherence is interpreted:
+  `src/main/java/dev/talos/runtime/verification/TargetScopeStaticVerifier.java`.
+- Existing verifier tests assert this missing-surface failure family for some
+  incomplete surfaces:
+  `src/test/java/dev/talos/runtime/verification/StaticTaskVerifierTest.java`.
+- Existing verifier tests also pin the `script.js` versus `scripts.js`
+  similar-target traps, including wrong expected target and forbidden sibling
+  mutation failures:
   `src/test/java/dev/talos/runtime/verification/StaticTaskVerifierTest.java`.
 - The live trace proves the target-specific mutation guard and similar-file
   guard worked; the failure came after mutation, during static verification.
@@ -93,7 +106,7 @@ failed when they are actually complete for the requested scope.
 
 ## Recommended Fix
 
-Make static verification target-aware:
+Make static verification target- and contract-aware:
 
 1. If the task only targets JS and the HTML file references that JS, allow a
    JS/HTML coherence check without requiring CSS.
@@ -101,6 +114,27 @@ Make static verification target-aware:
    limitation rather than failing the turn.
 3. Preserve the existing hard failure for tasks that require full HTML/CSS/JS
    coherence or where a missing primary file is actually relevant.
+4. Preserve `TargetScopeStaticVerifier` behavior: writing `script.js` must still
+   fail when the contract expected `scripts.js`, and forbidden sibling targets
+   must still fail if mutated.
+
+## Implementation Evidence
+
+- Added a focused verifier regression:
+  `StaticTaskVerifierTest.scriptOnlySelectorFixDoesNotRequireCssWhenHtmlImportsEditedScript`.
+- `StaticTaskVerifier.verifySmallWebWorkspace(...)` now routes only narrow
+  JavaScript selector edits through a JS/HTML partial verifier when:
+  - all successful mutations are JavaScript files;
+  - the task does not carry an interaction-claim obligation;
+  - the contract does not expect non-JavaScript mutation targets; and
+  - inspected HTML imports the mutated JavaScript file.
+- The new path reuses `StaticWebPartialVerifier.verifyFunctionalWebWorkspace(...)`
+  and `StaticWebSelectorAnalyzer.analyzeFunctional(...)`, filters CSS-only
+  linkage/content findings as irrelevant to the JS-only contract, and records:
+  `HTML/JavaScript selector coherence passed ...; CSS was not required for this
+  JavaScript-only edit.`
+- Existing full-surface, interaction-proof, and similar-target behavior remains
+  pinned by the broader `dev.talos.runtime.verification.*` test package.
 
 ## Regression Test
 
@@ -110,3 +144,17 @@ Make static verification target-aware:
 - Verifier should not emit "HTML, CSS, and JavaScript primary files were not
   all present" as a task failure solely because CSS is absent.
 - Similar-file guard remains asserted: `scripts.js` is forbidden and unchanged.
+- Negative guard: if the contract expects `scripts.js` but the mutation changes
+  `script.js`, the existing similar-target failure still wins.
+
+## Verification
+
+- `.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.scriptOnlySelectorFixDoesNotRequireCssWhenHtmlImportsEditedScript"`:
+  RED before implementation with the T917 failure text, GREEN after implementation.
+- `.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.verification.TargetScopeStaticVerifierTest" --tests "dev.talos.runtime.verification.StaticWebSurfaceDetectorTest" --tests "dev.talos.runtime.verification.StaticWebSelectorAnalyzerTest"`:
+  green.
+- `.\gradlew.bat test --tests "dev.talos.runtime.verification.*"`: green.
+- `.\gradlew.bat test --tests "dev.talos.docs.TicketHygieneTest" --tests "dev.talos.wiki.WikiLintStructuralTest"`:
+  green.
+- `.\gradlew.bat check --no-daemon`: green.
+- `git diff --check`: green, with CRLF normalization warnings only.

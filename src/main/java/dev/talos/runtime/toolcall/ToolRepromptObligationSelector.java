@@ -46,7 +46,7 @@ final class ToolRepromptObligationSelector {
                 expectedTargetObligationActive);
         return new Selection(
                 remainingRepairTargets,
-                remainingExpectedTargets,
+                expectedTargetObligationActive ? remainingExpectedTargets : List.of(),
                 staticRepairObligationActive,
                 repromptToolSpecs);
     }

@@ -10,7 +10,9 @@ import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.tools.ToolRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -133,6 +135,54 @@ class PromptInspectorTest {
                 .anyMatch(message -> message.content() != null
                         && message.content().contains("type: SMALL_TALK")
                         && message.content().contains("Do not call tools")));
+    }
+
+    @Test
+    void renderNextAskNoToolPromptOmitsWorkspaceManifest(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # Ask fixture
+                Visible project codename: ORBIT-ASK-17
+                """);
+
+        PromptRender render = PromptInspector.renderNext(
+                "ask",
+                "Without reading or listing any files, tell me the workspace codename. "
+                        + "If you cannot know it from current verified evidence, say exactly: "
+                        + "I cannot verify the codename without inspecting files.",
+                workspace,
+                fullToolContext(new Config()));
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.sections().contains("workspace"));
+        assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("README (excerpt):"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("ORBIT-ASK-17"), render.systemPrompt());
+    }
+
+    @Test
+    void renderNextPlanNoToolPromptOmitsWorkspaceManifest(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # Plan fixture
+                Visible project codename: PLAN-ARC-42
+                """);
+
+        PromptRender render = PromptInspector.renderNext(
+                "plan",
+                "Without reading or listing any files, tell me the workspace codename. "
+                        + "If you cannot know it from current verified evidence, say exactly: "
+                        + "I cannot verify the codename without inspecting files.",
+                workspace,
+                fullToolContext(new Config()));
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.sections().contains("workspace"));
+        assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("README (excerpt):"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("PLAN-ARC-42"), render.systemPrompt());
     }
 
     @Test

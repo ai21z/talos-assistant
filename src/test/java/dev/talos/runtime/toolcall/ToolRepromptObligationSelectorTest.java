@@ -85,7 +85,7 @@ class ToolRepromptObligationSelectorTest {
     }
 
     @Test
-    void expectedTargetFactsBeforeMutationProgressDoNotRaiseObligationOrNarrowTools() {
+    void expectedTargetFactsBeforeMutationProgressDoNotRaiseObligationOrFeedOverlayTargets() {
         LoopState state = loopState(
                 List.of(ChatMessage.system("sys"), ChatMessage.user("Create README.md and notes.md.")),
                 broadTools());
@@ -94,7 +94,7 @@ class ToolRepromptObligationSelectorTest {
                 ToolRepromptObligationSelector.select(state, outcome(0, 0));
 
         assertEquals(List.of(), selection.remainingRepairTargets());
-        assertEquals(List.of("README.md", "notes.md"), selection.remainingExpectedTargets());
+        assertEquals(List.of(), selection.remainingExpectedTargets());
         assertFalse(selection.staticRepairObligationActive());
         assertEquals(toolNames(broadTools()), toolNames(selection.repromptToolSpecs()));
         assertFalse(state.hasPendingActionObligation());

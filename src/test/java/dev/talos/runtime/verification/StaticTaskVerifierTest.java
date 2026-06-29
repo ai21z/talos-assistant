@@ -1059,6 +1059,40 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void scriptOnlySelectorFixDoesNotRequireCssWhenHtmlImportsEditedScript() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <body><button class="cta-button">Go</button><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.cta-button').addEventListener('click', () => console.log('ok'));
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.querySelector('.missing-button');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Fix script.js by changing .missing-button to .cta-button. Do not edit scripts.js.",
+                loopResult(List.of(successfulExactEdit(
+                        "script.js",
+                        ".missing-button",
+                        ".cta-button",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.problems().stream()
+                .noneMatch(p -> p.contains("HTML, CSS, and JavaScript primary files were not all present")),
+                result.problems().toString());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("HTML/JavaScript selector coherence passed")), result.facts().toString());
+    }
+
+    @Test
     void scriptOnlySelectorFixUsesTargetAwareWebSurfaceDespiteMixedWorkspaceFiles() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
         Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");

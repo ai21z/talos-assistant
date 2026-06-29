@@ -1,6 +1,6 @@
-# [T912-open-medium] Plan static-web diagnosis must not claim uninspected files
+# [T912-done-medium] Plan static-web diagnosis must not claim uninspected files
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -17,7 +17,9 @@ Priority: medium
 - File diff summary: none
 - Approval choices: none
 - Checkpoint id: n/a
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: live installed audit reproduced; deterministic
+  regressions added; focused static-web/Plan gate and adjacent verifier/outcome
+  gate green
 
 Redacted prompt sequence:
 
@@ -216,14 +218,29 @@ Refactor scope:
 
 ## Tests / Evidence
 
-Required deterministic regression:
+Added deterministic regression:
 
-- Unit test: evidence-containment predicate for unobserved inspected-file claims
-- Integration/executor test: Plan static-web diagnosis with `index.html` and
-  `script.js` read only; answer must not claim `styles.css` inspected
-- Prompt-debug test: manifest may list `styles.css`, but the current-turn
-  evidence model distinguishes it from inspected evidence
-- Trace assertion: read paths exactly match claimed inspected paths
+- `AssistantTurnExecutorTest.ReadOnlyWebDiagnosticsGroundingTests.planStaticWebDiagnosisDoesNotClaimUnreadCssAsInspected`
+  reproduces the Plan audit shape: `styles.css` exists on disk, but the loop
+  read paths are only `index.html` and `script.js`. The shaped answer keeps the
+  JavaScript selector mismatch and implementation plan, but does not claim
+  `CSS: styles.css` was inspected.
+- `AssistantTurnExecutorTest.ReadOnlyWebDiagnosticsGroundingTests.staticButtonReviewGroundsHtmlOnlyUnderinspectionWhenVisibleScriptIsUnlinked`
+  now enforces the same truth standard for HTML-only evidence: Talos may report
+  that inspected HTML does not link a local JavaScript file, but must not invent
+  JavaScript selector/content diagnostics from an unread `script.js`.
+- `AssistantTurnExecutorTest.NonStreaming.verifyOnlyNoToolAnswerRetriesBeforeConfirming`
+  now expects the runtime-owned evidence-bound diagnostic instead of preserving
+  model prose that overstates what was confirmed from files.
+
+Implemented behavior:
+
+- `AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(...)` now calls
+  a read-evidence-bound renderer.
+- `StaticTaskVerifier.renderReadOnlyWebDiagnostics(...)` renders inspected-file
+  claims only from current-turn `readPaths`, filters CSS diagnostics unless CSS
+  was read, supports HTML+JS partial diagnosis, and adds a concrete read-only
+  implementation plan for plan/fix-shaped requests.
 
 Manual/TalosBench rerun:
 
@@ -239,6 +256,18 @@ Commands:
 
 ```powershell
 .\gradlew.bat test --tests "dev.talos.runtime.outcome.*" --tests "dev.talos.cli.modes.PlanModeTest" --no-daemon
+```
+
+Executed focused red/green T912 gate:
+
+```powershell
+.\gradlew.bat test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$ReadOnlyWebDiagnosticsGroundingTests.planStaticWebDiagnosisDoesNotClaimUnreadCssAsInspected'
+```
+
+Executed adjacent verifier/outcome gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.toolcall.TerminalReadOnlyStopAnswerTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$ReadOnlyWebDiagnosticsGroundingTests' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.verifyOnlyNoToolAnswerRetriesBeforeConfirming' --tests "dev.talos.cli.modes.PlanModeTest"
 ```
 
 Add broader commands if runtime code changes:

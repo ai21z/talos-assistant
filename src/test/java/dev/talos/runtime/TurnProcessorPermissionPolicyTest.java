@@ -107,6 +107,44 @@ class TurnProcessorPermissionPolicyTest {
     }
 
     @Test
+    void protectedReadUsesOnceOnlyApprovalSurface(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SECRET=1");
+        AtomicInteger fullApprovals = new AtomicInteger();
+        AtomicInteger onceApprovals = new AtomicInteger();
+        ApprovalGate gate = new ApprovalGate() {
+            @Override public boolean approve(String description, String detail) {
+                return approveOnce(description, detail).isApproved();
+            }
+
+            @Override public ApprovalResponse approveFull(String description, String detail) {
+                fullApprovals.incrementAndGet();
+                return ApprovalResponse.APPROVED;
+            }
+
+            @Override public ApprovalResponse approveOnce(String description, String detail) {
+                onceApprovals.incrementAndGet();
+                return ApprovalResponse.APPROVED;
+            }
+        };
+        Config config = new Config(null);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(), gate, registry);
+
+        TurnUserRequestCapture.set("read .env");
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.read_file", Map.of("path", ".env")),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(0, fullApprovals.get(), "protected read must not offer session approval");
+        assertEquals(1, onceApprovals.get(), "protected read should request once-only approval");
+        assertTrue(result.output().contains("SECRET=1"));
+    }
+
+    @Test
     void sessionRememberStillBypassesGateForSafeWriteButNotProtectedPath(@TempDir Path workspace) {
         AtomicInteger gateCalls = new AtomicInteger();
         ApprovalGate gate = new ApprovalGate() {

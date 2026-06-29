@@ -15,6 +15,10 @@ public final class CommandOutputTruthfulnessGuard {
             "[Command output truth check: no talos.run_command result was produced this turn.]\n\n"
             + "No command output is available because talos.run_command did not run. "
             + "The unsupported command-style output was withheld.";
+    public static final String UNSUPPORTED_COMMAND_APPROVAL_DENIAL_REPLACEMENT =
+            "[Command approval truth check: no talos.run_command approval denial was recorded.]\n\n"
+            + "No command result is available because talos.run_command did not run. "
+            + "The unsupported command approval-denial claim was withheld.";
 
     private static final Pattern GIT_STATUS_LINE = Pattern.compile(
             "(?im)^(on branch \\S+|your branch is .+|changes not staged for commit:"
@@ -31,6 +35,9 @@ public final class CommandOutputTruthfulnessGuard {
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult
     ) {
+        if (shouldWithholdUnsupportedCommandApprovalDenial(answer, plan, loopResult)) {
+            return new Result(UNSUPPORTED_COMMAND_APPROVAL_DENIAL_REPLACEMENT, true);
+        }
         if (!shouldWithholdUnsupportedCommandOutput(answer, plan, loopResult)) {
             return new Result(answer, false);
         }
@@ -56,6 +63,49 @@ public final class CommandOutputTruthfulnessGuard {
             if ("talos.run_command".equals(canonicalToolName(outcome.toolName()))) return true;
         }
         return false;
+    }
+
+    private static boolean shouldWithholdUnsupportedCommandApprovalDenial(
+            String answer,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        if (answer == null || answer.isBlank()) return false;
+        if (hasDeniedRunCommand(loopResult)) return false;
+        return claimsCommandApprovalDenied(answer) && looksLikeCommandExecutionClaim(plan, answer);
+    }
+
+    private static boolean hasDeniedRunCommand(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.denied()) continue;
+            if ("talos.run_command".equals(canonicalToolName(outcome.toolName()))) return true;
+        }
+        return false;
+    }
+
+    private static boolean claimsCommandApprovalDenied(String answer) {
+        String lower = answer == null ? "" : answer.toLowerCase(Locale.ROOT);
+        return lower.contains("approval was denied")
+                || lower.contains("approval denied")
+                || lower.contains("denied command approval")
+                || lower.contains("has denied command approval")
+                || lower.contains("command approval was denied");
+    }
+
+    private static boolean looksLikeCommandExecutionClaim(CurrentTurnPlan plan, String answer) {
+        String request = plan == null || plan.taskContract() == null
+                ? ""
+                : plan.taskContract().originalUserRequest();
+        String lowerRequest = request == null ? "" : request.toLowerCase(Locale.ROOT);
+        String lowerAnswer = answer == null ? "" : answer.toLowerCase(Locale.ROOT);
+        return lowerAnswer.contains("command")
+                || lowerRequest.contains("talos.run_command")
+                || lowerRequest.contains("run_command")
+                || lowerRequest.contains("run the command")
+                || lowerRequest.contains("execute the command")
+                || lowerRequest.contains("call the command")
+                || lowerRequest.contains("try the command");
     }
 
     private static boolean looksLikeGitStatusOutput(String answer) {

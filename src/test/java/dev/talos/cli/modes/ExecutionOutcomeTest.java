@@ -395,6 +395,56 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void unsupportedNaturalCommandRequestWithReadOnlyFallbackDoesNotInventApprovalDenial() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Run the command Get-ChildItem -Name to list workspace file names. "
+                        + "I will deny command approval."));
+
+        var contract = dev.talos.runtime.task.TaskContractResolver.fromMessages(messages);
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                contract,
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The command was not executed because approval was denied.",
+                1,
+                1,
+                List.of("talos.list_dir"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("."),
+                1,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "README.md\nsrc", "", null, "")));
+
+        assertEquals("unsupported-command-verification-request", contract.classificationReason());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Command not run: the requested command is outside the current bounded command profile.]"),
+                outcome.finalAnswer());
+        String lower = outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+        assertFalse(lower.contains("approval was denied"), outcome.finalAnswer());
+        assertFalse(lower.contains("approval denied"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+    }
+
+    @Test
     void fabricatedGitStatusOutputWithoutRunCommandIsWithheldAfterReadOnlyToolUse() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

@@ -79,6 +79,15 @@ public final class CommandOutcomeRenderer {
                 + "No Python, pytest, or .py command result is available in this beta turn.";
     }
 
+    public static String unsupportedCommandNotAvailableReplacement(TaskContract contract) {
+        if (unsupportedPythonCommandExecutionRequest(contract)) {
+            return unsupportedCommandNotAvailableReplacement();
+        }
+        return "[Command not run: the requested command is outside the current bounded command profile.]\n\n"
+                + "No command result is available because the requested shell command was not exposed through "
+                + "an approved talos.run_command profile.";
+    }
+
     public static boolean satisfiesVerifyOnlyRequest(TaskContract contract) {
         return contract != null
                 && contract.type() == TaskType.VERIFY_ONLY

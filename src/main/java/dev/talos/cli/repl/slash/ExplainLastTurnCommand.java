@@ -243,6 +243,7 @@ public final class ExplainLastTurnCommand implements Command {
         sb.append("\nLocal Trace\n");
         sb.append("  Local trace: ").append(trace.traceId()).append('\n');
         sb.append("  Schema: ").append(trace.schemaVersion()).append('\n');
+        sb.append("  Mode: ").append(blankDefault(trace.mode(), "none recorded")).append('\n');
         sb.append("  Redaction: ").append(trace.redaction().mode()).append('\n');
         if (trace.taskContract() != null && !trace.taskContract().type().isBlank()) {
             sb.append("  Task contract: ").append(trace.taskContract().type())

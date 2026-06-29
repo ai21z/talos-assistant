@@ -1,6 +1,6 @@
-# [T911-open-medium] Read-only no-tool turns must not smuggle workspace facts via manifest
+# [T911-done-medium] Read-only no-tool turns must not smuggle workspace facts via manifest
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -16,7 +16,8 @@ Priority: medium
 - File diff summary: none
 - Approval choices: none
 - Checkpoint id: n/a
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: live installed audit reproduced; deterministic regression
+  added and focused tests pass in the inner loop
 
 Additional installed-product corroboration:
 
@@ -93,6 +94,14 @@ Code evidence:
 - `WorkspaceManifest` is intentionally tested to include file structure and
   README excerpts when `withWorkspace(...)` is used:
   `src/test/java/dev/talos/core/llm/SystemPromptBuilderWorkspaceManifestTest.java`.
+- `WorkspaceManifest.isSkipped(...)` currently skips hidden dotfiles except
+  `.github` and `.env`, so `.env` filenames can appear in the prompt-visible
+  `File structure:` manifest. That is filename metadata exposure, not `.env`
+  value/body exposure:
+  `src/main/java/dev/talos/core/util/WorkspaceManifest.java`.
+- Existing manifest tests prove path listing and non-README body exclusion, but
+  they do not currently pin `.env` filename treatment:
+  `src/test/java/dev/talos/core/util/WorkspaceManifestTest.java`.
 - `UnifiedAssistantModeTest` has expectations that some prompt modes avoid the
   manifest in certain render paths, but the installed Ask path still included
   the manifest for the no-tool turn:
@@ -202,7 +211,8 @@ Risk, approval, and protected paths:
 
 - Risk level: medium
 - Approval behavior: unchanged
-- Protected path behavior: protected files remain excluded/redacted by manifest policy
+- Protected path behavior: protected file contents/values remain excluded/redacted;
+  `.env` filename exposure is an explicit manifest-policy concern for this ticket
 
 Checkpoint, evidence, verification, and repair:
 
@@ -224,13 +234,15 @@ Refactor scope:
 ## Acceptance Criteria
 
 - In Ask and Plan no-tool/direct-answer turns, the prompt does not include
-  README excerpt workspace facts unless trace/prompt-debug explicitly labels
-  them as available evidence.
+  README excerpt or file-tree workspace facts unless trace/prompt-debug
+  explicitly labels them as available evidence.
 - A prompt that says "without reading or listing files" does not answer a
   workspace file fact solely from a hidden README manifest.
 - Ask/Plan workspace-inspection turns that expose read tools still work and can
   read requested files.
-- Protected content remains excluded from manifest and prompt-debug.
+- Protected file contents/values remain excluded from manifest and prompt-debug;
+  `.env` filename presence is either excluded or explicitly labeled as manifest
+  evidence with a deterministic test.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or
   outcome truth.
 
@@ -238,10 +250,33 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Unit test: Ask/Plan prompt-render or `PromptInspector` test for SMALL_TALK/no-tool read-only turns
-- Integration/executor test: Ask/Plan no-tool workspace-fact prompt does not answer from README manifest
+- Unit test: Ask/Plan prompt-render or `PromptInspector` test for SMALL_TALK/no-tool read-only turns: done
+- Integration/executor test: Ask/Plan no-tool workspace-fact prompt does not receive README manifest evidence: done
+- Unit test: manifest/prompt coverage for `.env` filename policy, with `.env`
+  contents/values never present in prompt-debug or model prompt artifacts: done
 - JSON e2e scenario: n/a
-- Trace assertion: no-tool frame and manifest evidence are consistent
+- Trace assertion: no-tool frame and manifest evidence are consistent via
+  `PromptInspector.fromMessages(...)` section metadata and request-surface tests
+
+Implementation:
+
+- Added `PromptWorkspaceContextPolicy` and routed Ask, Plan, Agent/Unified, and
+  `/prompt` rendering through the same rule: workspace manifest context is only
+  injected when the current-turn visible tool surface is non-empty.
+- Preserved workspace manifests for inspection-capable turns, including
+  Ask/Plan requests that expose read tools and Agent/Auto turns with real
+  workspace tools.
+- Removed the `.env` exception from the manifest walker. `.github` remains
+  visible; `.env` names and contents are excluded from manifest prompt context.
+
+Focused RED/GREEN:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.modes.AskModeTest" --tests "dev.talos.cli.modes.PlanModeTest" --tests "dev.talos.cli.prompt.PromptInspectorTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest.unsupportedNaturalShellCommandPromptExposesNoFallbackTools" --tests "dev.talos.core.util.WorkspaceManifestTest" --no-daemon
+```
+
+RED failed exactly on the new hidden-manifest and `.env` filename assertions.
+GREEN passed after the implementation.
 
 Manual/TalosBench rerun:
 

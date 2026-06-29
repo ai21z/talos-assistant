@@ -9,6 +9,7 @@ import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
+import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
@@ -66,6 +67,9 @@ public final class AskMode implements Mode {
         TaskContract askContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromUserRequest(rawLine),
                 workspace);
+        if (ReadOnlyCommandRefusal.matches(askContract)) {
+            return Optional.of(ReadOnlyCommandRefusal.resultFor(name()));
+        }
         if (askContract.mutationRequested()) {
             return Optional.of(new Result.Ok("\n" + READ_ONLY_MUTATION_NUDGE + "\n\n"));
         }
@@ -87,14 +91,16 @@ public final class AskMode implements Mode {
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
-        String system = SystemPromptBuilder.forAsk()
+        SystemPromptBuilder promptBuilder = SystemPromptBuilder.forAsk()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                 .withVisibleToolNames(visibleTools)
                 .withReadOnlyToolMode(true)
-                .withWorkspace(workspace)
                 .withNativeTools(nativeTools)
-                .withHistory(hasHistory)
-                .build();
+                .withHistory(hasHistory);
+        if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(visibleTools)) {
+            promptBuilder.withWorkspace(workspace);
+        }
+        String system = promptBuilder.build();
 
         // Build conversation history - AskMode uses a larger budget (55% vs 25%)
         // because there are no RAG snippets competing for context space.

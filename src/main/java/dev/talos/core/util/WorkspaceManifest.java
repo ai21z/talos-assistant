@@ -115,7 +115,7 @@ public final class WorkspaceManifest {
             String segment = rel.getName(i).toString();
             if (SKIP.contains(segment)) return true;
             // Skip hidden dirs/files (starting with .) except known useful ones
-            if (segment.startsWith(".") && !segment.equals(".github") && !segment.equals(".env")) {
+            if (segment.startsWith(".") && !segment.equals(".github")) {
                 return true;
             }
         }
