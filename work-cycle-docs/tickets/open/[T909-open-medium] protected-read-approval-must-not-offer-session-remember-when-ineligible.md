@@ -29,6 +29,17 @@ Additional installed-product corroboration:
 - Trace ids: `trc-1d694bbb-f990-4f95-9b78-a858ec62c94f`, then `trc-80c2180c-45a7-4502-8ac8-285c68b0dd63`
 - Approval choices: `a` on protected `.env` read, then `n` when the next `.env` read prompted again
 
+Additional Agent-mode corroboration:
+
+- Source: installed-product Agent-mode manual audit
+- Date: 2026-06-29
+- Repo HEAD at audit: `6f583801`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\agent-mode-deep-20260629-075710\agent-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/agent-mode-deep-20260629-075710/artifacts/prompt-debug/prompt-debug-20260629-081157.md`
+- Trace ids: `trc-7b553c55-6c70-473b-be2c-b8bfc272fe79`, `trc-d3ed5883-0985-48e3-9cad-c6f13255c9f1`
+- Approval choices: `n` on first protected read; `y` on second protected read
+
 Redacted prompt sequence:
 
 ```text
@@ -60,6 +71,12 @@ that prompt produced `BLOCKED_BY_APPROVAL`.
 The same behavior reproduced in `/mode plan`: selecting `a` granted the current
 protected read, but the next `.env` read prompted again and denial produced
 `BLOCKED_BY_APPROVAL`. The safe boundary held; the UI promise remained false.
+
+The same ineligible prompt surface is visible in `/mode agent`: protected-read
+approval windows still advertise `y = approve once . a = approve for session .
+Enter = deny` for `.env` reads. The Agent audit did not reselect `a`, because
+Ask/Plan already proved the mismatch; it confirms the misleading choice is not
+mode-local.
 ```
 
 Code evidence:
