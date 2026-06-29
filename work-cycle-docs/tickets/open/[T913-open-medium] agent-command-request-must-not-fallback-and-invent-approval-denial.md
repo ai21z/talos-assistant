@@ -19,6 +19,20 @@ Priority: medium
 - Checkpoint id: n/a
 - Verification status: live installed audit reproduced; deterministic regression not yet added
 
+Additional Auto-mode corroboration:
+
+- Source: installed-product Auto-mode manual audit
+- Date: 2026-06-29
+- Talos version / repo HEAD at audit: 0.10.6 / `c91e3060`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `qwen2.5-coder-14b`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\auto-mode-deep-20260629-091500\auto-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/auto-mode-deep-20260629-091500/artifacts/prompt-debug/prompt-debug-20260629-084647.md`
+- Provider body artifact copy: `local/manual-testing/auto-mode-deep-20260629-091500/artifacts/prompt-debug/prompt-debug-20260629-084647.provider-body.json`
+- Trace ids: `trc-2330239d-5287-49c0-a5aa-4bba621f581a`, `trc-f9b01258-f78e-4bb3-9707-4a355bc720f7`
+- File diff summary: none for command prompts
+- Approval choices: none occurred; no command approval prompt was shown
+
 Redacted prompt sequence:
 
 ```text
@@ -53,6 +67,13 @@ For the denial prompt, the final answer said:
 But `/last trace` showed approvals `required=0 granted=0 denied=0`, no command
 tool, and one successful `talos.list_dir` call. No command approval was ever
 requested or denied.
+
+Auto-mode reproduced the command fallback half of this issue with deny/approve
+wording: both prompts stayed `WORKSPACE_EXPLAIN`/`INSPECT`, used
+`talos.list_dir`, and had approvals `required=0 granted=0 denied=0`. The Auto
+denial-worded answer did not repeat the false "approval denied" sentence, so
+the common runtime bug is the command-surface fallback; the false denial prose
+remains the Agent-run outcome-truth variant.
 ```
 
 Code evidence:
@@ -269,3 +290,5 @@ Add broader commands if runtime code changes:
 
 - Cross-reference T872 before closing: this ticket fixes one live Agent shape;
   T872 still owns full command-profile approve/execute/reject coverage.
+- The Auto audit corroborates the command fallback without reproducing the
+  false approval-denial prose; keep the regression split explicit.
