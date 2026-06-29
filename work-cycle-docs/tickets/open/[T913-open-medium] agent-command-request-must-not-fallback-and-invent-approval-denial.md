@@ -33,6 +33,21 @@ Additional Auto-mode corroboration:
 - File diff summary: none for command prompts
 - Approval choices: none occurred; no command approval prompt was shown
 
+Additional GPT-OSS Auto-mode corroboration:
+
+- Source: installed-product GPT-OSS Auto-mode manual audit
+- Date: 2026-06-29
+- Talos version / repo HEAD at audit: 0.10.6 / `3efe1d60`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Isolated Talos home: `local/manual-testing/gptoss-auto-mode-deep-20260629-093500/home`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\gptoss-auto-mode-deep-20260629-093500\auto-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/gptoss-auto-mode-deep-20260629-093500/artifacts/prompt-debug/prompt-debug-20260629-100448.md`
+- Provider body artifact copy: `local/manual-testing/gptoss-auto-mode-deep-20260629-093500/artifacts/prompt-debug/prompt-debug-20260629-100448.provider-body.json`
+- Trace ids: `trc-f9616938-9edc-4faf-85bb-7ea9799f6478`, `trc-7589105a-4a19-4a87-a5a4-a395785ef912`
+- File diff summary: none for command prompts
+- Approval choices: none occurred; no command approval prompt was shown
+
 Redacted prompt sequence:
 
 ```text
@@ -74,6 +89,15 @@ wording: both prompts stayed `WORKSPACE_EXPLAIN`/`INSPECT`, used
 denial-worded answer did not repeat the false "approval denied" sentence, so
 the common runtime bug is the command-surface fallback; the false denial prose
 remains the Agent-run outcome-truth variant.
+
+GPT-OSS Auto-mode reproduced both halves cross-model. The denial-worded prompt
+stayed `WORKSPACE_EXPLAIN`/`INSPECT`, used `talos.list_dir`, had approvals
+`required=0 granted=0 denied=0`, and answered:
+
+  I'm not able to execute that PowerShell command because the user has denied command approval.
+
+That sentence is contradicted by `/last trace`: no command approval was ever
+requested or denied.
 ```
 
 Code evidence:
@@ -292,3 +316,6 @@ Add broader commands if runtime code changes:
   T872 still owns full command-profile approve/execute/reject coverage.
 - The Auto audit corroborates the command fallback without reproducing the
   false approval-denial prose; keep the regression split explicit.
+- The GPT-OSS Auto audit corroborates both the command fallback and the false
+  approval-denial wording, so this is cross-model prompt/runtime fragility, not
+  a Qwen-only behavior.
