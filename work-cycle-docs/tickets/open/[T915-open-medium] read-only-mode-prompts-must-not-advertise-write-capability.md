@@ -20,6 +20,20 @@ Priority: medium
 - Checkpoint id: n/a
 - Verification status: live installed audit reproduced; deterministic regression not yet added
 
+Additional GPT-OSS Plan-mode corroboration:
+
+- Source: installed-product GPT-OSS Plan-mode manual audit
+- Date: 2026-06-29
+- Talos version / repo HEAD at audit: 0.10.6 / `f210987e`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Isolated Talos home: `local/manual-testing/gptoss-plan-mode-deep-20260629-103000/home`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\gptoss-plan-mode-deep-20260629-103000\plan-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/gptoss-plan-mode-deep-20260629-103000/artifacts/prompt-debug/prompt-debug-20260629-104045.md`
+- Provider body artifact copy: `local/manual-testing/gptoss-plan-mode-deep-20260629-103000/artifacts/prompt-debug/prompt-debug-20260629-104045.provider-body.json`
+- Trace ids: `trc-63338ff4-39c8-4e0f-96f4-68de8909fe74`, `trc-b954ea65-5389-44fe-9fa4-b689b95b4603`
+- File diff summary: none; `plan-should-not-land.txt` and `injected-gptoss-plan.txt` were absent after final disk check
+
 Redacted prompt sequence:
 
 ```text
@@ -75,6 +89,12 @@ That is a prompt-surface contradiction. It did not produce a mutation because
 native/prompt-visible tools were correctly capped, but it violates the T890
 acceptance criterion that Ask prompt text must not advertise write/edit
 capability.
+
+GPT-OSS Plan-mode prompt-debug showed the same contradiction: the shared
+identity text advertised file creation and `talos.write_file`, then the Plan
+rules said Plan is read-only and must not create/edit/run commands/request
+approval. Runtime safety still held, but the read-only prompt contract remained
+internally inconsistent.
 ```
 
 Code evidence:
@@ -87,12 +107,16 @@ Code evidence:
 - `src/main/resources/prompts/sections/ask-rules.txt` correctly says Ask is
   read-only and must not create/edit/run commands/request approval, so the
   contradiction is between shared identity text and mode-specific posture text.
+- `src/main/resources/prompts/sections/plan-rules.txt` similarly says Plan is
+  read-only and must not create/edit/run commands/request approval.
 - `SystemPromptBuilderTest.identityContainsExplicitFileCreationCapability`
   currently asserts that `SystemPromptBuilder.forAsk().build()` contains
   `CAN create files` and `talos.write_file`, which is now the opposite of the
   read-only Ask contract introduced by T890.
 - T890 acceptance criteria explicitly included: "Ask prompt text does not
   advertise write/edit capability."
+- T891 acceptance criteria require Plan to be a read-only planning posture, so
+  Plan should not inherit write-capability advertising either.
 
 ## Classification
 

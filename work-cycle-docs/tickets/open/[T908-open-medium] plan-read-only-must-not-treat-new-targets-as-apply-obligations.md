@@ -32,6 +32,20 @@ Additional installed-product corroboration:
 - Trace ids: `trc-1add7bce-a8a8-42f6-821a-4244ed2b7cd4`, `trc-4c8302e9-89bb-4871-9684-c47575b56c6f`
 - Disk verification: `plan-new.txt` and `plan-direct.txt` absent after the audit
 
+Additional GPT-OSS Plan-mode corroboration:
+
+- Source: installed-product GPT-OSS Plan-mode manual audit
+- Date: 2026-06-29
+- Talos version / repo HEAD at audit: 0.10.6 / `f210987e`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Isolated Talos home: `local/manual-testing/gptoss-plan-mode-deep-20260629-103000/home`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\gptoss-plan-mode-deep-20260629-103000\plan-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/gptoss-plan-mode-deep-20260629-103000/artifacts/prompt-debug/prompt-debug-20260629-104045.md`
+- Provider body artifact copy: `local/manual-testing/gptoss-plan-mode-deep-20260629-103000/artifacts/prompt-debug/prompt-debug-20260629-104045.provider-body.json`
+- Trace ids: `trc-63338ff4-39c8-4e0f-96f4-68de8909fe74`, `trc-235de11c-f702-42fb-a530-185d77573ce2`
+- Disk verification: `plan-should-not-land.txt` absent after the audit
+
 Redacted prompt sequence:
 
 ```text
@@ -85,6 +99,20 @@ The later deep Plan audit reproduced the direct-create variant with
 tried to read the nonexistent target, then answered `I cannot create files.`
 The trace outcome was `COMPLETED_UNVERIFIED`, which is weak for a request that
 was intentionally not completed in Plan mode.
+
+GPT-OSS Plan reproduced the same direct-create variant with
+`plan-should-not-land.txt`: no write tool and no approval were exposed, and the
+file was absent after the final disk check. But Plan first read `README.md`,
+then tried `talos.read_file -> plan-should-not-land.txt`, and answered only the
+missing-file failure instead of producing a plan or switch-to-Agent nudge.
+`/last trace` showed `READ_ONLY_QA`, `mutationAllowed=false`,
+`READ_TARGET_REQUIRED`, and `plan-should-not-land.txt = MUST_READ`.
+
+The GPT-OSS follow-up "Yes, apply that creation now" did not consume the
+pending mutation as an apply obligation: no tools were called, no approval was
+requested, and the answer correctly said to switch to `/mode agent`. So the
+remaining confirmed failure is the initial nonexistent-target read obligation,
+not the follow-up handoff.
 
 The saved provider body then contained an `[Expected target progress]`
 continuation saying to "Continue this mutation task" and "Use the visible
