@@ -48,6 +48,21 @@ Additional GPT-OSS Auto-mode corroboration:
 - File diff summary: none for command prompts
 - Approval choices: none occurred; no command approval prompt was shown
 
+Additional GPT-OSS Agent-mode corroboration:
+
+- Source: installed-product GPT-OSS Agent-mode manual audit
+- Date: 2026-06-29
+- Talos version / repo HEAD at audit: 0.10.6 / `ab4b3706`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Isolated Talos home: `local/manual-testing/gptoss-agent-mode-deep-20260629-104800/home`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\gptoss-agent-mode-deep-20260629-104800\agent-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/gptoss-agent-mode-deep-20260629-104800/artifacts/prompt-debug/prompt-debug-20260629-110433.md`
+- Provider body artifact copy: `local/manual-testing/gptoss-agent-mode-deep-20260629-104800/artifacts/prompt-debug/prompt-debug-20260629-110433.provider-body.json`
+- Trace id: `trc-97c59fc1-e4b3-4abd-8264-cc18949b4967`
+- File diff summary: none for command prompt
+- Approval choices: none occurred; no command approval prompt was shown
+
 Redacted prompt sequence:
 
 ```text
@@ -98,6 +113,13 @@ stayed `WORKSPACE_EXPLAIN`/`INSPECT`, used `talos.list_dir`, had approvals
 
 That sentence is contradicted by `/last trace`: no command approval was ever
 requested or denied.
+
+GPT-OSS Agent-mode reproduced the command-surface fallback in Agent after the
+approval-heavy mutation path had already been proven working. The command
+request stayed `WORKSPACE_EXPLAIN`/`INSPECT`, used `talos.list_dir`, had
+approvals `required=0 granted=0 denied=0`, and never exposed
+`talos.run_command`. This run did not repeat the false denial sentence; it
+corroborates the shared command fallback half of the ticket.
 ```
 
 Code evidence:
@@ -319,3 +341,5 @@ Add broader commands if runtime code changes:
 - The GPT-OSS Auto audit corroborates both the command fallback and the false
   approval-denial wording, so this is cross-model prompt/runtime fragility, not
   a Qwen-only behavior.
+- The GPT-OSS Agent audit corroborates the command fallback in Agent itself, but
+  did not reproduce the false denial wording.
