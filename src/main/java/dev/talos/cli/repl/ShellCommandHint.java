@@ -55,11 +55,10 @@ public final class ShellCommandHint {
         if (second.startsWith("-")) {
             looksShell = true; // a flag second token, e.g. "talos -v"
         } else if (SUBCOMMANDS.contains(second)) {
-            // T903: a subcommand alone, a short subcommand chain, or a subcommand
-            // with a flag is a shell command; longer prose that merely starts with a
-            // subcommand-homonym verb (e.g. "talos run the tests please") is not, and
-            // must reach the model.
-            looksShell = tokens.length <= 3 || hasFlagToken(tokens);
+            // T906: token count alone is too broad. Short prose such as
+            // "talos run tests" must reach the model; keep exact commands,
+            // explicit flags, and documented positional command shapes.
+            looksShell = tokens.length == 2 || hasFlagToken(tokens) || isDocumentedPositionalInvocation(tokens);
         } else {
             looksShell = false;
         }
@@ -76,6 +75,12 @@ public final class ShellCommandHint {
             if (tokens[i].startsWith("-")) return true;
         }
         return false;
+    }
+
+    private static boolean isDocumentedPositionalInvocation(String[] tokens) {
+        return tokens.length == 3
+                && "setup".equalsIgnoreCase(tokens[1])
+                && "models".equalsIgnoreCase(tokens[2]);
     }
 
     private static String message() {

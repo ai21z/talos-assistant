@@ -55,6 +55,10 @@ public final class SystemPromptBuilder {
     /** The prompt modes. */
     public enum Mode { ASK, PLAN, RAG, UNIFIED }
 
+    private static final String MUTABLE_WORKSPACE_CAPABILITY = """
+            You CAN create files when policy and approval allow it; you have a talos.write_file tool that writes files to disk. When the user asks you to create or write a file, call talos.write_file. Never say "I cannot create files."
+            """;
+
     private SystemPromptBuilder(Mode mode) {
         this.mode = Objects.requireNonNull(mode);
     }
@@ -181,6 +185,9 @@ public final class SystemPromptBuilder {
 
         // 1. Identity
         sb.append(identity.strip());
+        if (advertiseMutableWorkspaceCapability()) {
+            sb.append("\n").append(MUTABLE_WORKSPACE_CAPABILITY);
+        }
 
         // 1b. Workspace manifest (file tree + README snippet for instant awareness)
         if (workspace != null) {
@@ -358,6 +365,33 @@ public final class SystemPromptBuilder {
     private boolean commandToolVisible() {
         return commandToolMode
                 && (visibleToolNames == null || visibleToolNames.contains("talos.run_command"));
+    }
+
+    private boolean advertiseMutableWorkspaceCapability() {
+        if (mode != Mode.UNIFIED || readOnlyToolMode || directoryListingToolMode) return false;
+        if (visibleToolNames != null) {
+            return visibleToolNames.stream().anyMatch(SystemPromptBuilder::isMutationToolName);
+        }
+        if (promptTools != null && !promptTools.isEmpty()) {
+            return promptTools.stream()
+                    .map(PromptToolDescriptor::name)
+                    .anyMatch(SystemPromptBuilder::isMutationToolName);
+        }
+        return false;
+    }
+
+    private static boolean isMutationToolName(String name) {
+        return switch (name == null ? "" : name) {
+            case "talos.write_file",
+                    "talos.edit_file",
+                    "talos.apply_workspace_batch",
+                    "talos.mkdir",
+                    "talos.copy_path",
+                    "talos.move_path",
+                    "talos.rename_path",
+                    "talos.delete_path" -> true;
+            default -> false;
+        };
     }
 
     /** Minimal fallback prompt when no resource files exist. */

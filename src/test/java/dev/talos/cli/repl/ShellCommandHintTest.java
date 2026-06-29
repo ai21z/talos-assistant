@@ -36,7 +36,7 @@ class ShellCommandHintTest {
         @Test void case_insensitive()    { assertTrue(ShellCommandHint.detect("TALOS SETUP").isPresent()); }
         @Test void leading_whitespace()  { assertTrue(ShellCommandHint.detect("   talos setup").isPresent()); }
         @Test void subcommand_with_flag(){ assertTrue(ShellCommandHint.detect("talos setup models --write --force").isPresent()); }
-        @Test void subcommand_chain()    { assertTrue(ShellCommandHint.detect("talos setup models").isPresent()); }
+        @Test void documented_setup_models_topic() { assertTrue(ShellCommandHint.detect("talos setup models").isPresent()); }
         // T903: path-qualified invocations (basename extraction)
         @Test void path_qualified_unix() { assertTrue(ShellCommandHint.detect("./talos setup").isPresent()); }
         @Test void path_qualified_abs()  { assertTrue(ShellCommandHint.detect("/usr/local/bin/talos --version").isPresent()); }
@@ -62,6 +62,15 @@ class ShellCommandHintTest {
         }
         @Test void prose_setup_my_project() {
             assertTrue(ShellCommandHint.detect("talos setup my project for me").isEmpty());
+        }
+        @Test void short_prose_run_tests() {
+            assertTrue(ShellCommandHint.detect("talos run tests").isEmpty());
+        }
+        @Test void short_prose_status_repo() {
+            assertTrue(ShellCommandHint.detect("talos status repo").isEmpty());
+        }
+        @Test void short_prose_diagnose_issue() {
+            assertTrue(ShellCommandHint.detect("talos diagnose issue").isEmpty());
         }
         @Test void bare_binary_name_only() {
             assertTrue(ShellCommandHint.detect("talos").isEmpty());

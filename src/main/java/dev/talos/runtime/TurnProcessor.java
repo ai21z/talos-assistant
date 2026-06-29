@@ -659,7 +659,9 @@ public final class TurnProcessor {
                     session.config(),
                     diffPreview,
                     commandProfiles);
-            ApprovalResponse response = approvalGate.approveFull(desc, detail);
+            ApprovalResponse response = permissionDecision.rememberEligible()
+                    ? approvalGate.approveFull(desc, detail)
+                    : approvalGate.approveOnce(desc, detail);
 
             if (response == ApprovalResponse.DENIED) {
                 TurnAuditCapture.recordApprovalDenied();

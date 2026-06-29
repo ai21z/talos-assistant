@@ -4583,8 +4583,11 @@ class AssistantTurnExecutorTest {
 
             assertTrue(out.text().contains("[Used 3 tool(s): talos.list_dir, talos.read_file"),
                     out.text());
-            assertTrue(out.text().contains("Confirmed from the files"), out.text());
-            assertTrue(out.text().contains("references script.js"), out.text());
+            assertTrue(out.text().contains("I inspected the current-turn static web files"), out.text());
+            assertTrue(out.text().contains(
+                    "index.html: linked JavaScript was not inspected in this turn: `script.js`"),
+                    out.text());
+            assertFalse(out.text().contains("Confirmed from the files"), out.text());
             assertFalse(out.text().contains("without being able to see"), out.text());
         }
 
@@ -6130,6 +6133,18 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("zero changed-files answer → NOT annotated")
+        void zeroChangedFilesAnswerIsNotAnnotated() {
+            String answer = "I created or modified zero files during this Ask-mode test.";
+
+            String out = AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult(0));
+
+            assertEquals(answer, out);
+            assertFalse(out.startsWith(AssistantTurnExecutor.FALSE_MUTATION_ANNOTATION));
+            assertFalse(AssistantTurnExecutor.containsMutationClaim(answer));
+        }
+
+        @Test
         @DisplayName("containsMutationClaim detects real Turn 5 phrases")
         void detectsTranscriptPhrases() {
             assertTrue(AssistantTurnExecutor.containsMutationClaim(
@@ -7456,6 +7471,76 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("plan static-web diagnosis does not claim unread CSS as inspected")
+        void planStaticWebDiagnosisDoesNotClaimUnreadCssAsInspected() throws Exception {
+            Path ws = Files.createTempDirectory("talos-plan-static-web-unread-css-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!doctype html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <button class="real-button" type="button">Run</button>
+                            <p id="result">Waiting.</p>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), ".real-button { color: green; }\n");
+                Files.writeString(ws.resolve("script.js"), """
+                        const button = document.querySelector('.missing-button');
+                        const result = document.querySelector('#result');
+
+                        if (button && result) {
+                          button.addEventListener('click', () => {
+                            result.textContent = 'Done';
+                          });
+                        }
+                        """);
+
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Plan a fix for the static page so the button can work. "
+                                + "Inspect only index.html and script.js; do not read .env and do not edit."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "I inspected index.html, styles.css, and script.js. The CSS is fine.",
+                        2,
+                        2,
+                        List.of("talos.read_file", "talos.read_file"),
+                        List.of(),
+                        0,
+                        0,
+                        false,
+                        0,
+                        List.of("index.html", "script.js"),
+                        0,
+                        0,
+                        0,
+                        0);
+
+                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                        loopResult.finalAnswer(), messages, loopResult, ws);
+
+                assertNotEquals(loopResult.finalAnswer(), out);
+                assertTrue(out.contains("Static web diagnostics found:"), out);
+                assertTrue(out.contains("HTML: `index.html`"), out);
+                assertTrue(out.contains("JavaScript: `script.js`"), out);
+                assertFalse(out.contains("CSS: `styles.css`"), out);
+                assertTrue(out.contains("JavaScript references missing class selectors: `.missing-button`"), out);
+                assertTrue(out.contains("Implementation plan:"), out);
+                assertFalse(out.contains("The CSS is fine"), out);
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("static button review grounds html-only underinspection when script is visible but unlinked")
         void staticButtonReviewGroundsHtmlOnlyUnderinspectionWhenVisibleScriptIsUnlinked() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-html-only-underinspection-");
@@ -7530,10 +7615,10 @@ class AssistantTurnExecutorTest {
                         messages, ws, ctx, new AssistantTurnExecutor.Options());
 
                 assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
-                assertTrue(out.text().contains("HTML does not link JavaScript file: `script.js`"), out.text());
-                assertTrue(out.text().contains("JavaScript references missing class selectors: `.cta-button`"),
-                        out.text());
-                assertTrue(out.text().contains("does not assign visible result text"), out.text());
+                assertTrue(out.text().contains(
+                        "index.html: inspected HTML does not link a local JavaScript file."), out.text());
+                assertFalse(out.text().contains("JavaScript references missing class selectors"), out.text());
+                assertFalse(out.text().contains("does not assign visible result text"), out.text());
                 assertFalse(out.text().contains("With these changes, the button should work in a browser"),
                         out.text());
                 assertFalse(out.text().contains("document.getElementById('myButton')"), out.text());

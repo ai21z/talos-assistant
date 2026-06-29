@@ -14,7 +14,9 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -206,6 +208,69 @@ class AskModeTest {
     }
 
     @Test
+    void commandRequestReturnsReadOnlyNudgeWithoutCallingLlm() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                engineConfig(),
+                List.of(new LlmClient.StreamResult("should not be called", List.of())),
+                8192);
+        var ctx = Context.builder(engineConfig())
+                .llm(recorded.client())
+                .toolRegistry(fileToolRegistry())
+                .build();
+        var mode = new AskMode();
+
+        Optional<Result> result = mode.handle(
+                "Run the command Get-ChildItem -Name to list workspace files. Do not use slash commands.",
+                WS,
+                ctx);
+
+        assertTrue(result.isPresent());
+        String body = result.get().toString();
+        assertTrue(body.contains("Ask is read-only"), body);
+        assertTrue(body.contains("cannot run commands"), body);
+        assertTrue(body.contains("/mode agent"), body);
+        assertTrue(recorded.requests().isEmpty(), "Ask command refusal must not call the LLM");
+    }
+
+    @Test
+    void noToolDirectAnswerPromptDoesNotInjectWorkspaceManifest(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # Ask fixture
+                Visible project codename: ORBIT-ASK-17
+                """);
+        Files.writeString(workspace.resolve(".env"), "TALOS_FAKE_SECRET=must-not-enter-prompt\n");
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                engineConfig(),
+                List.of(new LlmClient.StreamResult(
+                        "I cannot verify the codename without inspecting files.",
+                        List.of())),
+                8192);
+        var ctx = Context.builder(engineConfig())
+                .llm(recorded.client())
+                .toolRegistry(fileToolRegistry())
+                .build();
+
+        Optional<Result> result = new AskMode().handle(
+                "Without reading or listing any files, tell me the workspace codename. "
+                        + "If you cannot know it from current verified evidence, say exactly: "
+                        + "I cannot verify the codename without inspecting files.",
+                workspace,
+                ctx);
+
+        assertTrue(result.isPresent());
+        assertEquals(1, recorded.requests().size());
+        ChatRequest request = recorded.requests().getFirst();
+        assertTrue(toolNames(request).isEmpty(), toolNames(request).toString());
+        String prompt = joinedMessages(request);
+        assertFalse(prompt.contains("File structure:"), prompt);
+        assertFalse(prompt.contains("README (excerpt):"), prompt);
+        assertFalse(prompt.contains("ORBIT-ASK-17"), prompt);
+        assertFalse(prompt.contains(".env"), prompt);
+        assertFalse(prompt.contains("must-not-enter-prompt"), prompt);
+    }
+
+    @Test
     void askLlmRequestUsesReadOnlyNativeAndPromptToolSurface() throws Exception {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 engineConfig(),
@@ -230,6 +295,11 @@ class AskModeTest {
         assertFalse(prompt.contains("- **talos.edit_file**"), prompt);
         assertFalse(prompt.contains("FILE CREATION AND MODIFICATION"), prompt);
         assertFalse(prompt.contains("You CAN write files"), prompt);
+        assertFalse(prompt.contains("You CAN create files"), prompt);
+        assertFalse(prompt.contains("talos.write_file tool that writes files"), prompt);
+        assertFalse(prompt.contains("When the user asks you to create or write a file, call talos.write_file"),
+                prompt);
+        assertFalse(prompt.contains("Never say \"I cannot create files\""), prompt);
         assertFalse(prompt.contains("ALWAYS call the tool"), prompt);
     }
 

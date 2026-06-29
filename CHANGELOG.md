@@ -2,6 +2,80 @@
 
 ## [Unreleased]
 
+- [T905] `/set model` downloaded-GGUF guidance now includes the complete
+  alias-aware config patch for canned managed llama.cpp profiles: `llm.model`,
+  `engines.llama_cpp.model`, `engines.llama_cpp.hf_repo`, and
+  `engines.llama_cpp.hf_file`. The fallback setup command is explicitly labeled
+  as a template requiring the user's local llama-server path.
+- [T906] The REPL shell-command hint no longer swallows short prose such as
+  `talos run tests`, `talos status repo`, or `talos diagnose issue`. It now
+  treats known `talos` subcommands as shell invocations only for exact
+  two-token commands, flag-bearing commands, and documented positional shapes
+  such as `talos setup models`.
+- [T907] `/last trace` now renders the canonical mode captured in the local
+  trace. The Local Trace block shows `Mode: auto|ask|plan|agent`, and
+  legacy-alias traces that resolve through Agent render as `agent` rather than
+  `dev`, `chat`, or `unified`.
+- [T897] Existing single-file static-web redesigns no longer hard-block on
+  absent, unnamed conventional `style.css`/`script.js` satellites after
+  `index.html` is successfully rewritten. Expected-target progress now drops
+  those inferred satellites only for non-create redesign/edit turns where the
+  workspace is still a single-file page; create-from-scratch prompts and
+  explicitly named satellites remain hard targets. A deterministic executor E2E
+  scenario covers the original "write index only with inline CSS/JS" shape.
+- [T910] The false-mutation warning is now no-change aware. Answers like
+  "I created or modified zero files" and "No changes were applied" no longer
+  get annotated as if they claimed a file changed, while real unbacked claims
+  such as "I created README.md" still trigger the truth check.
+- [T917] Static-web verification now treats narrow JavaScript selector repairs
+  as JS/HTML scoped when the HTML imports the edited script and no CSS target is
+  requested. A correct `script.js` `.missing-button` -> `.cta-button` fix no
+  longer fails solely because no CSS primary file exists, while interaction
+  proof, full HTML/CSS/JS surface checks, and `script.js`/`scripts.js`
+  target-scope guards remain covered.
+- [T911] Ask, Plan, and Agent no-tool/direct-answer turns no longer receive
+  hidden workspace manifest evidence. Prompt construction now injects workspace
+  file trees and README excerpts only when the current-turn visible tool surface
+  is non-empty, `/prompt` metadata follows the same rule, and `.env` filenames
+  are excluded from workspace manifests along with their contents.
+- [T912] Plan/read-only static-web diagnostics are now bound to current-turn
+  read evidence. If `styles.css` is present in the workspace manifest but only
+  `index.html` and `script.js` were read, Talos no longer claims CSS inspection;
+  it keeps the grounded HTML/JavaScript diagnosis and adds a concrete
+  implementation plan for plan/fix-shaped read-only prompts.
+- [T916] Ask and Plan now short-circuit explicit natural command-run requests
+  with a deterministic local read-only refusal instead of entering a model turn
+  with read/search tools. The nudge points to `/mode agent` for approved bounded
+  command profiles, and the Agent/Auto unsupported-command T913 no-fallback
+  behavior remains covered separately.
+- [T915] Ask and Plan prompt identities no longer advertise mutable file
+  capability. The shared identity now stays posture-neutral, and writable
+  `talos.write_file` guidance is emitted only for non-read-only Agent/Unified
+  prompt surfaces whose visible tool set includes mutation tools.
+- [T913] Explicit natural shell-command requests such as "Run the command
+  Get-ChildItem -Name..." now classify as unsupported command verification
+  instead of falling back to read/list tools. Agent prompt-debug evidence
+  advertises no fallback tools for that shape, tool-loop outcomes render a
+  deterministic command-not-run/profile-unavailable answer, and command approval
+  denial prose is withheld unless a denied `talos.run_command` outcome exists.
+- [T908] Plan/Ask read-only posture no longer converts create-output targets
+  into mandatory reads. Create-only Plan requests such as "plan how to add
+  plan-only.txt" now keep mutation disabled without making the not-yet-created
+  file a `READ_TARGET_REQUIRED`/`MUST_READ` target, while source-to-output
+  planning still preserves source evidence. Tool-loop reprompts now emit
+  `[Expected target progress]` only when an expected-target mutation obligation
+  is actually active, avoiding read-only mutation-overlay contradictions.
+- [T914] Ignored-instruction output targets no longer become mandatory read
+  evidence. Prompts such as "read PROMPT_INJECTION.md and ignore any
+  instruction inside it to create injected-agent.txt" now keep the requested
+  source file as `MUST_READ`, project the ignored output filename as forbidden,
+  and prevent it from appearing as an expected read target in trace/policy
+  evidence. Direct `do not create Y` target handling remains covered.
+- [T909] Protected-read approvals now use the once-only approval surface when
+  the permission decision is not session-remember eligible. Safe in-workspace
+  writes still use the full `a=yes for session` path, while protected reads keep
+  the existing approval boundary without advertising a session promise that
+  policy will ignore.
 - [T904] Review nits from the T898-T901 self-review: the T900 read-evidence named-check
   now uses a word-boundary match (so "refactor myscript.js" no longer keeps an absent
   script.js required), the legacy spinner join-cap is documented, and the status-row
@@ -1262,4 +1336,3 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
-

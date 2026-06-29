@@ -320,6 +320,15 @@ public final class StaticTaskVerifier {
             }
         }
         if (primary.size() < 3) {
+            VerificationReport jsOnlySelectorReport = verifyJavaScriptOnlySelectorWorkspace(
+                    root,
+                    contract,
+                    profile,
+                    primary,
+                    mutatedPaths,
+                    facts,
+                    problems);
+            if (jsOnlySelectorReport != null) return jsOnlySelectorReport;
             if (!primary.isEmpty()
                     && profile.targetSurface().allowsFunctionalPartial()
                     && hasSelectorInteractionClaim(contract)) {
@@ -353,6 +362,15 @@ public final class StaticTaskVerifier {
             return VerificationReport.empty();
         }
         if (!hasPrimaryWebSurface(primary)) {
+            VerificationReport jsOnlySelectorReport = verifyJavaScriptOnlySelectorWorkspace(
+                    root,
+                    contract,
+                    profile,
+                    primary,
+                    mutatedPaths,
+                    facts,
+                    problems);
+            if (jsOnlySelectorReport != null) return jsOnlySelectorReport;
             if (profile.targetSurface().allowsFunctionalPartial()
                     && hasSelectorInteractionClaim(contract)) {
                 VerificationReport report = verifyFunctionalInteractionWorkspace(
@@ -460,6 +478,162 @@ public final class StaticTaskVerifier {
                     + selectors.htmlFile() + ", " + selectors.cssFile() + ", and " + selectors.jsFile() + ".");
         }
         return interactionReport;
+    }
+
+    private static VerificationReport verifyJavaScriptOnlySelectorWorkspace(
+            Path root,
+            TaskContract contract,
+            CapabilityProfile profile,
+            List<String> primary,
+            Set<String> mutatedPaths,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (root == null
+                || contract == null
+                || profile == null
+                || !profile.targetSurface().allowsFunctionalPartial()
+                || primary == null
+                || primary.isEmpty()
+                || !looksJavaScriptOnlySelectorEdit(contract, mutatedPaths)
+                || !htmlImportsMutatedJavaScript(root, primary, mutatedPaths)) {
+            return null;
+        }
+
+        StaticWebPartialVerifier.verifyFunctionalWebWorkspace(root, contract, primary, facts, problems);
+        if (!problems.isEmpty()) return VerificationReport.empty();
+
+        StaticWebSelectorAnalyzer.Facts selectors = StaticWebSelectorAnalyzer.analyzeFunctional(
+                root,
+                primary,
+                preferredWebTargetFiles(contract, mutatedPaths));
+        if (selectors == null) {
+            problems.add("functional web interaction could not be checked because HTML/JavaScript primary files could not be read.");
+            return VerificationReport.empty();
+        }
+        if (!pathCollectionContains(mutatedPaths, selectors.jsFile())) {
+            problems.add("HTML does not link JavaScript file: `"
+                    + firstJavaScriptMutation(mutatedPaths) + "`");
+            return VerificationReport.empty();
+        }
+
+        List<String> staticWebProblems = new ArrayList<>();
+        staticWebProblems.addAll(functionalLinkageProblems(selectors));
+        staticWebProblems.addAll(functionalContentProblems(selectors));
+        staticWebProblems.addAll(selectors.selectorProblems());
+        problems.addAll(staticWebProblems);
+        if (staticWebProblems.isEmpty()) {
+            facts.add("HTML/JavaScript selector coherence passed for "
+                    + selectors.htmlFile() + " and " + selectors.jsFile()
+                    + "; CSS was not required for this JavaScript-only edit.");
+        }
+        return VerificationReport.empty();
+    }
+
+    private static boolean looksJavaScriptOnlySelectorEdit(TaskContract contract, Set<String> mutatedPaths) {
+        if (contract == null || !contract.mutationRequested() || hasSelectorInteractionClaim(contract)) return false;
+        if (mutatedPaths == null
+                || mutatedPaths.isEmpty()
+                || mutatedPaths.stream().anyMatch(path -> !hasExtension(path, ".js"))) {
+            return false;
+        }
+        if (!contract.expectedTargets().isEmpty()
+                && contract.expectedTargets().stream().anyMatch(path -> !hasExtension(path, ".js"))) {
+            return false;
+        }
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        if (lower.contains("css")
+                || lower.contains("stylesheet")
+                || lower.contains("style.css")
+                || lower.contains("styles.css")
+                || lower.contains("styling")) {
+            return false;
+        }
+        return lower.contains("selector") || hasNonFileStaticSelectorLiteral(request);
+    }
+
+    private static boolean hasNonFileStaticSelectorLiteral(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        Matcher matcher = STATIC_SELECTOR_LITERAL.matcher(userRequest);
+        while (matcher.find()) {
+            String selector = matcher.group(1);
+            if (selector == null || selector.isBlank()) continue;
+            String lower = selector.toLowerCase(Locale.ROOT);
+            if (!Set.of(".js", ".css", ".html", ".htm", ".json", ".md", ".txt").contains(lower)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean htmlImportsMutatedJavaScript(
+            Path root,
+            List<String> primary,
+            Collection<String> mutatedPaths
+    ) {
+        if (root == null || primary == null || primary.isEmpty() || mutatedPaths == null || mutatedPaths.isEmpty()) {
+            return false;
+        }
+        Set<String> mutatedJavaScript = new LinkedHashSet<>();
+        for (String path : mutatedPaths) {
+            if (hasExtension(path, ".js")) {
+                String name = basename(path);
+                if (!name.isBlank()) mutatedJavaScript.add(name);
+            }
+        }
+        if (mutatedJavaScript.isEmpty()) return false;
+
+        for (String htmlFile : StaticWebSurfaceDetector.primaryHtmlTargets(primary)) {
+            try {
+                String html = Files.readString(root.resolve(htmlFile));
+                for (String linked : StaticWebSelectorAnalyzer.linkedJavaScriptOccurrences(html)) {
+                    if (pathCollectionContains(mutatedJavaScript, linked)) return true;
+                }
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> functionalLinkageProblems(StaticWebSelectorAnalyzer.Facts selectors) {
+        if (selectors == null) return List.of();
+        return selectors.linkageProblems().stream()
+                .filter(problem -> !problem.contains("CSS file"))
+                .toList();
+    }
+
+    private static List<String> functionalContentProblems(StaticWebSelectorAnalyzer.Facts selectors) {
+        if (selectors == null) return List.of();
+        return selectors.contentProblems().stream()
+                .filter(problem -> !problem.contains("CSS file appears to be placeholder content"))
+                .toList();
+    }
+
+    private static boolean pathCollectionContains(Collection<String> paths, String candidate) {
+        if (paths == null || paths.isEmpty() || candidate == null || candidate.isBlank()) return false;
+        boolean caseInsensitive = System.getProperty("os.name", "")
+                .toLowerCase(Locale.ROOT)
+                .contains("win");
+        String normalizedCandidate = normalizePath(candidate);
+        for (String path : paths) {
+            String normalizedPath = normalizePath(path);
+            if (caseInsensitive ? normalizedPath.equalsIgnoreCase(normalizedCandidate)
+                    : normalizedPath.equals(normalizedCandidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String firstJavaScriptMutation(Collection<String> mutatedPaths) {
+        if (mutatedPaths == null || mutatedPaths.isEmpty()) return "";
+        return mutatedPaths.stream()
+                .filter(path -> hasExtension(path, ".js"))
+                .findFirst()
+                .orElse("");
     }
 
     private static boolean hasSelectorInteractionClaim(TaskContract contract) {
@@ -680,6 +854,104 @@ public final class StaticTaskVerifier {
         return out.toString().stripTrailing();
     }
 
+    public static String renderReadOnlyWebDiagnostics(
+            Path workspace,
+            Collection<String> readPaths,
+            String userRequest
+    ) {
+        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        List<String> inspected = inspectedStaticWebReadFiles(workspace, readPaths);
+        if (inspected.isEmpty()) return null;
+        Path root = workspace.toAbsolutePath().normalize();
+        if (!hasReadFileWithExtension(inspected, ".js", ".jsx", ".ts", ".tsx")) {
+            return renderHtmlOnlyReadOnlyWebDiagnostics(root, inspected, userRequest);
+        }
+        StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyzeFunctional(
+                root,
+                inspected,
+                inspected);
+        if (facts == null) return null;
+
+        boolean cssInspected = !facts.cssFile().isBlank() && containsTarget(inspected, facts.cssFile());
+        boolean jsInspected = !facts.jsFile().isBlank() && containsTarget(inspected, facts.jsFile());
+        StringBuilder out = new StringBuilder();
+        out.append("I inspected the current-turn static web files:\n\n");
+        out.append("- HTML: `").append(facts.htmlFile()).append("`\n");
+        if (cssInspected) {
+            out.append("- CSS: `").append(facts.cssFile()).append("`\n");
+        }
+        if (jsInspected) {
+            out.append("- JavaScript: `").append(facts.jsFile()).append("`\n");
+        }
+        out.append('\n');
+
+        List<String> problems = readOnlyWebDiagnosticProblems(facts, cssInspected, jsInspected, userRequest);
+        boolean planRequest = looksLikePlanRequest(userRequest);
+        if (problems.isEmpty() && !planRequest) {
+            return null;
+        }
+        if (problems.isEmpty()) {
+            out.append("Static web diagnostics did not find obvious problems in the inspected evidence.");
+        } else {
+            out.append("Static web diagnostics found:\n");
+            for (String problem : problems) {
+                out.append("- ").append(problem).append('\n');
+            }
+        }
+        if (planRequest) {
+            appendReadOnlyWebPlan(out, facts, cssInspected, jsInspected, problems);
+        }
+        out.append("\nNo files were changed.");
+        return out.toString().stripTrailing();
+    }
+
+    private static String renderHtmlOnlyReadOnlyWebDiagnostics(
+            Path root,
+            List<String> inspected,
+            String userRequest
+    ) {
+        String htmlFile = inspected.stream()
+                .filter(path -> hasExtension(path, ".html", ".htm"))
+                .findFirst()
+                .orElse("");
+        if (htmlFile.isBlank()) return null;
+        String html;
+        try {
+            html = Files.readString(root.resolve(htmlFile));
+        } catch (Exception e) {
+            return null;
+        }
+
+        StringBuilder out = new StringBuilder();
+        out.append("I inspected the current-turn static web files:\n\n");
+        out.append("- HTML: `").append(htmlFile).append("`\n\n");
+
+        List<String> problems = new ArrayList<>();
+        problems.addAll(StaticWebStructureVerifier.htmlStructureProblems(htmlFile, html));
+        List<String> linkedScripts = StaticWebSelectorAnalyzer.linkedJavaScriptOccurrences(html);
+        if (linkedScripts.isEmpty()) {
+            problems.add(htmlFile + ": inspected HTML does not link a local JavaScript file.");
+        } else {
+            problems.add(htmlFile + ": linked JavaScript was not inspected in this turn: "
+                    + formatBacktickList(linkedScripts) + ".");
+        }
+
+        out.append("Static web diagnostics found:\n");
+        for (String problem : problems) {
+            out.append("- ").append(problem).append('\n');
+        }
+        if (looksLikePlanRequest(userRequest)) {
+            out.append("\nImplementation plan:\n");
+            out.append("1. Switch to `/mode agent` before making changes.\n");
+            out.append("2. Inspect the JavaScript file linked by `").append(htmlFile)
+                    .append("` or add the intended script link if none exists.\n");
+            out.append("3. Update the smallest HTML or JavaScript target needed for the button behavior.\n");
+            out.append("4. Verify the button interaction after the edit.\n");
+        }
+        out.append("\nNo files were changed.");
+        return out.toString().stripTrailing();
+    }
+
     public static String renderScriptImportInspection(Path workspace, String userRequest) {
         if (workspace == null || !Files.isDirectory(workspace)) return null;
         if (!StaticWebImportIntent.matches(userRequest)) return null;
@@ -768,6 +1040,159 @@ public final class StaticTaskVerifier {
             }
         }
         return new WebDiagnostics(facts.htmlFile(), facts.cssFile(), facts.jsFile(), problems);
+    }
+
+    private static List<String> inspectedStaticWebReadFiles(Path workspace, Collection<String> readPaths) {
+        if (workspace == null || readPaths == null || readPaths.isEmpty()) return List.of();
+        Path root = workspace.toAbsolutePath().normalize();
+        List<String> out = new ArrayList<>();
+        for (String path : readPaths) {
+            String normalized = normalizePath(path);
+            if (normalized.isBlank() || !StaticWebSurfaceDetector.isSmallWorkspaceWebFile(normalized)) continue;
+            try {
+                Path resolved = root.resolve(normalized).toAbsolutePath().normalize();
+                if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) continue;
+                String relative = root.relativize(resolved).toString().replace('\\', '/');
+                if (relative.contains("/")) continue;
+                if (!out.contains(relative)) out.add(relative);
+            } catch (RuntimeException ignored) {
+                // Ignore malformed read-path hints; trace evidence remains authoritative elsewhere.
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<String> readOnlyWebDiagnosticProblems(
+            StaticWebSelectorAnalyzer.Facts facts,
+            boolean cssInspected,
+            boolean jsInspected,
+            String userRequest
+    ) {
+        List<String> problems = new ArrayList<>();
+        try {
+            problems.addAll(StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), facts.html()));
+        } catch (RuntimeException ignored) {
+            problems.add(facts.htmlFile() + ": could not be checked for HTML structure problems.");
+        }
+        problems.addAll(filterReadOnlyLinkageProblems(facts.linkageProblems(), cssInspected, jsInspected));
+        problems.addAll(filterReadOnlyContentProblems(facts.contentProblems(), facts, cssInspected, jsInspected));
+        problems.addAll(filterReadOnlySelectorProblems(facts.selectorProblems(), cssInspected, jsInspected));
+        if (jsInspected) {
+            problems.addAll(facts.genericButtonResultDiagnosticProblems());
+            problems.addAll(facts.buttonResultBehaviorProblems(userRequest));
+        }
+        return List.copyOf(problems);
+    }
+
+    private static List<String> filterReadOnlyLinkageProblems(
+            List<String> problems,
+            boolean cssInspected,
+            boolean jsInspected
+    ) {
+        if (problems == null || problems.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String problem : problems) {
+            String lower = problem == null ? "" : problem.toLowerCase(Locale.ROOT);
+            if (lower.contains("css") && !cssInspected) continue;
+            if (lower.contains("javascript") && !jsInspected) continue;
+            out.add(problem);
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<String> filterReadOnlyContentProblems(
+            List<String> problems,
+            StaticWebSelectorAnalyzer.Facts facts,
+            boolean cssInspected,
+            boolean jsInspected
+    ) {
+        if (problems == null || problems.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String problem : problems) {
+            if (problem == null || problem.isBlank()) continue;
+            String lower = problem.toLowerCase(Locale.ROOT);
+            if (!cssInspected && lower.contains("css")) continue;
+            if (!jsInspected && lower.contains("javascript")) continue;
+            if (!cssInspected && !facts.cssFile().isBlank() && problem.startsWith(facts.cssFile() + ":")) continue;
+            if (!jsInspected && !facts.jsFile().isBlank() && problem.startsWith(facts.jsFile() + ":")) continue;
+            out.add(problem);
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<String> filterReadOnlySelectorProblems(
+            List<String> problems,
+            boolean cssInspected,
+            boolean jsInspected
+    ) {
+        if (problems == null || problems.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String problem : problems) {
+            if (problem == null || problem.isBlank()) continue;
+            if (!cssInspected && problem.startsWith("CSS ")) continue;
+            if (!jsInspected && problem.startsWith("JavaScript ")) continue;
+            out.add(problem);
+        }
+        return List.copyOf(out);
+    }
+
+    private static boolean containsTarget(Collection<String> targets, String target) {
+        if (targets == null || target == null || target.isBlank()) return false;
+        String normalizedTarget = normalizePath(target);
+        for (String candidate : targets) {
+            if (normalizePath(candidate).equals(normalizedTarget)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasReadFileWithExtension(Collection<String> targets, String... exts) {
+        if (targets == null || targets.isEmpty()) return false;
+        for (String target : targets) {
+            if (hasExtension(target, exts)) return true;
+        }
+        return false;
+    }
+
+    private static boolean looksLikePlanRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        return lower.contains("plan")
+                || lower.contains("fix")
+                || lower.contains("repair")
+                || lower.contains("how would")
+                || lower.contains("how to");
+    }
+
+    private static void appendReadOnlyWebPlan(
+            StringBuilder out,
+            StaticWebSelectorAnalyzer.Facts facts,
+            boolean cssInspected,
+            boolean jsInspected,
+            List<String> problems
+    ) {
+        out.append("\nImplementation plan:\n");
+        if (problems == null || problems.isEmpty()) {
+            out.append("1. Switch to `/mode agent` before making changes.\n");
+            out.append("2. Reproduce the button behavior and inspect any additional asset involved.\n");
+            out.append("3. Apply the smallest file change and verify the page behavior.\n");
+            return;
+        }
+        out.append("1. Switch to `/mode agent` before making changes.\n");
+        if (jsInspected) {
+            out.append("2. Update `").append(facts.jsFile())
+                    .append("` so its selectors and button handler match elements present in `")
+                    .append(facts.htmlFile()).append("`.\n");
+        } else {
+            out.append("2. Inspect the JavaScript file linked from `").append(facts.htmlFile())
+                    .append("`, then update the selector or handler causing the issue.\n");
+        }
+        if (!cssInspected && !facts.cssFile().isBlank()) {
+            out.append("3. Inspect `").append(facts.cssFile())
+                    .append("` before making any styling-specific change; it was not read in this turn.\n");
+            out.append("4. Verify the button interaction after the edit.\n");
+        } else {
+            out.append("3. Verify the button interaction after the edit.\n");
+        }
     }
 
     private static String firstReadableWorkspaceTarget(Path root, List<String> targets) {

@@ -178,6 +178,43 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void unsupportedNaturalShellCommandPromptExposesNoFallbackTools(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # fixture
+                Hidden command-surface fact: COMMAND-MANIFEST-CANARY-91
+                """);
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Run the command Get-ChildItem -Name to list workspace file names. "
+                        + "I will deny command approval.",
+                workspace,
+                contextWithCommandTool("The command was not executed because approval was denied."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("VERIFY_ONLY", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("Available Tools"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("README (excerpt):"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("COMMAND-MANIFEST-CANARY-91"), render.systemPrompt());
+        String frame = render.messages().stream()
+                .map(message -> message.content() == null ? "" : message.content())
+                .filter(content -> content.startsWith("[CurrentTurnCapability]"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(frame.contains("visibleTools: (none)"), frame);
+        assertFalse(frame.contains("talos.list_dir"), frame);
+        assertFalse(frame.contains("talos.read_file"), frame);
+        assertFalse(frame.contains("talos.run_command"), frame);
+    }
+
+    @Test
     void expandedCapabilityPromptUsesDeterministicNoToolAnswer() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();

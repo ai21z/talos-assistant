@@ -1,5 +1,6 @@
 package dev.talos.harness;
 
+import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -121,6 +122,58 @@ class ExecutorScenarioTest {
             assertFalse(result.finalAnswer().contains(falseMutationClaim),
                     "False mutation prose must not survive obligation failure. Actual:\n"
                             + result.finalAnswer());
+        }
+    }
+
+    @Test
+    @DisplayName("T897 end-to-end: existing single-file static page redesign does not hard-block absent inferred satellites")
+    void t897_existing_single_file_static_web_redesign_does_not_hard_block_absent_inferred_satellites() {
+        String originalHtml = """
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Old Page</title>
+                    <style>body { font-family: sans-serif; }</style>
+                  </head>
+                  <body><main>Old page</main></body>
+                </html>
+                """;
+
+        String readIndex = """
+                ```json
+                {"name":"talos.read_file","parameters":{"path":"index.html"}}
+                ```
+                """;
+
+        String writeIndexOnly = """
+                ```json
+                {"name":"talos.write_file","parameters":{"path":"index.html","content":"<!doctype html>\\n<html lang='en'>\\n<head><meta charset='utf-8'><title>Aurora Console</title><style>body { margin: 0; font-family: system-ui; background: #101820; color: white; } button { padding: 1rem; }</style></head>\\n<body><main><h1>Aurora Console</h1><button id='ignite'>Ignite</button><p id='status'>Ready</p></main><script>document.getElementById('ignite').addEventListener('click', () => { document.getElementById('status').textContent = 'Launched'; });</script></body>\\n</html>"}}
+                ```
+                Updated index.html with the redesign.
+                """;
+
+        var scenario = ScenarioDefinition.named("T897 single-file static web redesign")
+                .withFile("index.html", originalHtml)
+                .build();
+        List<ChatMessage> history = List.of(
+                ChatMessage.user("Create a single-file static webpage in index.html with inline styles."),
+                ChatMessage.assistant("Created index.html."));
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                scenario,
+                history,
+                "Make this page better with a complete redesign, modern styling, and interaction.",
+                List.of(readIndex, writeIndexOnly))) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerNotContains("Action obligation failed")
+                    .assertAnswerNotContains("BLOCKED_BY_POLICY")
+                    .assertAnswerNotContains("Remaining target(s): script.js")
+                    .assertAnswerNotContains("Remaining target(s): style.css")
+                    .assertFileContains("index.html", "Aurora Console")
+                    .assertFileContains("index.html", "addEventListener")
+                    .assertFileAbsent("style.css")
+                    .assertFileAbsent("script.js")
+                    .assertLocalTraceRecorded();
         }
     }
 }

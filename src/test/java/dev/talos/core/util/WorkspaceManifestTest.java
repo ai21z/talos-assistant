@@ -122,6 +122,17 @@ class WorkspaceManifestTest {
         }
 
         @Test
+        void skipsEnvDotfileNameAndContents() throws IOException {
+            Files.writeString(tmp.resolve(".env"), "TALOS_FAKE_SECRET=must-not-enter-manifest\n");
+            Files.writeString(tmp.resolve("README.md"), "# Project\n");
+
+            String manifest = WorkspaceManifest.build(tmp);
+
+            assertFalse(manifest.contains(".env"), manifest);
+            assertFalse(manifest.contains("must-not-enter-manifest"), manifest);
+        }
+
+        @Test
         void truncatesLargeDirectories() throws IOException {
             for (int i = 0; i < 90; i++) {
                 Files.createFile(tmp.resolve(String.format("file-%03d.txt", i)));

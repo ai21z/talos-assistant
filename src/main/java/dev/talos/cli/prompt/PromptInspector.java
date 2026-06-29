@@ -7,6 +7,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
+import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -48,18 +49,18 @@ public final class PromptInspector {
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(resolvedMode, rawContract);
         TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
         ExecutionPhase initialPhase = effectiveTurn.phase();
-        boolean smallTalk = "agent".equals(resolvedMode)
-                && contract.type() == TaskType.SMALL_TALK;
         boolean directoryListing = "agent".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
         List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, initialPhase, ctx);
+        boolean includeWorkspaceContext =
+                PromptWorkspaceContextPolicy.includeWorkspaceManifest(effectiveTools);
 
         SystemPromptBuilder builder = builderFor(resolvedMode)
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
                 .withDirectoryListingToolMode(directoryListing);
         if (usesAssistantTaskContract(resolvedMode)) {
-            if (!smallTalk) {
+            if (includeWorkspaceContext) {
                 builder
                         .withPromptTools(PromptToolDescriptors.fromRegistry(ctx == null ? null : ctx.toolRegistry()))
                         .withVisibleToolNames(effectiveTools)
@@ -106,7 +107,7 @@ public final class PromptInspector {
                         hasHistory,
                         nativeTools,
                         effectiveTools,
-                        !smallTalk),
+                        includeWorkspaceContext),
                 messages,
                 Instant.now()
         );
@@ -128,6 +129,8 @@ public final class PromptInspector {
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(canonicalMode, rawContract);
         TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
         List<String> effectiveTools = effectiveToolNames(canonicalMode, contract, effectiveTurn.phase(), ctx);
+        boolean includeWorkspaceContext =
+                PromptWorkspaceContextPolicy.includeWorkspaceManifest(effectiveTools);
         return new PromptRender(
                 normalizeMode(requestedMode),
                 canonicalMode,
@@ -146,7 +149,7 @@ public final class PromptInspector {
                         historyMessages > 0,
                         nativeTools,
                         effectiveTools,
-                        contract.type() != TaskType.SMALL_TALK),
+                        includeWorkspaceContext),
                 messages,
                 Instant.now()
         );

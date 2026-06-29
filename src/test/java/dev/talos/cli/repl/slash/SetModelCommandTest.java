@@ -75,9 +75,15 @@ class SetModelCommandTest {
         String text = SetModelCommand.modelNotFoundMessage(
                 "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded, profile);
 
+        assertTrue(text.contains("llm:"), text);
+        assertTrue(text.contains("  model: \"qwen36vf-q6k\""), text);
+        assertTrue(text.contains("engines:"), text);
+        assertTrue(text.contains("  llama_cpp:"), text);
+        assertTrue(text.contains("    model: \"qwen36vf-q6k\""), text);
         assertTrue(text.contains("hf_repo: \"tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF\""), text);
         assertTrue(text.contains("hf_file: \"Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf\""), text);
         assertTrue(text.contains("--profile qwen36vf-q6k"), text);
+        assertTrue(text.contains("Template alternative"), text);
         assertFalse(text.contains("<name>"), text);
         assertFalse(text.contains("<llama-server>"), text);
     }

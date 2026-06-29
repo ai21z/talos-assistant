@@ -186,11 +186,17 @@ record ExecutionOutcome(
                 && !commandSucceeded
                 && !commandFailed
                 && !commandDenied;
+        boolean unsupportedCommandRequiredButNotRun = CommandOutcomeRenderer.unsupportedCommandVerificationRequest(contract)
+                && !commandSucceeded
+                && !commandFailed
+                && !commandDenied;
         boolean unsupportedPythonCommandRequiredButNotRun = CommandOutcomeRenderer.unsupportedPythonCommandExecutionRequest(contract)
                 && !commandSucceeded
                 && !commandFailed
                 && !commandDenied;
-        boolean failedAnyActionObligation = actionObligationFailure.failed() || commandRequiredButNotRun;
+        boolean failedAnyActionObligation = actionObligationFailure.failed()
+                || commandRequiredButNotRun
+                || unsupportedCommandRequiredButNotRun;
 
         String shaped = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -265,6 +271,8 @@ record ExecutionOutcome(
             current = CommandOutcomeRenderer.successReplacement(commandConclusion);
         } else if (commandRequiredButNotRun) {
             current = CommandOutcomeRenderer.requiredButNotRunReplacement();
+        } else if (unsupportedCommandRequiredButNotRun) {
+            current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement(contract);
         } else if (unsupportedPythonCommandRequiredButNotRun) {
             current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
         }
@@ -570,7 +578,7 @@ record ExecutionOutcome(
         if (commandRequiredButNotRun) {
             shaped = CommandOutcomeRenderer.requiredButNotRunReplacement();
         } else if (unsupportedCommandNotAvailable) {
-            shaped = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
+            shaped = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement(contract);
         }
         boolean blocked = noToolMutationReplaced || commandRequiredButNotRun || unsupportedCommandNotAvailable;
         boolean ungrounded = shaped != null

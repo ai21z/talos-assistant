@@ -2328,7 +2328,10 @@ public final class AssistantTurnExecutor {
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
         if (!readStaticWebDiagnosticSurface(loopResult, workspace)) return answer;
 
-        String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace, loopResult.readPaths());
+        String grounded = StaticTaskVerifier.renderReadOnlyWebDiagnostics(
+                workspace,
+                loopResult.readPaths(),
+                userRequest);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 

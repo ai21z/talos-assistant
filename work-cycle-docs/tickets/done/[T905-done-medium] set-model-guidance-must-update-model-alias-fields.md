@@ -1,6 +1,6 @@
-# [T905-open-medium] Set-model guidance must update model alias fields
+# [T905-done-medium] Set-model guidance must update model alias fields
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -15,7 +15,7 @@ Priority: medium
 - File diff summary: none
 - Approval choices: none
 - Checkpoint id: n/a
-- Verification status: focused tests pass, but review found a coverage gap
+- Verification status: focused red/green regression added and passing locally
 
 Redacted prompt sequence:
 
@@ -229,10 +229,25 @@ Add broader commands if runtime code changes:
 - No candidate bump.
 - Add a `CHANGELOG.md` `Unreleased` line when complete.
 
+## Resolution - 2026-06-30
+
+- Mapped downloaded-GGUF guidance now renders a redaction-safe config patch with
+  `llm.model`, `engines.llama_cpp.model`, `engines.llama_cpp.hf_repo`, and
+  `engines.llama_cpp.hf_file` from the matched
+  `LlamaCppModelProfiles.CannedProfile`.
+- The terminal setup fallback is explicitly labeled as a template requiring the
+  user's local llama-server path instead of implying the command is
+  copy-pasteable as-is.
+- No hot-swap, config mutation, path-redaction, approval, permission, or trace
+  behavior changed.
+- Focused evidence: `.\gradlew.bat test --tests
+  "dev.talos.cli.repl.slash.SetModelCommandTest" --no-daemon` failed red on the
+  missing alias fields, then passed after the guidance helper change.
+
 ## Known Risks
 
-- Accidentally making the setup-command fallback look copy-pasteable while it
-  still needs the user's local `server_path`.
+- A clean installed-product smoke should still verify `/set model
+  gpt-oss-20b-mxfp4` after the next global install/candidate build.
 
 ## Known Follow-Ups
 

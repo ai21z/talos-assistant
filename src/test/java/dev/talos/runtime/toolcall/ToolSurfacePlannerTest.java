@@ -52,6 +52,20 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void unsupportedNaturalShellCommandRequestExposesNoFallbackTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Run the command Get-ChildItem -Name to list workspace file names. "
+                                + "I will deny command approval."),
+                ExecutionPhase.VERIFY,
+                registry());
+
+        assertEquals(List.of(), plan.nativeToolNames());
+        assertEquals(List.of(), plan.nativeToolSpecs());
+        assertEquals("unsupported command request", plan.reason());
+    }
+
+    @Test
     void readOnlySurfaceUsesMetadataAndOmitsMutationOperations() {
         ToolRegistry registry = registry();
         registry.register(new MetadataOnlyInspectTool());

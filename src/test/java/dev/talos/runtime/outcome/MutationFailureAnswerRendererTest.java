@@ -32,6 +32,49 @@ class MutationFailureAnswerRendererTest {
     }
 
     @Test
+    void noChangeAnswersAreNotMutationClaims() {
+        List<String> answers = List.of(
+                "I created or modified zero files during this Ask-mode test.",
+                "I created zero files and modified zero files.",
+                "I changed no files during this turn.",
+                "I edited no files.",
+                "I wrote no files.",
+                "I saved zero files.",
+                "No changes were applied.",
+                "Zero changes were applied.",
+                "Nothing was created or modified in the workspace.");
+
+        for (String answer : answers) {
+            assertFalse(MutationFailureAnswerRenderer.containsMutationClaim(answer), answer);
+            assertEquals(
+                    answer,
+                    MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
+                            answer,
+                            loopResult(List.of(readOnlyOutcome())),
+                            0),
+                    answer);
+        }
+    }
+
+    @Test
+    void realMutationClaimsStillTriggerWhenNoMutationSucceeded() {
+        List<String> answers = List.of(
+                "I created README.md.",
+                "I modified index.html.",
+                "I changed script.js.",
+                "No files were modified, but I created report.md.");
+
+        for (String answer : answers) {
+            assertTrue(MutationFailureAnswerRenderer.containsMutationClaim(answer), answer);
+            String out = MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
+                    answer,
+                    loopResult(List.of(readOnlyOutcome())),
+                    0);
+            assertTrue(out.startsWith(MutationFailureAnswerRenderer.FALSE_MUTATION_ANNOTATION), answer);
+        }
+    }
+
+    @Test
     void deniedMutationSummarySeparatesPolicyAndApprovalDenials() {
         var messages = messages("Edit index.html and .env.");
         var loopResult = loopResult(List.of(

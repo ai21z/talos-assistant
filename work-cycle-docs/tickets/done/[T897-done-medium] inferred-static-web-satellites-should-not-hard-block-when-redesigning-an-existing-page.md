@@ -1,8 +1,37 @@
-# [T897-open-medium] Inferred static-web satellites must not be a hard mutation obligation when redesigning an existing single-file page
+# [T897-done-medium] Inferred static-web satellites must not be a hard mutation obligation when redesigning an existing single-file page
 
-Status: open
+Status: done
 Priority: medium
 Blocker level: future milestone (deferred-beyond-this-arc). Discovered while scoping T895; split out because the clean fix is disk-aware, not lexical.
+
+## Resolution 2026-06-29
+
+Implemented the disk-aware obligation-layer route described below, not a
+role-tagging/`MAY_MUTATE` refactor. `TaskContractResolver` still projects the
+conventional static-web triplet where the existing create tests require it.
+`ExpectedTargetProgressAccounting` now removes absent, unnamed conventional
+`style.css`/`styles.css`/`script.js`/`scripts.js` satellites only from the hard
+remaining-mutation-target calculation when all of these are true:
+
+- the contract is not a create-from-scratch `FILE_CREATE` task;
+- the current workspace is still a single-file static page rooted at
+  `index.html` with no root `.css`/`.js` files;
+- `index.html` was successfully mutated in this turn;
+- the latest request is an existing-page/site redesign/improvement shape;
+- the satellite was not explicitly named and does not exist on disk.
+
+Explicit filenames and create-from-scratch triplet prompts remain hard expected
+targets. Deterministic E2E now covers a contextual existing single-file
+redesign where the model reads `index.html`, writes only `index.html` with
+inline CSS/JS, and does not end `BLOCKED_BY_POLICY` for missing `style.css` or
+`script.js`.
+
+Verification:
+
+- `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest"` red before the fix on `[script.js, style.css]`, then green after.
+- `.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ExpectedTargetProgressAccountingTest" --tests "dev.talos.runtime.toolcall.ToolRepromptObligationSelectorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.task.WorkspaceTargetReconcilerTest" --tests "dev.talos.runtime.toolcall.StaticWebRewriteGroundingGuardTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.runtime.toolcall.RolefulIntentRecoveryRegressionTest"` passed.
+- `.\gradlew.bat e2eTest --tests "dev.talos.harness.ExecutorScenarioTest.t897_existing_single_file_static_web_redesign_does_not_hard_block_absent_inferred_satellites"` passed.
+- `.\gradlew.bat e2eTest --tests "dev.talos.harness.ExecutorScenarioTest" --tests "dev.talos.harness.JsonScenarioPackTest.multiFileWebCreateContinuesUntilExpectedTargets" --tests "dev.talos.harness.JsonScenarioPackTest.staticVerificationContinuationPreservesScriptsJs" --tests "dev.talos.harness.JsonScenarioPackTest.rolefulExistingStaticWebTargetsKeepPluralNames" --tests "dev.talos.harness.JsonScenarioPackTest.staticWebInteractionFailureRepairsMutatedTargets"` passed.
 
 > Update 2026-06-28: the READ-evidence sibling of this bug (plan/ask read-only demanding reads of nonexistent inferred satellites) was fixed and closed as T900 (see work-cycle-docs/tickets/done/[T900-done-medium] ...). T897 now covers ONLY the remaining MUTATION facet below. The read fix could be cleanly disk-aware (you can never read a nonexistent file); the mutation facet cannot use a naive disk-existence drop because create-from-scratch satellites are also absent on disk, so dropping them would regress the intended "keep creating until the triplet is done" behavior (T98/T99/T100). The mutation fix therefore still needs the inferred-vs-named + create-vs-redesign distinction at the mutation-obligation layer.
 

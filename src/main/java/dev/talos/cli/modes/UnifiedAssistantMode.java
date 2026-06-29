@@ -8,6 +8,7 @@ import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -99,7 +100,6 @@ public final class UnifiedAssistantMode implements Mode {
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(contractMessages),
                 workspace);
-        boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);
         List<ToolSpec> plannedNativeToolSpecs =
@@ -109,7 +109,7 @@ public final class UnifiedAssistantMode implements Mode {
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
                 .withDirectoryListingToolMode(directoryListing);
-        if (!smallTalk) {
+        if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(plannedNativeToolNames)) {
             promptBuilder
                     .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                     .withVisibleToolNames(plannedNativeToolNames)

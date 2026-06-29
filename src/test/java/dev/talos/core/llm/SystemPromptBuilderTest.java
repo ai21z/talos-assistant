@@ -364,7 +364,7 @@ class SystemPromptBuilderTest {
         var registry = new PromptToolSet();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
-        String prompt = SystemPromptBuilder.forAsk()
+        String prompt = SystemPromptBuilder.forUnified()
                 .withPromptTools(registry)
                 .withNativeTools(true)
                 .build();
@@ -405,7 +405,7 @@ class SystemPromptBuilderTest {
         var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
-        String prompt = SystemPromptBuilder.forAsk()
+        String prompt = SystemPromptBuilder.forUnified()
                 .withPromptTools(registry)
                 .withNativeTools(true)
                 .build();
@@ -443,6 +443,7 @@ class SystemPromptBuilderTest {
                 "Read-only mode should not list edit_file as an available tool descriptor");
         assertFalse(prompt.contains("FILE CREATION AND MODIFICATION"),
                 "Read-only mode should not use the writable tool preamble");
+        assertNoWriteCapabilityAdvertisement(prompt);
     }
 
     @Test
@@ -465,6 +466,7 @@ class SystemPromptBuilderTest {
                 "Native read-only mode should filter mutating tool descriptors");
         assertFalse(prompt.contains("runtime handles tool invocation format automatically - just decide WHICH tool"),
                 "Native read-only mode should not use the writable native preamble");
+        assertNoWriteCapabilityAdvertisement(prompt);
     }
 
     @Test
@@ -641,6 +643,16 @@ class SystemPromptBuilderTest {
                 true);
     }
 
+    private static void assertNoWriteCapabilityAdvertisement(String prompt) {
+        assertFalse(prompt.contains("You CAN create files"), prompt);
+        assertFalse(prompt.contains("CAN create files"), prompt);
+        assertFalse(prompt.contains("talos.write_file tool that writes files"), prompt);
+        assertFalse(prompt.contains("When the user asks you to create or write a file, call talos.write_file"),
+                prompt);
+        assertFalse(prompt.contains("Never say \"I cannot create files\""), prompt);
+        assertFalse(prompt.contains("NEVER say \"I cannot create files\""), prompt);
+    }
+
     private static final class PromptToolSet extends ArrayList<PromptToolDescriptor> {
         void register(PromptToolDescriptor descriptor) {
             add(descriptor);
@@ -654,7 +666,7 @@ class SystemPromptBuilderTest {
         var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
-        String prompt = SystemPromptBuilder.forAsk()
+        String prompt = SystemPromptBuilder.forUnified()
                 .withPromptTools(registry)
                 .build();
 
@@ -669,7 +681,7 @@ class SystemPromptBuilderTest {
         var registry = new PromptToolSet();
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
 
-        String prompt = SystemPromptBuilder.forAsk()
+        String prompt = SystemPromptBuilder.forUnified()
                 .withPromptTools(registry)
                 .build();
 
@@ -680,13 +692,30 @@ class SystemPromptBuilderTest {
     }
 
     @Test
-    void identityContainsExplicitFileCreationCapability() {
-        String prompt = SystemPromptBuilder.forAsk().build();
+    void askAndPlanIdentityDoNotAdvertiseWriteCapability() {
+        String ask = SystemPromptBuilder.forAsk().build();
+        String plan = SystemPromptBuilder.forPlan().build();
+
+        assertNoWriteCapabilityAdvertisement(ask);
+        assertNoWriteCapabilityAdvertisement(plan);
+    }
+
+    @Test
+    void unifiedWritablePromptStillAdvertisesWriteCapabilityWhenWriteToolVisible() {
+        var registry = new PromptToolSet();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", false));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", true));
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withPromptTools(registry)
+                .withNativeTools(true)
+                .withVisibleToolNames(java.util.List.of("talos.read_file", "talos.write_file"))
+                .build();
 
         assertTrue(prompt.contains("CAN create files"),
-                "Identity should explicitly state file creation capability");
+                "Writable Agent/Unified prompts should still advertise file creation capability");
         assertTrue(prompt.contains("talos.write_file"),
-                "Identity should mention talos.write_file by name");
+                "Writable Agent/Unified prompts should still name talos.write_file");
     }
 
     @Test
@@ -730,7 +759,7 @@ class SystemPromptBuilderTest {
         registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
         registry.register(stubTool("talos.read_file", "Read a workspace file"));
 
-        String prompt = SystemPromptBuilder.forAsk()
+        String prompt = SystemPromptBuilder.forUnified()
                 .withPromptTools(registry)
                 .build();
 

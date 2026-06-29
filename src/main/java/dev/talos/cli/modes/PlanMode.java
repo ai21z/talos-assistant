@@ -9,6 +9,7 @@ import dev.talos.runtime.Result;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
+import dev.talos.runtime.policy.PromptWorkspaceContextPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
@@ -64,6 +65,9 @@ public final class PlanMode implements Mode {
         TaskContract rawContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(contractMessages),
                 workspace);
+        if (ReadOnlyCommandRefusal.matches(rawContract)) {
+            return Optional.of(ReadOnlyCommandRefusal.resultFor(name()));
+        }
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
                 CapabilityPosturePolicy.apply(CapabilityPosture.PLAN_READ_ONLY, rawContract);
         TaskContract effectiveContract = WorkspaceTargetReconciler.reconcile(
@@ -75,14 +79,16 @@ public final class PlanMode implements Mode {
         List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
 
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
-        String system = SystemPromptBuilder.forPlan()
+        SystemPromptBuilder promptBuilder = SystemPromptBuilder.forPlan()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                 .withVisibleToolNames(plannedNativeToolNames)
                 .withReadOnlyToolMode(true)
-                .withWorkspace(workspace)
                 .withNativeTools(nativeTools)
-                .withHistory(!history.isEmpty())
-                .build();
+                .withHistory(!history.isEmpty());
+        if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(plannedNativeToolNames)) {
+            promptBuilder.withWorkspace(workspace);
+        }
+        String system = promptBuilder.build();
 
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);

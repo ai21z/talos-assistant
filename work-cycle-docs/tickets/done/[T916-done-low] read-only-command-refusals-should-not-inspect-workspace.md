@@ -1,6 +1,6 @@
-# [T916-open-low] Read-only command refusals should not inspect workspace
+# [T916-done-low] Read-only command refusals should not inspect workspace
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -19,7 +19,9 @@ Priority: low
 - File diff summary: none
 - Approval choices: none; no command approval prompt was shown
 - Checkpoint id: n/a
-- Verification status: live installed audits reproduced; deterministic regression not yet added
+- Verification status: live installed audits reproduced; deterministic
+  regressions added; focused Ask/Plan gate and adjacent T913 command-surface
+  gates green
 
 Redacted prompt sequence:
 
@@ -100,7 +102,7 @@ for direct command requests in read-only modes.
 
 ## Recommended Fix
 
-Add a read-only command-refusal path for Ask and Plan:
+Implemented a read-only command-refusal path for Ask and Plan:
 
 1. Detect explicit command-run requests under `ASK_READ_ONLY` and
    `PLAN_READ_ONLY`.
@@ -112,9 +114,28 @@ Add a read-only command-refusal path for Ask and Plan:
 
 ## Regression Test
 
-- Ask command request -> no native tools, no prompt tools, no approval, answer
-  says Ask cannot run commands and points to Agent if appropriate.
-- Plan command request -> no native tools, no prompt tools, no approval, answer
-  says Plan cannot run commands or apply changes.
-- Prompt that explicitly says "do not inspect files" -> no read/list/search
-  calls.
+Added deterministic regression:
+
+- `AskModeTest.commandRequestReturnsReadOnlyNudgeWithoutCallingLlm` proves an
+  explicit natural command request returns a local read-only command refusal,
+  points to `/mode agent`, and records no LLM request, so no native or
+  prompt-visible read/search surface can be exposed.
+- `PlanModeTest.commandRequestReturnsReadOnlyNudgeWithoutCallingLlm` proves the
+  same behavior for Plan, including the "do not inspect files just to
+  compensate" repro shape from the installed-product audit.
+
+Executed focused T916 gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.modes.AskModeTest" --tests "dev.talos.cli.modes.PlanModeTest"
+```
+
+Executed adjacent T913 preservation gates:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest.unsupportedNaturalShellCommandPromptExposesNoFallbackTools" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest.unsupportedNaturalShellCommandRequestExposesNoFallbackTools" --tests "dev.talos.runtime.outcome.CommandOutputTruthfulnessGuardTest"
+```
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest.unsupportedNaturalCommandRequestBecomesUnsupportedVerifyContract" --tests "dev.talos.runtime.task.TaskContractResolverTest.explicitNaturalShellCommandRequestsBecomeUnsupportedVerifyContract" --tests "dev.talos.runtime.task.TaskContractResolverTest.commandCapabilityQuestionsDoNotBecomeExecutionRequests" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest.unsupportedNaturalCommandRequestExposesNoTools" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.unsupportedNaturalCommandRequestWithReadOnlyFallbackDoesNotInventApprovalDenial"
+```

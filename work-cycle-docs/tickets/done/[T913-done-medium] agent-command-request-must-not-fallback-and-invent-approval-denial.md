@@ -1,6 +1,6 @@
-# [T913-open-medium] Agent command request must not fallback and invent approval denial
+# [T913-done-medium] Agent command request must not fallback and invent approval denial
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -17,7 +17,9 @@ Priority: medium
 - File diff summary: none for command prompts
 - Approval choices: none occurred; no command approval prompt was shown
 - Checkpoint id: n/a
-- Verification status: live installed audit reproduced; deterministic regression not yet added
+- Verification status: deterministic regressions added; focused T913 gate,
+  adjacent command/prompt-surface gate, ticket/wiki hygiene, standalone wiki
+  lint, diff check, and full `check` green
 
 Additional Auto-mode corroboration:
 
@@ -292,15 +294,32 @@ Refactor scope:
 
 ## Tests / Evidence
 
-Required deterministic regression:
+Added deterministic regression:
 
-- Unit test: `TaskContractResolverTest` for explicit command request
-  classification/unsupported classification
-- Unit test: command/approval truth guard for false approval-denial claim with
-  no approval ledger denial
-- Integration/executor test: Agent command prompt that cannot expose
-  `run_command` returns deterministic not-run/unsupported answer
-- Trace assertion: no command denial claim unless approvals denied count is > 0
+- Unit test:
+  `TaskContractResolverTest.explicitNaturalShellCommandRequestsBecomeUnsupportedVerifyContract`
+  proves audited natural shell-command wording becomes a `VERIFY_ONLY`
+  unsupported-command contract instead of `WORKSPACE_EXPLAIN`/directory listing.
+- Unit test:
+  `ToolSurfacePlannerTest.unsupportedNaturalShellCommandRequestExposesNoFallbackTools`
+  proves unsupported natural shell-command requests expose no fallback
+  `list_dir`/read/search tools and no `run_command` approval path.
+- Unit test:
+  `CommandOutputTruthfulnessGuardTest.commandApprovalDenialClaimWithoutDeniedRunCommandIsWithheld`
+  proves command approval-denial prose is withheld unless a denied
+  `talos.run_command` outcome exists.
+- Guard test:
+  `CommandOutputTruthfulnessGuardTest.commandApprovalDenialClaimWithDeniedRunCommandPassesUnchanged`
+  preserves real command approval-denial reporting when the ledger records a
+  denied `talos.run_command`.
+- Tool-loop outcome test:
+  `ExecutionOutcomeTest.unsupportedNaturalCommandRequestWithReadOnlyFallbackDoesNotInventApprovalDenial`
+  proves a `list_dir` fallback plus fake "approval was denied" prose is replaced
+  with runtime-owned unsupported/not-run command wording.
+- Agent prompt-surface test:
+  `UnifiedAssistantModeTest.unsupportedNaturalShellCommandPromptExposesNoFallbackTools`
+  proves Agent prompt-debug evidence advertises `visibleTools: (none)` for this
+  unsupported natural command shape.
 
 Manual/TalosBench rerun:
 
@@ -315,7 +334,19 @@ Commands:
 .\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon
 ```
 
-Add broader commands if runtime code changes:
+Executed focused gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.runtime.outcome.CommandOutputTruthfulnessGuardTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon --rerun-tasks
+```
+
+Executed adjacent command/prompt-surface gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.outcome.CommandOutcomeRendererTest" --tests "dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest" --tests "dev.talos.core.llm.SystemPromptBuilderTest" --tests "dev.talos.runtime.TurnProcessorCommandPolicyTest" --tests "dev.talos.runtime.trace.LocalTurnTraceCommandTest" --no-daemon --rerun-tasks
+```
+
+Executed broader runtime gate:
 
 ```powershell
 .\gradlew.bat check --no-daemon
