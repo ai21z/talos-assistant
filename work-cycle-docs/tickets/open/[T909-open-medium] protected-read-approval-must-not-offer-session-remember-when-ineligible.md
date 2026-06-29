@@ -90,6 +90,19 @@ Additional GPT-OSS Plan-mode corroboration:
 - Trace id: `trc-760a78aa-4cbd-48c9-b985-2fbcc1fcfcff`
 - Approval choice: `n` on protected read
 
+Additional GPT-OSS Agent-mode corroboration:
+
+- Source: installed-product GPT-OSS Agent-mode manual audit
+- Date: 2026-06-29
+- Repo HEAD at audit: `ab4b3706`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Isolated Talos home: `local/manual-testing/gptoss-agent-mode-deep-20260629-104800/home`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\gptoss-agent-mode-deep-20260629-104800\agent-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/gptoss-agent-mode-deep-20260629-104800/artifacts/prompt-debug/prompt-debug-20260629-110433.md`
+- Trace id: `trc-7cc71886-ccb4-4176-8830-a7466fc749fb`
+- Approval choice: `n` on protected read
+
 Redacted prompt sequence:
 
 ```text
@@ -149,6 +162,12 @@ The same ineligible prompt surface also reproduced cross-model in GPT-OSS
 `/mode plan`. The protected-read deny path contained the read with
 `BLOCKED_BY_APPROVAL`, and no protected content was shown, but the approval
 window still advertised `a = approve for session` for a protected read.
+
+The same ineligible prompt surface also reproduced cross-model in GPT-OSS
+`/mode agent`, even while an unrelated write session approval was active. The
+protected-read deny path still required its own approval and contained the read
+with `BLOCKED_BY_APPROVAL`, but the approval window still advertised
+`a = approve for session` for a protected read.
 ```
 
 Code evidence:
