@@ -37,14 +37,19 @@ class SetupCmdTest {
     void modelsHelpMentionsTestedManagedLlamaCppProfiles() {
         String help = SetupCmd.modelsHelp();
 
+        assertTrue(help.contains("Accepted beta stability profiles:"), help);
+        assertTrue(help.contains("Experimental selectable profiles:"), help);
         assertTrue(help.contains("qwen2.5-coder-14b"));
         assertTrue(help.contains("gpt-oss-20b"));
         assertTrue(help.contains("qwen36vf-q6k"));
         assertTrue(help.contains("deepseek-v2lite-q4km"));
         assertTrue(help.contains("native/default"));
         assertTrue(help.contains("text/tool-prompt"));
+        assertTrue(help.contains("docs/user/model-profiles/qwen2.5-coder-14b.md"), help);
+        assertTrue(help.contains("talos doctor --start"), help);
         assertTrue(help.contains("talos setup models --profile"));
         assertTrue(help.contains(".talos/models"));
+        assertFalse(help.contains("Tested profiles:"), help);
     }
 
     @Test

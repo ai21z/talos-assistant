@@ -2,6 +2,8 @@ package dev.talos.engine.llamacpp;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -44,5 +46,30 @@ class LlamaCppModelProfilesTest {
         assertTrue(LlamaCppModelProfiles.profiles().containsKey("gpt-oss-20b"));
         assertEquals("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
                 LlamaCppModelProfiles.profiles().get("qwen2.5-coder-14b").hfRepo());
+    }
+
+    @Test
+    void supportTiersKeepTheDoctrinePinnedStabilityPairSeparateFromExperimentalProfiles() {
+        List<String> accepted = LlamaCppModelProfiles.profiles().values().stream()
+                .filter(profile -> profile.supportTier() == LlamaCppModelProfiles.SupportTier.ACCEPTED_BETA)
+                .map(LlamaCppModelProfiles.CannedProfile::alias)
+                .toList();
+        List<String> experimental = LlamaCppModelProfiles.profiles().values().stream()
+                .filter(profile -> profile.supportTier() == LlamaCppModelProfiles.SupportTier.EXPERIMENTAL_SELECTABLE)
+                .map(LlamaCppModelProfiles.CannedProfile::alias)
+                .toList();
+
+        assertEquals(List.of("qwen2.5-coder-14b", "gpt-oss-20b"), accepted);
+        assertEquals(List.of("qwen36vf-q4km", "qwen36vf-q6k", "deepseek-v2lite-q4km"), experimental);
+    }
+
+    @Test
+    void everyCannedProfileHasToolModeEvidenceBoundaryAndGuidePath() {
+        for (var profile : LlamaCppModelProfiles.profiles().values()) {
+            assertFalse(profile.toolMode().isBlank(), profile.alias());
+            assertTrue(profile.evidenceSummary().contains("evidence"), profile.alias());
+            assertTrue(profile.guidePath().startsWith("docs/user/model-profiles/"), profile.alias());
+            assertTrue(profile.guidePath().endsWith(".md"), profile.alias());
+        }
     }
 }

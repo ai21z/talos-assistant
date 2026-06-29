@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T886] Managed llama.cpp model setup now has a repeatable
+  configure -> test -> guide recipe for every canned chat profile. Setup help
+  renders from the shared profile registry, separates the accepted beta
+  stability pair (`qwen2.5-coder-14b`, `gpt-oss-20b`) from experimental
+  selectable profiles, links per-profile guides, and `talos doctor --start`
+  now requires the deterministic `TALOS_MODEL_SMOKE_OK` reply token before
+  reporting model-smoke success.
 - [T905] `/set model` downloaded-GGUF guidance now includes the complete
   alias-aware config patch for canned managed llama.cpp profiles: `llm.model`,
   `engines.llama_cpp.model`, `engines.llama_cpp.hf_repo`, and

@@ -190,6 +190,25 @@ class DoctorProbesTest {
         assertTrue(result.detail().contains("engine-files"));
     }
 
+    @Test
+    void startModeFailsWhenSmokeReplyDoesNotContainTheExpectedToken() throws IOException {
+        HttpServer server = startChatServer("wrong-token");
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "smoke-model"));
+
+            ProbeResult result = new ServerProbe(true).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.FAIL, result.status());
+            assertTrue(result.detail().contains("model smoke reply did not contain"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     // ── index-writable / home-writable ───────────────────────────────────
 
     @Test
@@ -352,6 +371,20 @@ class DoctorProbesTest {
         server.createContext("/health", exchange -> {
             byte[] bytes = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    private static HttpServer startChatServer(String reply) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            byte[] bytes = ("""
+                    {"choices":[{"message":{"role":"assistant","content":"%s"}}]}
+                    """.formatted(reply)).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });

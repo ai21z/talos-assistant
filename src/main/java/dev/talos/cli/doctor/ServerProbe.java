@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Probes the llama.cpp server. Default mode never starts anything: a
@@ -27,6 +28,7 @@ import java.util.List;
  * touched.
  */
 public final class ServerProbe implements DoctorProbe {
+    static final String MODEL_SMOKE_TOKEN = "TALOS_MODEL_SMOKE_OK";
 
     private final boolean startServer;
 
@@ -100,10 +102,18 @@ public final class ServerProbe implements DoctorProbe {
             }
             String reply = chatEngine.chat(new ChatRequest(
                     runtime.backend(), runtime.model(), "",
-                    "Reply with the single word: ok", List.of(), null));
-            int replyChars = reply == null ? 0 : reply.strip().length();
+                    "Reply exactly " + MODEL_SMOKE_TOKEN + " and no other text.", List.of(), null));
+            String normalized = reply == null ? "" : reply.strip();
+            int replyChars = normalized.length();
+            if (!normalized.toUpperCase(Locale.ROOT).contains(MODEL_SMOKE_TOKEN)) {
+                return ProbeResult.fail(id(),
+                        "model smoke reply did not contain " + MODEL_SMOKE_TOKEN
+                                + " (" + replyChars + " reply chars)",
+                        "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
+                                + preflight.port() + ".log");
+            }
             return ProbeResult.pass(id(),
-                    "end-to-end chat verified (" + replyChars + " reply chars);"
+                    "end-to-end model smoke verified (" + replyChars + " reply chars);"
                             + " managed server released again");
         } catch (Exception e) {
             return ProbeResult.fail(id(),
