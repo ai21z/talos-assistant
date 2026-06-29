@@ -1,5 +1,6 @@
 package dev.talos.cli.launcher;
- 
+
+import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
 import picocli.CommandLine;
 
 import java.nio.charset.StandardCharsets;
@@ -63,15 +64,25 @@ public class SetupCmd implements Callable<Integer> {
     }
 
     public static String modelsHelp() {
-        return """
+        StringBuilder out = new StringBuilder("""
                 Talos managed llama.cpp model setup
 
-                Tested profiles:
-                  qwen2.5-coder-14b     Qwen/Qwen2.5-Coder-14B-Instruct-GGUF q4_k_m        tool mode: native/default
-                  gpt-oss-20b            ggml-org/gpt-oss-20b-GGUF mxfp4                   tool mode: native/default
-                  qwen36vf-q4km          tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF Q4_K_M tool mode: native/default
-                  qwen36vf-q6k           tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF Q6_K   tool mode: native/default
-                  deepseek-v2lite-q4km   bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF Q4_K_M tool mode: text/tool-prompt
+                Accepted beta stability profiles:
+                """);
+        appendProfiles(out, LlamaCppModelProfiles.SupportTier.ACCEPTED_BETA);
+        out.append("""
+
+                Experimental selectable profiles:
+                """);
+        appendProfiles(out, LlamaCppModelProfiles.SupportTier.EXPERIMENTAL_SELECTABLE);
+        out.append("""
+
+                Repeatable configure -> test -> guide recipe:
+                  1. talos setup models --profile <name> --server-path C:/path/to/llama-server.exe --write
+                  2. Restart Talos after the config write.
+                  3. talos status --verbose
+                  4. talos doctor --start
+                  5. Save the doctor output as evidence before calling that local setup verified.
 
                 Talos-managed download/cache:
                   talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
@@ -86,7 +97,22 @@ public class SetupCmd implements Callable<Integer> {
 
                 Existing configs are backed up when --force is used.
                 Switching managed GGUF profiles rewrites the active config; restart Talos after the write.
-                """;
+                """);
+        return out.toString();
+    }
+
+    private static void appendProfiles(StringBuilder out, LlamaCppModelProfiles.SupportTier tier) {
+        for (var profile : LlamaCppModelProfiles.profiles().values()) {
+            if (profile.supportTier() != tier) continue;
+            out.append("  ")
+                    .append(profile.alias())
+                    .append("\n")
+                    .append("    source: ").append(profile.hfRepo()).append("\n")
+                    .append("    file: ").append(profile.hfFile()).append("\n")
+                    .append("    tool mode: ").append(profile.toolMode()).append("\n")
+                    .append("    guide: ").append(profile.guidePath()).append("\n")
+                    .append("    evidence: ").append(profile.evidenceSummary()).append("\n");
+        }
     }
 
     public static String renderManagedLlamaCppProfileConfig(
@@ -262,7 +288,7 @@ public class SetupCmd implements Callable<Integer> {
         // T902: sourced from the shared LlamaCppModelProfiles registry so the
         // canned profiles here and the /set model switch guidance never drift.
         Map<String, ModelProfile> out = new LinkedHashMap<>();
-        for (var p : dev.talos.engine.llamacpp.LlamaCppModelProfiles.profiles().values()) {
+        for (var p : LlamaCppModelProfiles.profiles().values()) {
             out.put(p.alias(), new ModelProfile(p.alias(), p.hfRepo(), p.hfFile(), p.nativeCalling()));
         }
         return Map.copyOf(out);

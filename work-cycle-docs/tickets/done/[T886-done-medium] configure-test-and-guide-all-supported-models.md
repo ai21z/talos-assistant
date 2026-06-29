@@ -1,23 +1,25 @@
-# [T886-open-medium] Configure, test, and write guides for all supported models
+# [T886-done-medium] Configure, test, and write guides for all supported models
 
-Status: open
+Status: done
 Priority: medium
-Blocker level: future milestone (deferred-beyond-beta). Owner marked this a
-discussion item / arc, not for implementation now.
+Blocker level: closed. Owner promoted this from deferred discussion item to
+implementation on 2026-06-30.
 
 ## Evidence Summary
 
 - Source: owner manual REPL testing + discussion (2026-06-27)
 - Date: 2026-06-27
-- Talos version / commit: 0.10.6 / 4f8f50a7
-- Verification status: scope captured; no code yet
+- Original discussion version / commit: 0.10.6 / 4f8f50a7
+- Implementation baseline version / commit: 0.10.6 / 6d077439
+- Verification status: implemented with focused red/green tests; full `check`
+  passed because runtime code changed
 
 Observed / request: from the `/models` discussion the owner concluded: "IF THE USER
 NEEDS TO CONFIGURE A MODEL, we need to provide the corresponding guide ... we are
 going to configure and test ALL those models and we will provide GUIDES." This is
 the arc behind [T883] (which only clarified the `/models` tip wording). It pairs
-with [T885] (terminal-UI configuration). The owner framed it as discussion, not
-implementation, for now.
+with [T885] (terminal-UI configuration). The owner later promoted T886 ahead of
+T885 because it is adjacent to the model setup/support surface.
 
 ## Classification
 
@@ -31,13 +33,15 @@ Secondary buckets:
 
 Blocker level:
 
-- future milestone
+- closed
 
 Why this level:
 
 ```text
-Larger arc (multiple models x configure + test + guide). Owner asked to discuss and
-plan, not build now. Must respect the model-stability invariant.
+Implemented as the bounded model-support surface: shared profile metadata,
+deterministic doctor smoke semantics, and per-profile guides. The stability
+invariant is preserved by separating accepted beta profiles from experimental
+selectable profiles.
 ```
 
 ## Architectural Hypothesis
@@ -62,7 +66,7 @@ Likely code/document areas:
 
 - `talos setup models` (profile config path)
 - `src/main/java/dev/talos/engine/llamacpp/` (managed llama.cpp config + scan)
-- model guides (location TBD: docs/ or work-cycle-docs/)
+- `docs/user/model-profiles/` (one user guide per canned chat profile)
 
 Why a one-off patch is insufficient:
 
@@ -98,6 +102,20 @@ default qwen3.6-35b-a3b and the abliterated eval model). One guide per model,
 following the same shape.
 ```
 
+Implemented 2026-06-30:
+
+- `LlamaCppModelProfiles.CannedProfile` now carries support tier, tool mode,
+  guide path, and evidence-boundary text as the canonical profile metadata.
+- `talos setup models` help renders profile sections from that registry instead
+  of a hardcoded table.
+- Accepted beta stability profiles are explicitly limited to
+  `qwen2.5-coder-14b` and `gpt-oss-20b`.
+- Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite are explicitly labeled
+  experimental selectable profiles, not beta stability baselines.
+- `talos doctor --start` now requires the deterministic
+  `TALOS_MODEL_SMOKE_OK` reply token before reporting model-smoke success.
+- Per-profile guides live under `docs/user/model-profiles/`.
+
 ## Architecture Metadata
 
 Capability:
@@ -114,7 +132,7 @@ Owning package/class:
 
 New or changed tools:
 
-- none expected; a smoke/verify harness at most
+- no new command; `talos doctor --start` smoke semantics tightened
 
 Risk, approval, and protected paths:
 
@@ -125,7 +143,7 @@ Risk, approval, and protected paths:
 
 Checkpoint, evidence, verification, and repair:
 
-- Checkpoint behavior: checkpoint before any config write
+- Checkpoint behavior: unchanged; this ticket does not write user config
 - Evidence obligation: per-model smoke-test output captured as evidence
 - Verification profile: a deterministic "model loads + answers" check
 - Repair profile: n/a
@@ -143,20 +161,37 @@ Refactor scope:
 
 ## Acceptance Criteria
 
-- A repeatable per-model recipe (configure -> test -> guide) exists and is applied
+- [x] A repeatable per-model recipe (configure -> test -> guide) exists and is applied
   first to `qwen2.5-coder-14b` and `gpt-oss-20b`.
-- Each guide is backed by a deterministic smoke test that proves the model loads and
+- [x] Each guide is backed by a deterministic smoke test that proves the model loads and
   answers; no model is documented as "supported" without passing evidence.
-- The doctrine-pinned stability models are unchanged.
-- No regressions to privacy, permissions, checkpointing, trace redaction, or
+- [x] The doctrine-pinned stability models are unchanged.
+- [x] No regressions to privacy, permissions, checkpointing, trace redaction, or
   outcome truth.
 
 ## Tests / Evidence
 
-Required deterministic regression:
+Implemented deterministic regressions:
 
-- Integration/executor test: per-model "loads + answers" smoke check
-- Evidence: captured smoke-test output referenced by each guide
+- `DoctorProbesTest` pins that `talos doctor --start` fails if the chat reply
+  does not contain `TALOS_MODEL_SMOKE_OK`.
+- `LlamaCppModelProfilesTest` pins support-tier separation and profile guide
+  metadata for all canned profiles.
+- `SetupCmdTest` pins registry-rendered setup help, support-tier headings,
+  guide links, and `talos doctor --start` guidance.
+- `TrustClaimsHonestyTest` pins the accepted/experimental wording and one guide
+  per canned chat profile.
+
+Evidence:
+
+- Hugging Face model API checks confirmed the configured GGUF filenames for
+  Qwen2.5-Coder, GPT-OSS, Qwen3.6-VibeForged Q4/Q6, DeepSeek-Coder-V2-Lite, and
+  `bge-m3` on 2026-06-30.
+- Focused red/green gate:
+  `.\gradlew.bat test --tests "dev.talos.engine.llamacpp.LlamaCppModelProfilesTest" --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.docs.TrustClaimsHonestyTest" --tests "dev.talos.cli.doctor.DoctorProbesTest" --no-daemon`
+  passed after implementation.
+- Full runtime gate: `.\gradlew.bat check --no-daemon` passed after
+  implementation.
 
 Commands:
 

@@ -36,6 +36,11 @@ class TrustClaimsHonestyTest {
     private static final String DEEPSEEK_TOOL_MODE_BOUNDARY =
             "DeepSeek-Coder-V2-Lite Q4 is Talos-usable in text/tool-prompt mode with "
                     + "`tools.native_calling:false`; native/default produced zero executable tool calls.";
+    private static final String ACCEPTED_MODEL_BOUNDARY =
+            "Accepted beta stability profiles are `qwen2.5-coder-14b` and `gpt-oss-20b`.";
+    private static final String EXPERIMENTAL_MODEL_BOUNDARY =
+            "Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles, "
+                    + "not beta stability baselines.";
     private static final String RETRIEVAL_PERMISSION_BOUNDARY =
             "Retrieval is evidence, not permission to inspect everything.";
     private static final String COMMAND_OUTPUT_BOUNDARY =
@@ -211,10 +216,21 @@ class TrustClaimsHonestyTest {
         String managedSetup = read("docs/setup-managed-models.md");
         String publicDocs = read("README.md") + "\n" + read("AGENTS.md") + "\n" + readMarkdownTree("docs");
 
+        assertContainsNormalized(modelSetup, ACCEPTED_MODEL_BOUNDARY);
+        assertContainsNormalized(managedSetup, ACCEPTED_MODEL_BOUNDARY);
+        assertContainsNormalized(modelSetup, EXPERIMENTAL_MODEL_BOUNDARY);
+        assertContainsNormalized(managedSetup, EXPERIMENTAL_MODEL_BOUNDARY);
         assertContainsNormalized(modelSetup, DEEPSEEK_TOOL_MODE_BOUNDARY);
         assertContainsNormalized(managedSetup, DEEPSEEK_TOOL_MODE_BOUNDARY);
         assertContains(modelSetup, "Qwen3.6-VibeForged Q4/Q6");
         assertContains(managedSetup, "Qwen3.6-VibeForged Q4/Q6");
+        assertFalse(modelSetup.contains("## Tested Managed Profiles"));
+        assertFalse(managedSetup.contains("## Tested Profiles"));
+        assertProfileGuide("qwen2.5-coder-14b");
+        assertProfileGuide("gpt-oss-20b");
+        assertProfileGuide("qwen36vf-q4km");
+        assertProfileGuide("qwen36vf-q6k");
+        assertProfileGuide("deepseek-v2lite-q4km");
         assertPatternAbsent(publicDocs, DEEPSEEK_NATIVE_TOOL_CAPABLE_CLAIM);
     }
 
@@ -340,5 +356,12 @@ class TrustClaimsHonestyTest {
     private static void assertPatternAbsent(String text, Pattern forbidden) {
         assertFalse(forbidden.matcher(text).find(),
                 "Forbidden trust-positioning pattern is present: " + forbidden.pattern());
+    }
+
+    private static void assertProfileGuide(String profile) throws Exception {
+        String text = read("docs/user/model-profiles/" + profile + ".md");
+        assertContains(text, "talos setup models --profile " + profile);
+        assertContains(text, "talos doctor --start");
+        assertContains(text, "Save the `talos doctor --start` output as evidence before calling this profile verified on a new machine.");
     }
 }

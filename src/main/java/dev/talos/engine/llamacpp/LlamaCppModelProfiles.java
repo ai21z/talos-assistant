@@ -1,5 +1,6 @@
 package dev.talos.engine.llamacpp;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -19,8 +20,32 @@ public final class LlamaCppModelProfiles {
 
     private LlamaCppModelProfiles() {}
 
+    /** Public support posture for a canned chat profile. */
+    public enum SupportTier {
+        ACCEPTED_BETA("accepted beta stability"),
+        EXPERIMENTAL_SELECTABLE("experimental selectable");
+
+        private final String label;
+
+        SupportTier(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
     /** A canned profile: {@code alias} is the {@code --profile} value. */
-    public record CannedProfile(String alias, String hfRepo, String hfFile, boolean nativeCalling) {}
+    public record CannedProfile(
+            String alias,
+            String hfRepo,
+            String hfFile,
+            boolean nativeCalling,
+            String toolMode,
+            SupportTier supportTier,
+            String evidenceSummary,
+            String guidePath) {}
 
     private static final Map<String, CannedProfile> PROFILES = build();
 
@@ -28,20 +53,35 @@ public final class LlamaCppModelProfiles {
         LinkedHashMap<String, CannedProfile> out = new LinkedHashMap<>();
         out.put("qwen2.5-coder-14b", new CannedProfile(
                 "qwen2.5-coder-14b", "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
-                "qwen2.5-coder-14b-instruct-q4_k_m.gguf", true));
+                "qwen2.5-coder-14b-instruct-q4_k_m.gguf", true,
+                "native/default", SupportTier.ACCEPTED_BETA,
+                "accepted beta stability evidence; run talos doctor --start after configuration for machine-local smoke evidence",
+                "docs/user/model-profiles/qwen2.5-coder-14b.md"));
         out.put("gpt-oss-20b", new CannedProfile(
                 "gpt-oss-20b", "ggml-org/gpt-oss-20b-GGUF",
-                "gpt-oss-20b-mxfp4.gguf", true));
+                "gpt-oss-20b-mxfp4.gguf", true,
+                "native/default", SupportTier.ACCEPTED_BETA,
+                "accepted beta stability evidence; run talos doctor --start after configuration for machine-local smoke evidence",
+                "docs/user/model-profiles/gpt-oss-20b.md"));
         out.put("qwen36vf-q4km", new CannedProfile(
                 "qwen36vf-q4km", "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
-                "Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf", true));
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf", true,
+                "native/default", SupportTier.EXPERIMENTAL_SELECTABLE,
+                "experimental tool-call evidence; not beta stability evidence",
+                "docs/user/model-profiles/qwen36vf-q4km.md"));
         out.put("qwen36vf-q6k", new CannedProfile(
                 "qwen36vf-q6k", "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
-                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf", true));
+                "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf", true,
+                "native/default", SupportTier.EXPERIMENTAL_SELECTABLE,
+                "experimental tool-call evidence; not beta stability evidence",
+                "docs/user/model-profiles/qwen36vf-q6k.md"));
         out.put("deepseek-v2lite-q4km", new CannedProfile(
                 "deepseek-v2lite-q4km", "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
-                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf", false));
-        return Map.copyOf(out);
+                "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf", false,
+                "text/tool-prompt", SupportTier.EXPERIMENTAL_SELECTABLE,
+                "experimental text/tool-prompt evidence; native/default produced zero executable tool calls",
+                "docs/user/model-profiles/deepseek-v2lite-q4km.md"));
+        return Collections.unmodifiableMap(out);
     }
 
     /** All canned profiles, keyed by alias, insertion-ordered. */

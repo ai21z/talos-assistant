@@ -19,17 +19,21 @@ Local-first depends on the configured chat endpoint. Chat endpoints are localhos
 talos setup models
 ```
 
-This prints the tested managed profiles and example commands.
+This prints the managed profile support levels and example commands.
 
-## Tested Managed Profiles
+## Managed Profile Support Levels
 
-| Profile | Source | File | Tool mode |
-| --- | --- | --- | --- |
-| `qwen2.5-coder-14b` | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` | `qwen2.5-coder-14b-instruct-q4_k_m.gguf` | native/default |
-| `gpt-oss-20b` | `ggml-org/gpt-oss-20b-GGUF` | `gpt-oss-20b-mxfp4.gguf` | native/default |
-| `qwen36vf-q4km` | `tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF` | `Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf` | native/default |
-| `qwen36vf-q6k` | `tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF` | `Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf` | native/default |
-| `deepseek-v2lite-q4km` | `bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF` | `DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf` | text/tool-prompt |
+Accepted beta stability profiles are `qwen2.5-coder-14b` and `gpt-oss-20b`.
+
+Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles, not beta stability baselines.
+
+| Profile | Support level | Source | File | Tool mode | Guide |
+| --- | --- | --- | --- | --- | --- |
+| `qwen2.5-coder-14b` | accepted beta stability | `Qwen/Qwen2.5-Coder-14B-Instruct-GGUF` | `qwen2.5-coder-14b-instruct-q4_k_m.gguf` | native/default | [guide](model-profiles/qwen2.5-coder-14b.md) |
+| `gpt-oss-20b` | accepted beta stability | `ggml-org/gpt-oss-20b-GGUF` | `gpt-oss-20b-mxfp4.gguf` | native/default | [guide](model-profiles/gpt-oss-20b.md) |
+| `qwen36vf-q4km` | experimental selectable | `tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF` | `Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf` | native/default | [guide](model-profiles/qwen36vf-q4km.md) |
+| `qwen36vf-q6k` | experimental selectable | `tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF` | `Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf` | native/default | [guide](model-profiles/qwen36vf-q6k.md) |
+| `deepseek-v2lite-q4km` | experimental selectable | `bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF` | `DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf` | text/tool-prompt | [guide](model-profiles/deepseek-v2lite-q4km.md) |
 
 Tool-mode evidence is per profile and quant. Qwen3.6-VibeForged Q4/Q6 passed
 the initial Talos tool-call gate in native/default mode. DeepSeek-Coder-V2-Lite
@@ -37,6 +41,10 @@ Q4 is Talos-usable in text/tool-prompt mode with
 `tools.native_calling:false`; native/default produced zero executable tool
 calls. Do not treat this profile as native/default compatible unless later
 evidence proves native/default tool-calling.
+
+Use `talos doctor --start` after configuring and restarting Talos to prove the
+selected profile loads and answers on the current machine. Save the
+`talos doctor --start` output before calling a local profile setup verified.
 
 Configure Qwen:
 
@@ -107,7 +115,7 @@ used. When `--force` is used, Talos writes a backup first.
 
 ## Talos-Owned Model Cache
 
-For tested managed profiles, Talos configures the Hugging Face cache directory:
+For built-in managed Hugging Face profiles, Talos configures the cache directory:
 
 ```text
 %USERPROFILE%\.talos\models\huggingface
