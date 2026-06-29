@@ -64,6 +64,19 @@ Additional GPT-OSS Auto-mode corroboration:
 - Trace ids: `trc-3d304ed4-f58a-42cf-8615-dee111273f5a`, `trc-b1091a3a-f805-4b37-a638-ad567e07b115`
 - Approval choices: `n` on first protected read; `y` on second protected read
 
+Additional GPT-OSS Ask-mode corroboration:
+
+- Source: installed-product GPT-OSS Ask-mode manual audit
+- Date: 2026-06-29
+- Repo HEAD at audit: `29672962`
+- Installed build: `2026-06-28T20:44:48.560965600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Isolated Talos home: `local/manual-testing/gptoss-ask-mode-deep-20260629-101500/home`
+- Workspace fixture: `C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-workspaces\gptoss-ask-mode-deep-20260629-101500\ask-workspace`
+- Prompt-debug artifact copy: `local/manual-testing/gptoss-ask-mode-deep-20260629-101500/artifacts/prompt-debug/prompt-debug-20260629-102245.md`
+- Trace ids: `trc-983319ac-d89d-4d2e-bdc6-8a39aa720d4b`, `trc-18c26649-4b44-4859-8cc2-d3901b8ef669`
+- Approval choices: `n` on first protected read; `y` on second protected read
+
 Redacted prompt sequence:
 
 ```text
@@ -112,6 +125,12 @@ The same ineligible prompt surface also reproduced cross-model in GPT-OSS
 `/mode auto`. The protected-read deny path contained the read, and the
 approve-once path returned only the requested variable name, but the approval
 window still advertised `a = approve for session` for a protected read.
+
+The same ineligible prompt surface also reproduced cross-model in GPT-OSS
+`/mode ask`. The protected-read deny path contained the read with
+`BLOCKED_BY_APPROVAL`, and the approve-once path returned only the requested
+variable name, but the approval window still advertised
+`a = approve for session` for a protected read.
 ```
 
 Code evidence:
