@@ -2925,6 +2925,90 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void partialReplacementFailureDoesNotKeepCompleteLabelWhenOneRequestedTargetIsUnchanged() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-partial-replacement-");
+        try {
+            Files.writeString(ws.resolve("notes.md"), "status=new\n");
+            Files.writeString(ws.resolve("more.md"), "status2=old\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                            + "Then replace status2=old with status2=new in more.md."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    """
+                            Updated 2 files: notes.md, more.md.
+                            ✓ Updated notes.md (1 lines, 11 bytes)
+                            ✓ Updated more.md (1 lines, 11 bytes)
+                            """,
+                    1,
+                    2,
+                    List.of("talos.edit_file", "talos.write_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    2,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "notes.md", true, true, false,
+                                    "edited notes.md", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "more.md", true, true, false,
+                                    "wrote more.md", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t869-partial-replacement",
+                    "sid-t869",
+                    1,
+                    "2026-06-30T12:00:00Z",
+                    "workspace-hash",
+                    "agent",
+                    "llama.cpp",
+                    "gpt-oss:20b",
+                    messages.getLast().content());
+            ExecutionOutcome outcome;
+            LocalTurnTrace trace;
+            try {
+                outcome = ExecutionOutcome.fromToolLoop(
+                        loopResult.finalAnswer(), messages, loopResult, ws, 0);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
+            assertNotNull(trace);
+            assertNotNull(trace.outcome());
+            assertEquals("FAILED", trace.outcome().status());
+            assertEquals("FAILED", trace.outcome().verificationStatus());
+            assertEquals("SUCCEEDED", trace.outcome().mutationStatus());
+            assertEquals("FAILED", trace.outcome().classification());
+            assertTrue(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("more.md: replacement new text was not observed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Updated 2 files:"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("✓ Updated more.md"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMatchAfterSuccessfulWriteIsVerifiedComplete() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-match-");
         try {

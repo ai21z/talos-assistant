@@ -76,7 +76,7 @@ final class TaskVerificationOutcomeSelector {
         if (claimOverride.isPresent()) {
             return claimOverride.get();
         }
-        if (expectation.verifiedAny() && !webCoherenceRequired) {
+        if (expectation.verifiedAny() && expectation.coversAllSuccessfulMutations() && !webCoherenceRequired) {
             if (expectation.replacementRequired()) {
                 return TaskVerificationResult.passed(
                         "Replacement verification passed.",

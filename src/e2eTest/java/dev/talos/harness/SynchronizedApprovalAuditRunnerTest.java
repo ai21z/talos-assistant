@@ -437,7 +437,7 @@ class SynchronizedApprovalAuditRunnerTest {
         assertEquals("CREATED", result.trace().checkpoint().status());
         assertEquals("PASSED", result.trace().verification().status());
         assertTrue(result.trace().verification().summary()
-                .contains("Exact edit replacement verification passed"), result.trace().verification().summary());
+                .contains("Replacement verification passed"), result.trace().verification().summary());
     }
 
     @Test

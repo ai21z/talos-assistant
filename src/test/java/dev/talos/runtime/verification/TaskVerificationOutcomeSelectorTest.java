@@ -57,6 +57,21 @@ class TaskVerificationOutcomeSelectorTest {
     }
 
     @Test
+    void expectationPassDoesNotCoverUnverifiedSuccessfulMutationTarget() {
+        TaskVerificationResult result = TaskVerificationOutcomeSelector.select(
+                List.of("notes.md: replacement text observed and old text absent."),
+                List.of(),
+                2,
+                false,
+                expectationResult(true, true, false, false, false),
+                exactEditResult(true, false, false),
+                sourceDerivedResult(false));
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status());
+        assertTrue(result.summary().contains("Target/readback checks passed"), result.summary());
+    }
+
+    @Test
     void sourceDerivedPositiveCoverageDoesNotProjectToPassedForGenericSummary() {
         TaskVerificationResult result = TaskVerificationOutcomeSelector.select(
                 List.of("summary.md: source-derived artifact includes evidence from notes.md."),
@@ -124,11 +139,22 @@ class TaskVerificationOutcomeSelectorTest {
             boolean appendLineRequired,
             boolean bulletCountRequired
     ) {
+        return expectationResult(verifiedAny, replacementRequired, appendLineRequired, bulletCountRequired, true);
+    }
+
+    private static TaskExpectationStaticVerifier.Result expectationResult(
+            boolean verifiedAny,
+            boolean replacementRequired,
+            boolean appendLineRequired,
+            boolean bulletCountRequired,
+            boolean coversAllSuccessfulMutations
+    ) {
         return new TaskExpectationStaticVerifier.Result(
                 verifiedAny,
                 replacementRequired,
                 appendLineRequired,
                 bulletCountRequired,
+                coversAllSuccessfulMutations,
                 List.of(),
                 List.of());
     }

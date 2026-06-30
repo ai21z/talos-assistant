@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T869] Multi-target replacement verification now resolves explicit
+  target-scoped `replace old with new in file` expectations for each requested
+  target. A successful write that leaves one requested replacement unsatisfied
+  now fails static verification, demotes the turn outcome/trace to `FAILED`,
+  and withholds stale success prose instead of presenting `COMPLETE` /
+  `COMPLETED_UNVERIFIED`. Expectation-based verification only upgrades a turn
+  to `PASSED` when it covers every successful mutation target.
 - [T873] Command/tool-output truth checks now cover additional
   ledger-gated shapes beyond git status: test-run output, process-list output,
   shell listing/cat output, and explicit file-content claims without a matching

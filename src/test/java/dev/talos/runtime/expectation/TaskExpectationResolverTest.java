@@ -147,6 +147,46 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsReplacementExpectationsForExplicitMultiTargetReplacements() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                        + "Then replace status2=old with status2=new in more.md.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(2, expectations.size());
+        ReplacementExpectation notes = replacementFor(expectations, "notes.md");
+        assertEquals("notes.md", notes.targetPath());
+        assertEquals("status=old", notes.oldText());
+        assertEquals("status=new", notes.newText());
+        assertEquals("replacement-replace-with-in-target", notes.sourcePattern());
+        ReplacementExpectation more = replacementFor(expectations, "more.md");
+        assertEquals("more.md", more.targetPath());
+        assertEquals("status2=old", more.oldText());
+        assertEquals("status2=new", more.newText());
+        assertEquals("replacement-replace-with-in-target", more.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsReplacementExpectationsForCompactMultiTargetReplacement() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Replace status=old with status=new in notes.md and status2=old with status2=new in more.md.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(2, expectations.size());
+        ReplacementExpectation notes = replacementFor(expectations, "notes.md");
+        assertEquals("status=old", notes.oldText());
+        assertEquals("status=new", notes.newText());
+        assertEquals("replacement-replace-with-in-target", notes.sourcePattern());
+        ReplacementExpectation more = replacementFor(expectations, "more.md");
+        assertEquals("status2=old", more.oldText());
+        assertEquals("status2=new", more.newText());
+        assertEquals("replacement-continued-with-in-target", more.sourcePattern());
+    }
+
+    @Test
     void extractsReplacementExpectationAfterApprovalSimilarTargetWording() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "After approval, edit only script.js, not scripts.js. "
@@ -236,5 +276,14 @@ class TaskExpectationResolverTest {
                 "Overwrite index.html and README.md with exactly AFTER.");
 
         assertTrue(TaskExpectationResolver.resolve(contract).isEmpty());
+    }
+
+    private static ReplacementExpectation replacementFor(List<TaskExpectation> expectations, String targetPath) {
+        return expectations.stream()
+                .filter(ReplacementExpectation.class::isInstance)
+                .map(ReplacementExpectation.class::cast)
+                .filter(expectation -> targetPath.equals(expectation.targetPath()))
+                .findFirst()
+                .orElseThrow();
     }
 }

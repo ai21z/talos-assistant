@@ -3443,6 +3443,27 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void multiTargetReplacementExpectationFailsWhenOneRequestedReplacementIsMissing() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "status=new\n");
+        Files.writeString(workspace.resolve("more.md"), "status2=old\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                        + "Then replace status2=old with status2=new in more.md.",
+                loopResult(List.of(
+                        successfulEdit("notes.md", VerificationStatus.PASS),
+                        successfulWrite("more.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("more.md: replacement new text was not observed")),
+                result.problems().toString());
+    }
+
+    @Test
     void replacementPreserveRestPassesWhenFullWriteEvidenceOnlyReplacesRequestedText() throws Exception {
         String previous = """
                 <html>
