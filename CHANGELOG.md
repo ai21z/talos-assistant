@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T872] The live synchronized approval audit no longer aborts the full bank
+  when the first protected-read-denied scenario safely completes without the
+  model attempting the expected approval path. Audit transcripts now record
+  expected versus observed approval counts, missing required approvals score as
+  `FAIL_REVIEW_REQUIRED`, and the protected-read non-attempt writes a
+  `REVIEW-REQUIRED.md` bundle instead of being mistaken for passing coverage.
 - [T885] `/profiles configure` now provides a terminal-side declaration/edit
   path for workspace verification profiles. It previews the exact proposed
   `.talos/profiles.yaml` bytes and SHA-256 behind approval, checkpoints the
