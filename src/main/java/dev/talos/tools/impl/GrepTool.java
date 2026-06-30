@@ -290,7 +290,7 @@ public final class GrepTool implements TalosTool {
     }
 
     private static String truncate(String s, int max) {
-        return s.length() <= max ? s : s.substring(0, max) + "…";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
     private static String safeSearchLine(String line, boolean privateMode) {

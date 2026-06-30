@@ -1,6 +1,6 @@
-# [T870-open-low] Redacted/search output rendering glitch (mangled `line:N` token)
+# [T870-done-low] Redacted/search output rendering glitch (mangled `line:N` token)
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -16,6 +16,21 @@ Priority: low
 - Approval choices: not applicable (read-only `talos.grep` turn)
 - Checkpoint id: not applicable
 - Verification status: reviewed by independent review + cross-verified by owner against disk. Trust surface HELD for this turn: canary scan passed, no secret/canary/PII leak, no false/unapproved mutation, no hard-fail gate fired.
+
+2026-06-30 implementation recheck:
+
+- The saved GPT-OSS `output.txt` contains the observed `line?2` token in the
+  final answer text.
+- The matching GPT-OSS provider-body artifact redacts the tool result as
+  `[protected tool result redacted by prompt-debug policy]`, so it does not
+  prove a malformed deterministic grep result.
+- The Qwen provider-body artifact for the same prompt family shows clean tool
+  output: `notes.md:2 | PRIVATE_MARKER=[redacted], but matching lines were not
+  returned.`
+- Implementation therefore treats the original deterministic-formatter root
+  cause as unproven. The landed fix pins the deterministic search surfaces and
+  removes the `GrepTool` Unicode truncation marker so future long grep results
+  do not depend on terminal glyph fallback.
 
 Redacted prompt sequence:
 
@@ -35,12 +50,15 @@ No "?" substitution appears in the locator or the redaction placeholder.
 Observed behavior:
 
 ```text
-The rendered match for the PRIVATE_MARKER turn contained the literal token "line?2"
-(a mangled "line:2"-style locator: the ":" separator surfaced as "?"). No protected
-content leaked - the canary scan passed and the .ssh/id_rsa "dummy" content is absent
-from every capture. The defect is purely cosmetic: a "?" substitution artifact in how
-a redacted / grep match line is displayed, almost certainly an encoding/glyph
-substitution somewhere in the search-result rendering path.
+The GPT-OSS final answer for the PRIVATE_MARKER turn contained the literal token
+"line?2" while still withholding the marker value. No protected content leaked - the
+canary scan passed and the .ssh/id_rsa "dummy" content is absent from every capture.
+The durable artifacts do not prove that the deterministic grep formatter emitted
+"line?2"; the Qwen provider body shows the deterministic tool result as a clean
+line beginning `notes.md:2 | PRIVATE_MARKER=[redacted]`, while the GPT-OSS
+provider body redacts the tool result before the model-visible transcript. This
+is still privacy-adjacent product polish because redacted search output should
+be byte-clean where Talos owns the rendering.
 ```
 
 ## Classification
@@ -72,8 +90,9 @@ Bad ticket framing to avoid:
 
 ```text
 Replace "line?2" with "line:2" in the gpt-oss output. (This is a model-output edit and
-a one-off string patch; the artifact is in our own deterministic render/sanitize path,
-not in the model token, so a per-string fix would mask a real encoding bug.)
+a one-off string patch. The artifact evidence places the exact bad token in the
+rendered final answer and does not prove the deterministic grep result was
+malformed or that the raw model token stream contained a colon.)
 ```
 
 Architectural hypothesis:
@@ -82,13 +101,12 @@ Architectural hypothesis:
 Talos builds the match line deterministically as relPath + ":" + (i + 1) + " | " +
 truncate(safeLine, ...) in GrepTool.searchFile / searchExtractedFile, where safeLine
 passes through ProtectedContentSanitizer.sanitizeSearchLine -> sanitizeText (which
-redacts PRIVATE_MARKER assignments). A ":" surfacing as "?" is a classic charset/glyph
-substitution: a byte or code point that is dropped to "?" by a non-UTF-8 stream
-encoder, a JLine/terminal glyph fallback, or a markdown/streaming shaper rewriting a
-control or non-ASCII code point. The owner is the search-result rendering/sanitization
-layer plus the REPL output encoder - not the model and not the safety policy. The
-redaction itself is correct (PRIVATE_MARKER value did not leak); only the display of a
-locator/placeholder character is corrupted.
+redacts PRIVATE_MARKER assignments). Re-review shows the owned deterministic match
+line was clean in the saved Qwen provider-body artifact, so the confirmed product
+work is to pin that formatting with tests across the agent tool and slash command and
+remove known non-ASCII punctuation from the grep tool truncation path. The redaction
+itself is correct (PRIVATE_MARKER value did not leak); the closed fix keeps the owned
+search-result rendering ASCII-clean where Talos controls the bytes.
 ```
 
 Likely code/document areas:
@@ -103,7 +121,7 @@ Why a one-off patch is insufficient:
 ```text
 If a code point is being coerced to "?" by an encoder or glyph-fallback, the same defect
 will silently corrupt any redaction placeholder, any non-ASCII match content, the
-truncation ellipsis "…" already used in truncate(), and future private-document
+truncation ellipsis that `GrepTool` previously used, and future private-document
 placeholders. Pinning the exact substitution point and asserting UTF-8/clean rendering
 once protects the whole redacted-output surface rather than one observed token.
 ```
@@ -223,6 +241,22 @@ Add broader commands if runtime code changes:
 ./gradlew.bat e2eTest --no-daemon
 ./gradlew.bat check --no-daemon
 ```
+
+## Resolution
+
+- Added deterministic regression coverage for `talos.grep` PRIVATE_MARKER
+  matches at line 2, asserting `notes.md:2 | PRIVATE_MARKER=[redacted]`, no raw
+  marker value, and no `line?2` / placeholder `?` substitution.
+- Added `/grep` slash-command coverage for the equivalent clean redacted locator
+  shape (`notes.md:` plus `2: PRIVATE_MARKER=[redacted]`).
+- Added a red/green regression for long `talos.grep` matches: truncation now uses
+  ASCII `...` rather than the Unicode ellipsis character risk point called out
+  in this ticket.
+- Focused verification: `.\gradlew.bat test --tests
+  "dev.talos.tools.impl.GrepToolTest" --tests
+  "dev.talos.cli.repl.slash.WorkspaceCommandsTest" --no-daemon` failed before
+  the code change on the new truncation assertion and passed after the one-line
+  formatter change.
 
 ## Work-Test Cycle Notes
 
