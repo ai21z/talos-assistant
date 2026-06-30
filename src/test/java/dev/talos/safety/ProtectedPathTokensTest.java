@@ -61,6 +61,9 @@ class ProtectedPathTokensTest {
 
     @Test
     void windowsAliasSegmentsAreCanonicalizedBeforeProtectedMatching() {
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".env."));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".env "));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".env..."));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa."));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa "));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa. "));

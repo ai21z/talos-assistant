@@ -1,6 +1,6 @@
-# [T867-open-medium] Protected-path alias classification fail-closed cleanliness (Windows 8.3 + trailing-dot)
+# [T867-done-medium] Protected-path alias classification fail-closed cleanliness (Windows 8.3 + trailing-dot)
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -106,7 +106,7 @@ Honest scope note: fail-closed already held in the audit - no protected content 
 
 ## Architecture Metadata
 
-- Policy owner: `dev.talos.safety.ProtectedPathTokens` (single protected-path classifier, T759) and `dev.talos.safety.ProtectedWorkspacePaths` (workspace path classifier, current `POLICY_VERSION = protected-content-policy-v7`).
+- Policy owner: `dev.talos.safety.ProtectedPathTokens` (single protected-path classifier, T759) and `dev.talos.safety.ProtectedWorkspacePaths` (workspace path classifier; `POLICY_VERSION` was `protected-content-policy-v7` at ticket creation and is `protected-content-policy-v8` after this fix).
 - Determinism: classification is pure / deterministic; no model in the safety-critical path. This ticket strengthens that property for alias inputs.
 - Fail-closed: unresolved-short-name and realpath-failure branches must remain fail-closed (protected). Verified-held in this audit.
 - Cross-references:
@@ -124,6 +124,14 @@ Honest scope note: fail-closed already held in the audit - no protected content 
 6. `ProtectedWorkspacePaths.POLICY_VERSION` is bumped (v8) with a Javadoc rationale if classification output changes; stale privacy-partition rebuild semantics preserved.
 7. No regression in the audited leak behavior: a canary/`dummy`-absence check over the equivalent alias reads still passes (no protected bytes reach the model).
 
+## Resolution (2026-06-30)
+
+- `ProtectedPathTokens` trailing-dot/space canonicalization is now regression-pinned for `.env.`, `.env `, and `.env...` returning `SECRET`.
+- `ProtectedWorkspacePaths` now computes the token-derived protected kind before the unresolved-short-name fallback. If the alias-shaped path already contains enough protected tokens to infer a target-truthful kind, such as `SSH~1/id_rsa`, the decision carries `SECRET`; if it does not, the unresolved 8.3 segment still fails closed as `CONTROL`.
+- `ProtectedWorkspacePaths.POLICY_VERSION` is bumped to `protected-content-policy-v8` with a Javadoc rationale because classification output changed.
+- `PermissionDecision` carries the protected kind from the resource decision. Operator-facing protected-read and protected-mutation messages include the kind, for example `(SECRET)`, while retaining the existing protected-path wording.
+- `PermissionTraceEventFactory` records `protectedKind` for protected permission decisions and keeps `pathHint` redacted as `<protected-path>`, so trace evidence is target-truthful without exposing protected filenames.
+
 ## Tests / Evidence
 
 - Unit tests in the existing `ProtectedPathTokens` / `ProtectedWorkspacePaths` test suites:
@@ -134,6 +142,24 @@ Honest scope note: fail-closed already held in the audit - no protected content 
 - Trace-label assertion: the `Decision` -> refusal-reason / trace-classification mapping renders the resolved kind and path (target-truthful), pinned by a test on the rendering owner.
 - Re-run the relevant T842 alias scenarios (or a focused harness equivalent) and confirm the canary scan still shows `dummy` absent and the recorded classification is now clean.
 - POLICY_VERSION bump covered by the existing policy-version test if classification output changes.
+
+Focused verification added and run:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.safety.ProtectedPathTokensTest" --tests "dev.talos.safety.ProtectedWorkspacePathsTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.policy.PermissionPolicyTest" --tests "dev.talos.runtime.trace.LocalTurnTracePermissionDecisionTest" --tests "dev.talos.runtime.TurnProcessorPermissionPolicyTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.safety.ProtectedPathTokensTest" --tests "dev.talos.safety.ProtectedWorkspacePathsTest" --tests "dev.talos.runtime.policy.ProtectedPathPolicyTest" --tests "dev.talos.runtime.policy.PermissionPolicyTest" --tests "dev.talos.runtime.TurnProcessorPermissionPolicyTest" --tests "dev.talos.runtime.trace.LocalTurnTracePermissionDecisionTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.outcome.MutationFailureAnswerRendererTest" --no-daemon
+```
+
+All three focused gates passed before the ticket was closed.
+
+Final gate:
+
+```powershell
+.\gradlew.bat check --no-daemon
+```
+
+`BUILD SUCCESSFUL` in 1m55s; `:test`, `:e2eTest`, `:validateArchitectureBoundaries`, `:validateReleaseLedger`, `:jacocoTestReport`, `:checkGeneratedArtifactCanaries`, and `:jacocoTestCoverageVerification` ran.
 
 ## Work-Test Cycle Notes
 

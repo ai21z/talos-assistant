@@ -7,6 +7,7 @@ public record PermissionDecision(
         String userMessage,
         String relativePath,
         boolean protectedPath,
+        String protectedKind,
         boolean rememberEligible
 ) {
     public PermissionDecision {
@@ -14,6 +15,7 @@ public record PermissionDecision(
         reasonCode = reasonCode == null || reasonCode.isBlank() ? "UNKNOWN" : reasonCode;
         userMessage = userMessage == null ? "" : userMessage;
         relativePath = relativePath == null ? "" : relativePath;
+        protectedKind = protectedKind == null ? "" : protectedKind;
     }
 
     public static PermissionDecision allow(String reasonCode, ResourceDecision resource) {
@@ -23,6 +25,7 @@ public record PermissionDecision(
                 "",
                 resource == null ? "" : resource.relativePath(),
                 resource != null && resource.protectedPath(),
+                resource == null ? "" : resource.protectedKind(),
                 false);
     }
 
@@ -38,6 +41,7 @@ public record PermissionDecision(
                 userMessage,
                 resource == null ? "" : resource.relativePath(),
                 resource != null && resource.protectedPath(),
+                resource == null ? "" : resource.protectedKind(),
                 rememberEligible);
     }
 
@@ -48,6 +52,7 @@ public record PermissionDecision(
                 userMessage,
                 resource == null ? "" : resource.relativePath(),
                 resource != null && resource.protectedPath(),
+                resource == null ? "" : resource.protectedKind(),
                 false);
     }
 
@@ -58,6 +63,7 @@ public record PermissionDecision(
                 message,
                 relativePath,
                 protectedPath,
+                protectedKind,
                 false);
     }
 }

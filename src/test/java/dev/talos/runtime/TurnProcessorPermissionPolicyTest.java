@@ -5,6 +5,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
@@ -28,6 +30,7 @@ class TurnProcessorPermissionPolicyTest {
     void cleanup() {
         TurnUserRequestCapture.clear();
         TurnTaskContractCapture.clear();
+        LocalTurnTraceCapture.clear();
         if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
     }
 
@@ -142,6 +145,50 @@ class TurnProcessorPermissionPolicyTest {
         assertEquals(0, fullApprovals.get(), "protected read must not offer session approval");
         assertEquals(1, onceApprovals.get(), "protected read should request once-only approval");
         assertTrue(result.output().contains("SECRET=1"));
+    }
+
+    @Test
+    void protectedAliasReadRecordsTargetTruthfulKindInPermissionTrace(@TempDir Path workspace) {
+        AtomicInteger gateCalls = new AtomicInteger();
+        AtomicReference<String> approvalDetail = new AtomicReference<>();
+        Config config = new Config(null);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(), (description, detail) -> {
+                    gateCalls.incrementAndGet();
+                    approvalDetail.set(detail);
+                    return true;
+                }, registry);
+
+        TurnUserRequestCapture.set("read SSH~1/id_rsa");
+        LocalTurnTraceCapture.begin(
+                "trc-t867-protected-alias",
+                "sid-t867",
+                1,
+                "2026-06-30T12:00:00Z",
+                "workspace-hash",
+                "agent",
+                "test",
+                "model",
+                "read SSH~1/id_rsa");
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.read_file", Map.of("path", "SSH~1/id_rsa")),
+                context(workspace, config));
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+        assertFalse(result.success(), "the alias target need not exist for permission trace classification");
+        assertEquals(1, gateCalls.get(), "the protected alias should require approval before read execution");
+        assertTrue(approvalDetail.get().contains("protected path `SSH~1/id_rsa`"), approvalDetail.get());
+        assertTrue(approvalDetail.get().contains("(SECRET)"), approvalDetail.get());
+        var event = trace.events().stream()
+                .filter(candidate -> "PERMISSION_DECISION".equals(candidate.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(true, event.data().get("protectedPath"));
+        assertEquals("SECRET", event.data().get("protectedKind"));
+        assertEquals("<protected-path>", event.data().get("pathHint"));
     }
 
     @Test

@@ -25,8 +25,12 @@ public final class ProtectedWorkspacePaths {
      *  protected long-name directories before matching.
      *  v7 (T840): unresolved Windows 8.3-style short-name segments fail closed
      *  after realpath classification so realpath errors cannot leave
-     *  suspicious lexical aliases unprotected. */
-    public static final String POLICY_VERSION = "protected-content-policy-v7";
+     *  suspicious lexical aliases unprotected.
+     *  v8 (T867): unresolved short-name aliases retain a more specific
+     *  protected kind when the remaining path tokens already classify as
+     *  protected; the generic CONTROL fail-closed label is used only when no
+     *  target-truthful kind is available. */
+    public static final String POLICY_VERSION = "protected-content-policy-v8";
 
     private static final Pattern WINDOWS_SHORT_NAME_SEGMENT =
             Pattern.compile("(?i)^[a-z0-9_$@-]{1,6}~[1-9][0-9]*(\\.[a-z0-9_$@-]{1,3})?$");
@@ -77,10 +81,10 @@ public final class ProtectedWorkspacePaths {
         }
 
         String relative = normalizeRelative(ws.relativize(resolved));
-        if (hasUnresolvedWindowsShortNameSegment(relative)) {
+        String kind = ProtectedPathTokens.protectedKind(relative.toLowerCase(Locale.ROOT));
+        if (hasUnresolvedWindowsShortNameSegment(relative) && kind.isBlank()) {
             return new Decision(rawPath, relative, true, true, false, true, "CONTROL");
         }
-        String kind = ProtectedPathTokens.protectedKind(relative.toLowerCase(Locale.ROOT));
         return new Decision(rawPath, relative, true, true, false, !kind.isBlank(), kind);
     }
 

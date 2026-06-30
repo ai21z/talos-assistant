@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T867] Protected-path alias classification now preserves target-truthful
+  protected kinds for alias-shaped paths when the remaining path tokens already
+  prove a protected target. Windows trailing-dot/space `.env` aliases are pinned
+  as `SECRET`, unresolved short-name paths such as `SSH~1/id_rsa` now carry the
+  inferred `SECRET` kind instead of flattening to generic `CONTROL`, unknown
+  short-name aliases still fail closed, and permission/trace evidence surfaces
+  the protected kind while keeping protected path hints redacted. The protected
+  path policy version is bumped to v8 so stale privacy partitions rebuild.
 - [T869] Multi-target replacement verification now resolves explicit
   target-scoped `replace old with new in file` expectations for each requested
   target. A successful write that leaves one requested replacement unsatisfied

@@ -291,6 +291,7 @@ public final class LocalTurnTraceCapture {
             String reasonCode,
             String relativePath,
             boolean protectedPath,
+            String protectedKind,
             boolean rememberEligible
     ) {
         Bag bag = HOLDER.get();
@@ -302,6 +303,7 @@ public final class LocalTurnTraceCapture {
                 reasonCode,
                 relativePath,
                 protectedPath,
+                protectedKind,
                 rememberEligible));
     }
 

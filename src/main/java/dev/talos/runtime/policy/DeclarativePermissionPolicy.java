@@ -37,8 +37,9 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         ResourceDecision protectedResource = firstProtectedPath(resources);
         if (risk.requiresApproval() && protectedResource != null) {
             return PermissionDecision.deny("PROTECTED_PATH_DENY",
-                    "Permission policy denied mutation of protected path `" + protectedResource.relativePath()
-                            + "`. No approval was requested and no file was changed.",
+                    "Permission policy denied mutation of protected path "
+                            + protectedPathLabel(protectedResource)
+                            + ". No approval was requested and no file was changed.",
                     protectedResource);
         }
 
@@ -48,8 +49,8 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
 
         if (!risk.requiresApproval() && protectedResource != null && isSpecificReadTool(request.call().toolName())) {
             return PermissionDecision.ask("PROTECTED_PATH_ASK",
-                    "Permission policy requires approval before reading protected path `"
-                            + protectedResource.relativePath() + "`.",
+                    "Permission policy requires approval before reading protected path "
+                            + protectedPathLabel(protectedResource) + ".",
                     protectedResource,
                     false);
         }
@@ -109,6 +110,14 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
             if (resource != null && resource.protectedPath()) return resource;
         }
         return null;
+    }
+
+    private static String protectedPathLabel(ResourceDecision resource) {
+        if (resource == null) return "``";
+        String kind = resource.protectedKind() == null || resource.protectedKind().isBlank()
+                ? ""
+                : " (" + resource.protectedKind() + ")";
+        return "`" + resource.relativePath() + "`" + kind;
     }
 
     private static PermissionDecision explicitDecision(
