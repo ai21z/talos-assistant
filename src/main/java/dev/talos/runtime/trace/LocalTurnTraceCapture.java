@@ -324,6 +324,27 @@ public final class LocalTurnTraceCapture {
                 bag.builder, checkpointId, success, restoredFiles, deletedFiles, reason);
     }
 
+    public static void recordWorkspaceProfileDeclarationConfigured(
+            String profileId,
+            String declarationSha256,
+            String approval,
+            String trustStateAfter,
+            String checkpointStatus,
+            String checkpointId,
+            boolean replacedExisting
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(WorkspaceProfileTraceEventFactory.declarationConfigured(
+                profileId,
+                declarationSha256,
+                approval,
+                trustStateAfter,
+                checkpointStatus,
+                checkpointId,
+                replacedExisting));
+    }
+
     public static void recordProtocolSanitized(String reason) {
         Bag bag = HOLDER.get();
         if (bag == null) return;

@@ -91,6 +91,15 @@ public final class WorkspaceCommandProfilesLoader {
         return new Loaded(parse(raw, workspace.toAbsolutePath().normalize()), sha256);
     }
 
+    static Loaded loadBytes(byte[] raw, Path workspace) {
+        if (raw == null) {
+            return new Loaded(WorkspaceCommandProfiles.invalid("declaration is empty"), "");
+        }
+        Path ws = workspace == null ? Path.of(".").toAbsolutePath().normalize()
+                : workspace.toAbsolutePath().normalize();
+        return new Loaded(parse(raw, ws), sha256Hex(raw));
+    }
+
     private static WorkspaceCommandProfiles parse(byte[] raw, Path workspace) {
         JsonNode root;
         try {

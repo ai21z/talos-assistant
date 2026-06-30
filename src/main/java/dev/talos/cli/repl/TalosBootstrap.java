@@ -484,7 +484,7 @@ public final class TalosBootstrap {
         // Environment preflight
         registry.register(new DoctorCommand(workspace));
         // Workspace verification profiles (T791)
-        registry.register(new ProfilesCommand(workspace));
+        registry.register(new ProfilesCommand(workspace, checkpointService));
         registry.register(new VerifyCommand(workspace));
         // Undo (gated checkpoint restore since T795)
         registry.register(new UndoCommand(workspace, checkpointService));

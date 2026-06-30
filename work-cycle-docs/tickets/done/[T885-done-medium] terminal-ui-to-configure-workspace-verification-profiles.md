@@ -1,16 +1,16 @@
-# [T885-open-medium] Terminal-UI flow to configure workspace verification profiles
+# [T885-done-medium] Terminal-UI flow to configure workspace verification profiles
 
-Status: open
+Status: done
 Priority: medium
-Blocker level: future milestone (deferred-beyond-beta). Owner marked this a
-discussion item, not for implementation now.
+Blocker level: completed implementation. This was originally captured as a
+future milestone discussion item; the owner later selected it for implementation.
 
 ## Evidence Summary
 
 - Source: owner manual REPL testing + discussion (2026-06-27)
 - Date: 2026-06-27
 - Talos version / commit: 0.10.6 / 4f8f50a7
-- Verification status: design discussion captured; no code yet
+- Verification status: implemented and full-check verified on 2026-06-30
 
 Observed / request: `/profiles` (workspace verification profiles in
 `.talos/profiles.yaml`) is not in `/help` or `/help all`, and the owner is fine with
@@ -102,6 +102,22 @@ owner. Consider a confirm/diff step that shows the exact bytes to be written and
 the resulting content hash before anything is pinned.
 ```
 
+Implemented shape:
+
+- `/profiles configure <id> --exec <executable> [--arg <argv>]...
+  [--timeout-ms <ms>] [--expected-write <workspace-path>]...` declares or edits
+  one workspace verification profile.
+- The command previews the proposed `.talos/profiles.yaml` bytes and the
+  resulting declaration SHA-256 through the approval gate before any write.
+- The write is checkpointed before `.talos/profiles.yaml` is changed; checkpoint
+  failure blocks the write.
+- The resulting declaration remains `UNTRUSTED_NEW` or `UNTRUSTED_CHANGED`
+  until `/profiles trust` pins the exact SHA-256 through the existing trust
+  store.
+- Trace/audit metadata records profile id, declaration SHA-256, approval choice,
+  trust state, checkpoint status/id, and whether the profile replaced an
+  existing declaration; raw profile YAML is not stored in trace metadata.
+
 ## Architecture Metadata
 
 Capability:
@@ -160,27 +176,40 @@ Refactor scope:
 
 Required deterministic regression:
 
-- Unit test: a UI-declared profile is in a declared-not-trusted state until pinned+approved
+- Unit test: a UI-declared profile is in a declared-not-trusted state until
+  pinned+approved (`ProfilesCommandTest.configureDeclaresProfileAfterApprovalButDoesNotTrustIt`)
 - Integration test: write path is checkpointed and gated
+  (`configureDeclaresProfileAfterApprovalButDoesNotTrustIt`,
+  `configureCheckpointFailureBlocksWriteAfterApproval`)
 - Trace assertion: profile hash + approval choice recorded
+  (`configureRecordsTraceEventWithHashApprovalChoiceAndTrustState`)
 
 Commands:
 
 ```powershell
-./gradlew.bat check --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.repl.slash.ProfilesCommandTest"
+.\gradlew.bat test --tests "dev.talos.cli.repl.slash.ProfilesCommandTest" --tests "dev.talos.cli.repl.slash.VerifyCommandTest" --tests "dev.talos.runtime.command.WorkspaceCommandProfilesLoaderTest" --tests "dev.talos.runtime.command.WorkspaceProfileTrustStoreTest" --tests "dev.talos.cli.repl.slash.CheckpointCommandTest" --tests "dev.talos.runtime.trace.LocalTurnTraceCheckpointRecorderTest" --tests "dev.talos.runtime.trace.LocalTurnTraceCommandTest"
+.\gradlew.bat test --tests "dev.talos.cli.repl.slash.SimpleCommandsTest" --tests "dev.talos.cli.repl.SlashCommandCompleterTest" --tests "dev.talos.cli.repl.WorkspaceCommandTemplatesTest"
+.\gradlew.bat check --no-daemon
 ```
+
+All commands passed on 2026-06-30. The first focused run was red before
+implementation because the `/profiles configure` constructor/subcommand did not
+exist, satisfying the TDD red step.
 
 ## Work-Test Cycle Notes
 
 - Inner dev loop when implemented. Do not bump version outside candidate closeout.
 - Behavior-changing closeout adds a one-line `## [Unreleased]` CHANGELOG entry.
 
-## Known Risks
+## Known Risks / Residual Scope
 
-- Easy to accidentally auto-trust a declared profile; the test for declared !=
-  trusted is the guard.
+- Easy to accidentally auto-trust a declared profile; the declared != trusted
+  tests are the guard.
+- The terminal flow is intentionally flag-based rather than a full-screen wizard.
+  That keeps the trust path deterministic and scriptable for the beta line.
 
 ## Known Follow-Ups
 
-- Pairs with [T886] (configure/test/guide all models). Both were owner discussion
-  items on 2026-06-27.
+- None required for this ticket. A richer interactive wizard can be considered
+  later if it preserves the same declaration/trust separation.
