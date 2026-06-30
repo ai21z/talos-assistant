@@ -422,6 +422,10 @@ public final class SynchronizedApprovalAuditRunner {
         transcript.put("userPromptChars", request.userPrompt().length());
         transcript.put("finalAnswerHash", sha256(result.finalAnswer()));
         transcript.put("finalAnswerChars", result.finalAnswer().length());
+        transcript.put("expectedApprovalCount", request.approvals().size());
+        transcript.put("expectedRequiredApprovalCount", request.approvals().stream()
+                .filter(step -> !step.optional())
+                .count());
         transcript.put("approvalCount", result.approvals().size());
         transcript.put("approvalResponses", result.approvals().stream()
                 .map(event -> event.response().name())
