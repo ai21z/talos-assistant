@@ -68,7 +68,7 @@ Use:
 ## Command Execution
 
 Commands run through profiles instead of arbitrary shell strings. The current
-model-callable command surface exposes Gradle verification profiles:
+model-callable command surface exposes built-in Gradle verification profiles:
 
 - `gradle_test`
 - `gradle_check`
@@ -76,8 +76,34 @@ model-callable command surface exposes Gradle verification profiles:
 - `gradle_install_dist`
 - `gradle_e2e_test`
 
+Workspace-specific verification commands use `ws:<id>` profiles declared in
+`.talos/profiles.yaml`. This is the current Maven support path: declare a fixed
+Maven wrapper command such as `./mvnw -B --no-transfer-progress verify`, trust
+the declaration with `/profiles trust`, and run it with `/verify ws:maven_verify`.
+
+```text
+/profiles configure maven_verify --exec ./mvnw --arg -B --arg --no-transfer-progress --arg verify --timeout-ms 600000 --expected-write target/
+/profiles trust
+/verify ws:maven_verify
+```
+
+The declaration is not trusted merely because it exists. `/profiles trust`
+reviews and pins the current `.talos/profiles.yaml` SHA-256. If the file changes
+later, the profile returns to untrusted and cannot reach an approval prompt
+until it is reviewed and trusted again.
+
+Workspace profiles always use declared fixed argv only. The model or user turn
+cannot append arbitrary Maven arguments to `ws:maven_verify` at execution time,
+and every `/verify` or `talos.run_command` execution still requires approval.
+
 Unknown profiles are rejected. Non-Gradle diagnostic profiles may exist inside
 the runtime registry, but they are not a current user-facing command execution
 promise.
 
 Command working directories must stay inside the workspace.
+
+Maven is not automatically offline. Dependency resolution may use the network
+and may write to a local Maven cache outside the workspace unless the project or
+environment has already configured Maven otherwise. Treat the profile as a
+bounded command-launch policy, not as a guarantee about Maven's own dependency
+behavior.

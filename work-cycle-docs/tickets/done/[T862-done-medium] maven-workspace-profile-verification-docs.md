@@ -1,6 +1,6 @@
-# [T862-open-medium] Maven Workspace Profile Verification Docs
+# [T862-done-medium] Maven Workspace Profile Verification Docs
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -16,7 +16,22 @@ Priority: medium
 - File diff summary: no runtime diff; product-support gap
 - Approval choices: not applicable
 - Checkpoint id: not applicable
-- Verification status: not run
+- Verification status: original 2026-06-23 static review did not run
+  verification; 2026-06-30 closeout verification is recorded below.
+
+2026-06-30 closeout:
+
+- Scope resolved as docs-only. No runtime command-profile code changed and no
+  built-in Maven profile was added.
+- Existing generic workspace-profile tests already cover the trust invariants
+  that make Maven safe through `ws:<id>` profiles:
+  `WorkspaceCommandProfilesLoaderTest.validDeclarationLoadsWsPrefixedProfilesWithHardenedDefaults`,
+  `CommandToolPlannerTest.trustedWorkspaceProfilePlansItsDeclaredArgvExactly`,
+  `CommandToolPlannerTest.workspaceProfilesRejectCallerArguments`,
+  `CommandToolPlannerTest.untrustedDeclarationIsRejectedAtPlanTimeWithTheTrustHint`,
+  and `CommandVerificationEvidenceTest.workspaceProfilesAreVerificationClass`.
+- This closeout adds the missing user-facing Maven recipe and trust-flow docs
+  without claiming Maven is network-free or workspace-contained by itself.
 
 Redacted prompt sequence:
 
@@ -39,7 +54,7 @@ Observed behavior:
 The model-callable command profile docs list only built-in Gradle profiles.
 Workspace `ws:` profiles are already trust-pinned, fixed-argv, approval-forced,
 and treated as verification-class command evidence, but there is no visible
-Maven recipe or deterministic proof that `./mvnw verify` is the intended path.
+Maven recipe for `./mvnw verify` as the intended path.
 ```
 
 ## Classification
@@ -106,8 +121,9 @@ surface must agree.
 
 ```text
 Make Maven verification support explicit through trusted workspace profiles,
-with docs and tests showing `./mvnw -B --no-transfer-progress verify` as the
-recommended Maven project path.
+with docs showing `./mvnw -B --no-transfer-progress verify` as the recommended
+Maven project path. Runtime trust behavior remains covered by the existing
+generic `ws:` profile tests.
 ```
 
 ## Non-Goals
@@ -186,20 +202,54 @@ Refactor scope:
 
 - User docs include a Maven `ws:maven_verify` example and the `/profiles trust` flow.
 - Docs distinguish Talos' own Gradle build from Talos support for Maven workspaces.
-- Tests prove a trusted Maven-shaped workspace profile registers and plans as fixed argv with no caller args.
-- Tests prove untrusted or changed Maven profile declarations fail closed before approval.
-- Tests prove a successful trusted `ws:maven_verify` after mutation is accepted as verification-class command evidence.
+- Existing tests prove trusted `ws:` workspace profiles register and plan as fixed argv with no caller args.
+- Existing tests prove untrusted or changed workspace profile declarations fail closed before approval.
+- Existing tests prove a successful trusted `ws:` command after mutation is accepted as verification-class command evidence.
 - No docs imply Maven command execution is network-free unless the workspace has already resolved dependencies or Maven is configured offline.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or outcome truth.
 
 ## Tests / Evidence
 
-Required deterministic regression:
+Existing deterministic coverage:
 
-- Unit test: `WorkspaceCommandProfilesLoaderTest` for Maven-shaped profile parsing.
-- Unit test: `CommandToolPlannerTest` for trusted `ws:maven_verify` fixed argv and caller-arg rejection.
-- Unit test: `CommandVerificationEvidence` coverage through `StaticTaskVerifierTest` or a package-local verification test.
-- Docs test: command docs mention Maven through workspace profiles, not built-in arbitrary shell.
+- `WorkspaceCommandProfilesLoaderTest.validDeclarationLoadsWsPrefixedProfilesWithHardenedDefaults`
+  proves workspace profile declarations load with `ws:` ids, resolved
+  workspace-relative executables, fixed args, BUILD_OR_TEST risk, no network,
+  no interactive mode, and approval required.
+- `CommandToolPlannerTest.trustedWorkspaceProfilePlansItsDeclaredArgvExactly`
+  proves trusted workspace profiles plan exactly the declared argv.
+- `CommandToolPlannerTest.workspaceProfilesRejectCallerArguments` proves callers
+  cannot append ad hoc args.
+- `CommandToolPlannerTest.untrustedDeclarationIsRejectedAtPlanTimeWithTheTrustHint`
+  proves untrusted declarations fail closed before approval.
+- `CommandVerificationEvidenceTest.workspaceProfilesAreVerificationClass` proves
+  trusted `ws:` profiles count as verification-class command evidence.
+
+Docs evidence:
+
+- `docs/user/commands.md` now documents `/profiles`, `/verify ws:<id>`, the
+  `ws:maven_verify` YAML recipe, the equivalent `/profiles configure` flow, and
+  the Maven network/cache caveat.
+- `docs/user/approvals-and-permissions.md` now documents declaration trust,
+  SHA-256 pinning, fixed argv, approval, changed-file fail-closed behavior, and
+  the Maven network/cache caveat.
+- `docs/user/quickstart.md` now includes a Maven workspace verification section
+  that distinguishes Talos' own Gradle build from Maven workspace support.
+
+No new Maven-specific runtime tests were added in this docs-only closeout
+because `ws:` profile behavior is intentionally command-agnostic; `maven_verify`
+is a documented profile id, not a new runtime type.
+
+Closeout verification:
+
+- `.\gradlew.bat test --tests
+  "dev.talos.runtime.command.WorkspaceCommandProfilesLoaderTest" --tests
+  "dev.talos.runtime.command.CommandToolPlannerTest" --tests
+  "dev.talos.runtime.verification.CommandVerificationEvidenceTest"
+  --no-daemon`
+- `.\gradlew.bat test --tests "dev.talos.docs.*" --no-daemon`
+- `git diff --check`
+- `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon`
 
 Manual/TalosBench rerun:
 

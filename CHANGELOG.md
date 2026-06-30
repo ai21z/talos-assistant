@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T862] Maven workspace verification is now documented as a trusted
+  workspace-profile flow instead of a built-in Maven command profile. User docs
+  show the `ws:maven_verify` `.talos/profiles.yaml` recipe, `/profiles trust`,
+  `/verify ws:maven_verify`, fixed-argv and approval boundaries, and the Maven
+  network/cache caveat while keeping Talos' own build described as Gradle.
 - [T867] Protected-path alias classification now preserves target-truthful
   protected kinds for alias-shaped paths when the remaining path tokens already
   prove a protected target. Windows trailing-dot/space `.env` aliases are pinned
