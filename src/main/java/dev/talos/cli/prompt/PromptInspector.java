@@ -15,6 +15,7 @@ import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -51,7 +52,8 @@ public final class PromptInspector {
         ExecutionPhase initialPhase = effectiveTurn.phase();
         boolean directoryListing = "agent".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
-        List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, initialPhase, ctx);
+        List<ToolSpec> effectiveSpecs = effectiveToolSpecs(resolvedMode, contract, initialPhase, ctx);
+        List<String> effectiveTools = NativeToolSpecPolicy.names(effectiveSpecs);
         boolean includeWorkspaceContext =
                 PromptWorkspaceContextPolicy.includeWorkspaceManifest(effectiveTools);
 
@@ -62,7 +64,9 @@ public final class PromptInspector {
         if (usesAssistantTaskContract(resolvedMode)) {
             if (includeWorkspaceContext) {
                 builder
-                        .withPromptTools(PromptToolDescriptors.fromRegistry(ctx == null ? null : ctx.toolRegistry()))
+                        .withPromptTools(PromptToolDescriptors.fromRegistry(
+                                ctx == null ? null : ctx.toolRegistry(),
+                                effectiveSpecs))
                         .withVisibleToolNames(effectiveTools)
                         .withWorkspace(workspace)
                         .withReadOnlyToolMode(!contract.mutationAllowed())
@@ -128,7 +132,8 @@ public final class PromptInspector {
                 workspace);
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn = effectiveTurn(canonicalMode, rawContract);
         TaskContract contract = WorkspaceTargetReconciler.reconcile(effectiveTurn.taskContract(), workspace);
-        List<String> effectiveTools = effectiveToolNames(canonicalMode, contract, effectiveTurn.phase(), ctx);
+        List<String> effectiveTools = NativeToolSpecPolicy.names(
+                effectiveToolSpecs(canonicalMode, contract, effectiveTurn.phase(), ctx));
         boolean includeWorkspaceContext =
                 PromptWorkspaceContextPolicy.includeWorkspaceManifest(effectiveTools);
         return new PromptRender(
@@ -252,7 +257,7 @@ public final class PromptInspector {
         return ctx.llm().getModel();
     }
 
-    private static List<String> effectiveToolNames(
+    private static List<ToolSpec> effectiveToolSpecs(
             String resolvedMode,
             TaskContract contract,
             ExecutionPhase phase,
@@ -260,13 +265,17 @@ public final class PromptInspector {
     ) {
         if (ctx == null || ctx.toolRegistry() == null) return List.of();
         if (ctx.hasNativeToolSpecOverride()) {
-            return NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+            return ctx.nativeToolSpecs();
         }
         if (usesAssistantTaskContract(resolvePromptMode(resolvedMode)) && contract != null) {
-            return NativeToolSpecPolicy.names(
-                    NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
+            return NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry(), ctx.cfg());
         }
-        return registryToolNames(ctx);
+        return ctx.toolRegistry().descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
     }
 
     private static CapabilityPosturePolicy.EffectiveTurn effectiveTurn(

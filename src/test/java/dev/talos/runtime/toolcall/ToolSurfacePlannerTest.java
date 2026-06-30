@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.Config;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -86,6 +87,41 @@ class ToolSurfacePlannerTest {
         assertFalse(names.contains("talos.edit_file"));
         assertFalse(names.contains("talos.metadata_mutation"));
         assertEquals("read-only metadata surface", plan.reason());
+    }
+
+    @Test
+    void privateModeAvailabilityExcludesRetrievalToolsFromReadOnlyAndApplySurfaces() {
+        ToolCapabilityAvailability availability = ToolCapabilityAvailability.fromConfig(privateConfig(false));
+
+        ToolSurfacePlanner.Plan readOnly = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest("What is this project?"),
+                ExecutionPhase.INSPECT,
+                registry(),
+                availability);
+        ToolSurfacePlanner.Plan apply = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest("Create a README.md file."),
+                ExecutionPhase.APPLY,
+                registry(),
+                availability);
+
+        assertEquals(List.of("talos.grep", "talos.list_dir", "talos.read_file"),
+                readOnly.nativeToolNames());
+        assertFalse(apply.nativeToolNames().contains("talos.retrieve"), apply.nativeToolNames().toString());
+        assertTrue(apply.nativeToolNames().contains("talos.read_file"), apply.nativeToolNames().toString());
+        assertTrue(apply.nativeToolNames().contains("talos.write_file"), apply.nativeToolNames().toString());
+    }
+
+    @Test
+    void privateModeExplicitRagAvailabilityKeepsRetrievalTools() {
+        ToolCapabilityAvailability availability = ToolCapabilityAvailability.fromConfig(privateConfig(true));
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest("What is this project?"),
+                ExecutionPhase.INSPECT,
+                registry(),
+                availability);
+
+        assertTrue(plan.nativeToolNames().contains("talos.retrieve"), plan.nativeToolNames().toString());
     }
 
     @Test
@@ -838,6 +874,17 @@ class ToolSurfacePlannerTest {
         registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
                 plan, 0, 1, false, false, "", "", false, false, false, "")));
         return registry;
+    }
+
+    private static Config privateConfig(boolean ragEnabledInPrivateMode) {
+        Config cfg = new Config();
+        Map<String, Object> rag = new java.util.LinkedHashMap<>();
+        rag.put("enabled_in_private_mode", ragEnabledInPrivateMode);
+        Map<String, Object> privacy = new java.util.LinkedHashMap<>();
+        privacy.put("mode", "private");
+        privacy.put("rag", rag);
+        cfg.data.put("privacy", privacy);
+        return cfg;
     }
 
     private static final class MetadataOnlyInspectTool implements TalosTool {

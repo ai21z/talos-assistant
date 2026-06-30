@@ -19,6 +19,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -414,6 +416,25 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void privateModeMutationPromptOmitsRetrieveFromPromptSurface() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Create notes.txt with the exact content hello.",
+                Path.of(".").toAbsolutePath().normalize(),
+                privateContext("I will create notes.txt.", false));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertTrue(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.retrieve"), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("talos.retrieve"), render.systemPrompt());
+    }
+
+    @Test
     void repairFollowUpUsesHistoryAwareContractForNativeToolSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();
@@ -624,6 +645,32 @@ class UnifiedAssistantModeTest {
                 .toolRegistry(registry)
                 .llm(LlmClient.scripted(java.util.List.of(response)))
                 .build();
+    }
+
+    private static Context privateContext(String response, boolean ragEnabledInPrivateMode) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new ListDirTool());
+        registry.register(new GrepTool());
+        registry.register(new RetrieveTool(null));
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        return Context.builder(privateConfig(ragEnabledInPrivateMode))
+                .memory(new SessionMemory())
+                .toolRegistry(registry)
+                .llm(LlmClient.scripted(java.util.List.of(response)))
+                .build();
+    }
+
+    private static Config privateConfig(boolean ragEnabledInPrivateMode) {
+        Config cfg = new Config();
+        Map<String, Object> rag = new LinkedHashMap<>();
+        rag.put("enabled_in_private_mode", ragEnabledInPrivateMode);
+        Map<String, Object> privacy = new LinkedHashMap<>();
+        privacy.put("mode", "private");
+        privacy.put("rag", rag);
+        cfg.data.put("privacy", privacy);
+        return cfg;
     }
 
     private static Context contextWithCommandTool(String response) {

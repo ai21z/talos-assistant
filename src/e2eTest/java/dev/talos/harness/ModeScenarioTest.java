@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("TurnProcessor mode scenarios")
 class ModeScenarioTest {
@@ -100,6 +101,39 @@ class ModeScenarioTest {
                     .assertApprovalCounts(0, 0, 0, 0)
                     .assertAnswerContains("README.md")
                     .assertFileContains("README.md", "Talos");
+        }
+    }
+
+    @Test
+    @DisplayName("Private mode omits retrieve from trace and prompt tool surfaces")
+    void privateModeOmitsRetrieveFromTraceAndPromptSurfaces() {
+        ScenarioDefinition scenario = ScenarioDefinition.named("private mode retrieval surface")
+                .withPrivateMode()
+                .withMode("auto")
+                .withFile("README.md", "Talos public readme\n")
+                .withUserPrompt("What is this project?")
+                .build();
+
+        try (var result = ScenarioRunner.runThroughTurnProcessor(
+                scenario,
+                List.of("I can inspect the workspace without using retrieval."))) {
+            result.assertActiveMode("auto")
+                    .assertTraceMode("auto")
+                    .assertApprovalCounts(0, 0, 0, 0);
+
+            LocalTurnTrace trace = result.localTrace();
+            assertTrue(trace.toolSurface().nativeTools().contains("talos.read_file"),
+                    trace.toolSurface().nativeTools().toString());
+            assertFalse(trace.toolSurface().nativeTools().contains("talos.retrieve"),
+                    trace.toolSurface().nativeTools().toString());
+            assertFalse(trace.toolSurface().promptTools().contains("talos.retrieve"),
+                    trace.toolSurface().promptTools().toString());
+            assertFalse(trace.promptAudit().nativeTools().contains("talos.retrieve"),
+                    trace.promptAudit().nativeTools().toString());
+            assertFalse(trace.promptAudit().promptTools().contains("talos.retrieve"),
+                    trace.promptAudit().promptTools().toString());
+            assertEquals(trace.toolSurface().nativeTools(), trace.promptAudit().nativeTools(),
+                    "Prompt-visible tools must match native tools in private mode");
         }
     }
 

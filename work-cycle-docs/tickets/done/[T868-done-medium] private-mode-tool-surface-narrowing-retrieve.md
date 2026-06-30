@@ -1,6 +1,6 @@
-# [T868-open-medium] Private-Mode Tool-Surface Narrowing Should Remove Retrieval Tools, Not Only Disable Function
+# [T868-done-medium] Private-Mode Tool-Surface Narrowing Should Remove Retrieval Tools, Not Only Disable Function
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -219,6 +219,45 @@ Refactor scope:
 - `PromptToolDescriptors` does not render a retrieve descriptor in private mode; `CurrentTurnCapabilityFrame` copy does not imply retrieve is available in private mode.
 - The functional retrieval/reindex disable in `RagService` is unchanged and still fail-closed (regression proving private-mode retrieval still no-ops even if a tool were somehow invoked).
 - No regressions to privacy, permissions, checkpointing, trace redaction, or outcome truth.
+
+## Resolution
+
+Implemented in the `0.10.6` line on `improvement/qodana-cleanup`.
+
+- Added typed retrieval capability metadata (`CapabilityKind.RETRIEVE` and
+  `ToolOperationMetadata.retrieve(...)`) so retrieve/RAG-dependent tool
+  availability is not inferred from the literal `talos.retrieve` name.
+- Added `ToolCapabilityAvailability.fromConfig(Config)` as the deterministic
+  privacy-to-surface seam. It derives retrieval availability from
+  `PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)` and is applied inside
+  `ToolSurfacePlanner` after the existing operation predicate selection.
+- Updated native tool selection, Ask, Plan, Agent, prompt preview, and
+  route-through-TurnProcessor E2E paths to use the config-aware planned surface.
+  Prompt-visible descriptors are now adapted from the same planned native specs
+  so prompt and native tool lists stay equal.
+- Made read-only, verification, and mutation prompt preambles capability-aware
+  where retrieval is not in the visible surface. Private-mode prompts no longer
+  mention `talos.retrieve` in either the descriptor list, current-turn frame, or
+  boilerplate prose.
+- Left the `RagService` private-mode functional backstop unchanged; retrieve
+  remains fail-closed even if invoked outside the narrowed surface.
+
+Deterministic evidence:
+
+- `ToolSurfacePlannerTest`: private mode excludes retrieval from read-only and
+  apply surfaces; explicit private-mode RAG re-enable keeps retrieval visible.
+- `NativeToolSpecPolicyTest`: config-aware native specs omit/keep retrieve
+  according to private-mode RAG availability.
+- `PromptToolDescriptorsTest`: prompt descriptors can be constrained to the
+  planned visible specs.
+- `AskModeTest`, `PlanModeTest`, `UnifiedAssistantModeTest`, and
+  `PromptInspectorTest`: private-mode prompt/native surfaces omit retrieval and
+  the rendered system prompt does not advertise `talos.retrieve`.
+- `ModeScenarioTest`: route-through-`TurnProcessor` trace and prompt-audit
+  surfaces omit retrieve and keep prompt/native surfaces equal in private mode.
+- Existing RAG/private-mode backstops still pass:
+  `RagServiceContextLedgerTest`, `TalosKnowledgeEnginePrivacyTest`,
+  `RetrieveToolTest`, and `RagIndexCmdPrivateModeTest`.
 
 ## Tests / Evidence
 

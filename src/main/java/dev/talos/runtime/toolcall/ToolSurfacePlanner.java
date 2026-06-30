@@ -35,9 +35,20 @@ public final class ToolSurfacePlanner {
             ExecutionPhase phase,
             ToolRegistry registry
     ) {
+        return plan(contract, phase, registry, ToolCapabilityAvailability.allEnabled());
+    }
+
+    public static Plan plan(
+            TaskContract contract,
+            ExecutionPhase phase,
+            ToolRegistry registry,
+            ToolCapabilityAvailability availability
+    ) {
         if (registry == null || registry.isEmpty()) {
             return new Plan(List.of(), "no registry tools");
         }
+        ToolCapabilityAvailability safeAvailability =
+                availability == null ? ToolCapabilityAvailability.allEnabled() : availability;
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             return new Plan(List.of(), "small-talk");
         }
@@ -51,7 +62,7 @@ public final class ToolSurfacePlanner {
             return new Plan(List.of(), "unsupported command request");
         }
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
-            return select(registry, ToolSurfacePlanner::isDirectoryListingTool, "directory listing");
+            return select(registry, ToolSurfacePlanner::isDirectoryListingTool, safeAvailability, "directory listing");
         }
         if (contract != null
                 && !contract.mutationAllowed()
@@ -59,6 +70,7 @@ public final class ToolSurfacePlanner {
             return select(
                     registry,
                     descriptor -> isFileReadTool(descriptor) || isDirectoryListingTool(descriptor),
+                    safeAvailability,
                     "verify-only path check with directory targets");
         }
         if (contract != null
@@ -67,12 +79,13 @@ public final class ToolSurfacePlanner {
             return select(
                     registry,
                     descriptor -> isFileReadTool(descriptor) || isDirectoryListingTool(descriptor),
+                    safeAvailability,
                     "read-only path existence surface");
         }
         if (contract != null
                 && !contract.mutationAllowed()
                 && !contract.expectedTargets().isEmpty()) {
-            return select(registry, ToolSurfacePlanner::isFileReadTool, "expected target read");
+            return select(registry, ToolSurfacePlanner::isFileReadTool, safeAvailability, "expected target read");
         }
 
         boolean mutationAllowed = contract != null
@@ -86,41 +99,46 @@ public final class ToolSurfacePlanner {
                 return select(
                         registry,
                         descriptor -> intent.toolNames().contains(descriptor.name()),
+                        safeAvailability,
                         intent.surfaceReason());
             }
             if (sourceDerivedFileCreateTargets(contract)) {
                 return select(
                         registry,
                         ToolSurfacePlanner::isFileTargetFullWriteApplyOperation,
+                        safeAvailability,
                         "source-derived file creation apply surface");
             }
             if (staticWebFullFileApplyTargets(contract)) {
                 return select(
                         registry,
                         ToolSurfacePlanner::isFileTargetFullWriteApplyOperation,
+                        safeAvailability,
                         "static web full-file apply surface");
             }
             if (fileEditTargets(contract)) {
                 return select(
                         registry,
                         ToolSurfacePlanner::isFileTargetApplyOperation,
+                        safeAvailability,
                         "file edit target apply surface");
             }
             if (exactStaticWebFileTargets(contract)) {
                 return select(
                         registry,
                         ToolSurfacePlanner::isFileTargetApplyOperation,
+                        safeAvailability,
                         "static web file target apply surface");
             }
-            return select(registry, ToolSurfacePlanner::isApplyOperation, "mutation apply surface");
+            return select(registry, ToolSurfacePlanner::isApplyOperation, safeAvailability, "mutation apply surface");
         }
         if (explicitCommandVerificationSurface(contract, phase)) {
-            return select(registry, ToolSurfacePlanner::isCommandOperation, "explicit command profile surface");
+            return select(registry, ToolSurfacePlanner::isCommandOperation, safeAvailability, "explicit command profile surface");
         }
         if (verificationCommandSurface(contract, phase)) {
-            return select(registry, ToolSurfacePlanner::isVerificationOperation, "verification command surface");
+            return select(registry, ToolSurfacePlanner::isVerificationOperation, safeAvailability, "verification command surface");
         }
-        return select(registry, ToolSurfacePlanner::isReadOnlyOperation, "read-only metadata surface");
+        return select(registry, ToolSurfacePlanner::isReadOnlyOperation, safeAvailability, "read-only metadata surface");
     }
 
     /**
@@ -200,10 +218,17 @@ public final class ToolSurfacePlanner {
                 && StaticWebCapabilityProfile.prefersFullFileWriteForInitialApply(contract);
     }
 
-    private static Plan select(ToolRegistry registry, java.util.function.Predicate<ToolDescriptor> predicate,
-                               String reason) {
+    private static Plan select(
+            ToolRegistry registry,
+            java.util.function.Predicate<ToolDescriptor> predicate,
+            ToolCapabilityAvailability availability,
+            String reason
+    ) {
+        ToolCapabilityAvailability safeAvailability =
+                availability == null ? ToolCapabilityAvailability.allEnabled() : availability;
         List<ToolSpec> specs = registry.descriptors().stream()
                 .filter(predicate)
+                .filter(descriptor -> safeAvailability.allows(metadata(descriptor)))
                 .map(ToolSurfacePlanner::toSpec)
                 .toList();
         return new Plan(specs, reason);

@@ -19,8 +19,8 @@ import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
+import dev.talos.runtime.toolcall.CanonicalToolDescriptors;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
-import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.PromptAuditSnapshot;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -114,7 +114,7 @@ final class AssistantTurnPreparation {
                 ? ExecutionPhase.APPLY
                 : ctx.executionPhaseState().phase();
         return ctx.withNativeToolSpecs(
-                NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
+                NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry(), ctx.cfg()));
     }
 
     private static CurrentTurnPlan buildCurrentTurnPlan(
@@ -306,7 +306,11 @@ final class AssistantTurnPreparation {
     }
 
     private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
-        return ToolSurfacePlanner.defaultVisibleToolNames(contract, phase);
+        return NativeToolSpecPolicy.names(NativeToolSpecPolicy.select(
+                contract,
+                phase,
+                CanonicalToolDescriptors.registry(),
+                null));
     }
 
     private static ProjectMemoryContext loadProjectMemory(Path workspace, TaskContract contract) {

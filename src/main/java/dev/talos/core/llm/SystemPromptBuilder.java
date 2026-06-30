@@ -319,18 +319,14 @@ public final class SystemPromptBuilder {
             sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE_NATIVE);
         } else if (directoryListingToolMode) {
             sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE);
-        } else if (readOnlyToolMode && visibleCommandTool && nativeTools) {
-            sb.append(DEFAULT_VERIFICATION_TOOLS_PREAMBLE_NATIVE);
         } else if (readOnlyToolMode && visibleCommandTool) {
-            sb.append(DEFAULT_VERIFICATION_TOOLS_PREAMBLE);
-        } else if (readOnlyToolMode && nativeTools) {
-            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
+            sb.append(verificationToolsPreamble(nativeTools, descriptors));
         } else if (readOnlyToolMode) {
-            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE);
-        } else if (mode == Mode.UNIFIED && !mutableWorkspaceCapabilityVisible() && nativeTools) {
-            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
+            sb.append(readOnlyToolsPreamble(nativeTools, descriptors));
         } else if (mode == Mode.UNIFIED && !mutableWorkspaceCapabilityVisible()) {
-            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE);
+            sb.append(readOnlyToolsPreamble(nativeTools, descriptors));
+        } else if (!hasTool(descriptors, "talos.retrieve")) {
+            sb.append(generalToolsPreamble(nativeTools, descriptors));
         } else if (nativeTools) {
             String nativePreamble = readResource(RES_TOOLS_NATIVE);
             if (nativePreamble != null) {
@@ -359,6 +355,150 @@ public final class SystemPromptBuilder {
         }
 
         return sb.toString();
+    }
+
+    private static String generalToolsPreamble(boolean nativeTools, List<PromptToolDescriptor> descriptors) {
+        var sb = new StringBuilder();
+        sb.append("Available Tools\n");
+        if (nativeTools) {
+            sb.append("""
+                    You have access to the following tools. The runtime handles tool invocation format automatically - just decide WHICH tool to call and with WHAT parameters.
+                    """);
+        } else {
+            sb.append("""
+                    You have access to the following tools. When you need to use a tool, emit a tool call as a JSON object in EXACTLY this format:
+
+                    ```json
+                    {"name": "tool_name", "parameters": {"key": "value"}}
+                    ```
+                    """);
+        }
+        if (hasMutationTool(descriptors)) {
+            sb.append("\nFILE CREATION AND MODIFICATION (CRITICAL):\n");
+            if (hasTool(descriptors, "talos.write_file")) {
+                sb.append("- You CAN create files. You have talos.write_file. USE IT when a file creation or full overwrite is required.\n");
+            }
+            if (hasTool(descriptors, "talos.edit_file")) {
+                sb.append("- When the user asks you to EDIT an existing file, call talos.edit_file with old_string and new_string.\n");
+            }
+            sb.append("- NEVER claim you changed a file unless a listed mutation tool actually succeeded.\n");
+            sb.append("- After writing or editing, briefly confirm what you did.\n");
+        }
+        sb.append("\nRules:\n");
+        sb.append("- CONTEXT FIRST: If the provided context snippets already answer the user's question, respond directly from context. Do NOT call a tool when the answer is already in front of you.\n");
+        appendWorkspaceInspectionLine(sb, "- Workspace questions", descriptors);
+        sb.append("- Only call a tool when you need to perform an action that the current context cannot satisfy.\n");
+        sb.append("- You may call multiple tools in one response.\n");
+        sb.append("- After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.\n");
+        sb.append("- Do NOT fabricate tool results. Wait for the actual result.\n");
+        sb.append("- Only call tools that are listed below. Do not invent tool names.\n");
+        sb.append("- If a tool returns an error, explain the issue to the user.");
+        return sb.toString();
+    }
+
+    private static String readOnlyToolsPreamble(boolean nativeTools, List<PromptToolDescriptor> descriptors) {
+        var sb = new StringBuilder();
+        sb.append("""
+                Available Tools
+                This turn is read-only or diagnostic. Only inspection tools are listed for this turn.
+                Do not call write/edit tools. If you identify a possible fix, describe it and wait for an explicit change request.
+                """);
+        if (nativeTools) {
+            sb.append("The runtime handles tool invocation format automatically - decide which listed inspection tool to call and with what parameters.\n");
+        } else {
+            sb.append("""
+
+                    To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
+
+                    ```json
+                    {"name": "tool_name", "parameters": {"key": "value"}}
+                    ```
+                    """);
+        }
+        sb.append("\nWhen to call:\n");
+        appendWorkspaceInspectionLine(sb, "- Workspace questions", descriptors);
+        if (hasTool(descriptors, "talos.list_dir") && hasTool(descriptors, "talos.read_file")) {
+            sb.append("- Small workspaces -> list files, then read the obvious primary files before answering.\n");
+        }
+        if (hasTool(descriptors, "talos.grep")) {
+            sb.append("- Search tasks -> talos.grep for exact text or selectors.\n");
+        }
+        if (hasTool(descriptors, "talos.retrieve")) {
+            sb.append("- Semantic cross-file search on a large indexed workspace -> talos.retrieve.\n");
+        }
+        sb.append("""
+
+                Rules:
+                - Wait for tool results before answering. Do not fabricate results.
+                - Only call tools listed below. Do not invent names.
+                - Never call the same tool with the same parameters twice in one turn.""");
+        return sb.toString();
+    }
+
+    private static String verificationToolsPreamble(boolean nativeTools, List<PromptToolDescriptor> descriptors) {
+        var sb = new StringBuilder();
+        sb.append("""
+                Available Tools
+                This turn is verification-oriented. Only inspection tools and approved command verification tools are listed.
+                Do not call write/edit tools. Do not invent shell commands.
+                """);
+        if (nativeTools) {
+            sb.append("The runtime handles tool invocation format automatically - decide which listed tool to call and with what parameters.\n");
+        } else {
+            sb.append("""
+
+                    To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
+
+                    ```json
+                    {"name": "tool_name", "parameters": {"key": "value"}}
+                    ```
+                    """);
+        }
+        sb.append("\nWhen to call:\n");
+        appendWorkspaceInspectionLine(sb, "- Workspace evidence", descriptors);
+        if (hasTool(descriptors, "talos.run_command")) {
+            sb.append("- Build/test verification -> talos.run_command with an approved Gradle profile.\n");
+        }
+        sb.append("""
+
+                Rules:
+                - Wait for tool results before answering. Do not fabricate results.
+                - Only call tools listed below. Do not invent names.
+                - Never provide raw shell, cmd.exe, PowerShell, package install, network, or git write commands.""");
+        return sb.toString();
+    }
+
+    private static void appendWorkspaceInspectionLine(
+            StringBuilder sb,
+            String label,
+            List<PromptToolDescriptor> descriptors
+    ) {
+        List<String> names = descriptors.stream()
+                .map(PromptToolDescriptor::name)
+                .filter(SystemPromptBuilder::isInspectionToolName)
+                .toList();
+        if (names.isEmpty()) {
+            sb.append(label).append(" -> use only the listed inspection tools.\n");
+        } else {
+            sb.append(label).append(" -> ").append(String.join(", ", names)).append(".\n");
+        }
+    }
+
+    private static boolean hasTool(List<PromptToolDescriptor> descriptors, String name) {
+        return descriptors.stream().anyMatch(descriptor -> name.equals(descriptor.name()));
+    }
+
+    private static boolean hasMutationTool(List<PromptToolDescriptor> descriptors) {
+        return descriptors.stream()
+                .map(PromptToolDescriptor::name)
+                .anyMatch(SystemPromptBuilder::isMutationToolName);
+    }
+
+    private static boolean isInspectionToolName(String name) {
+        return switch (name == null ? "" : name) {
+            case "talos.list_dir", "talos.read_file", "talos.grep", "talos.retrieve" -> true;
+            default -> false;
+        };
     }
 
     private String modeRules() {
@@ -514,28 +654,6 @@ public final class SystemPromptBuilder {
             - Only call tools that are listed below. Do not invent tool names.
             - If a tool returns an error, explain the issue to the user.""";
 
-    private static final String DEFAULT_READ_ONLY_TOOLS_PREAMBLE = """
-            Available Tools
-            This turn is read-only or diagnostic. Only inspection tools are listed for this turn.
-            Do not call write/edit tools. If you identify a possible fix, describe it and wait for an explicit change request.
-
-            To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
-
-            ```json
-            {"name": "tool_name", "parameters": {"key": "value"}}
-            ```
-
-            When to call:
-            - Workspace questions -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
-            - Small workspaces -> list files, then read the obvious primary files before answering.
-            - Search tasks -> talos.grep for exact text or selectors.
-            - Semantic cross-file search on a large indexed workspace -> talos.retrieve.
-
-            Rules:
-            - Wait for tool results before answering. Do not fabricate results.
-            - Only call tools listed below. Do not invent names.
-            - Never call the same tool with the same parameters twice in one turn.""";
-
     private static final String DEFAULT_READ_ONLY_TASK_CONTRACT = """
             Current Turn Contract
             - This specific user turn is read-only or diagnostic.
@@ -556,58 +674,6 @@ public final class SystemPromptBuilder {
             - Use talos.list_dir only.
             - Do not inspect, search, retrieve, summarize, or infer file contents unless the user explicitly asks for that in a later turn.
             - Do not call talos.write_file or talos.edit_file in this turn.""";
-
-    private static final String DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE = """
-            Available Tools
-            This turn is read-only or diagnostic. Only inspection tools are listed for this turn.
-            Do not call write/edit tools. If you identify a possible fix, describe it and wait for an explicit change request.
-            The runtime handles tool invocation format automatically - decide which listed inspection tool to call and with what parameters.
-
-            When to call:
-            - Workspace questions -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
-            - Small workspaces -> list files, then read the obvious primary files before answering.
-            - Search tasks -> talos.grep for exact text or selectors.
-            - Semantic cross-file search on a large indexed workspace -> talos.retrieve.
-
-            Rules:
-            - Wait for tool results before answering. Do not fabricate results.
-            - Only call tools listed below. Do not invent names.
-            - Never call the same tool with the same parameters twice in one turn.""";
-
-    private static final String DEFAULT_VERIFICATION_TOOLS_PREAMBLE = """
-            Available Tools
-            This turn is verification-oriented. Only inspection tools and approved command verification tools are listed.
-            Do not call write/edit tools. Do not invent shell commands.
-
-            To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
-
-            ```json
-            {"name": "tool_name", "parameters": {"key": "value"}}
-            ```
-
-            When to call:
-            - Workspace evidence -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
-            - Build/test verification -> talos.run_command with an approved Gradle profile.
-
-            Rules:
-            - Wait for tool results before answering. Do not fabricate results.
-            - Only call tools listed below. Do not invent names.
-            - Never provide raw shell, cmd.exe, PowerShell, package install, network, or git write commands.""";
-
-    private static final String DEFAULT_VERIFICATION_TOOLS_PREAMBLE_NATIVE = """
-            Available Tools
-            This turn is verification-oriented. Only inspection tools and approved command verification tools are listed.
-            Do not call write/edit tools. Do not invent shell commands.
-            The runtime handles tool invocation format automatically - decide which listed tool to call and with what parameters.
-
-            When to call:
-            - Workspace evidence -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
-            - Build/test verification -> talos.run_command with an approved Gradle profile.
-
-            Rules:
-            - Wait for tool results before answering. Do not fabricate results.
-            - Only call tools listed below. Do not invent names.
-            - Never provide raw shell, cmd.exe, PowerShell, package install, network, or git write commands.""";
 
     private static final String DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE = """
             Available Tools

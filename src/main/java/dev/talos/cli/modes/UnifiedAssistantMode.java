@@ -31,12 +31,12 @@ import java.util.Optional;
  * Unified assistant mode: single action-capable mode for all natural-language work.
  *
  * <p>This mode replaces the RETRIEVE → RagMode routing in auto-mode. Instead of
- * pre-injecting RAG snippets, the model decides when to retrieve context by
- * calling {@code talos.retrieve} or {@code talos.read_file} as tools.
+ * pre-injecting RAG snippets, the model decides when to inspect context by
+ * calling the retrieval or file-read tools available for the current turn.
  *
  * <p>Capabilities available to the model:
  * <ul>
- *   <li>Full tool access (read, write, edit, list, grep, retrieve)</li>
+ *   <li>Current-turn tool access (read, write, edit, list, grep, and retrieval when policy allows)</li>
  *   <li>Workspace manifest for project awareness</li>
  *   <li>Conversation history for continuity</li>
  *   <li>Explicit guidance to use tools for file ops and retrieval for code questions</li>
@@ -103,7 +103,7 @@ public final class UnifiedAssistantMode implements Mode {
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);
         List<ToolSpec> plannedNativeToolSpecs =
-                NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry());
+                NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry(), ctx.cfg());
         List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
@@ -111,7 +111,7 @@ public final class UnifiedAssistantMode implements Mode {
                 .withDirectoryListingToolMode(directoryListing);
         if (PromptWorkspaceContextPolicy.includeWorkspaceManifest(plannedNativeToolNames)) {
             promptBuilder
-                    .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
+                    .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                     .withVisibleToolNames(plannedNativeToolNames)
                     .withWorkspace(workspace)
                     .withReadOnlyToolMode(!taskContract.mutationAllowed())
@@ -160,7 +160,7 @@ public final class UnifiedAssistantMode implements Mode {
      * Build structured ChatMessages: system → history → current user message.
      *
      * <p>Unlike RagMode, there is no RAG context injection here. The model
-     * uses {@code talos.retrieve} and {@code talos.read_file} tools on demand.
+     * uses the current turn's listed inspection tools on demand.
      */
     static List<ChatMessage> buildMessages(String system, String rawLine, List<ChatMessage> history) {
         return buildMessages(system, rawLine, history, "");

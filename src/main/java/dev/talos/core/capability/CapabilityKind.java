@@ -7,6 +7,7 @@ package dev.talos.core.capability;
  */
 public enum CapabilityKind {
     INSPECT,
+    RETRIEVE,
     CREATE,
     EDIT,
     ORGANIZE,

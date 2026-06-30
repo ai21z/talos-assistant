@@ -58,7 +58,7 @@ class ToolOperationMetadataTest {
         assertMetadata(
                 new RetrieveTool(null).descriptor().operationMetadata(),
                 "talos.retrieve",
-                CapabilityKind.INSPECT,
+                CapabilityKind.RETRIEVE,
                 ToolRiskLevel.READ_ONLY,
                 Map.of(),
                 false,

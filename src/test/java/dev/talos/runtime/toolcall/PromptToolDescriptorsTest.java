@@ -8,6 +8,8 @@ import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -49,6 +51,24 @@ class PromptToolDescriptorsTest {
         assertEquals("Write a file", write.description());
         assertEquals("{\"type\":\"object\",\"required\":[\"path\"]}", write.parametersSchema());
         assertTrue(write.requiresApproval());
+    }
+
+    @Test
+    void adaptsOnlyThePlannedVisibleSurfaceWhenSpecsAreProvided() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(tool(
+                "talos.read_file",
+                "Read a file",
+                "{\"type\":\"object\"}",
+                ToolRiskLevel.READ_ONLY));
+        registry.register(new RetrieveTool(null));
+
+        List<PromptToolDescriptor> descriptors = PromptToolDescriptors.fromRegistry(
+                registry,
+                List.of(new ToolSpec("talos.read_file", "Read a file", "{\"type\":\"object\"}")));
+
+        assertEquals(List.of("talos.read_file"),
+                descriptors.stream().map(PromptToolDescriptor::name).toList());
     }
 
     private static TalosTool tool(

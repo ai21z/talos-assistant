@@ -13,6 +13,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -303,6 +304,28 @@ class AskModeTest {
         assertFalse(prompt.contains("ALWAYS call the tool"), prompt);
     }
 
+    @Test
+    void privateModeAskPromptAndNativeSurfaceOmitRetrieveTool() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                privateEngineConfig(false),
+                List.of(new LlmClient.StreamResult("private read-only answer", List.of())),
+                8192);
+        var ctx = Context.builder(privateEngineConfig(false))
+                .llm(recorded.client())
+                .toolRegistry(retrievalToolRegistry())
+                .build();
+
+        Optional<Result> result = new AskMode().handle("What is this project?", WS, ctx);
+
+        assertTrue(result.isPresent());
+        assertEquals(1, recorded.requests().size());
+        ChatRequest request = recorded.requests().getFirst();
+        assertFalse(toolNames(request).contains("talos.retrieve"), toolNames(request).toString());
+        assertTrue(toolNames(request).contains("talos.read_file"), toolNames(request).toString());
+        String prompt = joinedMessages(request);
+        assertFalse(prompt.contains("talos.retrieve"), prompt);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Fast-path tests (exact echo, think tags) - no memory interaction
     // ═══════════════════════════════════════════════════════════════════════
@@ -377,11 +400,28 @@ class AskModeTest {
         return cfg;
     }
 
+    private static Config privateEngineConfig(boolean ragEnabledInPrivateMode) {
+        Config cfg = engineConfig();
+        Map<String, Object> rag = new LinkedHashMap<>();
+        rag.put("enabled_in_private_mode", ragEnabledInPrivateMode);
+        Map<String, Object> privacy = new LinkedHashMap<>();
+        privacy.put("mode", "private");
+        privacy.put("rag", rag);
+        cfg.data.put("privacy", privacy);
+        return cfg;
+    }
+
     private static ToolRegistry fileToolRegistry() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
+        return registry;
+    }
+
+    private static ToolRegistry retrievalToolRegistry() {
+        ToolRegistry registry = fileToolRegistry();
+        registry.register(new RetrieveTool(null));
         return registry;
     }
 

@@ -77,6 +77,22 @@ public record ToolOperationMetadata(
                 "");
     }
 
+    public static ToolOperationMetadata retrieve(String toolName, String traceEventKind) {
+        return new ToolOperationMetadata(
+                toolName,
+                CapabilityKind.RETRIEVE,
+                ToolRiskLevel.READ_ONLY,
+                Map.of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                traceEventKind,
+                "");
+    }
+
     public static ToolOperationMetadata workspaceMutation(
             String toolName,
             CapabilityKind capabilityKind,
