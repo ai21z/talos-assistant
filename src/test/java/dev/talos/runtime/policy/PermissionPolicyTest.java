@@ -86,6 +86,24 @@ class PermissionPolicyTest {
     }
 
     @Test
+    void protectedReadAliasCarriesTargetTruthfulProtectedKind() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(new Config(null),
+                new ToolCall("talos.read_file", Map.of("path", "SSH~1/id_rsa")),
+                ToolRiskLevel.READ_ONLY,
+                ExecutionPhase.INSPECT));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("PROTECTED_PATH_ASK", decision.reasonCode());
+        assertTrue(decision.protectedPath());
+        assertEquals("SECRET", decision.protectedKind());
+        assertTrue(decision.userMessage().contains("protected path"));
+        assertTrue(decision.userMessage().contains("SSH~1/id_rsa"));
+        assertTrue(decision.userMessage().contains("(SECRET)"));
+    }
+
+    @Test
     void explicitDenyRuleBeatsProtectedReadAsk() {
         Config cfg = configWithRules(List.of(
                 rule("deny", List.of("talos.read_file"), List.of("READ_ONLY"), List.of("INSPECT"), List.of(".env"))

@@ -35,6 +35,7 @@ class LocalTurnTracePermissionDecisionTest {
                 "PROTECTED_PATH_ASK",
                 ".env",
                 true,
+                "SECRET",
                 false);
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
@@ -49,6 +50,7 @@ class LocalTurnTracePermissionDecisionTest {
         assertEquals("PROTECTED_PATH_ASK", event.data().get("reasonCode"));
         assertEquals(false, event.data().get("rememberEligible"));
         assertEquals(true, event.data().get("protectedPath"));
+        assertEquals("SECRET", event.data().get("protectedKind"));
         assertEquals("<protected-path>", event.data().get("pathHint"));
         assertFalse(MAPPER.writeValueAsString(trace).contains("SECRET_TOKEN=raw-value"), trace.toString());
     }
@@ -69,12 +71,14 @@ class LocalTurnTracePermissionDecisionTest {
         assertFalse(capture.contains("data.put(\"reasonCode\""), capture);
         assertFalse(capture.contains("data.put(\"rememberEligible\""), capture);
         assertFalse(capture.contains("data.put(\"protectedPath\""), capture);
+        assertFalse(capture.contains("data.put(\"protectedKind\""), capture);
         assertFalse(capture.contains("TraceRedactor.pathHint(relativePath)"), capture);
         assertTrue(factory.contains("PERMISSION_DECISION"), factory);
         assertTrue(factory.contains("data.put(\"action\""), factory);
         assertTrue(factory.contains("data.put(\"reasonCode\""), factory);
         assertTrue(factory.contains("data.put(\"rememberEligible\""), factory);
         assertTrue(factory.contains("data.put(\"protectedPath\""), factory);
+        assertTrue(factory.contains("data.put(\"protectedKind\""), factory);
         assertTrue(factory.contains("TraceRedactor.pathHint(relativePath)"), factory);
     }
 

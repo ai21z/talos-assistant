@@ -596,6 +596,7 @@ public final class TurnProcessor {
                 permissionDecision.reasonCode(),
                 permissionDecision.relativePath(),
                 permissionDecision.protectedPath(),
+                permissionDecision.protectedKind(),
                 permissionDecision.rememberEligible());
         if (commandTool) {
             LocalTurnTraceCapture.recordCommandPolicyDecision(

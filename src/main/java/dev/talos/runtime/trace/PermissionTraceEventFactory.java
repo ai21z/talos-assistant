@@ -17,6 +17,7 @@ final class PermissionTraceEventFactory {
             String reasonCode,
             String relativePath,
             boolean protectedPath,
+            String protectedKind,
             boolean rememberEligible
     ) {
         Map<String, Object> data = new LinkedHashMap<>();
@@ -24,6 +25,9 @@ final class PermissionTraceEventFactory {
         data.put("reasonCode", safe(reasonCode));
         data.put("rememberEligible", rememberEligible);
         data.put("protectedPath", protectedPath);
+        if (protectedPath && protectedKind != null && !protectedKind.isBlank()) {
+            data.put("protectedKind", protectedKind.strip());
+        }
         if (relativePath != null && !relativePath.isBlank()) {
             data.put("pathHint", TraceRedactor.pathHint(relativePath));
         }

@@ -20,11 +20,11 @@ class ProtectedWorkspacePathsTest {
     Path workspace;
 
     @Test
-    void policyVersionIsV7_sinceT840UnresolvedShortNameSegmentsFailClosed() {
+    void policyVersionIsV8_sinceT867AliasKindsAreTargetTruthful() {
         // Typed literal on purpose (never constant-vs-constant): bumping the
         // version is a deliberate act that forces stale RAG privacy
         // partitions to rebuild, and this pin makes the bump reviewable.
-        assertEquals("protected-content-policy-v7", ProtectedWorkspacePaths.POLICY_VERSION);
+        assertEquals("protected-content-policy-v8", ProtectedWorkspacePaths.POLICY_VERSION);
     }
 
     @Test
@@ -117,6 +117,7 @@ class ProtectedWorkspacePathsTest {
             ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, rawPath);
 
             assertTrue(direct.protectedPath(), rawPath);
+            assertEquals("SECRET", direct.protectedKind(), rawPath);
             assertEquals(runtime.protectedPath(), direct.protectedPath(), rawPath);
             assertEquals(runtime.protectedKind(), direct.protectedKind(), rawPath);
         }
@@ -151,6 +152,22 @@ class ProtectedWorkspacePathsTest {
         assertTrue(ProtectedWorkspacePaths.isProtectedPath(
                 workspace,
                 workspace.resolve("SSH~1").resolve("new-key.txt")));
+    }
+
+    @Test
+    void unresolvedShortNameWithProtectedFilenameKeepsTargetTruthfulSecretKind() {
+        ProtectedWorkspacePaths.Decision direct =
+                ProtectedWorkspacePaths.classify(workspace, "SSH~1/id_rsa");
+        ResourceDecision runtime = ProtectedPathPolicy.classify(workspace, "SSH~1/id_rsa");
+
+        assertTrue(direct.hasPath());
+        assertTrue(direct.insideWorkspace());
+        assertFalse(direct.workspaceEscape());
+        assertTrue(direct.protectedPath(), "unresolved short-name segments still fail closed");
+        assertEquals("SECRET", direct.protectedKind());
+        assertEquals("SSH~1/id_rsa", direct.relativePath());
+        assertEquals(runtime.protectedPath(), direct.protectedPath());
+        assertEquals(runtime.protectedKind(), direct.protectedKind());
     }
 
     @Test
