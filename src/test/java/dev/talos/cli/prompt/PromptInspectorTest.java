@@ -131,6 +131,7 @@ class PromptInspectorTest {
         assertFalse(render.sections().contains("tools:native"));
         assertFalse(render.sections().contains("workspace"));
         assertFalse(render.systemPrompt().contains("Available Tools"));
+        assertNoWriteCapabilityAdvertisement(render.systemPrompt());
         assertTrue(render.messages().stream()
                 .anyMatch(message -> message.content() != null
                         && message.content().contains("type: SMALL_TALK")
@@ -200,6 +201,7 @@ class PromptInspectorTest {
         assertTrue(render.registryTools().contains("talos.write_file"));
         assertTrue(render.sections().contains("tools:native"));
         assertTrue(render.systemPrompt().contains("Only inspection tools"));
+        assertNoWriteCapabilityAdvertisement(render.systemPrompt());
     }
 
     @Test
@@ -351,6 +353,12 @@ class PromptInspectorTest {
         return Context.builder(cfg)
                 .toolRegistry(registry)
                 .build();
+    }
+
+    private static void assertNoWriteCapabilityAdvertisement(String prompt) {
+        assertFalse(prompt.contains("full read/write access"), prompt);
+        assertFalse(prompt.contains("MUST call talos.write_file or talos.edit_file"), prompt);
+        assertFalse(prompt.contains("Reading alone does not satisfy the request"), prompt);
     }
 
     private static Context fullToolContext(Config cfg) {

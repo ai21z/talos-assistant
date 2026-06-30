@@ -61,10 +61,13 @@
   with read/search tools. The nudge points to `/mode agent` for approved bounded
   command profiles, and the Agent/Auto unsupported-command T913 no-fallback
   behavior remains covered separately.
-- [T915] Ask and Plan prompt identities no longer advertise mutable file
-  capability. The shared identity now stays posture-neutral, and writable
-  `talos.write_file` guidance is emitted only for non-read-only Agent/Unified
-  prompt surfaces whose visible tool set includes mutation tools.
+- [T915] Read-only prompt rendering is now posture-aware across Ask, Plan, and
+  Agent/Auto `/prompt` previews. The shared identity stays posture-neutral,
+  and Agent/Unified prompts use read-only rules and read-only tool preambles
+  whenever the current visible tool surface has no mutation tool, including
+  no-tool small-talk and `READ_ONLY_QA` turns. Writable `talos.write_file`
+  guidance remains only when the visible surface actually includes mutation
+  tools.
 - [T913] Explicit natural shell-command requests such as "Run the command
   Get-ChildItem -Name..." now classify as unsupported command verification
   instead of falling back to read/list tools. Agent prompt-debug evidence

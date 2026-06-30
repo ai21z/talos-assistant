@@ -37,6 +37,7 @@ public final class SystemPromptBuilder {
     private static final String RES_PLAN_RULES    = "prompts/sections/plan-rules.txt";
     private static final String RES_RAG_RULES     = "prompts/sections/rag-rules.txt";
     private static final String RES_UNIFIED_RULES = "prompts/sections/unified-rules.txt";
+    private static final String RES_UNIFIED_READ_ONLY_RULES = "prompts/sections/unified-read-only-rules.txt";
     private static final String RES_TOOLS         = "prompts/sections/tools-preamble.txt";
     private static final String RES_TOOLS_NATIVE  = "prompts/sections/tools-preamble-native.txt";
     private static final String RES_CONVERSATION  = "prompts/sections/conversation.txt";
@@ -205,15 +206,9 @@ public final class SystemPromptBuilder {
         }
 
         // 2. Mode-specific rules
-        String modeRes = switch (mode) {
-            case ASK     -> RES_ASK_RULES;
-            case PLAN    -> RES_PLAN_RULES;
-            case RAG     -> RES_RAG_RULES;
-            case UNIFIED -> RES_UNIFIED_RULES;
-        };
         String modeRules = directoryListingToolMode
                 ? DEFAULT_DIRECTORY_LISTING_MODE_RULES
-                : readResource(modeRes);
+                : modeRules();
         if (modeRules != null) {
             sb.append("\n\n").append(modeRules.strip());
         }
@@ -332,6 +327,10 @@ public final class SystemPromptBuilder {
             sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
         } else if (readOnlyToolMode) {
             sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE);
+        } else if (mode == Mode.UNIFIED && !mutableWorkspaceCapabilityVisible() && nativeTools) {
+            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
+        } else if (mode == Mode.UNIFIED && !mutableWorkspaceCapabilityVisible()) {
+            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE);
         } else if (nativeTools) {
             String nativePreamble = readResource(RES_TOOLS_NATIVE);
             if (nativePreamble != null) {
@@ -362,12 +361,30 @@ public final class SystemPromptBuilder {
         return sb.toString();
     }
 
+    private String modeRules() {
+        if (mode == Mode.UNIFIED && !mutableWorkspaceCapabilityVisible()) {
+            String rules = readResource(RES_UNIFIED_READ_ONLY_RULES);
+            return rules == null ? DEFAULT_UNIFIED_READ_ONLY_RULES : rules;
+        }
+        String modeRes = switch (mode) {
+            case ASK     -> RES_ASK_RULES;
+            case PLAN    -> RES_PLAN_RULES;
+            case RAG     -> RES_RAG_RULES;
+            case UNIFIED -> RES_UNIFIED_RULES;
+        };
+        return readResource(modeRes);
+    }
+
     private boolean commandToolVisible() {
         return commandToolMode
                 && (visibleToolNames == null || visibleToolNames.contains("talos.run_command"));
     }
 
     private boolean advertiseMutableWorkspaceCapability() {
+        return mode == Mode.UNIFIED && mutableWorkspaceCapabilityVisible();
+    }
+
+    private boolean mutableWorkspaceCapabilityVisible() {
         if (mode != Mode.UNIFIED || readOnlyToolMode || directoryListingToolMode) return false;
         if (visibleToolNames != null) {
             return visibleToolNames.stream().anyMatch(SystemPromptBuilder::isMutationToolName);
@@ -400,7 +417,9 @@ public final class SystemPromptBuilder {
             case ASK     -> "You are Talos, a local-first workspace assistant. Answer clearly and concisely.\n";
             case PLAN    -> "You are Talos, a local-first workspace assistant. Produce read-only implementation plans.\n";
             case RAG     -> "You are Talos, a local-first workspace assistant. Answer using the provided context snippets.\n";
-            case UNIFIED -> "You are Talos, a local-first workspace assistant with full tool access. Use tools proactively for file operations and project questions.\n";
+            case UNIFIED -> mutableWorkspaceCapabilityVisible()
+                    ? "You are Talos, a local-first workspace assistant with current-turn mutation tools. Use tools proactively for file operations and project questions.\n"
+                    : "You are Talos, a local-first workspace assistant operating under the current turn's listed tools. Do not claim file changes unless a mutation tool is actually available and succeeds.\n";
         };
     }
 
@@ -456,6 +475,23 @@ public final class SystemPromptBuilder {
             The user is asking only for file or directory names. Minimize data access.
             Use the listed directory tool once, then answer with names only.
             Do not infer, summarize, or inspect file contents unless the user asks for that in a later turn.""";
+
+    private static final String DEFAULT_UNIFIED_READ_ONLY_RULES = """
+            Behavior Rules
+            You are a local assistant operating under the tools available for this current turn.
+
+            How to work:
+            - Use only tools listed for this turn. If no tools are listed, answer directly from the user's message and do not claim workspace inspection.
+            - For questions about the workspace, call the listed inspection tools to ground your answer, then answer concretely. Cite file paths when file evidence is available.
+            - If the listed tools are read-only, inspect and describe findings without applying changes.
+            - For general knowledge unrelated to the workspace, answer directly without tools.
+
+            What not to do:
+            - Do not invent or mention unavailable tools as if they can be used in this turn.
+            - Do not claim you changed a file unless a mutation tool actually succeeded in this turn.
+            - Do not ask the user what they want when they already told you - act within the current turn's available capability.
+
+            Style: brief, precise, CLI-appropriate. Short paragraphs and lists. No JSON unless asked.""";
 
     private static final String DEFAULT_TOOLS_PREAMBLE_NATIVE = """
             Available Tools

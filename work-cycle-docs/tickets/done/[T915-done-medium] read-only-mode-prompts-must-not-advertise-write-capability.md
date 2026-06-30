@@ -1,6 +1,6 @@
-# [T915-open-medium] Read-only mode prompts must not advertise write capability
+# [T915-done-medium] Read-only mode prompts must not advertise write capability
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -18,11 +18,10 @@ Priority: medium
 - File diff summary: none; direct Ask mutation request did not create `ask-should-not-land.txt`, and prompt-injection target `injected-gptoss-ask.txt` was absent after final disk check
 - Approval choices: protected-read `n`, then protected-read `y`; no mutation approval was requested in Ask
 - Checkpoint id: n/a
-- Verification status: prior Ask/Plan deterministic regressions added; focused
-  T915 gate, adjacent prompt/capability-frame gate, ticket/wiki hygiene,
-  standalone wiki lint, diff check, and full `check` were green when the ticket
-  was first closed. Reopened 2026-06-30 for the generic `/prompt` auto/agent
-  read-only residual below.
+- Verification status: prior Ask/Plan deterministic regressions added; reopened
+  2026-06-30 for the generic `/prompt` auto/agent read-only residual below and
+  re-closed after Agent/Unified prompt rules became visible-mutation-surface
+  aware.
 
 Additional GPT-OSS Plan-mode corroboration:
 
@@ -148,16 +147,13 @@ approval. Runtime safety still held, but the read-only prompt contract remained
 internally inconsistent.
 ```
 
-Code evidence:
+Code evidence before the reopened fix:
 
-- `src/main/resources/prompts/sections/identity.txt` unconditionally states
-  that Talos can create files and has `talos.write_file`.
-- `SystemPromptBuilder.buildComposed(...)` always appends the identity resource
-  before mode-specific rules:
-  `src/main/java/dev/talos/core/llm/SystemPromptBuilder.java`.
+- `src/main/resources/prompts/sections/identity.txt` is now posture-neutral
+  after the first T915 close; it no longer unconditionally states that Talos
+  can create files or has `talos.write_file`.
 - `src/main/resources/prompts/sections/ask-rules.txt` correctly says Ask is
-  read-only and must not create/edit/run commands/request approval, so the
-  contradiction is between shared identity text and mode-specific posture text.
+  read-only and must not create/edit/run commands/request approval.
 - `src/main/resources/prompts/sections/plan-rules.txt` similarly says Plan is
   read-only and must not create/edit/run commands/request approval.
 - `src/main/resources/prompts/sections/unified-rules.txt` still contains the
@@ -165,14 +161,13 @@ Code evidence:
   talos.edit_file" language. In the 2026-06-30 `/prompt` artifacts, that
   language appeared even when the current-turn contract was `READ_ONLY_QA` and
   exposed only read/search/list/retrieve tools.
+- `SystemPromptBuilder.buildComposed(...)` selected Unified/Agent mode rules
+  without checking whether the current visible tool surface actually contained
+  a mutation tool.
 - `ReadOnlyProposalGroundingGuard` already treats "full read/write access" and
   tool names as internal prompt/runtime text when they leak into read-only
   answers, which reinforces that this prose should not be rendered as a
   current-turn capability claim in `/prompt` either.
-- `SystemPromptBuilderTest.identityContainsExplicitFileCreationCapability`
-  currently asserts that `SystemPromptBuilder.forAsk().build()` contains
-  `CAN create files` and `talos.write_file`, which is now the opposite of the
-  read-only Ask contract introduced by T890.
 - T890 acceptance criteria explicitly included: "Ask prompt text does not
   advertise write/edit capability."
 - T891 acceptance criteria require Plan to be a read-only planning posture, so
@@ -202,23 +197,22 @@ issue is still material because prompt-visible contracts are part of Talos'
 audit surface, and contradictory write instructions make read-only modes more
 fragile across models.
 
-## Recommended Fix
+## Implemented Fix
 
-Make capability advertisement posture-aware:
+Capability advertisement is now posture-aware:
 
-1. Split shared identity from mutable-agent capability instructions.
-2. For `ASK_READ_ONLY` and `PLAN_READ_ONLY`, omit or rewrite the generic
-   "You CAN create files / call talos.write_file" identity sentence.
-3. Keep mutation capability language only for Agent/Auto turns whose capped
-   current tool surface can actually expose mutation tools.
-4. Update `SystemPromptBuilderTest.identityContainsExplicitFileCreationCapability`
-   so Ask/Plan assert absence of write-capability advertising, while Agent
-   or mutation-capable prompt paths retain appropriate tool-use guidance.
-5. Extend the same posture-awareness to the generic Unified/Agent rules rendered
-   by `/prompt`: when the current-turn contract is read-only and the visible
-   surface has no mutation tools, omit or rewrite "full read/write access" and
-   "MUST call talos.write_file/edit_file" language. Agent/Auto may retain
-   action-capable wording only for writable current-turn surfaces.
+1. Shared identity stays posture-neutral.
+2. `SystemPromptBuilder` now gates Agent/Unified mutable capability on
+   `mutableWorkspaceCapabilityVisible()`, which requires an actual visible
+   mutation tool and rejects read-only or directory-listing turns.
+3. Agent/Unified mode rules now select
+   `prompts/sections/unified-read-only-rules.txt` whenever the current visible
+   surface has no mutation tool, including Auto/Agent read-only `/prompt`
+   previews and no-tool small-talk turns.
+4. Agent/Unified tool preambles now use read-only preambles when the visible
+   tool surface lacks mutation tools.
+5. Writable Agent/Auto turns still retain write/edit guidance when the visible
+   surface actually includes mutation tools.
 
 ## Prior Regression Tests
 
@@ -260,19 +254,33 @@ Executed broader runtime gate:
 
 ## Reopened Acceptance Criteria
 
-- `/prompt` for an auto/agent read-only current-turn contract does not render
+- [x] `/prompt` for an auto/agent read-only current-turn contract does not render
   "full read/write access" or "MUST call talos.write_file/edit_file" language.
-- `/prompt` still shows the accurate capped visible tool surface and current-turn
+- [x] `/prompt` still shows the accurate capped visible tool surface and current-turn
   contract, and prompt-visible tools equal native tools.
-- Agent/Auto mutation-capable turns still retain appropriate write/edit guidance
+- [x] Agent/Auto mutation-capable turns still retain appropriate write/edit guidance
   when the capped current surface actually exposes mutation tools.
-- Existing Ask/Plan no-write-advertisement tests remain green.
-- No regressions to approval, protected-read behavior, trace redaction, or mode
+- [x] Existing Ask/Plan no-write-advertisement tests remain green.
+- [x] No regressions to approval, protected-read behavior, trace redaction, or mode
   routing.
 
 Required new deterministic regression:
 
-- `SystemPromptBuilderTest` or `/prompt` command coverage for an auto/agent
+- [x] `SystemPromptBuilderTest` and `/prompt` inspector coverage for an auto/agent
   `READ_ONLY_QA` render asserts absence of stale global mutation instructions.
-- Inverse coverage asserts a writable Agent/Auto prompt still contains the needed
+- [x] Inverse coverage asserts a writable Agent/Auto prompt still contains the needed
   write/edit guidance when mutation tools are visible.
+
+Reopened verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.llm.SystemPromptBuilderTest.readOnlyToolModeOmitsMutatingToolDescriptors" --tests "dev.talos.cli.prompt.PromptInspectorTest.renderNextSmallTalkMatchesNoToolRuntimeSurface" --tests "dev.talos.cli.prompt.PromptInspectorTest.renderNextReadOnlyWorkspacePromptShowsReadOnlyEffectiveTools" --no-daemon --rerun-tasks
+.\gradlew.bat test --tests "dev.talos.core.llm.SystemPromptBuilderTest" --tests "dev.talos.cli.prompt.PromptInspectorTest" --no-daemon --rerun-tasks
+.\gradlew.bat test --tests "dev.talos.core.llm.SystemPromptBuilderTest" --tests "dev.talos.cli.prompt.PromptInspectorTest" --tests "dev.talos.cli.modes.AskModeTest" --tests "dev.talos.cli.modes.PlanModeTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --tests "dev.talos.runtime.NativeToolPipelineTest" --no-daemon --rerun-tasks
+git diff --check
+.\gradlew.bat check --no-daemon
+```
+
+All commands above passed on the reopened close pass. The red phase first
+confirmed the new prompt-truth assertions failed on the stale Unified/Agent
+write-capability prose before the implementation changed prompt rendering.
