@@ -12,7 +12,9 @@ import dev.talos.runtime.task.TaskContract;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Verifies deterministic post-apply expectations resolved from explicit task wording. */
 final class TaskExpectationStaticVerifier {
@@ -34,14 +36,17 @@ final class TaskExpectationStaticVerifier {
         boolean replacementRequired = false;
         boolean appendLineRequired = false;
         boolean bulletCountRequired = false;
+        Set<String> verifiedTargets = new LinkedHashSet<>();
 
         for (TaskExpectation expectation : expectations) {
             if (expectation instanceof LiteralContentExpectation literal) {
                 verifiedAny = true;
+                addExpectationTarget(verifiedTargets, literal);
                 verifyLiteralContentExpectation(root, literal, facts, problems, recordExpectationTrace);
             } else if (expectation instanceof ReplacementExpectation replacement) {
                 verifiedAny = true;
                 replacementRequired = true;
+                addExpectationTarget(verifiedTargets, replacement);
                 verifyReplacementExpectation(
                         root,
                         replacement,
@@ -52,6 +57,7 @@ final class TaskExpectationStaticVerifier {
             } else if (expectation instanceof AppendLineExpectation appendLine) {
                 verifiedAny = true;
                 appendLineRequired = true;
+                addExpectationTarget(verifiedTargets, appendLine);
                 verifyAppendLineExpectation(
                         root,
                         appendLine,
@@ -62,6 +68,7 @@ final class TaskExpectationStaticVerifier {
             } else if (expectation instanceof BulletListExpectation bullets) {
                 verifiedAny = true;
                 bulletCountRequired = true;
+                addExpectationTarget(verifiedTargets, bullets);
                 verifyBulletListExpectation(root, bullets, facts, problems, recordExpectationTrace);
             }
         }
@@ -71,8 +78,39 @@ final class TaskExpectationStaticVerifier {
                 replacementRequired,
                 appendLineRequired,
                 bulletCountRequired,
+                coversAllSuccessfulMutations(verifiedTargets, successfulMutations),
                 facts,
                 problems);
+    }
+
+    private static void addExpectationTarget(Set<String> verifiedTargets, TaskExpectation expectation) {
+        if (verifiedTargets == null || expectation == null) return;
+        String target = normalizePath(expectation.targetPath());
+        if (!target.isBlank()) verifiedTargets.add(target);
+    }
+
+    private static boolean coversAllSuccessfulMutations(
+            Set<String> verifiedTargets,
+            List<ToolCallLoop.ToolOutcome> successfulMutations
+    ) {
+        if (verifiedTargets == null || verifiedTargets.isEmpty()
+                || successfulMutations == null || successfulMutations.isEmpty()) {
+            return false;
+        }
+        Set<String> mutationTargets = new LinkedHashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
+            String target = normalizePath(outcome.pathHint());
+            if (!target.isBlank()) mutationTargets.add(target);
+        }
+        return !mutationTargets.isEmpty() && verifiedTargets.containsAll(mutationTargets);
+    }
+
+    private static String normalizePath(String path) {
+        String normalized = path == null ? "" : path.strip().replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
     }
 
     private static void verifyLiteralContentExpectation(
@@ -315,6 +353,7 @@ final class TaskExpectationStaticVerifier {
             boolean replacementRequired,
             boolean appendLineRequired,
             boolean bulletCountRequired,
+            boolean coversAllSuccessfulMutations,
             List<String> facts,
             List<String> problems
     ) {
@@ -324,7 +363,7 @@ final class TaskExpectationStaticVerifier {
         }
 
         static Result empty() {
-            return new Result(false, false, false, false, List.of(), List.of());
+            return new Result(false, false, false, false, false, List.of(), List.of());
         }
     }
 }

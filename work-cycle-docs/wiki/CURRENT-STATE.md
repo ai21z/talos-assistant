@@ -148,11 +148,10 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: five open live-findings tickets carried into the main-merge
+- Active tickets: four open live-findings tickets carried into the main-merge
   line: T862 (Maven workspace-profile docs), T867
   (protected-path alias classification), T868 (private-mode retrieve tool-surface
-  narrowing), T869 (failed/denied mutation outcome label), T870 (redacted-search
-  rendering).
+  narrowing), T870 (redacted-search rendering).
   T866
   (git-status fabrication), T908 (Plan
   read-only target/progress obligations), T909 (protected-read session approval
@@ -168,8 +167,9 @@ confidence_histogram:
   T885 (terminal UI for verification profiles), and T915 (`/prompt` read-only
   capability advertising residual), and T872 (run_command +
   batch/local-display coverage reprobe), T871 (qwen grounding/edit-shape
-  deterministic steering), and T873 (broader command-output truthfulness
-  shapes) are done; the T834 mutation
+  deterministic steering), T873 (broader command-output truthfulness
+  shapes), and T869 (failed/denied/semantically unsatisfied mutation outcome
+  label) are done; the T834 mutation
   anti-overclaim path is done.
 - Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
   the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.
@@ -268,8 +268,8 @@ clean `check` is portably green on this host.
 ## Pre-release and Merge State
 
 The pre-release arc (T842 onward) is done. The T842 owner-run full manual audit
-held the trust surface with no hard-fail gate (findings ticketed T866-T873; T866
-and T873 are fixed). T843-T846 (site honesty, RAG/beta docs, model/hardware-range evidence,
+held the trust surface with no hard-fail gate (findings ticketed T866-T873; T866,
+T869, and T873 are fixed). T843-T846 (site honesty, RAG/beta docs, model/hardware-range evidence,
 doctor diagnostics) and the T848-T854 correctness and diagnostic-truth fixes are
 closed. The accepted beta range is one Windows machine, managed `llama.cpp`,
 BM25-only retrieval; hybrid/vector retrieval is shipped but unvalidated.

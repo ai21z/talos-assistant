@@ -41,6 +41,12 @@ public final class TaskExpectationResolver {
             "(?is)\\b(?:change|changing|update|updating)\\s+"
                     + "([#.][A-Za-z_][A-Za-z0-9_-]*)\\s+to\\s+"
                     + "([#.][A-Za-z_][A-Za-z0-9_-]*)\\b");
+    private static final String NEXT_MUTATION_CLAUSE =
+            "\\b(?:then|and|first|second|third|next|also)\\s+(?:replace|change|update|set)\\b";
+    private static final String TARGET_REFERENCE_CLAUSE =
+            "\\bin\\s+`?[A-Za-z0-9_./\\\\-]+\\.[A-Za-z0-9][A-Za-z0-9_-]*`?";
+    private static final String REPLACEMENT_TEXT =
+            "(?:(?!(?:" + NEXT_MUTATION_CLAUSE + "|" + TARGET_REFERENCE_CLAUSE + ")).)+?";
 
     private TaskExpectationResolver() {}
 
@@ -122,6 +128,10 @@ public final class TaskExpectationResolver {
         for (String target : contract.expectedTargets()) {
             if (target == null || target.isBlank()) continue;
             String normalizedTarget = normalizePath(target);
+            ReplacementExpectation replacement = replacementExpectation(request, normalizedTarget, false);
+            if (replacement != null) {
+                expectations.add(replacement);
+            }
             List<Candidate> candidates = new ArrayList<>();
             addTargetSpecificExactCandidates(request, normalizedTarget, candidates);
             addTargetContainingExactlyCandidates(request, normalizedTarget, candidates);
@@ -289,13 +299,22 @@ public final class TaskExpectationResolver {
     }
 
     private static ReplacementExpectation replacementExpectation(String request, String normalizedTarget) {
+        return replacementExpectation(request, normalizedTarget, true);
+    }
+
+    private static ReplacementExpectation replacementExpectation(
+            String request,
+            String normalizedTarget,
+            boolean allowTargetAgnosticSelector
+    ) {
         if (request == null || request.isBlank() || normalizedTarget == null || normalizedTarget.isBlank()) {
             return null;
         }
         String quoted = Pattern.quote(normalizedTarget);
         boolean preserveRest = preserveRestRequested(request);
         Pattern replaceWithInTarget = Pattern.compile(
-                "(?is)\\breplace\\s+(.+?)\\s+with\\s+(.+?)\\s+in\\s+`?"
+                "(?is)\\breplace\\s+(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
+                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         Matcher matcher = replaceWithInTarget.matcher(request);
         if (matcher.find()) {
@@ -306,10 +325,26 @@ public final class TaskExpectationResolver {
                     "replacement-replace-with-in-target",
                     preserveRest);
         }
+        Pattern continuedReplaceWithInTarget = Pattern.compile(
+                "(?is)\\b(?:and|then|also|next|second|third)\\s+"
+                        + "(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
+                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                        + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+        matcher = continuedReplaceWithInTarget.matcher(request);
+        if (matcher.find()) {
+            return replacementExpectation(
+                    normalizedTarget,
+                    matcher.group(1),
+                    matcher.group(2),
+                    "replacement-continued-with-in-target",
+                    preserveRest);
+        }
 
         Pattern changeFromToInTarget = Pattern.compile(
                 "(?is)\\b(?:change|update|set)\\s+(?:the\\s+)?(?:page\\s+)?"
-                        + "(?:title|text|label|string|word|phrase)\\s+from\\s+(.+?)\\s+to\\s+(.+?)\\s+in\\s+`?"
+                        + "(?:title|text|label|string|word|phrase)\\s+from\\s+"
+                        + "(" + REPLACEMENT_TEXT + ")\\s+to\\s+"
+                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = changeFromToInTarget.matcher(request);
         if (matcher.find()) {
@@ -321,6 +356,7 @@ public final class TaskExpectationResolver {
                     preserveRest);
         }
 
+        if (!allowTargetAgnosticSelector) return null;
         matcher = SELECTOR_CHANGE_TO.matcher(request);
         if (!matcher.find()) return null;
         return replacementExpectation(

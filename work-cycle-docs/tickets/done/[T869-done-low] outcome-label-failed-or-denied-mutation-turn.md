@@ -1,6 +1,6 @@
-# [T869-open-low] Outcome-truth label on a failed/denied mutation turn
+# [T869-done-low] Outcome-truth label on a failed/denied mutation turn
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -132,16 +132,16 @@ Blocker level:
 Why this level:
 
 ```text
-No invariant was breached: no protected leak, no unapproved/false mutation
-landed, no approved-without-checkpoint, no landed false-success. The disk is
-correct. The defect is a turn-status LABEL that reads "complete" for a turn that
-mutated nothing because its only attempt failed and was denied. That is an
-honesty-of-presentation gap on the trust surface (it could let an owner believe a
-turn did productive mutating work when it did not), so it belongs in the
-candidate follow-up band, not a release blocker. It is adjacent to T864
-(write-layer verification fail-closed): T864 made a failed read-back stop counting
-as a clean successful mutation; this ticket makes a failed/denied mutation ATTEMPT
-stop being labelled as a complete turn.
+Original evidence did not show a protected leak, unapproved mutation,
+checkpoint bypass, or false mutation landing on disk. It did show an outcome
+label that could read "complete" after failed/denied mutation attempts. The
+2026-06-30 corroboration added a stronger false-success shape: one requested
+target was touched but semantically unchanged, while the answer and trace still
+presented completion. This remains a trust-surface outcome-truth defect, not a
+permission or privacy breach. It is adjacent to T864 (write-layer verification
+fail-closed): T864 made a failed read-back stop counting as a clean successful
+mutation; this ticket makes failed, denied, and semantically unsatisfied
+requested mutation work stop being labelled as a complete turn.
 ```
 
 ## Architectural Hypothesis
@@ -359,6 +359,45 @@ Add broader commands if runtime code changes:
   reads honestly instead of COMPLETE).
 - Convert live failure evidence into deterministic regression before closeout:
   the gpt-oss stale-edit-deny turn becomes the executor/e2e regression above.
+
+## Resolution
+
+Implemented in the outcome-verification path instead of a render-site string
+patch:
+
+- Multi-target expectation resolution now extracts target-scoped replacement
+  expectations (`replace old with new in file`) for each explicitly requested
+  target, while avoiding target-agnostic selector expectations on multi-target
+  prompts.
+- Replacement parsing no longer lets one replacement clause swallow a later
+  mutation clause such as `Then replace ...`.
+- `TaskExpectationStaticVerifier.Result` now records whether task-specific
+  expectations covered every successful mutation target.
+- `TaskVerificationOutcomeSelector` only upgrades expectation-based evidence to
+  `PASSED` when every successful mutation target is covered; mixed semantic
+  proof + readback-only mutation stays `READBACK_ONLY`.
+- The T869 execution regression covers the 2026-06-30 GPT-OSS shape: `notes.md`
+  is correctly updated, `more.md` remains `status2=old`, both tool outcomes
+  claim success, and the final outcome/trace demote to `FAILED` with the stale
+  success prose withheld.
+
+Focused verification before full gate:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.verification.TaskVerificationOutcomeSelectorTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon
+```
+
+Result: BUILD SUCCESSFUL.
+
+Full runtime/documentation gate:
+
+```powershell
+.\gradlew.bat check --no-daemon
+```
+
+Result: BUILD SUCCESSFUL. The run completed `:test`, `:e2eTest`,
+`:validateArchitectureBoundaries`, `:validateReleaseLedger`, coverage, and
+artifact canary scanning.
 
 ## Known Risks
 
