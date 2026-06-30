@@ -539,6 +539,7 @@ record ExecutionOutcome(
         boolean malformedProtocolDebrisReplaced = false;
         boolean localAccessCapabilityCorrected = false;
         boolean mutationCapabilityCorrected = false;
+        boolean negativeWorkspaceResultCorrected = false;
 
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)
                 || ToolCallParser.looksLikeMalformedToolProtocol(shaped)) {
@@ -558,6 +559,15 @@ record ExecutionOutcome(
             }
 
             if (!localAccessCapabilityCorrected && !mutationCapabilityCorrected) {
+                corrected = NoToolAnswerTruthfulnessGuard.correctUngroundedNegativeWorkspaceResultClaimIfNeeded(
+                        shaped, safePlan, messages);
+                negativeWorkspaceResultCorrected = !Objects.equals(shaped, corrected);
+                shaped = corrected;
+            }
+
+            if (!localAccessCapabilityCorrected
+                    && !mutationCapabilityCorrected
+                    && !negativeWorkspaceResultCorrected) {
                 if (streamed) {
                     String replaced = NoToolAnswerTruthfulnessGuard.enforceStreamingNoToolTruthfulness(
                             shaped, safePlan, messages);
@@ -584,7 +594,9 @@ record ExecutionOutcome(
         boolean ungrounded = shaped != null
                 && (shaped.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected
-                || mutationCapabilityCorrected);
+                || mutationCapabilityCorrected
+                || negativeWorkspaceResultCorrected
+                || shaped.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_NEGATIVE_WORKSPACE_RESULT_REPLACEMENT));
         boolean advisoryOnly = ungrounded && !blocked;
         EvidenceObligationAssessment evidenceAssessment =
                 EvidenceObligationAssessment.assess(safePlan, null, null);

@@ -6,8 +6,34 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
+import java.util.Map;
+
 final class AppendLinePreApprovalGuard {
     private AppendLinePreApprovalGuard() {}
+
+    static ToolCall steeredEditFile(
+            ToolCall call,
+            LoopState state,
+            TaskContract contract,
+            String pathHint
+    ) {
+        if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
+        String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
+        if (!"write_file".equals(canonicalTool)) return null;
+        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
+        if (expectation == null) return null;
+        String content = firstParam(call, "content", "text", "body", "data", "file_content");
+        if (content == null) return null;
+        String previousContent = priorReadContentForPath(state, pathHint);
+        if (previousContent == null) return null;
+        if (!appendLineContentPreservesReadback(previousContent, content, expectation.expectedLine())) return null;
+        String path = firstParam(call, "path", "file_path", "filepath", "file", "filename");
+        if (path == null || path.isBlank()) path = pathHint;
+        return new ToolCall("talos.edit_file", Map.of(
+                "path", path,
+                "old_string", previousContent,
+                "new_string", content));
+    }
 
     static String diagnostic(
             ToolCall call,
@@ -37,10 +63,10 @@ final class AppendLinePreApprovalGuard {
 
     private static AppendLineExpectation appendLineExpectationForPath(TaskContract contract, String pathHint) {
         if (contract == null || pathHint == null || pathHint.isBlank()) return null;
-        String target = ToolCallSupport.normalizePath(pathHint);
+        String target = ToolCallSupport.canonicalizeReadPath(pathHint);
         for (var expectation : TaskExpectationResolver.resolve(contract)) {
             if (expectation instanceof AppendLineExpectation appendLine
-                    && ToolCallSupport.normalizePath(appendLine.targetPath()).equals(target)) {
+                    && ToolCallSupport.canonicalizeReadPath(appendLine.targetPath()).equals(target)) {
                 return appendLine;
             }
         }

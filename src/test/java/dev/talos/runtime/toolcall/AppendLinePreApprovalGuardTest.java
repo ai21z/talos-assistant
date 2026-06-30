@@ -58,6 +58,57 @@ class AppendLinePreApprovalGuardTest {
     }
 
     @Test
+    void validAppendLineWriteCanBeSteeredToEditFile() {
+        String request = "Read README.md, then append exactly this line to README.md: Release gate note";
+        LoopState state = loopState(request);
+        addReadback(state, "README.md", "1 | # Demo\n");
+        ToolCall validWrite = writeFile("README.md", "# Demo\nRelease gate note\n");
+
+        ToolCall steered = AppendLinePreApprovalGuard.steeredEditFile(
+                validWrite,
+                state,
+                TaskContractResolver.fromUserRequest(request),
+                "README.md");
+
+        assertNotNull(steered);
+        assertEquals("talos.edit_file", steered.toolName());
+        assertEquals("README.md", steered.param("path"));
+        assertEquals("# Demo\n", steered.param("old_string"));
+        assertEquals("# Demo\nRelease gate note\n", steered.param("new_string"));
+    }
+
+    @Test
+    void genuineRewriteWriteIsNotSteeredToEditFile() {
+        String request = "Rewrite README.md with a concise product overview.";
+        LoopState state = loopState(request);
+        addReadback(state, "README.md", "1 | # Demo\n");
+        ToolCall rewrite = writeFile("README.md", "# New Product Overview\n");
+
+        ToolCall steered = AppendLinePreApprovalGuard.steeredEditFile(
+                rewrite,
+                state,
+                TaskContractResolver.fromUserRequest(request),
+                "README.md");
+
+        assertNull(steered);
+    }
+
+    @Test
+    void newFileWriteIsNotSteeredToEditFile() {
+        String request = "Create notes.md with one line: Release gate note";
+        LoopState state = loopState(request);
+        ToolCall newFile = writeFile("notes.md", "Release gate note\n");
+
+        ToolCall steered = AppendLinePreApprovalGuard.steeredEditFile(
+                newFile,
+                state,
+                TaskContractResolver.fromUserRequest(request),
+                "notes.md");
+
+        assertNull(steered);
+    }
+
+    @Test
     void validAppendLineWriteMayOmitTerminalNewline() {
         String request = "Read README.md, then append exactly this line to README.md: Release gate note";
         LoopState state = loopState(request);

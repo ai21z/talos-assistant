@@ -10,6 +10,7 @@ import dev.talos.spi.types.ChatMessage;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 /** Pure final-answer guards for no-tool turns. */
@@ -22,6 +23,12 @@ public final class NoToolAnswerTruthfulnessGuard {
             "[Grounding check: the user asked for an answer based on workspace "
             + "contents, but no files were read this turn. The response below was "
             + "produced without reading any files.]\n\n";
+
+    public static final String UNGROUNDED_NEGATIVE_WORKSPACE_RESULT_REPLACEMENT =
+            "[Grounding check: no workspace search/read tool was called in this turn, "
+            + "so Talos cannot truthfully claim there were no results.]\n\n"
+            + "No workspace search was performed in this turn. Please retry so Talos "
+            + "can search or read the workspace evidence before answering.";
 
     public static final String STREAMING_NO_TOOL_MUTATION_ANNOTATION =
             "[Truth check: the response below narrates completed file changes, "
@@ -117,6 +124,67 @@ public final class NoToolAnswerTruthfulnessGuard {
             "these changes should align"
     );
 
+    private static final Set<String> NEGATIVE_WORKSPACE_RESULT_MARKERS = Set.of(
+            "no results",
+            "none found",
+            "no matches",
+            "nothing found",
+            "found no ",
+            "i found no ",
+            "no secrets",
+            "no api key",
+            "no api keys",
+            "no credentials",
+            "no tokens"
+    );
+
+    private static final Set<String> HONEST_NO_SEARCH_DISCLOSURE_MARKERS = Set.of(
+            "did not search",
+            "didn't search",
+            "no search was performed",
+            "without searching",
+            "without a search",
+            "cannot say whether",
+            "can't say whether",
+            "cannot determine",
+            "can't determine"
+    );
+
+    private static final Set<String> SENSITIVE_WORKSPACE_CONTENT_MARKERS = Set.of(
+            "secret",
+            "api key",
+            "token",
+            "credential",
+            "password"
+    );
+
+    private static final Set<String> WORKSPACE_SCOPE_MARKERS = Set.of(
+            "workspace",
+            "repo",
+            "repository",
+            "project",
+            "codebase",
+            "folder",
+            "directory",
+            "file",
+            "files",
+            "here",
+            "current"
+    );
+
+    private static final Set<String> WORKSPACE_SEARCH_ACTION_MARKERS = Set.of(
+            "search",
+            "scan",
+            "find",
+            "look for"
+    );
+
+    private static final Set<String> WORKSPACE_SEARCH_COMMAND_MARKERS = Set.of(
+            "grep",
+            "ripgrep",
+            "rg"
+    );
+
     public static boolean looksLikeEvidenceRequest(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase(Locale.ROOT);
@@ -209,7 +277,20 @@ public final class NoToolAnswerTruthfulnessGuard {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
+        return enforceNoToolTruthfulness(answer, plan, messages);
+    }
+
+    public static String enforceNoToolTruthfulness(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         String out = answer;
+        String negativeWorkspaceResultCorrection =
+                correctUngroundedNegativeWorkspaceResultClaimIfNeeded(out, plan, messages);
+        if (!Objects.equals(negativeWorkspaceResultCorrection, out)) {
+            return negativeWorkspaceResultCorrection;
+        }
         if (shouldReplaceStreamingNoToolMutationNarrative(answer, plan, messages)) {
             return STREAMING_NO_TOOL_MUTATION_REPLACEMENT;
         }
@@ -218,6 +299,81 @@ public final class NoToolAnswerTruthfulnessGuard {
         }
         out = annotateStreamingNoToolMutationClaim(out, plan, messages);
         return out;
+    }
+
+    public static String correctUngroundedNegativeWorkspaceResultClaimIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        if (!shouldCorrectUngroundedNegativeWorkspaceResultClaim(answer, plan, messages)) return answer;
+        return UNGROUNDED_NEGATIVE_WORKSPACE_RESULT_REPLACEMENT;
+    }
+
+    public static boolean shouldCorrectUngroundedNegativeWorkspaceResultClaim(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        if (answer == null || answer.isBlank()) return false;
+        CurrentTurnPlan safePlan = safePlan(plan, messages);
+        if (isDirectAnswerOnlyTurn(safePlan)) return false;
+        if (safePlan.taskContract().mutationRequested()) return false;
+        if (!looksLikeWorkspaceSearchRequest(latestUserRequest(safePlan, messages))) return false;
+        String lower = answer.toLowerCase(Locale.ROOT);
+        if (containsAny(lower, HONEST_NO_SEARCH_DISCLOSURE_MARKERS)) return false;
+        return containsAny(lower, NEGATIVE_WORKSPACE_RESULT_MARKERS);
+    }
+
+    private static boolean looksLikeWorkspaceSearchRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        boolean sensitiveContent = containsAnyWordOrPhrase(lower, SENSITIVE_WORKSPACE_CONTENT_MARKERS);
+        boolean workspaceScoped = containsAnyWordOrPhrase(lower, WORKSPACE_SCOPE_MARKERS);
+        boolean searchAction = containsAnyWordOrPhrase(lower, WORKSPACE_SEARCH_ACTION_MARKERS);
+        if (containsAnyWordOrPhrase(lower, WORKSPACE_SEARCH_COMMAND_MARKERS)) return true;
+        if (sensitiveContent && (workspaceScoped || lower.contains("are there any"))) return true;
+        return workspaceScoped && searchAction;
+    }
+
+    private static boolean containsAny(String lower, Set<String> markers) {
+        if (lower == null || lower.isBlank() || markers == null || markers.isEmpty()) return false;
+        for (String marker : markers) {
+            if (marker != null && !marker.isBlank() && lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsAnyWordOrPhrase(String lower, Set<String> markers) {
+        if (lower == null || lower.isBlank() || markers == null || markers.isEmpty()) return false;
+        for (String marker : markers) {
+            if (containsWordOrPhrase(lower, marker)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsWordOrPhrase(String lower, String marker) {
+        if (lower == null || lower.isBlank() || marker == null || marker.isBlank()) return false;
+        String needle = marker.toLowerCase(Locale.ROOT);
+        if (needle.chars().anyMatch(Character::isWhitespace)) {
+            return lower.contains(needle);
+        }
+        int from = 0;
+        while (from < lower.length()) {
+            int idx = lower.indexOf(needle, from);
+            if (idx < 0) return false;
+            int before = idx - 1;
+            int after = idx + needle.length();
+            boolean leftBoundary = before < 0 || !isWordChar(lower.charAt(before));
+            boolean rightBoundary = after >= lower.length() || !isWordChar(lower.charAt(after));
+            if (leftBoundary && rightBoundary) return true;
+            from = idx + needle.length();
+        }
+        return false;
+    }
+
+    private static boolean isWordChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
     }
 
     public static boolean shouldReplaceStreamingNoToolMutationNarrative(

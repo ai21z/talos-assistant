@@ -1,6 +1,6 @@
-# [T871-open-medium] qwen grounding + edit-shape weakness (deterministic competence steering)
+# [T871-done-medium] qwen grounding + edit-shape weakness (deterministic competence steering)
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -197,6 +197,51 @@ Reduce qwen2.5-coder-14b's ungrounded-claim and destructive-edit-shape patterns 
   retrieved evidence but a continuation-failure fallback is not scored as a
   clean answer-quality PASS.
 - Re-run the relevant subset of the T842 prompt bank against qwen2.5-coder-14b and capture provider bodies + workspace git state showing the reduced failure rate; preserve as durable evidence (the audit's caveat about overwritten per-turn session audit applies, so rely on provider bodies + git state + canary scan).
+
+## Completion Evidence
+
+Implemented on 2026-06-30 against `improvement/qodana-cleanup` after T872.
+
+Runtime changes:
+
+- `NoToolAnswerTruthfulnessGuard` now detects no-tool workspace/search negative
+  claims such as "no results", "none found", and "no matches" when no search or
+  read tool ran, and replaces them with an explicit no-search disclosure. Honest
+  "I did not search" answers pass unchanged.
+- `AppendLinePreApprovalGuard` now recognizes append-shaped `write_file`
+  payloads that exactly preserve same-turn readback plus the requested appended
+  line, including `./target` path variants, and converts them to
+  `talos.edit_file` before approval. New-file writes and genuine rewrites do
+  not steer.
+- `ToolCallPreExecutionGuardChain` records
+  `APPEND_LINE_WRITE_STEERED_TO_EDIT_FILE` when the conversion happens; approval
+  and checkpointing still happen through the normal mutation path.
+- `SynchronizedApprovalAuditMain` now scores
+  `proposal-only-does-not-mutate` as `FAIL_REVIEW_REQUIRED` when the final
+  answer is a tool-call continuation fallback after tool evidence.
+- `docs/user/model-profiles/qwen2.5-coder-14b.md` documents the residual Qwen
+  competence limit without claiming the model is fixed.
+
+Acceptance reconciliation:
+
+- Criterion 3's old "destructive-rewrite case still reaches approval" wording
+  reflected the original 2026-06-24 audit. Current code is stronger: an
+  append-line `write_file` that does not preserve same-turn readback is already
+  blocked before approval by the append-line preservation guard. T871 does not
+  weaken that guard. It adds steering for the preserving append-write shape and
+  leaves genuine rewrites/new-file writes untouched.
+- T850 remains the owner for the codename/name-non-invention case. T871 closes
+  the deterministic shapes it owns and keeps the broader model-competence
+  residual documented.
+
+Focused verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuardTest" --tests "dev.talos.runtime.toolcall.AppendLinePreApprovalGuardTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.streamingNoToolEvidenceAnswerIsAdvisoryAndUngrounded" --tests "dev.talos.cli.modes.ExecutionOutcomeTest.streamingNoToolNegativeLocalAccessClaimOnWorkspaceTurnIsCorrected" --no-daemon
+.\gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.append_line_full_write_is_steered_to_edit_file_before_approval" --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.proposal_only_continuation_fallback_after_tool_evidence_is_review_required" --no-daemon
+```
+
+Both focused gates passed.
 
 ## Work-Test Cycle Notes
 

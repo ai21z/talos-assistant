@@ -1161,6 +1161,33 @@ class SynchronizedApprovalAuditRunnerTest {
     }
 
     @Test
+    void append_line_full_write_is_steered_to_edit_file_before_approval() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Intro\n");
+
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(
+                new SynchronizedApprovalAuditRunner.Request(
+                        "append full-write steer",
+                        workspace,
+                        checkpointConfig(),
+                        "Append exactly this line to README.md: Release gate note",
+                        List.of(
+                                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                                "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"./README.md\","
+                                        + "\"content\":\"Intro\\nRelease gate note\\n\"}}",
+                                "The line has been appended."),
+                        List.of(ScriptedApprovalGate.Step.approve("talos.edit_file", "./README.md"))));
+
+        assertEquals("Intro\nRelease gate note\n", Files.readString(workspace.resolve("README.md")));
+        assertEquals(1, result.approvals().size());
+        assertTrue(result.approvals().get(0).description().contains("talos.edit_file"),
+                result.approvals().get(0).description());
+        assertTrue(result.traceText().contains("APPEND_LINE_WRITE_STEERED_TO_EDIT_FILE"), result.traceText());
+        assertTrue(result.traceText().contains("TOOL_EXECUTED talos.edit_file"), result.traceText());
+        assertTrue(result.trace().verification().summary().contains("Append line verification passed"),
+                result.trace().verification().summary());
+    }
+
+    @Test
     void synchronized_summary_scores_partial_passed_blocked_call_as_runtime_repair_pass() {
         SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
                 SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
@@ -1208,6 +1235,32 @@ class SynchronizedApprovalAuditRunnerTest {
                 SynchronizedApprovalAuditMain.ScenarioScore.PASS_WITH_RUNTIME_REPAIR,
                 evaluation.score());
         assertTrue(evaluation.reason().contains("runtime repair"), evaluation.reason());
+    }
+
+    @Test
+    void proposal_only_continuation_fallback_after_tool_evidence_is_review_required() {
+        SynchronizedApprovalAuditMain.ScenarioEvaluation evaluation =
+                SynchronizedApprovalAuditMain.evaluateTranscriptForSummary(
+                        "proposal-only-does-not-mutate",
+                        """
+                                {
+                                  "traceStatus" : "OK",
+                                  "verificationStatus" : "NOT_RUN",
+                                  "approvalCount" : 0,
+                                  "expectedRequiredApprovalCount" : 0,
+                                  "toolEventTypes" : [ "TOOL_CALL_PARSED", "TOOL_EXECUTED" ]
+                                }
+                                """,
+                        """
+                                [Used 3 tool(s): talos.list_dir, talos.grep, talos.retrieve | 2 iteration(s)] [1 failed]
+                                [Tool-call continuation could not be completed. No further tool calls were executed.]
+                                """,
+                        null);
+
+        assertEquals(
+                SynchronizedApprovalAuditMain.ScenarioScore.FAIL_REVIEW_REQUIRED,
+                evaluation.score());
+        assertTrue(evaluation.reason().contains("continuation fallback"), evaluation.reason());
     }
 
     @Test
