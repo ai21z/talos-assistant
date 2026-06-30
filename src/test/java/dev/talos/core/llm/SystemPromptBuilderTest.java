@@ -646,7 +646,10 @@ class SystemPromptBuilderTest {
     private static void assertNoWriteCapabilityAdvertisement(String prompt) {
         assertFalse(prompt.contains("You CAN create files"), prompt);
         assertFalse(prompt.contains("CAN create files"), prompt);
+        assertFalse(prompt.contains("full read/write access"), prompt);
         assertFalse(prompt.contains("talos.write_file tool that writes files"), prompt);
+        assertFalse(prompt.contains("MUST call talos.write_file or talos.edit_file"), prompt);
+        assertFalse(prompt.contains("Reading alone does not satisfy the request"), prompt);
         assertFalse(prompt.contains("When the user asks you to create or write a file, call talos.write_file"),
                 prompt);
         assertFalse(prompt.contains("Never say \"I cannot create files\""), prompt);
