@@ -55,6 +55,66 @@ Observed behavior:
   verified no-mutation disk state, not a retained per-turn trace artifact.
 ```
 
+Additional 2026-06-30 GPT-OSS live corroboration:
+
+- Source: T872 synchronized approval live rerun after harness remediation
+- Date: 2026-06-30
+- Talos version / repo HEAD at audit: 0.10.6 / `315996d818d6`
+- Installed build: `2026-06-30T06:17:19.550025600Z`
+- Model/backend: managed `llama.cpp` / `gpt-oss-20b`
+- Scenario: `mutation-remember-approval-auto-approves-second-write`
+- Artifact root:
+  `local/manual-testing/t872-sync-live-20260630-081814/gptoss-full-bank/mutation-remember-approval-auto-approves-second-write`
+- Workspace:
+  `local/manual-workspaces/t872-sync-live-20260630-081814/gptoss-full-bank/mutation-remember-approval-auto-approves-second-write`
+
+Observed added behavior:
+
+```text
+Prompt:
+  Use talos.edit_file twice. First replace status=old with status=new in
+  notes.md. Then replace status2=old with status2=new in more.md.
+
+Expected final file state:
+  notes.md -> status=new
+  more.md  -> status2=new
+
+Actual final file state:
+  notes.md changed to status=new.
+  more.md stayed status2=old.
+
+Trace:
+  - first write path: talos.edit_file on notes.md required approval and was
+    approved with APPROVED_REMEMBER.
+  - runtime raised EXPECTED_TARGETS_REMAINING for more.md.
+  - second write path: talos.write_file on more.md was auto-approved by the
+    session remember rule and executed, but wrote content whose hash/length
+    matches the unchanged `status2=old` payload.
+  - verificationStatus was READBACK_ONLY and outcome classification was
+    COMPLETED_UNVERIFIED / COMPLETE.
+
+Final answer:
+  "Updated 2 files: notes.md, more.md."
+  "✓ Updated more.md (1 lines, 11 bytes)"
+
+Harness result:
+  `FAILURE.md` records "live remember approval scenario did not auto-approve
+  the second safe write" because the expected content was absent from more.md.
+```
+
+Interpretation:
+
+```text
+This extends the same outcome-truth family with a PARTIAL mutation shape:
+one requested mutation landed correctly, the remaining expected target was
+touched but semantically unchanged, and the user-visible answer still claimed
+success. The runtime did not bypass approval and did not mutate without
+approval, but READBACK_ONLY target existence was not strong enough to detect
+that `more.md` still contained the old value. This is stronger than the original
+label-only evidence: it is a false success for one requested target inside a
+partially successful mutating turn.
+```
+
 ## Classification
 
 Primary taxonomy bucket:
