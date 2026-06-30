@@ -48,7 +48,8 @@ class TaskOutcomeWarningBuilderTest {
                         "A requested verification command was not run because approval or policy blocked it."),
                 new TruthWarning(
                         TruthWarningType.UNSUPPORTED_COMMAND_OUTPUT_CLAIM,
-                        "The answer asserted command output without a successful talos.run_command outcome."),
+                        "The answer asserted command/tool output without a successful talos.run_command "
+                                + "or matching talos.read_file outcome."),
                 new TruthWarning(
                         TruthWarningType.DENIED_PROTECTED_READ,
                         "A protected read was blocked because approval was denied."),

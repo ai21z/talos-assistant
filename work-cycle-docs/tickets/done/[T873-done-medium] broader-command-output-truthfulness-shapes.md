@@ -1,6 +1,6 @@
-# [T873-open-medium] Broader command-output truthfulness (non-git-status shapes)
+# [T873-done-medium] Broader command-output truthfulness (non-git-status shapes)
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -12,10 +12,12 @@ Priority: medium
 - Workspace fixture: not applicable (extension of the T866 guard)
 - Raw transcript path: see T842 (`local/manual-testing/capability-live-audit-20260624-173843/`)
 - Trace path or `/last trace` summary: not applicable
-- File diff summary: no runtime diff yet; extension scope
+- File diff summary: implemented in `CommandOutputTruthfulnessGuard`,
+  `ExecutionOutcome`, and task-outcome warning text; see completion evidence.
 - Approval choices: not applicable
 - Checkpoint id: not applicable
-- Verification status: not run (follow-up scope)
+- Verification status: deterministic regression added and focused gate passed;
+  full check required before commit.
 
 Redacted prompt sequence:
 
@@ -227,6 +229,26 @@ Add broader commands if runtime code changes:
 
 ```powershell
 ./gradlew.bat check --no-daemon
+```
+
+Completion evidence:
+
+```text
+Implemented on improvement/qodana-cleanup after T871/T872. The deterministic
+guard now withholds broader ledger-gated shapes when the matching producer did
+not run successfully in the turn ledger:
+
+- test-run output without successful talos.run_command
+- process-list output without successful talos.run_command
+- shell listing/cat output without successful talos.run_command
+- explicit file-content claims without a matching successful talos.read_file
+
+The existing git-status path remains on the same guard. ExecutionOutcome records
+the fired shape and missing producer in trace via PROTOCOL_SANITIZED, and the
+task-outcome warning now describes command/tool output rather than command-only
+output. Public trust-boundary docs were narrowed to say the named recognized
+shapes are covered, while arbitrary run_command claims and broad read/answer
+factual claims remain not completely covered.
 ```
 
 ## Work-Test Cycle Notes

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T873] Command/tool-output truth checks now cover additional
+  ledger-gated shapes beyond git status: test-run output, process-list output,
+  shell listing/cat output, and explicit file-content claims without a matching
+  `talos.read_file` producer. Trace evidence records the recognizer shape and
+  missing producer, while docs still state that arbitrary command/read claims
+  are not completely covered.
 - [T871] Qwen-specific grounding/edit-shape weaknesses now have deterministic
   runtime steering where the shape is provable. No-tool workspace "no
   results"/"none found" answers are downgraded to an explicit no-search

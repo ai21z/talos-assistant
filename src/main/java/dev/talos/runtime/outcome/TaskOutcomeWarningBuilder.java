@@ -75,7 +75,8 @@ public final class TaskOutcomeWarningBuilder {
         if (facts.unsupportedCommandOutputClaim()) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.UNSUPPORTED_COMMAND_OUTPUT_CLAIM,
-                    "The answer asserted command output without a successful talos.run_command outcome."));
+                    "The answer asserted command/tool output without a successful talos.run_command "
+                            + "or matching talos.read_file outcome."));
         }
         if (facts.deniedProtectedRead()) {
             warnings.add(TruthWarning.of(

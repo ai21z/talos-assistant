@@ -54,6 +54,225 @@ class CommandOutputTruthfulnessGuardTest {
     }
 
     @Test
+    void testRunOutputWithoutSuccessfulRunCommandIsWithheld() {
+        String answer = """
+                BUILD SUCCESSFUL in 12s
+                5378 tests completed, 0 failed
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Did the project tests pass?"),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertEquals(CommandOutputTruthfulnessGuard.UNSUPPORTED_COMMAND_OUTPUT_REPLACEMENT, result.answer());
+    }
+
+    @Test
+    void successfulRunCommandGroundsTestRunOutput() {
+        String answer = """
+                BUILD SUCCESSFUL in 12s
+                5378 tests completed, 0 failed
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Did the project tests pass?"),
+                        loopResult(succeededRunCommand("Command succeeded: gradle_test exited with code 0")));
+
+        assertFalse(result.unsupportedCommandOutputClaim());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void processListOutputWithoutSuccessfulRunCommandIsWithheld() {
+        String answer = """
+                PID   PPID  COMMAND
+                1001  1     java
+                1002  1     llama-server
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Show the current process list."),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertEquals(CommandOutputTruthfulnessGuard.UNSUPPORTED_COMMAND_OUTPUT_REPLACEMENT, result.answer());
+    }
+
+    @Test
+    void successfulRunCommandGroundsProcessListOutput() {
+        String answer = """
+                PID   PPID  COMMAND
+                1001  1     java
+                1002  1     llama-server
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Show the current process list."),
+                        loopResult(succeededRunCommand("Command succeeded: process list captured")));
+
+        assertFalse(result.unsupportedCommandOutputClaim());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void shellListingOutputWithoutSuccessfulRunCommandIsWithheld() {
+        String answer = """
+                $ ls
+                README.md
+                src
+                build.gradle.kts
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Run ls and report the output."),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertEquals(CommandOutputTruthfulnessGuard.UNSUPPORTED_COMMAND_OUTPUT_REPLACEMENT, result.answer());
+    }
+
+    @Test
+    void successfulRunCommandGroundsShellListingOutput() {
+        String answer = """
+                $ ls
+                README.md
+                src
+                build.gradle.kts
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Run ls and report the output."),
+                        loopResult(succeededRunCommand("Command succeeded: ls output captured")));
+
+        assertFalse(result.unsupportedCommandOutputClaim());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void shellCatOutputWithoutSuccessfulRunCommandIsWithheld() {
+        String answer = """
+                $ cat README.md
+                # Demo
+                Local-first workspace assistant.
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Run cat README.md and report the output."),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertEquals(CommandOutputTruthfulnessGuard.UNSUPPORTED_COMMAND_OUTPUT_REPLACEMENT, result.answer());
+    }
+
+    @Test
+    void successfulRunCommandGroundsShellCatOutput() {
+        String answer = """
+                $ cat README.md
+                # Demo
+                Local-first workspace assistant.
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("Run cat README.md and report the output."),
+                        loopResult(succeededRunCommand("Command succeeded: cat output captured")));
+
+        assertFalse(result.unsupportedCommandOutputClaim());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void fileContentClaimWithoutSuccessfulReadFileIsWithheld() {
+        String answer = """
+                README.md contains:
+                # Demo
+                Local-first workspace assistant.
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("What does README.md contain?"),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertTrue(result.answer().startsWith("[Workspace content truth check:"), result.answer());
+    }
+
+    @Test
+    void honestCommandUnavailableSentenceDoesNotMaskUngroundedFileContentClaim() {
+        String answer = """
+                I did not run the command.
+
+                README.md contains:
+                # Demo
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("What does README.md contain?"),
+                        loopResult(succeededListDir()));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertTrue(result.answer().startsWith("[Workspace content truth check:"), result.answer());
+    }
+
+    @Test
+    void successfulReadFileGroundsFileContentClaim() {
+        String answer = """
+                README.md contains:
+                # Demo
+                Local-first workspace assistant.
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("What does README.md contain?"),
+                        loopResult(succeededReadFile("README.md", "1 | # Demo\n2 | Local-first workspace assistant.")));
+
+        assertFalse(result.unsupportedCommandOutputClaim());
+        assertEquals(answer, result.answer());
+    }
+
+    @Test
+    void readOfOneFileDoesNotGroundSeparateFileContentClaim() {
+        String answer = """
+                README.md contains:
+                # Demo
+
+                notes.md contains:
+                PROJECT_CODENAME = Aster-7
+                """;
+
+        CommandOutputTruthfulnessGuard.Result result =
+                CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
+                        answer,
+                        plan("What do README.md and notes.md contain?"),
+                        loopResult(succeededReadFile("README.md", "1 | # Demo")));
+
+        assertTrue(result.unsupportedCommandOutputClaim());
+        assertTrue(result.answer().startsWith("[Workspace content truth check:"), result.answer());
+    }
+
+    @Test
     void commandApprovalDenialClaimWithoutDeniedRunCommandIsWithheld() {
         String answer = "The command was not executed because approval was denied.";
 
@@ -140,6 +359,11 @@ class CommandOutputTruthfulnessGuardTest {
     private static ToolCallLoop.ToolOutcome succeededListDir() {
         return new ToolCallLoop.ToolOutcome(
                 "talos.list_dir", ".", true, false, false, "README.md\nsrc", "");
+    }
+
+    private static ToolCallLoop.ToolOutcome succeededReadFile(String path, String summary) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.read_file", path, true, false, false, summary, "");
     }
 
     private static CurrentTurnPlan plan(String request) {

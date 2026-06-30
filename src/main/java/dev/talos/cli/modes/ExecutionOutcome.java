@@ -280,6 +280,13 @@ record ExecutionOutcome(
                 CommandOutputTruthfulnessGuard.withholdUnsupportedCommandOutputIfNeeded(
                         current, safePlan, loopResult);
         boolean unsupportedCommandOutputClaim = commandOutputTruthfulness.unsupportedCommandOutputClaim();
+        if (unsupportedCommandOutputClaim) {
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    "unsupported command/tool output claim withheld: shape="
+                            + commandOutputTruthfulness.shape()
+                            + ", missingProducer="
+                            + commandOutputTruthfulness.missingProducer());
+        }
         current = commandOutputTruthfulness.answer();
 
         EvidenceObligationAssessment evidenceAssessment =
