@@ -6,6 +6,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.*;
 import dev.talos.runtime.command.RunCommandTool;
@@ -194,12 +195,21 @@ public final class ScenarioRunner {
             ScenarioDefinition scenario,
             List<String> scriptedResponses) {
         var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
+        var cfg = new Config(null);
+        if (scenario.privateMode()) {
+            cfg.data.put("privacy", Map.of(
+                    "mode", "private",
+                    "rag", Map.of("enabled_in_private_mode", Boolean.FALSE)));
+        }
         var registry = new ToolRegistry(false);
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
+        if (scenario.privateMode()) {
+            registry.register(new RetrieveTool(new RagService(cfg)));
+        }
         registry.register(new RunCommandTool());
 
         GateRecorder gate = new GateRecorder(scenario.approvalPolicy());
@@ -214,7 +224,6 @@ public final class ScenarioRunner {
         var processor = new TurnProcessor(modes, gate, registry, approvalPolicy);
         var loop = new ToolCallLoop(processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
         var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var cfg = new Config(null);
         var ctx = Context.builder(cfg)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)

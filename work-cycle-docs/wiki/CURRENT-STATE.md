@@ -148,10 +148,11 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: three open live-findings tickets carried into the main-merge
-  line: T862 (Maven workspace-profile docs), T868 (private-mode retrieve
-  tool-surface narrowing), T870 (redacted-search rendering).
+- Active tickets: two open live-findings tickets carried into the main-merge
+  line: T862 (Maven workspace-profile docs) and T870 (redacted-search
+  rendering).
   T866 (git-status fabrication), T867 (protected-path alias classification),
+  T868 (private-mode retrieve tool-surface narrowing),
   T908 (Plan
   read-only target/progress obligations), T909 (protected-read session approval
   UI), T913 (Agent command fallback + false approval-denial claim), T914
@@ -268,7 +269,7 @@ clean `check` is portably green on this host.
 
 The pre-release arc (T842 onward) is done. The T842 owner-run full manual audit
 held the trust surface with no hard-fail gate (findings ticketed T866-T873; T866,
-T867, T869, and T873 are fixed). T843-T846 (site honesty, RAG/beta docs, model/hardware-range evidence,
+T867, T868, T869, and T873 are fixed). T843-T846 (site honesty, RAG/beta docs, model/hardware-range evidence,
 doctor diagnostics) and the T848-T854 correctness and diagnostic-truth fixes are
 closed. The accepted beta range is one Windows machine, managed `llama.cpp`,
 BM25-only retrieval; hybrid/vector retrieval is shipped but unvalidated.

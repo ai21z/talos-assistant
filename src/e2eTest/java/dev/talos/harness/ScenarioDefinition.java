@@ -22,6 +22,7 @@ import java.util.Map;
  *   <li><b>executionPhase</b> - optional forced phase for policy scenarios</li>
  *   <li><b>mode</b> - optional public/legacy mode selected before route-through
  *       scenarios run; defaults to {@code auto}</li>
+ *   <li><b>privateMode</b> - optional private-mode config for privacy/tool-surface scenarios</li>
  * </ul>
  *
  * <p>Scenarios are intentionally simple: one scripted LLM response, one workspace state.
@@ -35,7 +36,8 @@ public record ScenarioDefinition(
         String scriptedResponse,
         ScenarioApprovalPolicy approvalPolicy,
         ExecutionPhase executionPhase,
-        String mode
+        String mode,
+        boolean privateMode
 ) {
 
     public ScenarioDefinition {
@@ -55,17 +57,17 @@ public record ScenarioDefinition(
                               String scriptedResponse,
                               ScenarioApprovalPolicy approvalPolicy,
                               ExecutionPhase executionPhase) {
-        this(name, initialFiles, userPrompt, scriptedResponse, approvalPolicy, executionPhase, "auto");
+        this(name, initialFiles, userPrompt, scriptedResponse, approvalPolicy, executionPhase, "auto", false);
     }
 
     /** Construct with a default {@link ScenarioApprovalPolicy#APPROVE_ALL} policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String scriptedResponse) {
-        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null, "auto");
+        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null, "auto", false);
     }
 
     /** Back-compat constructor with user prompt and default approval policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String userPrompt, String scriptedResponse) {
-        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null, "auto");
+        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null, "auto", false);
     }
 
     // ── Builder ──────────────────────────────────────────────────────
@@ -83,6 +85,7 @@ public record ScenarioDefinition(
         private ScenarioApprovalPolicy policy = ScenarioApprovalPolicy.APPROVE_ALL;
         private ExecutionPhase executionPhase;
         private String mode = "auto";
+        private boolean privateMode;
 
         private Builder(String name) {
             this.name = name;
@@ -127,9 +130,14 @@ public record ScenarioDefinition(
             return this;
         }
 
+        public Builder withPrivateMode() {
+            this.privateMode = true;
+            return this;
+        }
+
         public ScenarioDefinition build() {
             return new ScenarioDefinition(
-                    name, new LinkedHashMap<>(files), userPrompt, scriptedResponse, policy, executionPhase, mode);
+                    name, new LinkedHashMap<>(files), userPrompt, scriptedResponse, policy, executionPhase, mode, privateMode);
         }
     }
 

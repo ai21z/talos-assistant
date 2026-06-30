@@ -13,6 +13,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -97,6 +98,27 @@ class PlanModeTest {
     }
 
     @Test
+    void privateModePlanPromptAndNativeSurfaceOmitRetrieveTool() throws Exception {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                privateEngineConfig(false),
+                List.of(new LlmClient.StreamResult("1. Inspect safe files.\n2. Report limitations.", List.of())),
+                8192);
+        var ctx = Context.builder(privateEngineConfig(false))
+                .llm(recorded.client())
+                .toolRegistry(retrievalToolRegistry())
+                .build();
+
+        Optional<Result> result = new PlanMode().handle("Plan how to explain this workspace.", WS, ctx);
+
+        assertTrue(result.isPresent());
+        ChatRequest request = recorded.requests().getFirst();
+        assertFalse(toolNames(request).contains("talos.retrieve"), toolNames(request).toString());
+        assertTrue(toolNames(request).contains("talos.read_file"), toolNames(request).toString());
+        String prompt = joinedMessages(request);
+        assertFalse(prompt.contains("talos.retrieve"), prompt);
+    }
+
+    @Test
     void commandRequestReturnsReadOnlyNudgeWithoutCallingLlm() throws Exception {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 engineConfig(),
@@ -171,12 +193,29 @@ class PlanModeTest {
         return cfg;
     }
 
+    private static Config privateEngineConfig(boolean ragEnabledInPrivateMode) {
+        Config cfg = engineConfig();
+        Map<String, Object> rag = new LinkedHashMap<>();
+        rag.put("enabled_in_private_mode", ragEnabledInPrivateMode);
+        Map<String, Object> privacy = new LinkedHashMap<>();
+        privacy.put("mode", "private");
+        privacy.put("rag", rag);
+        cfg.data.put("privacy", privacy);
+        return cfg;
+    }
+
     private static ToolRegistry toolRegistry() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new RunCommandTool());
+        return registry;
+    }
+
+    private static ToolRegistry retrievalToolRegistry() {
+        ToolRegistry registry = toolRegistry();
+        registry.register(new RetrieveTool(null));
         return registry;
     }
 

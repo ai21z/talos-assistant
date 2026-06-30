@@ -5,8 +5,11 @@ import dev.talos.core.Config;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.GrepTool;
+import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.RetrieveTool;
 import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.tools.ToolRegistry;
 import org.junit.jupiter.api.Test;
@@ -272,6 +275,26 @@ class PromptInspectorTest {
     }
 
     @Test
+    void renderNextPrivateModePreviewOmitsRetrieveFromToolsAndPrompt() {
+        PromptRender render = PromptInspector.renderNext(
+                "auto",
+                "What is this project?",
+                Path.of(".").toAbsolutePath().normalize(),
+                retrievalToolContext(privateConfig(false)));
+
+        assertEquals("agent", render.resolvedMode());
+        assertTrue(render.tools().contains("talos.read_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.retrieve"), render.tools().toString());
+        assertTrue(render.registryTools().contains("talos.retrieve"), render.registryTools().toString());
+        assertFalse(render.systemPrompt().contains("talos.retrieve"), render.systemPrompt());
+        assertTrue(render.messages().stream()
+                .anyMatch(message -> message.content() != null
+                        && message.content().contains("[CurrentTurnCapability]")
+                        && message.content().contains("visibleTools: talos.grep, talos.list_dir, talos.read_file")
+                        && !message.content().contains("talos.retrieve")));
+    }
+
+    @Test
     void renderNextPlanMutationPreviewShowsReadOnlyPlanSurface() {
         PromptRender render = PromptInspector.renderNext(
                 "plan",
@@ -369,6 +392,30 @@ class PromptInspectorTest {
         return Context.builder(cfg)
                 .toolRegistry(registry)
                 .build();
+    }
+
+    private static Context retrievalToolContext(Config cfg) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new ListDirTool());
+        registry.register(new GrepTool());
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        registry.register(new RetrieveTool(null));
+        return Context.builder(cfg)
+                .toolRegistry(registry)
+                .build();
+    }
+
+    private static Config privateConfig(boolean ragEnabledInPrivateMode) {
+        Config cfg = new Config();
+        Map<String, Object> rag = new LinkedHashMap<>();
+        rag.put("enabled_in_private_mode", ragEnabledInPrivateMode);
+        Map<String, Object> privacy = new LinkedHashMap<>();
+        privacy.put("mode", "private");
+        privacy.put("rag", rag);
+        cfg.data.put("privacy", privacy);
+        return cfg;
     }
 
     private static Context commandToolContext(Config cfg) {

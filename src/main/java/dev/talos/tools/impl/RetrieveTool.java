@@ -44,7 +44,7 @@ public final class RetrieveTool implements TalosTool {
                   "top_k":{"type":"integer","description":"Number of results (default from config)"}
                 },"required":["query"]}""",
                 ToolRiskLevel.READ_ONLY,
-                ToolOperationMetadata.inspect(NAME, java.util.Map.of(), "WORKSPACE_RETRIEVED"));
+                ToolOperationMetadata.retrieve(NAME, "WORKSPACE_RETRIEVED"));
     }
 
     @Override

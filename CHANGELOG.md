@@ -10,6 +10,13 @@
   short-name aliases still fail closed, and permission/trace evidence surfaces
   the protected kind while keeping protected path hints redacted. The protected
   path policy version is bumped to v8 so stale privacy partitions rebuild.
+- [T868] Private mode now narrows retrieval out of the offered tool surface
+  instead of only relying on the `RagService` no-op backstop. `talos.retrieve`
+  is marked as a typed retrieval capability, `ToolSurfacePlanner` applies
+  deterministic config-derived availability from `PrivacyConfigFacts`, Ask,
+  Plan, Agent, native, and prompt-preview surfaces all use the same planned specs, and
+  private-mode prompts, current-turn frames, traces, and prompt-audit surfaces
+  no longer advertise retrieve unless private-mode RAG is explicitly enabled.
 - [T869] Multi-target replacement verification now resolves explicit
   target-scoped `replace old with new in file` expectations for each requested
   target. A successful write that leaves one requested replacement unsatisfied

@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.Config;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -20,6 +21,7 @@ import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,6 +42,29 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.retrieve"));
         assertFalse(names.contains("talos.write_file"));
         assertFalse(names.contains("talos.edit_file"));
+    }
+
+    @Test
+    void privateModeConfigOmitsRetrieveFromNativeSpecs() {
+        var contract = TaskContractResolver.fromUserRequest("What is this project?");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry(), privateConfig(false)));
+
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.list_dir"), names.toString());
+        assertTrue(names.contains("talos.grep"), names.toString());
+        assertFalse(names.contains("talos.retrieve"), names.toString());
+    }
+
+    @Test
+    void privateModeExplicitRagConfigKeepsRetrieveInNativeSpecs() {
+        var contract = TaskContractResolver.fromUserRequest("What is this project?");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry(), privateConfig(true)));
+
+        assertTrue(names.contains("talos.retrieve"), names.toString());
     }
 
     @Test
@@ -221,6 +246,14 @@ class NativeToolSpecPolicyTest {
         registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
                 plan, 0, 1, false, false, "", "", false, false, false, "")));
         return registry;
+    }
+
+    private static Config privateConfig(boolean ragEnabledInPrivateMode) {
+        Config cfg = new Config();
+        cfg.data.put("privacy", Map.of(
+                "mode", "private",
+                "rag", Map.of("enabled_in_private_mode", ragEnabledInPrivateMode)));
+        return cfg;
     }
 
     private static void assertOnlyReadFile(List<String> names) {

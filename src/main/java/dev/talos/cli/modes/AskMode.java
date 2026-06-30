@@ -16,6 +16,7 @@ import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.PromptToolDescriptors;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,8 +80,9 @@ public final class AskMode implements Mode {
                 effectiveTurn.taskContract(),
                 workspace);
         ExecutionPhase effectivePhase = effectiveTurn.phase();
-        List<String> visibleTools = NativeToolSpecPolicy.names(
-                NativeToolSpecPolicy.select(effectiveContract, effectivePhase, ctx.toolRegistry()));
+        List<ToolSpec> plannedNativeToolSpecs =
+                NativeToolSpecPolicy.select(effectiveContract, effectivePhase, ctx.toolRegistry(), ctx.cfg());
+        List<String> visibleTools = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
 
         // Limits
         var lim = CfgUtil.map(ctx.cfg().data.get("limits"));
@@ -92,7 +94,7 @@ public final class AskMode implements Mode {
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forAsk()
-                .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
+                .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                 .withVisibleToolNames(visibleTools)
                 .withReadOnlyToolMode(true)
                 .withNativeTools(nativeTools)
