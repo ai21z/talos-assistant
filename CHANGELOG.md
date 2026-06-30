@@ -8,6 +8,9 @@
   expected versus observed approval counts, missing required approvals score as
   `FAIL_REVIEW_REQUIRED`, and the protected-read non-attempt writes a
   `REVIEW-REQUIRED.md` bundle instead of being mistaken for passing coverage.
+  The synchronized approval harness now also includes selected command-profile
+  probes for approved bounded `talos.run_command` execution and deterministic
+  command-policy rejection while `talos.run_command` is visible.
 - [T885] `/profiles configure` now provides a terminal-side declaration/edit
   path for workspace verification profiles. It previews the exact proposed
   `.talos/profiles.yaml` bytes and SHA-256 behind approval, checkpoints the
