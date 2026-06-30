@@ -148,18 +148,19 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: eight open live-findings tickets carried into the main-merge
+- Active tickets: nine open live-findings tickets carried into the main-merge
   line: T862 (Maven workspace-profile docs), T867
   (protected-path alias classification), T868 (private-mode retrieve tool-surface
   narrowing), T869 (failed/denied mutation outcome label), T870 (redacted-search
   rendering), T871 (qwen grounding / edit-shape steering), T872 (run_command +
-  batch coverage reprobe), and T873 (broader command-output truthfulness shapes).
+  batch coverage reprobe), T873 (broader command-output truthfulness shapes), and
+  T915 (`/prompt` read-only capability advertising residual).
   T866
   (git-status fabrication), T908 (Plan
   read-only target/progress obligations), T909 (protected-read session approval
   UI), T913 (Agent command fallback + false approval-denial claim), T914
   (ignored-instruction output target role projection), T912 (Plan static-web
-  evidence-bound diagnostics), T915 (read-only prompt capability advertising),
+  evidence-bound diagnostics),
   T916 (read-only command refusal no-inspection), T911 (read-only no-tool
   manifest evidence mismatch), T917 (static-web verifier CSS requirement for
   JS-only fixes), T910 (zero changed-files false mutation warning), T897
