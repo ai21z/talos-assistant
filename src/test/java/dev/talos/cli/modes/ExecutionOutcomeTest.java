@@ -522,6 +522,84 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void fabricatedTestRunOutputWithoutRunCommandIsWithheldWithShapeTrace() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Did the project tests pass?"));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                new dev.talos.runtime.task.TaskContract(
+                        dev.talos.runtime.task.TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        java.util.Set.of(),
+                        java.util.Set.of(),
+                        "Did the project tests pass?",
+                        "read-only-command-test-question"),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file", "talos.grep"),
+                List.of("talos.list_dir", "talos.read_file", "talos.grep"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                """
+                        BUILD SUCCESSFUL in 12s
+                        5378 tests completed, 0 failed
+                        """,
+                1,
+                1,
+                List.of("talos.list_dir"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("."),
+                0,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "README.md\nsrc", "", null, "")));
+
+        LocalTurnTraceCapture.begin(
+                "trc-t873-command-output-truth",
+                "sid-t873",
+                1,
+                "2026-06-30T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama.cpp",
+                "qwen2.5-coder:14b",
+                "Did the project tests pass?");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Command output truth check:"), outcome.finalAnswer());
+            String lower = outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("build successful"), outcome.finalAnswer());
+            assertFalse(lower.contains("tests completed"), outcome.finalAnswer());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.UNSUPPORTED_COMMAND_OUTPUT_CLAIM));
+            assertNotNull(trace);
+            assertTrue(trace.warnings().stream().anyMatch(warning ->
+                    "UNSUPPORTED_COMMAND_OUTPUT_CLAIM".equals(warning.code())
+                            && warning.message().contains("command/tool output")),
+                    trace.warnings().toString());
+            assertTrue(trace.events().stream().anyMatch(event ->
+                    "PROTOCOL_SANITIZED".equals(event.type())
+                            && String.valueOf(event.data().get("reason")).contains("shape=test-run")
+                            && String.valueOf(event.data().get("reason")).contains("missingProducer=talos.run_command")),
+                    trace.events().toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void explicitCommandRequestWithoutAnyToolIsBlockedAndSanitized() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

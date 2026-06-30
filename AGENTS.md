@@ -336,7 +336,7 @@ Talos may create local artifacts:
 
 Current implementation limits to disclose:
 
-* Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
+* Talos's deterministic no-change/no-success correction is strongest for file-mutation turns. It also withholds recognized ungrounded command/tool-output shapes when the turn ledger lacks the matching producer (git-status, test-run, process-list, shell listing/cat output, and explicit file-content claims without a matching read), but arbitrary `run_command` claims and broad read/answer factual claims are not completely covered.
 * Secret redaction is best-effort. It covers common key=value secret shapes, known canaries, common standalone token prefixes, AWS access-key shapes, JWT-like tokens, PEM private-key blocks, and URL/connection-string userinfo in model-context and durable sinks. Command-output handoff also withholds bounded high-entropy command streams before model context. This is not complete secret, PII, or credential detection.
 * `run_command` stdout and stderr pass through the model-context handoff boundary. Non-sensitive command output remains visible to the model for verification answers; command output that required secret redaction is withheld from model context and replaced with a bounded notice. This is not a complete command-output privacy proof.
 * Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.

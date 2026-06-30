@@ -101,7 +101,7 @@ Talos is a governance shell around local model execution, not proof that the
 model is capable or honest without runtime evidence. A documented limitation is
 not an overclaim.
 
-Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; `run_command` claims and read/answer factual claims are not yet equivalently covered.
+Talos's deterministic no-change/no-success correction is strongest for file-mutation turns. It also withholds recognized ungrounded command/tool-output shapes when the turn ledger lacks the matching producer (git-status, test-run, process-list, shell listing/cat output, and explicit file-content claims without a matching read), but arbitrary `run_command` claims and broad read/answer factual claims are not completely covered.
 
 Secret redaction is best-effort. It covers common key=value secret shapes, known canaries, common standalone token prefixes, AWS access-key shapes, JWT-like tokens, PEM private-key blocks, and URL/connection-string userinfo in model-context and durable sinks. Command-output handoff also withholds bounded high-entropy command streams before model context. This is not complete secret, PII, or credential detection. Do not rely on Talos to scrub arbitrary sensitive text from files it reads, command output, sessions, or traces.
 

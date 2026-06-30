@@ -18,8 +18,11 @@ class TrustClaimsHonestyTest {
     private static final String RAW_WAVE6_AUDIT =
             "work-cycle-docs/research/talos-trust-overclaim-audit-and-sources-20260616.md";
     private static final String ANTI_OVERCLAIM_BOUNDARY =
-            "Talos's deterministic no-change/no-success correction is strongest for file-mutation turns; "
-                    + "`run_command` claims and read/answer factual claims are not yet equivalently covered.";
+            "Talos's deterministic no-change/no-success correction is strongest for file-mutation turns. "
+                    + "It also withholds recognized ungrounded command/tool-output shapes when the turn ledger "
+                    + "lacks the matching producer (git-status, test-run, process-list, shell listing/cat output, "
+                    + "and explicit file-content claims without a matching read), but arbitrary `run_command` "
+                    + "claims and broad read/answer factual claims are not completely covered.";
     private static final String SECRET_REDACTION_BOUNDARY =
             "Secret redaction is best-effort. It covers common key=value secret shapes, "
                     + "known canaries, common standalone token prefixes, AWS access-key shapes, "
