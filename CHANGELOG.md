@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- [T871] Qwen-specific grounding/edit-shape weaknesses now have deterministic
+  runtime steering where the shape is provable. No-tool workspace "no
+  results"/"none found" answers are downgraded to an explicit no-search
+  disclosure, append-shaped full-file `write_file` calls that preserve a
+  same-turn readback are converted to `talos.edit_file` before approval, and
+  the synchronized approval scorer marks proposal-only continuation fallbacks
+  after tool evidence as `FAIL_REVIEW_REQUIRED` instead of answer-quality PASS.
+  The qwen profile guide documents the remaining model-competence residual
+  without claiming the model is fixed.
 - [T872] The live synchronized approval audit no longer aborts the full bank
   when the first protected-read-denied scenario safely completes without the
   model attempting the expected approval path. Audit transcripts now record

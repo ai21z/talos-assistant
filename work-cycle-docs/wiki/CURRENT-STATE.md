@@ -148,12 +148,11 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: seven open live-findings tickets carried into the main-merge
+- Active tickets: six open live-findings tickets carried into the main-merge
   line: T862 (Maven workspace-profile docs), T867
   (protected-path alias classification), T868 (private-mode retrieve tool-surface
   narrowing), T869 (failed/denied mutation outcome label), T870 (redacted-search
-  rendering), T871 (qwen grounding / edit-shape steering), and T873 (broader
-  command-output truthfulness shapes).
+  rendering), and T873 (broader command-output truthfulness shapes).
   T866
   (git-status fabrication), T908 (Plan
   read-only target/progress obligations), T909 (protected-read session approval
@@ -168,7 +167,8 @@ confidence_histogram:
   (set-model alias guidance), T886 (configure/test/guide supported models), and
   T885 (terminal UI for verification profiles), and T915 (`/prompt` read-only
   capability advertising residual), and T872 (run_command +
-  batch/local-display coverage reprobe) are done; the T834 mutation
+  batch/local-display coverage reprobe), and T871 (qwen grounding/edit-shape
+  deterministic steering) are done; the T834 mutation
   anti-overclaim path is done.
 - Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
   the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.

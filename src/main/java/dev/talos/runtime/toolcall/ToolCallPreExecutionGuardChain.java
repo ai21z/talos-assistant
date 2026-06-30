@@ -242,6 +242,25 @@ final class ToolCallPreExecutionGuardChain {
             return Result.blocked(effective, pathContext, failures, false);
         }
 
+        ToolCall appendLineSteeredEdit = AppendLinePreApprovalGuard.steeredEditFile(
+                effective,
+                state,
+                currentTaskContract,
+                pathHint);
+        if (appendLineSteeredEdit != null) {
+            LocalTurnTraceCapture.recordActionObligation(
+                    "APPEND_LINE_EDIT_SHAPE",
+                    "REPAIRED",
+                    "append-shaped write_file steered to talos.edit_file before approval",
+                    "APPEND_LINE_WRITE_STEERED_TO_EDIT_FILE");
+            effective = appendLineSteeredEdit;
+            pathContext = ToolExecutionPathContext.from(effective);
+            workspaceOperationPlan = pathContext.workspaceOperationPlan();
+            pathHint = pathContext.pathHint();
+            LOG.debug("Steered append-line write_file to edit_file for {} before approval",
+                    SafeLogFormatter.value(pathHint));
+        }
+
         String namedTargetExistenceDiagnostic = NamedTargetExistenceGuard.diagnostic(
                 effective,
                 state,

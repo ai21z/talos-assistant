@@ -32,3 +32,10 @@ Save the `talos doctor --start` output as evidence before calling this profile v
 ## Notes
 
 This profile is one of the doctrine-pinned stability models. Do not swap it out as a fix for model instability; fix the harness, prompt, config, or guide evidence instead.
+
+Known residual: Qwen can still under-ground factual workspace answers or choose
+weak edit strategies on some prompts. Talos steers several detectable shapes
+deterministically, including ungrounded no-results claims and append-shaped
+full-file writes, but that is not a proof that Qwen will always produce a
+useful grounded answer. Treat weak or generic Qwen answers as model-competence
+findings unless trace/tool evidence shows a runtime policy failure.

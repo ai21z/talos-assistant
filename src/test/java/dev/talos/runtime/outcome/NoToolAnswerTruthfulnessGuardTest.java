@@ -82,6 +82,95 @@ class NoToolAnswerTruthfulnessGuardTest {
         assertTrue(guarded.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION), guarded);
     }
 
+    @Test
+    void workspaceNoResultsNegativeWithoutToolGroundingIsReplaced() {
+        CurrentTurnPlan plan = plan(
+                TaskType.READ_ONLY_QA,
+                false,
+                "Are there any secrets or API keys in this workspace?");
+        List<ChatMessage> messages = List.of(ChatMessage.user(
+                "Are there any secrets or API keys in this workspace?"));
+
+        String guarded = NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                "No results found. There are no secrets or API keys in this workspace.",
+                plan,
+                messages);
+
+        assertEquals(NoToolAnswerTruthfulnessGuard.UNGROUNDED_NEGATIVE_WORKSPACE_RESULT_REPLACEMENT, guarded);
+    }
+
+    @Test
+    void honestNoSearchDisclosureIsNotReplacedAsNegativeResult() {
+        CurrentTurnPlan plan = plan(
+                TaskType.READ_ONLY_QA,
+                false,
+                "Are there any secrets or API keys in this workspace?");
+        List<ChatMessage> messages = List.of(ChatMessage.user(
+                "Are there any secrets or API keys in this workspace?"));
+        String answer = "I did not search the workspace in this turn, so I cannot say whether secrets exist.";
+
+        String guarded = NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                answer,
+                plan,
+                messages);
+
+        assertEquals(answer, guarded);
+    }
+
+    @Test
+    void genericNonWorkspaceFindRequestIsNotReplacedAsNegativeResult() {
+        CurrentTurnPlan plan = plan(
+                TaskType.READ_ONLY_QA,
+                false,
+                "Find a concise name for the new CLI mode.");
+        List<ChatMessage> messages = List.of(ChatMessage.user(
+                "Find a concise name for the new CLI mode."));
+        String answer = "No results found that fit better than Agent.";
+
+        String guarded = NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                answer,
+                plan,
+                messages);
+
+        assertEquals(answer, guarded);
+    }
+
+    @Test
+    void genericCredentialWordBrainstormIsNotReplacedAsWorkspaceSearch() {
+        CurrentTurnPlan plan = plan(
+                TaskType.READ_ONLY_QA,
+                false,
+                "Find a concise name for a password manager feature.");
+        List<ChatMessage> messages = List.of(ChatMessage.user(
+                "Find a concise name for a password manager feature."));
+        String answer = "No results found that fit better than Vault.";
+
+        String guarded = NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                answer,
+                plan,
+                messages);
+
+        assertEquals(answer, guarded);
+    }
+
+    @Test
+    void profileDoesNotCountAsFileScopeForWorkspaceNegativeGuard() {
+        CurrentTurnPlan plan = plan(
+                TaskType.READ_ONLY_QA,
+                false,
+                "Find a concise profile name.");
+        List<ChatMessage> messages = List.of(ChatMessage.user(
+                "Find a concise profile name."));
+        String answer = "No results found that fit better than Local Agent.";
+
+        String guarded = NoToolAnswerTruthfulnessGuard.enforceNoToolTruthfulness(
+                answer,
+                plan,
+                messages);
+
+        assertEquals(answer, guarded);
+    }
+
     private static CurrentTurnPlan plan(TaskType type, boolean mutationRequested, String request) {
         return CurrentTurnPlan.compatibility(
                 new TaskContract(type, mutationRequested, mutationRequested, false, Set.of(), Set.of(), request),
