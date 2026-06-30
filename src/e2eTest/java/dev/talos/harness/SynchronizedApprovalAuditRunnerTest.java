@@ -757,7 +757,7 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditMain.RunResult run =
                 SynchronizedApprovalAuditMain.run(artifacts, workspaces);
 
-        assertEquals(32, run.bundles().size());
+        assertEquals(34, run.bundles().size());
         assertTrue(Files.exists(run.summary()), run.summary().toString());
         assertTrue(Files.readString(run.summary()).contains("Synchronized Approval Scripted Audit"));
         assertTrue(Files.readString(run.summary()).contains("Mode: SCRIPTED"));
@@ -790,6 +790,8 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("mutation-forbidden-sibling-target-blocked-before-approval"));
         assertTrue(Files.readString(run.summary()).contains("PASS_WITH_RUNTIME_REPAIR"));
         assertTrue(Files.readString(run.summary()).contains("t325-python-command-boundary"));
+        assertTrue(Files.readString(run.summary()).contains("command-profile-gradle-test-approved"));
+        assertTrue(Files.readString(run.summary()).contains("command-profile-policy-rejected"));
         assertTrue(Files.readString(run.summary()).contains("workspace-mkdir-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-copy-path-approved"));
         assertTrue(Files.readString(run.summary()).contains("workspace-move-path-approved"));
@@ -953,6 +955,72 @@ class SynchronizedApprovalAuditRunnerTest {
 
         assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames().containsAll(workspaceOperations));
         assertTrue(SynchronizedApprovalAuditMain.supportedLiveScenarioNames().containsAll(workspaceOperations));
+    }
+
+    @Test
+    void synchronized_audit_filters_name_command_profile_scenarios() {
+        List<String> commandProfileScenarios = List.of(
+                "command-profile-gradle-test-approved",
+                "command-profile-policy-rejected");
+
+        assertTrue(SynchronizedApprovalAuditMain.supportedScriptedScenarioNames()
+                .containsAll(commandProfileScenarios));
+        assertTrue(SynchronizedApprovalAuditMain.supportedLiveScenarioNames()
+                .containsAll(commandProfileScenarios));
+    }
+
+    @Test
+    void deterministic_audit_entrypoint_can_run_command_profile_scenarios(@TempDir Path tempDir)
+            throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing-approved");
+        Path workspaces = tempDir.resolve("manual-workspaces-approved");
+
+        SynchronizedApprovalAuditMain.RunResult approved = SynchronizedApprovalAuditMain.run(
+                new SynchronizedApprovalAuditMain.Arguments(
+                        SynchronizedApprovalAuditMain.RunMode.SCRIPTED,
+                        artifacts,
+                        workspaces,
+                        null,
+                        "",
+                        "command-profile-gradle-test-approved"));
+
+        assertEquals(1, approved.bundles().size());
+        assertTrue(Files.readString(approved.summary()).contains("command-profile-gradle-test-approved"));
+        String approvedTrace = Files.readString(approved.bundles().getFirst().traceText());
+        String approvedTranscript = Files.readString(approved.bundles().getFirst().modelTranscript());
+        String approvedApprovals = Files.readString(approved.bundles().getFirst().approvalsJsonl());
+        assertTrue(approvedTrace.contains("COMMAND_APPROVAL_REQUIRED"), approvedTrace);
+        assertTrue(approvedTrace.contains("COMMAND_APPROVAL_GRANTED"), approvedTrace);
+        assertTrue(approvedTrace.contains("COMMAND_STARTED"), approvedTrace);
+        assertTrue(approvedTrace.contains("COMMAND_COMPLETED"), approvedTrace);
+        assertTrue(approvedTrace.contains("exitCode=0"), approvedTrace);
+        assertTrue(approvedTranscript.contains("TALOS_SYNC_COMMAND_OK"), approvedTranscript);
+        assertTrue(approvedApprovals.contains("profile: gradle_test"), approvedApprovals);
+
+        Path rejectArtifacts = tempDir.resolve("manual-testing-rejected");
+        Path rejectWorkspaces = tempDir.resolve("manual-workspaces-rejected");
+        SynchronizedApprovalAuditMain.RunResult rejected = SynchronizedApprovalAuditMain.run(
+                new SynchronizedApprovalAuditMain.Arguments(
+                        SynchronizedApprovalAuditMain.RunMode.SCRIPTED,
+                        rejectArtifacts,
+                        rejectWorkspaces,
+                        null,
+                        "",
+                        "command-profile-policy-rejected"));
+
+        assertEquals(1, rejected.bundles().size());
+        assertTrue(Files.readString(rejected.summary()).contains("command-profile-policy-rejected"));
+        String rejectedTrace = Files.readString(rejected.bundles().getFirst().traceText());
+        String rejectedTranscript = Files.readString(rejected.bundles().getFirst().modelTranscript());
+        String rejectedApprovals = Files.readString(rejected.bundles().getFirst().approvalsJsonl());
+        assertTrue(rejectedTrace.contains("COMMAND_DENIED"), rejectedTrace);
+        assertTrue(rejectedTrace.contains("PRE_APPROVAL_VALIDATION"), rejectedTrace);
+        assertFalse(rejectedTrace.contains("COMMAND_APPROVAL_REQUIRED"), rejectedTrace);
+        assertFalse(rejectedTrace.contains("COMMAND_STARTED"), rejectedTrace);
+        assertTrue(rejectedTranscript.contains("Raw shell commands are not supported"), rejectedTranscript);
+        assertTrue(rejectedTranscript.contains("No approval was requested and no command was executed"),
+                rejectedTranscript);
+        assertTrue(rejectedApprovals.isBlank(), rejectedApprovals);
     }
 
     @Test
