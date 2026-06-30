@@ -136,7 +136,28 @@ Explain what you can do here without changing files.
 Find files related to the failing test. Do not edit yet.
 ```
 
-## 7. Exit
+## 7. Maven Workspace Verification
+
+Talos itself is built with Gradle, but Talos can verify Maven workspaces through
+trusted workspace verification profiles. From a Maven project, declare a fixed
+wrapper command, trust the declaration, then run it:
+
+```text
+/profiles configure maven_verify --exec ./mvnw --arg -B --arg --no-transfer-progress --arg verify --timeout-ms 600000 --expected-write target/
+/profiles trust
+/verify ws:maven_verify
+```
+
+This writes or updates `.talos/profiles.yaml` after approval, then pins the
+current declaration by SHA-256. If the declaration changes later, run
+`/profiles trust` again before `/verify` can execute it.
+
+Use `./mvnw.cmd` instead of `./mvnw` when that is the wrapper present in a
+Windows Maven workspace. Maven may resolve dependencies from the network and may
+write to the local Maven cache unless the project is already configured for
+offline use.
+
+## 8. Exit
 
 Inside the REPL:
 

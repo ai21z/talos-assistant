@@ -148,8 +148,7 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: one open docs/workspace-profile ticket carried into the
-  main-merge line: T862 (Maven workspace-profile docs).
+- Active tickets: none in the current main-merge line.
   T866 (git-status fabrication), T867 (protected-path alias classification),
   T868 (private-mode retrieve tool-surface narrowing),
   T908 (Plan
@@ -168,8 +167,9 @@ confidence_histogram:
   batch/local-display coverage reprobe), T871 (qwen grounding/edit-shape
   deterministic steering), T873 (broader command-output truthfulness
   shapes), T870 (redacted-search rendering cleanliness), and T869
-  (failed/denied/semantically unsatisfied mutation outcome label) are done; the
-  T834 mutation anti-overclaim path is done.
+  (failed/denied/semantically unsatisfied mutation outcome label), and T862
+  (Maven workspace-profile verification docs) are done; the T834 mutation
+  anti-overclaim path is done.
 - Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
   the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.
   The current phase is the v0.10.6 main-merge preparation on
