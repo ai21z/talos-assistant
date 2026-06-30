@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T885] `/profiles configure` now provides a terminal-side declaration/edit
+  path for workspace verification profiles. It previews the exact proposed
+  `.talos/profiles.yaml` bytes and SHA-256 behind approval, checkpoints the
+  declaration before writing, records hash/approval/trust-state metadata in
+  trace/audit sinks, and leaves the declaration untrusted until `/profiles
+  trust` pins it through the existing SHA-256 approval chain.
 - [T886] Managed llama.cpp model setup now has a repeatable
   configure -> test -> guide recipe for every canned chat profile. Setup help
   renders from the shared profile registry, separates the accepted beta

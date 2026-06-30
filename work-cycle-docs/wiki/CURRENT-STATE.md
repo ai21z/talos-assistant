@@ -148,14 +148,13 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: nine open live-findings tickets carried into the main-merge
-  line. Eight trust/behaviour findings: T862 (Maven workspace-profile docs), T867
+- Active tickets: eight open live-findings tickets carried into the main-merge
+  line: T862 (Maven workspace-profile docs), T867
   (protected-path alias classification), T868 (private-mode retrieve tool-surface
   narrowing), T869 (failed/denied mutation outcome label), T870 (redacted-search
   rendering), T871 (qwen grounding / edit-shape steering), T872 (run_command +
   batch coverage reprobe), and T873 (broader command-output truthfulness shapes).
-  One deferred product/CLI finding: T885 (terminal UI for verification
-  profiles). T866
+  T866
   (git-status fabrication), T908 (Plan
   read-only target/progress obligations), T909 (protected-read session approval
   UI), T913 (Agent command fallback + false approval-denial claim), T914
@@ -165,9 +164,10 @@ confidence_histogram:
   manifest evidence mismatch), T917 (static-web verifier CSS requirement for
   JS-only fixes), T910 (zero changed-files false mutation warning), T897
   (static-web redesign inferred satellites), T907 (`/last trace` canonical
-  mode rendering), T906 (shell-command hint short-prose false positives), and
-  T905 (set-model alias guidance) are done; the T834 mutation anti-overclaim
-  path is done; T886 (configure/test/guide supported models) is done.
+  mode rendering), T906 (shell-command hint short-prose false positives), T905
+  (set-model alias guidance), T886 (configure/test/guide supported models), and
+  T885 (terminal UI for verification profiles) are done; the T834 mutation
+  anti-overclaim path is done.
 - Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
   the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.
   The current phase is the v0.10.6 main-merge preparation on
