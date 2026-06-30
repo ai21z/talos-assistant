@@ -24,6 +24,11 @@
   and withholds stale success prose instead of presenting `COMPLETE` /
   `COMPLETED_UNVERIFIED`. Expectation-based verification only upgrades a turn
   to `PASSED` when it covers every successful mutation target.
+- [T870] Redacted search output rendering is pinned for clean locator and
+  placeholder text. `talos.grep` and `/grep` now have regressions for
+  PRIVATE_MARKER matches with literal line locators and canonical redaction,
+  and long `talos.grep` matches truncate with ASCII `...` instead of a Unicode
+  ellipsis so redacted search output does not depend on terminal glyph fallback.
 - [T873] Command/tool-output truth checks now cover additional
   ledger-gated shapes beyond git status: test-run output, process-list output,
   shell listing/cat output, and explicit file-content claims without a matching

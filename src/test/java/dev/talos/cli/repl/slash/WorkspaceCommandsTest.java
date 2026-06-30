@@ -146,6 +146,25 @@ class WorkspaceCommandsTest {
         }
 
         @Test
+        void slash_grep_renders_redacted_private_marker_locator_without_question_substitution()
+                throws IOException {
+            Files.writeString(ws.resolve("notes.md"),
+                    "ordinary searchable text\nPRIVATE_MARKER = DO_NOT_LEAK_T870_PRIVATE_MARKER\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("PRIVATE_MARKER", ctx);
+
+            assertInstanceOf(Result.Ok.class, r);
+            String output = r.toString();
+            assertTrue(output.contains("notes.md:"), output);
+            assertTrue(output.contains("  2: PRIVATE_MARKER=[redacted]"), output);
+            assertFalse(output.contains("line?2"), output);
+            assertFalse(output.contains("PRIVATE_MARKER?"), output);
+            assertFalse(output.contains("[redacted?"), output);
+            assertFalse(output.contains("DO_NOT_LEAK_T870_PRIVATE_MARKER"), output);
+        }
+
+        @Test
         void slash_grep_private_mode_does_not_expose_neighbor_fields() throws IOException {
             Files.writeString(ws.resolve("health-notes.md"),
                     "Patient: Mira Stone\nCondition marker: DO_NOT_LEAK_PRIVATE_ROW\n");

@@ -275,6 +275,37 @@ class GrepToolTest {
         assertFalse(r.output().contains("DO_NOT_LEAK_T267_PRIVATE_MARKER"));
     }
 
+    @Test void grep_renders_redacted_private_marker_locator_without_question_substitution()
+            throws IOException {
+        Files.writeString(workspace.resolve("notes.md"),
+                "ordinary searchable text\nPRIVATE_MARKER = DO_NOT_LEAK_T870_PRIVATE_MARKER\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "PRIVATE_MARKER")), ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        String output = r.output();
+        assertTrue(output.contains("notes.md:2 | PRIVATE_MARKER=[redacted]"), output);
+        assertFalse(output.contains("line?2"), output);
+        assertFalse(output.contains("PRIVATE_MARKER?"), output);
+        assertFalse(output.contains("[redacted?"), output);
+        assertFalse(output.contains("DO_NOT_LEAK_T870_PRIVATE_MARKER"), output);
+    }
+
+    @Test void grep_truncates_long_match_with_ascii_marker_to_avoid_glyph_fallback()
+            throws IOException {
+        String longLine = "SEARCH_TARGET " + "x".repeat(240);
+        Files.writeString(workspace.resolve("notes.md"), "ordinary searchable text\n" + longLine + "\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "SEARCH_TARGET")), ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        String output = r.output();
+        assertTrue(output.contains("notes.md:2 | "), output);
+        assertTrue(output.contains("..."), output);
+        assertFalse(output.contains("…"), output);
+        assertFalse(output.contains("?"), output);
+    }
+
     @Test void privateModeGrepDoesNotExposeNeighborFieldsAroundCanaryMatches() throws IOException {
         Files.writeString(workspace.resolve("bank.csv"),
                 "account,balance,marker\nchecking,4812.44,DO_NOT_LEAK_PRIVATE_ROW\n");
