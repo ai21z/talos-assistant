@@ -1,0 +1,77 @@
+{
+  "schema": "talos.releaseGates.v1",
+  "packet": "current-0.10.4-release-packet-20260612-005957",
+  "branch": "feature/wave3-tui",
+  "sha": "21a868dbfebcfd3859ed0decde20d48edc606af3",
+  "generated": "2026-06-12T00:59:57+02:00",
+  "gates": [
+    {
+      "name": "deterministic-candidate-summaries",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/candidate-manifest.json",
+      "notes": "scripted cut: all four summaries report 0.10.4; mandatory post-bump check passed (unit + e2e + coverage floors + canary + arch). Packet-creation reverification caught a stale launcher (an aborted post-cut session had rebuilt installDist as 0.10.3 at 22:03Z); rebuilt from the clean cut tree and reverified Talos 0.10.4 before any lane runs"
+    },
+    {
+      "name": "qodana-static-analysis",
+      "lane": "STATIC_ANALYSIS",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/qodana-summary.json",
+      "notes": "fresh native scan at packet creation on the clean working tree at the cut commit (operator-attested; the qodana.yaml-pinned 2026.1 linter, build 253.31821, no longer emits metaInformation.json/result-allProblems.json so the summary honestly reports qodana-provenance-incomplete and the SARIF carries no VCS provenance fields); 0 critical with failureConditions critical=0 enforced by the scan itself (exit 0); 113 findings (108 warning, 5 note) vs 88 at 0.10.3 - wave-3 surface growth plus linter build drift, no new critical families"
+    },
+    {
+      "name": "safe-redirected-gptoss",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/talosbench/20260612-011407",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; piped approval inputs disallowed; StrictEvidence; matches the 0.10.2/0.10.3 baseline. Wave-3 degradation claim verified live: all 19 transcripts scanned, zero ANSI escape bytes - redirected output stayed byte-plain through the rendering rework; run from pwsh"
+    },
+    {
+      "name": "safe-redirected-qwen",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/talosbench/20260612-011101",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41, zero FAIL; piped approval inputs disallowed; StrictEvidence; matches the 0.10.2/0.10.3 baseline. All 19 transcripts scanned, zero ANSI escape bytes; run from pwsh (never Windows PowerShell 5.1 - its stderr handling aborts the runner)"
+    },
+    {
+      "name": "sync-approval-gptoss",
+      "lane": "SYNC_APPROVAL",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/gptoss/sync-approval",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "31/31 PASS-family from the committed candidate, runner artifact scan PASS; 2 PASS_WITH_RUNTIME_REPAIR (mutation-append-line-verified, static-web-selector-script-only-verified - the same two as 0.10.3, both verified-final); t325 PASS_WITH_READBACK_ONLY_LIMITATION; zero rescues; seed 424242"
+    },
+    {
+      "name": "sync-approval-qwen",
+      "lane": "SYNC_APPROVAL",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts/qwen/sync-approval",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "31/31 PASS-family from the committed candidate, runner artifact scan PASS; ZERO ladder rescues and ZERO runtime repairs. Headline delta vs 0.10.2/0.10.3: all six workspace-op scenarios now trace COMPLETE - the PASS-with-BLOCKED-traces quirk (phantom 'by' expected target) is gone, confirming T763 live with T764's outcome claim active; the only BLOCKED traces are the deliberately-blocking scenarios; t325 PASS_WITH_READBACK_ONLY_LIMITATION; seed 424242"
+    },
+    {
+      "name": "capability-private-mode-both-models",
+      "lane": "CAPABILITY_PRIVATE_MODE",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957-capability",
+      "notes": "48 runs (24/model incl. private-folder bank); 0 secret leaks, 0 canary leaks, 0 overclaims across all 48 rows; PASS by process/tool-artifact heuristics; private-mode handoffs WITHHELD_PRIVATE_MODE as expected; the pptx row matches the 0.10.3 baseline exactly (pre-existing unsupported-format handling, prompt-debug False, no overclaim); targeted canary scan over the capability roots PASS with the documented fixture allowlist; OCR via controlled stub"
+    },
+    {
+      "name": "true-pty-manual-qwen",
+      "lane": "TRUE_PTY_MANUAL",
+      "status": "NOT_RUN",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/pty-qwen/artifacts",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "OWNER-WAIVED 2026-06-12 (explicit decision, recorded verbatim intent: TUI-only wave, proceed to wave 4): the real-terminal visual cycle was NOT executed for this packet and is deliberately not claimed. What this leaves uncovered: live visual confirmation of streaming markdown, nanorc fences, the status row incl. resize, dynamic-width windows, and the JLine 3.30.13 bump (T781's planned PTY revalidation is waived with it). What still covers the surface: the T766 byte-identity contract test, redirected-path goldens, wrap parity tests, both talosbench banks with zero ANSI bytes, and the wave-2 PTY baseline on the same inline JLine stack. The generated packet (RUN-PTY-MANUAL-AUDIT.ps1 + runbook Step 6) remains valid if a real-terminal regression surfaces in daily use"
+    },
+    {
+      "name": "release-clean-canary-scan",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.4-release-packet-20260612-005957/artifacts",
+      "notes": "checkRuntimeArtifactCanaries PASS over the packet artifacts root (no allowlist) and the capability testing+workspace roots (documented fixture allowlist); the build-tree canary scan passed in the post-bump check; the pty-targeted scan (fixture .env allowlist) runs in the owner PTY cycle (OWNER-RUNBOOK Step 9) and is covered by the TRUE_PTY_MANUAL gate"
+    }
+  ]
+}

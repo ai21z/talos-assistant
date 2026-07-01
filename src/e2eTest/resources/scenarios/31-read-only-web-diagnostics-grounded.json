@@ -1,0 +1,16 @@
+{
+  "name": "read-only web diagnostics are grounded",
+  "fixture": "broken-bmi-site",
+  "v1Pack": true,
+  "claims": [
+    "read-only-web-diagnostics-use-static-workspace-facts",
+    "unsupported-model-diagnosis-is-replaced"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Inspect this BMI website and identify why it is not working. Do not edit files yet.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"styles.css\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"script.js\"}}\n```",
+    "The issue with the BMI website is that the `script.js` file is missing a closing script tag, which causes the JavaScript code to not be executed."
+  ]
+}

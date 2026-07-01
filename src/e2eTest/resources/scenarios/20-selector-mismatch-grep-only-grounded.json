@@ -1,0 +1,18 @@
+{
+  "name": "selector mismatch grep-only underinspection is grounded",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "grounded-analysis-reports-real-selector-mismatch",
+    "grep-only-underinspection-does-not-escape"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"(\\\\.\\\\w+|#[^{};]+)\\\\s*{\",\"include\":\"*.css\"}}\n```",
+    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"document\\\\.querySelector\",\"include\":\"*.js\"}}\n```",
+    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"(class|id)=\",\"include\":\"*.html\"}}\n```",
+    "Based on the tool results, there are no mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript within your workspace. No further action is needed."
+  ]
+}

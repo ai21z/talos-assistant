@@ -1,0 +1,16 @@
+{
+  "name": "natural site diagnostic prompt is grounded",
+  "fixture": "broken-bmi-site",
+  "v1Pack": true,
+  "claims": [
+    "natural-site-diagnostic-intent",
+    "read-only-web-diagnostics-use-static-workspace-facts"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "This site has broken links. Can you check what is wrong without changing files?",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"styles.css\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"script.js\"}}\n```",
+    "The issue is just that the page needs a newer browser. There are no static HTML, CSS, or JavaScript problems."
+  ]
+}

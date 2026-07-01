@@ -1,0 +1,61 @@
+package dev.talos.cli.repl;
+
+import dev.talos.runtime.Result;
+
+import dev.talos.runtime.TurnAudit;
+import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnResult;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+final class ReplRouterTraceTest {
+
+    @Test
+    void formatsCurrentTurnPolicyTraceForDebugTraceMode() {
+        TurnPolicyTrace policyTrace = new TurnPolicyTrace(
+                "SMALL_TALK",
+                false,
+                false,
+                List.of(),
+                List.of(),
+                "INSPECT",
+                "INSPECT",
+                List.of(),
+                List.of(),
+                List.of(),
+                "conversation-boundary-policy");
+        TurnResult result = new TurnResult(
+                new Result.Ok("hello"),
+                null,
+                1,
+                Duration.ofMillis(10),
+                new TurnAudit(
+                        List.of(),
+                        0,
+                        0,
+                        0,
+                        policyTrace,
+                        LocalTurnTrace.builder(
+                                        "trc-mode",
+                                        "session",
+                                        1,
+                                        "2026-06-28T00:00:00Z")
+                                .mode("ask")
+                                .build()));
+
+        String text = ReplRouter.formatCurrentTurnTrace(result);
+
+        assertTrue(text.contains("Current Turn Trace"));
+        assertTrue(text.contains("mode: ask"));
+        assertTrue(text.contains("contract: SMALL_TALK mutationAllowed=false verificationRequired=false"));
+        assertTrue(text.contains("classificationReason: conversation-boundary-policy"));
+        assertTrue(text.contains("phase: initial=INSPECT final=INSPECT"));
+        assertTrue(text.contains("nativeTools: none"));
+        assertTrue(text.contains("blocked: none"));
+    }
+}

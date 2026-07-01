@@ -1,0 +1,472 @@
+package dev.talos.core.rag;
+
+import dev.talos.core.CfgUtil;
+import dev.talos.core.Config;
+import dev.talos.core.embed.CachingEmbeddings;
+import dev.talos.core.embed.EmbeddingProfile;
+import dev.talos.core.embed.EmbeddingsFactory;
+import dev.talos.core.index.IndexProgressListener;
+import dev.talos.core.index.Indexer;
+import dev.talos.core.index.LuceneStore;
+import dev.talos.core.index.SymbolHit;
+import dev.talos.core.index.SymbolIndexStore;
+import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.core.cache.CacheDb;
+import dev.talos.core.context.ContextPacker;
+import dev.talos.core.context.ContextResult;
+import dev.talos.core.context.TokenBudget;
+import dev.talos.core.privacy.PrivacyConfigFacts;
+import dev.talos.core.rerank.ScoreThresholdReranker;
+import dev.talos.core.retrieval.*;
+import dev.talos.core.retrieval.stages.*;
+import dev.talos.core.context.ContextDecision;
+import dev.talos.core.context.ContextItem;
+import dev.talos.core.context.ContextItemSource;
+import dev.talos.core.context.ContextLedgerCapture;
+import dev.talos.core.context.ContextPrivacyClass;
+import dev.talos.core.context.ExecutionBoundary;
+import dev.talos.core.tool.ToolProtocolText;
+import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.safety.ProtectedWorkspacePaths;
+import dev.talos.safety.SafeLogFormatter;
+import dev.talos.spi.CorpusStore;
+import dev.talos.spi.types.ChunkMetadata;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public class RagService {
+    private static final Logger LOG = LoggerFactory.getLogger(RagService.class);
+    private static final String PRIVATE_MODE_REINDEX_DISABLED =
+            "RAG indexing is disabled in private mode. Enable private-mode RAG explicitly only after confirming protected and unsupported files stay outside the searchable corpus.";
+
+    private final Config cfg;
+    private final Indexer indexer;
+
+    // Guard against re-entrant lazy indexing
+    private final AtomicBoolean indexingNow = new AtomicBoolean(false);
+
+
+    /** Small data holder returned by prepare(). */
+    public static final class Prepared {
+        private final List<ContextResult.Snippet> snippets;
+        private final List<String> citations;
+        private final RetrievalTrace trace; // nullable - absent on error path
+        private final String errorReason;   // nullable - set when retrieval failed
+        private final List<SymbolHit> symbolHits;
+
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
+            this(snippets, citations, null, null, List.of());
+        }
+
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace) {
+            this(snippets, citations, trace, null, List.of());
+        }
+
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace, String errorReason) {
+            this(snippets, citations, trace, errorReason, List.of());
+        }
+
+        public Prepared(
+                List<ContextResult.Snippet> snippets,
+                List<String> citations,
+                RetrievalTrace trace,
+                String errorReason,
+                List<SymbolHit> symbolHits
+        ) {
+            this.snippets    = (snippets == null ? List.of() : List.copyOf(snippets));
+            this.citations   = (citations == null ? List.of() : List.copyOf(citations));
+            this.trace       = trace;
+            this.errorReason = errorReason;
+            this.symbolHits  = (symbolHits == null ? List.of() : List.copyOf(symbolHits));
+        }
+        /** Typed snippets with structured metadata. */
+        public List<ContextResult.Snippet> snippets() { return snippets; }
+        /** Legacy accessor: converts typed snippets to Map&lt;"path","text"&gt; for compatibility. */
+        public List<Map<String, String>> snippetMaps() {
+            List<Map<String, String>> out = new ArrayList<>(snippets.size());
+            for (var s : snippets) {
+                out.add(Map.of("path", s.path(), "text", s.text()));
+            }
+            return Collections.unmodifiableList(out);
+        }
+        public List<String> citations() { return citations; }
+        /** Symbol signature evidence found before semantic/vector recall. */
+        public List<SymbolHit> symbolHits() { return symbolHits; }
+        /** Pipeline trace, or null if retrieval failed before pipeline execution. */
+        public RetrievalTrace trace() { return trace; }
+        /** Non-null when retrieval failed; describes the failure reason. */
+        public String errorReason() { return errorReason; }
+        /** True when retrieval encountered an error and snippets may be incomplete. */
+        public boolean hasError() { return errorReason != null && !errorReason.isBlank(); }
+    }
+
+    /**
+     * Answer returned by {@link #ask(Path, String, Integer)}.
+     * <p>
+     * {@code packedContext} is the context actually sent to the LLM after packing
+     * and possible truncation. It is {@code null} on the net-disabled stub path
+     * (no model call occurs, so no packing is performed). Callers that inspect
+     * packed context must null-check first.
+     *
+     * @param text           generated answer text (or stub / error message)
+     * @param citations      deduplicated source-file citations
+     * @param prepared       full pre-packed retrieval result (nullable on error path)
+     * @param packedContext   packed context sent to model (null when net is disabled or on error)
+     */
+    public record Answer(String text, List<String> citations, Prepared prepared, ContextResult packedContext) {
+        /** Backwards-compatible constructor for callers that do not supply Prepared or packed context. */
+        public Answer(String text, List<String> citations) {
+            this(text, citations, null, null);
+        }
+    }
+
+    public RagService(Config cfg) {
+        this.cfg = Objects.requireNonNull(cfg);
+        this.indexer = new Indexer(cfg);
+    }
+
+    public Indexer getIndexer() { return indexer; }
+
+    public record ReindexOutcome(boolean indexed, String message) {}
+
+    public Object reindex(Path root) throws Exception {
+        return reindex(root, false, IndexProgressListener.NOOP).message();
+    }
+
+    public ReindexOutcome reindex(Path root, boolean forceFullReindex, IndexProgressListener listener) {
+        if (PrivacyConfigFacts.privateMode(cfg)
+                && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
+            LOG.info("Explicit RAG reindex refused because private mode disables indexing by default.");
+            return new ReindexOutcome(false, PRIVATE_MODE_REINDEX_DISABLED);
+        }
+        if (forceFullReindex) {
+            indexer.index(root, true, listener == null ? IndexProgressListener.NOOP : listener);
+        } else {
+            indexer.reindex(root, listener == null ? IndexProgressListener.NOOP : listener);
+        }
+        return new ReindexOutcome(true, "Reindexed.");
+    }
+
+    public Prepared prepare(Path ws, String query, Integer topKOverride) {
+        if (PrivacyConfigFacts.privateMode(cfg)
+                && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
+            ContextLedgerCapture.record(
+                    ContextItem.fromText(
+                            ContextItemSource.RAG_SNIPPET,
+                            ExecutionBoundary.RAG_INDEX,
+                            ContextPrivacyClass.NORMAL,
+                            "",
+                            "",
+                            0),
+                    ContextDecision.excludedByPrivacyOrTrustPolicy("PRIVATE_MODE_RAG_DISABLED"));
+            return new Prepared(
+                    List.of(),
+                    List.of(),
+                    null,
+                    "RAG retrieval is disabled in private mode. Enable it explicitly only after confirming protected and unsupported files stay outside the searchable corpus.");
+        }
+        // Ensure index exists before retrieval (lazy indexing on first query)
+        ensureIndexExists(ws);
+
+        int defaultTopK = 6;
+        try {
+            Map<String, Object> ragCfg = CfgUtil.map(cfg.data.get("rag"));
+            Object v = (ragCfg == null ? null : ragCfg.get("top_k"));
+            if (v instanceof Number n) defaultTopK = n.intValue();
+            else if (v != null) defaultTopK = Integer.parseInt(String.valueOf(v));
+        } catch (Exception ignore) {}
+
+        final int k = (topKOverride == null ? defaultTopK : Math.max(1, topKOverride));
+
+        // Read vector toggle; if off, KnnStage will gracefully skip (no query vector)
+        Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
+        boolean vecEnabled = true;
+        Object vectorsObj = rag.get("vectors");
+        if (vectorsObj instanceof Map<?,?> vm) {
+            Object en = vm.get("enabled");
+            if (en instanceof Boolean b) vecEnabled = b;
+        }
+
+        Path indexDir = indexer.indexDirFor(ws);
+        SymbolIndexStore.QueryResult symbolQuery = SymbolIndexStore.queryDetailed(indexDir, query, k);
+        List<SymbolHit> symbolHits = symbolQuery.hits();
+        List<ContextResult.Snippet> snippets = new ArrayList<>();
+        List<String> citations = new ArrayList<>();
+        RetrievalTrace trace = null;
+
+        try (LuceneStore store = new LuceneStore(indexDir, 0)) {
+            // Compute query vector when vectors are enabled
+            float[] qvec = null;
+            String embedFailReason = null;
+            if (vecEnabled) {
+                EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+                try (CacheDb cache = new CacheDb();
+                     CachingEmbeddings emb = new CachingEmbeddings(
+                             EmbeddingsFactory.forQuery(cfg), cache, "query/" + profile.cacheNamespace())) {
+                    qvec = emb.embed(query);
+                } catch (Exception e) {
+                    // If embeddings fail, proceed BM25-only but record why
+                    embedFailReason = SafeLogFormatter.throwableMessage(e);
+                    LOG.debug("Embedding failed, proceeding BM25-only: {}", embedFailReason);
+                }
+            }
+
+            // Build and execute the retrieval pipeline
+            RetrievalPipeline pipeline = buildDefaultPipeline(store);
+            RetrievalRequest request = new RetrievalRequest(query, qvec, k, embedFailReason);
+            RetrievalResult result = pipeline.execute(request);
+
+            trace = result.trace();
+            if (symbolQuery.sidecarStatus() == SymbolIndexStore.LoadStatus.CORRUPT) {
+                trace.record("symbol-sidecar", 0L, 0, 0, "skipped: corrupt symbol sidecar");
+            }
+            if (!symbolHits.isEmpty()) {
+                trace.route("CODE_SYMBOL_FIRST");
+                for (SymbolHit hit : symbolHits) {
+                    trace.recordEvidence(
+                            "SYMBOL_HIT",
+                            hit.path(),
+                            hit.kind().name() + " " + hit.symbol(),
+                            hit.lineStart(),
+                            "symbol signature match");
+                    ContextLedgerCapture.record(
+                            ContextItem.fromText(
+                                    ContextItemSource.SYMBOL_HIT,
+                                    ExecutionBoundary.RAG_INDEX,
+                                    ContextPrivacyClass.NORMAL,
+                                    hit.path(),
+                                    hit.signature(),
+                                    0),
+                            ContextDecision.includedInModel("CODE_SYMBOL_HIT_AVAILABLE"));
+                }
+            }
+            LOG.debug("Retrieval pipeline trace:\n{}", SafeLogFormatter.value(trace.summary()));
+
+            // Build typed snippets from pipeline results
+            for (RetrievalCandidate c : result.candidates()) {
+                String text = store.getTextByPath(c.path());
+                if (text == null || text.isBlank()) continue;
+                Path snippetPath = ws.resolve(c.path()).normalize();
+                if (ProtectedWorkspacePaths.isProtectedPath(ws, snippetPath)) {
+                    continue;
+                }
+                String sanitized = ProtectedContentSanitizer.sanitizeText(text);
+                snippets.add(new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
+                ContextLedgerCapture.record(
+                        ContextItem.fromText(
+                                ContextItemSource.RAG_SNIPPET,
+                                ExecutionBoundary.RAG_INDEX,
+                                ContextPrivacyClass.NORMAL,
+                                c.path(),
+                                sanitized,
+                                0),
+                        ContextDecision.includedInModel("RAG_RETRIEVAL_RESULT_AVAILABLE"));
+            }
+            // Build rich citations using the same metadata-aware formatting as ContextPacker
+            citations.addAll(ContextPacker.buildCitations(snippets));
+        } catch (Exception e) {
+            // Log the failure so it's visible in debug/audit, but don't explode the CLI
+            String reason = SafeLogFormatter.throwableMessage(e);
+            LOG.warn("Retrieval pipeline failed: {}", reason);
+            return new Prepared(snippets, citations, trace, reason, symbolHits);
+        }
+
+        return new Prepared(snippets, citations, trace, null, symbolHits);
+    }
+
+    /**
+     * Builds the default retrieval pipeline:
+     * BM25 → KNN → RRF Fusion → Source Boost → Rerank → Dedup.
+     *
+     * <p>Source boost applies path-based scoring adjustments after fusion to
+     * bias results toward production code when the query is implementation-oriented.
+     * The reranker stage uses ScoreThresholdReranker to filter low-confidence
+     * candidates and cap results for focused context packing.
+     * Package-private for testability.
+     */
+    RetrievalPipeline buildDefaultPipeline(CorpusStore store) {
+        return RetrievalPipeline.builder()
+                .addStage(new Bm25Stage(store))
+                .addStage(new KnnStage(store))
+                .addStage(new RrfFusionStage(60))
+                .addStage(new SourceBoostStage())
+                .addStage(new RerankerStage(new ScoreThresholdReranker()))
+                .addStage(new DedupStage())
+                .build();
+    }
+
+
+    /**
+     * Build system prompt using the composable SystemPromptBuilder.
+     * Used by the legacy {@code ask()} path and {@code DiagnoseCmd}.
+     */
+    public String buildSystemPrompt() {
+        return SystemPromptBuilder.forRag().build();
+    }
+
+    /**
+     * Retrieves context for the given question and generates an LLM answer.
+     * <p>
+     * <strong>Net-disabled stub path:</strong> When {@code net.enabled} is {@code false}
+     * in configuration, the LLM call is skipped entirely. The method returns an
+     * {@link Answer} whose text is a synthetic stub ({@code "(net disabled) <question>"}),
+     * whose citations come from the pre-packed retrieval set (i.e. {@link Prepared#citations()}),
+     * and whose {@link Answer#packedContext()} is {@code null} because context packing
+     * never runs (no model will consume it). Callers must therefore treat a null
+     * {@code packedContext} as "no packing was performed" - not as "packing produced
+     * nothing." The {@link Answer#prepared()} field is still populated, so the full
+     * retrieved snippet set is available for inspection.
+     * <p>
+     * This path exists to allow fast integration tests and air-gapped environments
+     * to exercise the retrieval pipeline without requiring a reachable LLM endpoint.
+     *
+     * @param ws          workspace root directory
+     * @param question    user query
+     * @param kOverride   optional override for top-K retrieval (null → config default)
+     * @return a non-null {@link Answer}; on unrecoverable error the answer text
+     *         contains the error message and citations are empty
+     */
+    public Answer ask(Path ws, String question, Integer kOverride) {
+        try {
+            Prepared prepared = prepare(ws, question, kOverride);
+
+            // Net-disabled stub path: skip LLM + context packing for fast tests / air-gap.
+            // packedContext is null because no packing is performed - no model will consume it.
+            // Citations come from the pre-packed retrieval set (Prepared).
+            // See Javadoc above for full semantics.
+            Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
+            boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
+
+            if (!netEnabled) {
+                String stub = "(net disabled) " + question;
+                return new Answer(stub, prepared.citations(), prepared, null);
+            }
+
+            String sys = buildSystemPrompt();
+
+            // Pack retrieved snippets into context using unified ContextPacker
+            ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
+            ContextResult packed = packer.pack(sys, question, symbolEvidenceSnippets(prepared.symbolHits()), prepared.snippets());
+
+            // Warn if trimming occurred
+            if (packed.wasTrimmed()) {
+                LOG.warn("RAG_CONTEXT_TRIMMED: Reduced snippets from {} to {} to fit {} token budget (estimated {} tokens). Consider reducing :k or enabling vectors.",
+                    packed.originalCount(), packed.finalCount(), packed.budgetTokens(), packed.estimatedTokens());
+            }
+
+            try (LlmClient llm = new LlmClient(cfg)) {
+                String text = llm.chat(sys, question, packed.toSnippetMaps());
+                if (text == null) text = "";
+
+                // Defensive: strip any tool-call blocks the model may emit.
+                // The rag-ask path has no tool dispatcher - tool calls are never
+                // valid here. They leak when the model sees tool-call format
+                // instructions in retrieved context (e.g., tools-preamble.txt).
+                text = ToolProtocolText.stripToolCalls(text);
+
+                // Warn if we have retrieval but answer is empty
+                if (!packed.isEmpty() && text.trim().isEmpty()) {
+                    LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens={}, budget={}). Check model capacity or reduce :k.",
+                        packed.finalCount(), packed.estimatedTokens(), packed.budgetTokens());
+                }
+
+                // Return packed citations (what the model actually saw), not pre-packed
+                return new Answer(text, packed.citations(), prepared, packed);
+            }
+        } catch (Exception e) {
+            String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
+            return new Answer(msg, List.of());
+        }
+    }
+
+
+    /**
+     * Ensures index exists for the given workspace. If missing or unreadable, performs lazy indexing.
+     * Guard with AtomicBoolean to prevent re-entrancy. Falls back to full rebuild on corruption.
+     */
+    private void ensureIndexExists(Path workspace) {
+        if (PrivacyConfigFacts.privateMode(cfg)
+                && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
+            LOG.info("RAG indexing skipped because private mode disables retrieval/indexing by default.");
+            return;
+        }
+        Path indexDir = indexer.indexDirFor(workspace);
+
+        // Check if index exists and is readable
+        if (Files.exists(indexDir) && Files.isDirectory(indexDir)) {
+            // Try to verify it's a valid Lucene index by attempting to open it
+            try (LuceneStore store = new LuceneStore(indexDir, 0)) {
+                SymbolIndexStore.LoadResult sidecar = SymbolIndexStore.loadDetailed(indexDir);
+                if (indexer.isPolicyMetadataCurrent(workspace)
+                        && sidecar.status() == SymbolIndexStore.LoadStatus.LOADED) {
+                    return;
+                }
+                LOG.warn("RAG index metadata or symbol sidecar is stale/missing/corrupt; rebuilding. sidecarStatus={}",
+                        sidecar.status());
+                indexer.invalidateIndex(workspace);
+            } catch (Exception e) {
+                // Index exists but is corrupted - log and proceed to rebuild
+                LOG.warn("Index directory exists but appears corrupted, will rebuild: {}",
+                        SafeLogFormatter.throwableMessage(e));
+                indexer.invalidateIndex(workspace);
+            }
+        }
+
+        // Index missing or corrupted - attempt lazy indexing
+        if (!indexingNow.compareAndSet(false, true)) {
+            // Already indexing in another thread/call, skip
+            return;
+        }
+
+        try {
+            System.out.print("\rIndexing workspace (first RAG query)... ");
+            System.out.flush();
+
+            // Perform indexing with current config (respects vectors setting)
+            indexer.index(workspace, false);
+
+            // Print final summary (Indexer already prints this, but ensure newline)
+            System.out.println();
+
+        } catch (Exception e) {
+            LOG.error("Lazy indexing failed: {}", SafeLogFormatter.throwableMessage(e));
+            System.err.println("\rIndexing failed: " + SafeLogFormatter.throwableMessage(e));
+        } finally {
+            indexingNow.set(false);
+        }
+    }
+
+    static List<ContextResult.Snippet> symbolEvidenceSnippets(List<SymbolHit> symbolHits) {
+        if (symbolHits == null || symbolHits.isEmpty()) return List.of();
+        List<ContextResult.Snippet> snippets = new ArrayList<>();
+        for (SymbolHit hit : symbolHits) {
+            if (hit == null || hit.path().isBlank() || hit.symbol().isBlank()) continue;
+            StringBuilder text = new StringBuilder();
+            text.append("[Symbol signature match - not full file contents]\n")
+                    .append(hit.kind().name())
+                    .append(" ")
+                    .append(hit.symbol())
+                    .append(" at ")
+                    .append(hit.path());
+            if (hit.lineStart() > 0) {
+                text.append(":").append(hit.lineStart());
+            }
+            if (!hit.signature().isBlank()) {
+                text.append("\nSignature: ")
+                        .append(ProtectedContentSanitizer.sanitizeText(hit.signature()));
+            }
+            String path = hit.path() + "#symbol-" + hit.lineStart();
+            snippets.add(new ContextResult.Snippet(
+                    path,
+                    text.toString(),
+                    new ChunkMetadata(null, hit.lineStart(), hit.lineEnd(), "Symbol signature match")));
+        }
+        return snippets;
+    }
+}

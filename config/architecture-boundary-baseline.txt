@@ -1,0 +1,4 @@
+# Talos architecture boundary ratchet baseline.
+# Format: rule|path|source-reference
+# This file records existing package-direction debt only. Do not add entries
+# unless a ticket explicitly accepts the new edge and explains why.

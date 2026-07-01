@@ -1,0 +1,11 @@
+┌──────────────────────────┬───────────────────────────────────────────────────┐
+│  ███ █ ███   TALOS       │ Workspace   C:\...\Projects\LOQ\loqj-cli          │
+│ █    █    █  v0.9.9-beta │ Mode        dev                                   │
+│ ████ █ ████              │ Model       qwen2.5-coder:14b-instruct-q...       │
+│  ███   ███               │ Engine      llama.cpp (managed)                   │
+│   ██   ██                │ Index       stale · rebuild advised               │
+├──────────────────────────┴───────────────────────────────────────────────────┤
+│ Policy  writes require approval            Debug  trace                      │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ governed edits · writes require approval                                     │
+└──────────────────────────────────────────────────────────────────────────────┘

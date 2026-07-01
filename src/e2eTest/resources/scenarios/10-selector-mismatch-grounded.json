@@ -1,0 +1,18 @@
+{
+  "name": "selector mismatch analysis is grounded",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "grounded-analysis-reports-real-selector-mismatch"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"style.css\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"script.js\"}}\n```",
+    "There are no mismatches between the HTML classes/IDs and the selectors used in CSS or JavaScript. The class `cta-button` is present in both HTML and JavaScript."
+  ]
+}

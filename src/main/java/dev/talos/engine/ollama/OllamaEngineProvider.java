@@ -1,0 +1,90 @@
+package dev.talos.engine.ollama;
+
+import dev.talos.core.CfgUtil;
+import dev.talos.core.HostLocalityPolicy;
+import dev.talos.safety.SafeLogFormatter;
+import dev.talos.spi.EngineConfig;
+import dev.talos.spi.ModelCatalog;
+import dev.talos.spi.ModelEngine;
+import dev.talos.spi.ModelEngineProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Map;
+
+public final class OllamaEngineProvider implements ModelEngineProvider {
+    private static final Logger LOG = LoggerFactory.getLogger(OllamaEngineProvider.class);
+
+    private static final String BACKEND = "ollama";
+
+    private static String hostFrom(EngineConfig cfg) {
+        // env first
+        String env = System.getenv("TALOS_ENGINE_HOST");
+        if (env != null && !env.isBlank()) return env.trim();
+
+        env = System.getenv("TALOS_OLLAMA_HOST");
+        if (env != null && !env.isBlank()) return env.trim();
+
+        // then config
+        Map<String,Object> ollama = CfgUtil.map(cfg == null ? null : cfg.data().get("ollama"));
+        Object v = ollama.get("host");
+        if (v != null) return String.valueOf(v);
+
+        // fallback
+        return "http://127.0.0.1:11434";
+    }
+
+    private static String chatHostFrom(EngineConfig cfg) {
+        String host = hostFrom(cfg);
+        boolean allowRemote = allowRemoteFrom(cfg);
+        HostLocalityPolicy.enforceLocalOrAllowed(
+                "Ollama chat host",
+                host,
+                allowRemote,
+                "ollama.allow_remote");
+        if (allowRemote && !HostLocalityPolicy.isLoopback(host)) {
+            LOG.warn("SECURITY: Using remote Ollama chat host: {}. Full prompts may leave this machine.",
+                    SafeLogFormatter.value(host));
+        }
+        return host;
+    }
+
+    private static boolean allowRemoteFrom(EngineConfig cfg) {
+        Map<String,Object> ollama = CfgUtil.map(cfg == null ? null : cfg.data().get("ollama"));
+        return CfgUtil.boolAt(ollama, "allow_remote", false);
+    }
+
+    private static String defaultModelFrom(EngineConfig cfg) {
+        String env = System.getenv("TALOS_MODEL");
+        if (env != null && !env.isBlank()) return env.trim();
+
+        env = System.getenv("TALOS_LLM_MODEL");
+        if (env != null && !env.isBlank()) return env.trim();
+
+        env = System.getenv("TALOS_OLLAMA_MODEL");
+        if (env != null && !env.isBlank()) return env.trim();
+
+        Map<String,Object> ollama = CfgUtil.map(cfg == null ? null : cfg.data().get("ollama"));
+        Object v = ollama.get("model");
+        if (v != null) return String.valueOf(v);
+
+        return "qwen2.5-coder:14b";
+    }
+
+    private static boolean nativeToolCallingFrom(EngineConfig cfg) {
+        Map<String,Object> tools = CfgUtil.map(cfg == null ? null : cfg.data().get("tools"));
+        return CfgUtil.boolAt(tools, "native_calling", true);
+    }
+
+    @Override public String id() { return BACKEND; }
+
+    @Override public ModelEngine create(EngineConfig cfg) {
+        // Engine is not model-bound; ChatRequest carries the model.
+        boolean nativeTools = nativeToolCallingFrom(cfg);
+        return new OllamaEngine(chatHostFrom(cfg), defaultModelFrom(cfg), nativeTools);
+    }
+
+    @Override public ModelCatalog catalog(EngineConfig cfg) {
+        return new OllamaCatalog(chatHostFrom(cfg));
+    }
+}

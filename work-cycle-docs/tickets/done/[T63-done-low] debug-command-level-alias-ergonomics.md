@@ -1,0 +1,137 @@
+# [T63-done-low] Debug Command Level Alias Ergonomics
+
+Status: done
+Priority: low
+Date: 2026-04-30
+Closed: 2026-05-02
+
+## Evidence Summary
+
+- Source: installed Talos 0.9.8 smoke run
+- Installed version: `Talos 0.9.8 - build 2026-04-30T08:33:26.239273200Z`
+- Transcript reference:
+  `local/manual-testing/talosbench/20260430-221050-debug-prompt/protected-read-denial-debug-prompt-one-denial.txt`
+
+Observed behavior:
+
+- `/debug prompt` works and enables Prompt Audit output.
+- `/debug prompt on` returns usage error `[201] Usage: /debug off|brief|rag|tools|prompt|trace`.
+- The user naturally requested `/debug prompt on` during smoke testing, so the
+  current syntax is slightly surprising even though it is documented by
+  `/help debug`.
+
+T67 audit update, 2026-05-01:
+
+- Summary:
+  `local/manual-testing/t67-audit-20260501-143927/summary.md`
+- Prompt:
+  `I typed /debug prompt on earlier. What command shows the last trace?`
+- Trace: `trc-a8bba70c-d84e-40c0-bba8-eacc8e584f70`
+- Talos made no tool calls, which is correct, but answered with generic Linux
+  logging advice instead of the known CLI command `/last trace`.
+- This keeps T63 low priority, but the scope should include direct command-help
+  answers for debug/trace ergonomics, not only slash-command parsing.
+
+## Classification
+
+Primary taxonomy bucket: `CLI_UX`
+
+Secondary buckets:
+
+- `TRACE_REDACTION`
+- `EVALUATION_HARNESS`
+
+Blocker level: not a blocker
+
+Why this level:
+
+The existing command works and the help text is technically correct. This is a
+small usability and manual-evaluation friction issue, not a runtime safety or
+truthfulness failure.
+
+## Goal
+
+Make debug level toggling tolerant of the harmless `on` suffix users expect
+while preserving the existing exact debug-level commands.
+
+## Non-Goals
+
+- No new debug levels.
+- No change to trace redaction defaults.
+- No change to `/last trace`, `/prompt`, or trace capture behavior.
+- No broad natural-language command parser.
+
+## Implementation Notes
+
+Likely code/document areas:
+
+- `src/main/java/dev/talos/cli/repl/slash/DebugCommand.java`
+- `src/main/java/dev/talos/cli/repl/slash/HelpCommand.java`
+- `src/test/java/dev/talos/cli/repl/slash/` or nearest existing slash command
+  tests
+- `tools/manual-eval/README.md`
+
+Suggested behavior:
+
+- `/debug prompt on` behaves like `/debug prompt`.
+- `/debug trace on` behaves like `/debug trace`.
+- `/debug rag on`, `/debug tools on`, and `/debug brief on` behave like their
+  existing level commands.
+- `/debug prompt off` behaves like `/debug off`.
+- `/debug on` remains invalid unless a later ticket defines a default level.
+
+## Acceptance Criteria
+
+- Existing commands `/debug off`, `/debug brief`, `/debug rag`, `/debug tools`,
+  `/debug prompt`, and `/debug trace` continue to work.
+- Optional `on` suffix is accepted for every non-off debug level.
+- Optional `off` suffix after a non-off level disables debug output.
+- Invalid forms still return clear usage.
+- `/help debug` mentions both canonical syntax and the optional `on` suffix.
+- A natural question such as `What command shows the last trace?` answers
+  `/last trace` directly and does not produce generic operating-system log
+  advice.
+
+## Tests / Evidence
+
+Required deterministic regression:
+
+- Slash command unit test: `/debug prompt on` sets prompt debug.
+- Slash command unit test: `/debug trace on` sets trace debug.
+- Slash command unit test: `/debug prompt off` sets debug off.
+- Slash command unit test: `/debug on` remains invalid.
+
+Manual/TalosBench rerun:
+
+- Run a one-prompt protected-read denial smoke with `/debug prompt on` and
+  `/last trace`; expected Prompt Audit appears and final trace remains redacted.
+
+Commands:
+
+```powershell
+./gradlew.bat test --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+```
+
+## Known Risks
+
+- Over-accepting debug syntax can make command mistakes harder to catch. Keep
+  the compatibility surface narrow and explicit.
+
+## Related Tickets
+
+- `work-cycle-docs/tickets/done/[T67-done-medium] model-switch-command-boundary-and-small-talk-classification.md`
+  tracked the separate T61 audit finding that `/model` was unknown and small
+  talk after `/set model ...` could be misclassified. Keep this ticket focused
+  on `/debug ... on/off` and trace-command ergonomics.
+
+## Closure Notes
+
+- `/debug <level> on` now accepts explicit non-off debug levels, including
+  `brief`, `rag`, `tools`, `prompt`, and `trace`.
+- `/debug <level> off` now disables debug output, while `/debug on` remains a
+  usage error.
+- `/help debug` documents the suffix form and `/last trace`.
+- Natural trace-command help such as `What command shows the last trace?` is
+  classified as direct small talk and answered deterministically with
+  `/last trace` instead of generic operating-system logging advice.

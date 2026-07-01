@@ -1,0 +1,18 @@
+/* Synthwave theme styles */
+body.synthwave-theme {
+  background: linear-gradient(180deg, #140014, #090012);
+  color: #f8eaff;
+}
+
+#hero {
+  padding: 48px;
+}
+
+.hero-content {
+  max-width: 720px;
+}
+
+.cta-button {
+  display: inline-block;
+  padding: 12px 20px;
+}

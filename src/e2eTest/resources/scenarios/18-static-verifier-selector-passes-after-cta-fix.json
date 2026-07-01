@@ -1,0 +1,16 @@
+{
+  "name": "static verifier passes after cta selector fix",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "post-apply-static-verifier-passes-selector-linkage",
+    "task-contract-explicit-edit-requires-verification"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Now apply the smallest fix by editing index.html so the CSS and JavaScript .cta-button selector has a matching element in the HTML. Use the file edit tool; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"        <p>Dive into a world of innovation and cutting-edge design.</p>\\r\\n      </div>\",\"new_string\":\"        <p>Dive into a world of innovation and cutting-edge design.</p>\\r\\n        <a class=\\\"cta-button\\\" href=\\\"#tickets\\\">Listen now</a>\\r\\n      </div>\"}}\n```",
+    "Updated index.html so the CTA selector now has a matching element."
+  ]
+}

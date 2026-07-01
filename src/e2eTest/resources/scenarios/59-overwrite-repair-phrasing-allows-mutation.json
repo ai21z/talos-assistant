@@ -1,0 +1,16 @@
+{
+  "name": "overwrite repair phrasing allows mutation",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "overwrite-repair-phrasing-is-apply-capable",
+    "write-file-repair-tools-are-not-read-only-denied"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. Use talos.write_file for all three.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n    <form id=\\\"bmiForm\\\">\\n      <label for=\\\"weight\\\">Weight</label>\\n      <input id=\\\"weight\\\" type=\\\"number\\\">\\n      <label for=\\\"height\\\">Height</label>\\n      <input id=\\\"height\\\" type=\\\"number\\\">\\n      <button type=\\\"submit\\\">Calculate BMI</button>\\n    </form>\\n    <p id=\\\"result\\\"></p>\\n  </main>\\n  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f7fb; }\\n.calculator { max-width: 460px; margin: 0 auto; padding: 2rem; background: white; border-radius: 8px; }\\nbutton { cursor: pointer; }\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"document.getElementById('bmiForm').addEventListener('submit', (event) => {\\n  event.preventDefault();\\n  const weight = Number(document.getElementById('weight').value);\\n  const height = Number(document.getElementById('height').value);\\n  const result = document.getElementById('result');\\n  if (!weight || !height) { result.textContent = 'Enter weight and height.'; return; }\\n  const bmi = weight / ((height / 100) ** 2);\\n  result.textContent = `Your BMI is ${bmi.toFixed(1)}`;\\n});\"}}\n```",
+    "Created the three BMI calculator files."
+  ]
+}

@@ -1,0 +1,329 @@
+package dev.talos.cli.launcher;
+
+import dev.talos.cli.repl.Limits;
+import dev.talos.cli.repl.ReplRouter;
+import dev.talos.cli.repl.DebugLevel;
+import dev.talos.cli.repl.SessionState;
+import dev.talos.cli.repl.SlashCommandCompleter;
+import dev.talos.cli.repl.TalosBootstrap;
+import dev.talos.cli.ui.AnsiColor;
+import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.InteractiveTty;
+import dev.talos.cli.ui.PromptRenderer;
+import dev.talos.cli.ui.TalosBanner;
+import dev.talos.cli.ui.TerminalOutput;
+import dev.talos.core.CfgUtil;
+import dev.talos.core.Config;
+import org.jline.reader.Completer;
+import org.jline.reader.EndOfFileException;
+import org.jline.reader.LineReader;
+import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.UserInterruptException;
+import org.jline.terminal.Attributes;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
+import picocli.CommandLine;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+
+@CommandLine.Command(name="run", description="Talos interactive REPL")
+public class RunCmd implements Runnable, SessionState {
+
+    @CommandLine.Option(names="--root", description="Workspace root (default: .)")
+    Path root;
+
+    @CommandLine.Option(names="--k", description="Top-K (default from config)")
+    Integer kOverride;
+
+    @CommandLine.Option(names="--bm25-only", description="Disable vectors")
+    boolean bm25Only;
+
+    @CommandLine.Option(names="--no-logo", description="Skip banner/logo display")
+    boolean noLogo;
+
+    // Minimal session state for commands
+    private int k = 8;
+    private DebugLevel debugLevel = DebugLevel.OFF;
+
+    // Simple 1s token bucket - FIXED VERSION
+    private long rlWindowStartMs = System.currentTimeMillis();
+    private int rlTokens = 10; // will be set from config
+    private final Object rlLock = new Object();
+
+    // ---- SessionState impl ----
+    @Override public int getK() { return k; }
+    @Override public void setK(int k) { this.k = Math.max(1, k); }
+    @Override public boolean isDebug() { return debugLevel.enabled(); }
+    @Override public void setDebug(boolean on) { this.debugLevel = on ? DebugLevel.BRIEF : DebugLevel.OFF; }
+    @Override public DebugLevel getDebugLevel() { return debugLevel; }
+    @Override public void setDebugLevel(DebugLevel level) { this.debugLevel = level == null ? DebugLevel.OFF : level; }
+
+    @Override
+    public void run() {
+        Path ws = (root == null ? Path.of(".") : root).toAbsolutePath().normalize();
+        try { ws = ws.toRealPath(); } catch (Exception ignore) {}
+        if (!Files.isDirectory(ws)) {
+            System.err.println("Not a directory: " + maskPath(ws));
+            return;
+        }
+
+        Config cfg = new Config();
+
+        // Limits from config
+        Limits lim = Limits.fromConfig(cfg);
+        rlTokens = lim.ratePerSec();
+
+        // --bm25-only flag: mutate cfg copy
+        if (bm25Only) {
+            Map<String,Object> rag = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("rag")));
+            Map<String,Object> vectors = new LinkedHashMap<>(CfgUtil.map(rag.get("vectors")));
+            vectors.put("enabled", Boolean.FALSE);
+            rag.put("vectors", vectors);
+            cfg.data.put("rag", rag);
+        }
+
+        // Router: commands + modes (workspace-aware), with *this* as SessionState.
+        // The REPL loop and approval gate must share one input owner. JLine is
+        // used for real interactive terminals; redirected/scripted stdin uses a
+        // plain reader so approval responses cannot drift into later turns.
+        ReplRouter router = null;
+        try {
+            boolean useSystemTerminal = shouldUseSystemTerminal(
+                    System.console() != null,
+                    fileDescriptorIsTerminal(0),
+                    fileDescriptorIsTerminal(1),
+                    bufferedInputBytes(System.in));
+            LineReader reader = null;
+            ReplInput input;
+            // Single authoritative output stream (T774): in interactive mode
+            // every byte flows through the JLine terminal's writer so its
+            // cursor model never diverges from the screen; scripted mode
+            // keeps raw System.out so redirected bytes are unchanged.
+            PrintStream sink;
+            AtomicReference<Completer> completerRef = new AtomicReference<>();
+            if (useSystemTerminal) {
+                Terminal term = buildTerminal(true);
+                reader = baseLineReaderBuilder(term)
+                        .completer(delegatingCompleter(completerRef))
+                        .build();
+                input = ReplInput.jline(reader);
+                sink = TerminalOutput.printStreamFor(term);
+            } else {
+                input = ReplInput.scripted(System.in, System.out);
+                sink = System.out;
+            }
+
+            // Create router with JLine-integrated approval gate
+            router = TalosBootstrap.create(this, cfg, sink, ws, reader, input.approvalReader());
+            final ReplRouter routerRef = router;
+
+            // Now that the router (and its command registry) exist, activate
+            // slash completion on the same LineReader used by approval prompts.
+            // Scripted stdin has no completer and no competing reader.
+            completerRef.set(new SlashCommandCompleter(router.getRegistry(), router.getTemplates()));
+
+            // Show banner unless --no-logo
+            String activeMode = router.getModes().getActiveName();
+            final LineReader readerRef = reader;
+            java.util.function.IntSupplier terminalWidth =
+                    readerRef != null ? () -> readerRef.getTerminal().getWidth() : null;
+            if (!noLogo) {
+                TalosBanner.print(ws, cfg, activeMode, getDebugLevel().label(), sink, terminalWidth);
+            } else {
+                TalosBanner.printCompact(ws, cfg, activeMode, sink, terminalWidth);
+            }
+            if (!router.getStartupNotice().isBlank()) {
+                sink.println(router.getStartupNotice());
+                sink.println();
+            }
+
+            // Set up prompt refresh callback for mode changes
+            final AtomicReference<String> currentPrompt = new AtomicReference<>();
+            final boolean styledPrompt = useSystemTerminal;
+            router.getModes().setPromptRefreshCallback(() -> {
+                String newMode = routerRef.getModes().getActiveName();
+                currentPrompt.set(buildPrompt(newMode, styledPrompt));
+            });
+
+            // Initialize the prompt
+            String initialMode = router.getModes().getActiveName();
+            currentPrompt.set(buildPrompt(initialMode, styledPrompt));
+
+            boolean quit = false;
+            while (!quit) {
+                String prompt = currentPrompt.get();
+                if (prompt == null) {
+                    prompt = buildPrompt(router.getModes().getActiveName(), styledPrompt);
+                }
+
+                String line;
+                try { line = input.readLine(prompt); }
+                catch (EndOfFileException eof) { break; }
+                catch (UserInterruptException interrupt) {
+                    sink.println();
+                    continue;
+                }
+                if (line == null) break;
+
+                line = sanitizeOutput(line).trim();
+                if (line.isEmpty()) continue;
+                if (shouldPrintPromptGap(useSystemTerminal, line)) {
+                    sink.println();
+                }
+
+                // Rate limit
+                if (!checkRateLimit(lim)) {
+                    sink.println("Too many requests. Please slow down.\n");
+                    continue;
+                }
+
+                // Slash-commands: router handles *all* registered commands
+                if (line.startsWith("/")) {
+                    if (router.tryHandle(line)) {
+                        if (router.shouldQuit()) { quit = true; }
+                        continue;
+                    }
+                    // Unknown -> show minimal help
+                    sink.println("Unknown command: " + line + "\n");
+                    printMan(sink);
+                    continue;
+                }
+
+                // Non-command prompt: route via modes (controller uses its own active mode)
+                if (router.tryHandlePrompt(line)) {
+                    if (router.shouldQuit()) { quit = true; }
+                    continue;
+                }
+
+                // Fallback (should rarely hit)
+                sink.println("unhandled prompt (no mode accepted): " + line + "\n");
+            }
+
+            sink.println("Goodbye!");
+        } catch (Exception e) {
+            System.err.println("run failed: " + e.getClass().getName() +
+                    (e.getMessage() == null ? "" : (": " + sanitizeErrorMessage(e.getMessage()))));
+            if (Boolean.getBoolean("talos.debug")) e.printStackTrace(System.err);
+        } finally {
+            // Restore the terminal scroll region before exiting (T779)
+            if (router != null) {
+                try { router.shutdownRendering(); } catch (Exception ignored) { }
+            }
+            // Fire session lifecycle callbacks (memory flush, audit, listener cleanup)
+            if (router != null) {
+                try { router.getRuntimeSession().close(); } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    /* -------------------- helpers -------------------- */
+
+    private boolean checkRateLimit(Limits lim) {
+        long now = System.currentTimeMillis();
+        synchronized (rlLock) {
+            if (now - rlWindowStartMs >= 1000) {
+                rlWindowStartMs = now;
+                rlTokens = lim.ratePerSec();
+            }
+            if (rlTokens > 0) { rlTokens--; return true; }
+            return false;
+        }
+    }
+
+
+    /* ===== UI ===== */
+
+    private static String buildPrompt(String mode, boolean styled) {
+        return PromptRenderer.render(mode, styled, CliTheme.current());
+    }
+
+    static Terminal buildTerminal(boolean interactiveConsole) throws IOException {
+        TerminalBuilder builder = TerminalBuilder.builder();
+        if (interactiveConsole) {
+            // Provider pinned to the bundled JNI natives (T781): the old
+            // .jna(true) flag was inert - no JNA dependency is on the
+            // classpath, so resolution always fell through to JNI anyway -
+            // and pinning keeps provider selection deterministic across
+            // JLine upgrades (FFM would need JDK 22+; this build targets 21).
+            return builder.system(true).provider("jni").build();
+        }
+        Attributes attributes = new Attributes();
+        attributes.setLocalFlag(Attributes.LocalFlag.ECHO, false);
+        return builder
+                .system(false)
+                .dumb(true)
+                .attributes(attributes)
+                .streams(System.in, System.out)
+                .build();
+    }
+
+    static LineReaderBuilder baseLineReaderBuilder(Terminal term) {
+        return LineReaderBuilder.builder()
+                .terminal(term)
+                .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
+                .option(LineReader.Option.BRACKETED_PASTE, false);
+    }
+
+    private static Completer delegatingCompleter(AtomicReference<Completer> delegateRef) {
+        return (reader, line, candidates) -> {
+            Completer delegate = delegateRef == null ? null : delegateRef.get();
+            if (delegate != null) {
+                delegate.complete(reader, line, candidates);
+            }
+        };
+    }
+
+    static boolean shouldUseSystemTerminal(
+            boolean interactiveConsole,
+            boolean stdinTerminal,
+            boolean stdoutTerminal,
+            int stdinAvailableBytes) {
+        return interactiveConsole && stdinTerminal && stdoutTerminal && stdinAvailableBytes <= 0;
+    }
+
+    static boolean shouldPrintPromptGap(boolean interactive, String line) {
+        return interactive && line != null && !line.trim().isEmpty();
+    }
+
+    static int bufferedInputBytes(InputStream in) {
+        if (in == null) {
+            return 0;
+        }
+        try {
+            return in.available();
+        } catch (IOException ignored) {
+            return 0;
+        }
+    }
+
+    static boolean fileDescriptorIsTerminal(int fd) {
+        return InteractiveTty.fileDescriptorIsTerminal(fd);
+    }
+
+    private static void printMan(PrintStream out) {
+        out.println(AnsiColor.grey("  Use ") + AnsiColor.blue("/help")
+                + AnsiColor.grey(" for available commands"));
+        out.println();
+    }
+
+    private static String maskPath(Path path) { return path.getFileName().toString(); }
+
+    private static String sanitizeOutput(String text) {
+        if (text == null) return "";
+        return text.replaceAll("\u001B\\[[;\\d]*m", "")
+                .replaceAll("[\u0000-\u0008\u000E-\u001F\u007F]", "");
+    }
+
+    private static String sanitizeErrorMessage(String message) {
+        if (message == null) return "(no details)";
+        return message.replaceAll("([A-Za-z]:)?[\\\\/][^\\\\/]+(?:[\\\\/][^\\\\/]+)*", "[path]")
+                .replaceAll("\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b", "[ip]");
+    }
+}

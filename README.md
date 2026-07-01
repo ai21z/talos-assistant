@@ -1,212 +1,649 @@
-# LOQ-J — Local-Only Java CLI for RAG
+# Talos
 
-Fast, private, citation-backed answers grounded in your current directory.
-- **Java 21**, Lucene 10.x, JLine REPL, Jackson
-- Local LLMs via **Ollama** (e.g., `qwen3:8b`)
-- Embeddings via `bge-m3` (vectors default **off** in config)
-- Modes: `ask | rag | rag+memory | dev | web | auto`
+Talos is a local-first CLI workspace assistant for understanding and changing a
+developer workspace through governed local tools, approval gates, traces,
+context handling, and verification-oriented outcomes.
 
----
+Talos began as LOQ-J, a local RAG CLI. It has evolved into a broader local
+workspace assistant and execution harness. Retrieval remains part of the
+system, but it now sits beside file tools, workspace operations, bounded command
+profiles, session state, prompt-debug evidence, and local trace records.
 
-## Installation
+The public release version is defined in `gradle.properties` as
+`talosVersion`, so the build and CLI stay aligned.
 
-### Option 1: Easy Install (Recommended)
+## Current Status
 
-**Windows:**
+Talos is under active beta hardening. The current beta path focuses on bounded
+local workspace tasks, explicit user control, local model execution, and
+auditable outcomes.
+
+The preferred model backend for the current product path is managed
+`llama.cpp`. Ollama remains available as a legacy backend option.
+
+### File Capability And Privacy Boundaries
+
+Talos is currently best suited for developer and text-oriented local
+workspaces:
+
+- code projects
+- Markdown and plain-text notes
+- JSON, YAML, XML, TOML, INI, properties, and config files
+- CSV and TSV files
+- static websites and source assets
+- non-sensitive workspace folders where local indexing/search is acceptable
+
+Talos can inspect and edit supported text-oriented files such as `.md`,
+`.markdown`, `.txt`, `.json`, `.yaml`, `.yml`, `.csv`, `.tsv`, `.html`, `.htm`,
+`.css`, `.js`, `.ts`, `.java`, `.kt`, `.kts`, `.py`, `.go`, `.rs`, `.c`,
+`.cpp`, `.h`, `.hpp`, `.xml`, `.toml`, `.ini`, `.properties`, `.conf`,
+`.config`, shell scripts, PowerShell scripts, Gradle files, Dockerfiles,
+README files, LICENSE files, and similar project text files.
+
+#### Capability Matrix
+
+| Area | Beta claim | Boundary |
+|---|---|---|
+| Developer/text workspaces | Inspect, edit, diff, approve, checkpoint, and verify supported text files | Not arbitrary shell/browser/cloud automation |
+| PDF | Text extraction for text-bearing PDFs | Not PDF creation, scanned-PDF OCR, visual layout review, or guaranteed reading order |
+| Word | Text extraction for `.docx` | Not `.doc`, comments/tracked-changes fidelity, embedded objects, or valid Word document generation |
+| Excel | Visible-cell extraction for `.xls`/`.xlsx` | No formula recalculation, macro execution, hidden-sheet guarantees, chart interpretation, or valid workbook generation |
+| Static web | HTML/CSS/JS source editing and static coherence checks | Not browser rendering proof unless a separate browser audit is run |
+| Image/OCR | Frozen out of beta product claims | Experimental OCR plumbing is not beta readiness evidence |
+| PowerPoint | Frozen out of beta product claims | No PPT/PPTX reader, writer, or slide-layout understanding claim |
+| Private paperwork | Not an approved beta product claim | Do not position Talos as safe for tax, health, legal, family, or admin folders until all privacy release gates pass |
+
+Talos cannot create valid PDF/DOCX/XLS/XLSX files with the current local
+text-file tool surface. It may create supported text source artifacts such as
+Markdown, plain text, HTML, CSV, or JSON that a dedicated document tool can
+convert later.
+
+Talos now has narrow local extraction for text-bearing PDFs, `.docx` Word
+documents, and `.xls`/`.xlsx` Excel workbooks. These are text extraction paths,
+not layout-perfect document review. PDF visual order, scanned/image-only PDFs,
+DOCX layout/comments/tracked changes/embedded objects, hidden workbook sheets,
+charts, macros, and workbook formula recalculation remain limited and must be
+reported as extraction limitations. Workbook formula cells are shown as formula
+text plus cached display value when available; Talos does not recalculate them.
+Large extracted output is capped and reported as partial/truncated rather than
+treated as complete. Scanned or image-only PDFs are reported as requiring OCR
+rather than treated as successfully reviewed. Encrypted and corrupt documents
+are reported as unreadable evidence, not summarized from guesswork.
+
+Images are frozen out of the beta scope and tracked for v1. The current code has
+an experimental OCR command adapter, but beta product claims must not depend on
+it. Talos must not describe image contents from filenames or guesswork. Use
+`/status --verbose` to see document-extraction preflight, including whether
+Image OCR is disabled, unavailable, or backed by a resolved local OCR command.
+This preflight checks configuration and command resolution; it does not execute
+the OCR command just to render status.
+
+PowerPoint (`.ppt`, `.pptx`) is also frozen out of beta and tracked for v1.
+Legacy Word `.doc`, archives, executables, and most binary files remain
+unsupported or deferred. If one of those files exists,
+Talos may identify that the file exists, but it must not claim it reviewed the
+body unless a local extractor actually produced text evidence. Convert
+unsupported documents to text, Markdown, HTML, CSV, or another supported text
+format before relying on Talos to inspect their contents.
+
+Sensitive personal paperwork is not an approved product claim yet. Do not
+position this beta as safe for tax folders, health records, legal paperwork,
+family/admin documents, or other private document folders until the privacy,
+artifact-redaction, RAG-safety, unsupported-format, and private-folder-mode
+release gates all pass.
+
+Talos may create local artifacts such as model context, provider-body captures,
+prompt-debug files, local turn traces, session logs, and RAG indexes.
+
+#### Current Trust-Surface Limits
+
+Talos is a governance shell around local model execution, not proof that the
+model is capable or honest without runtime evidence. A documented limitation is
+not an overclaim.
+
+Talos's deterministic no-change/no-success correction is strongest for file-mutation turns. It also withholds recognized ungrounded command/tool-output shapes when the turn ledger lacks the matching producer (git-status, test-run, process-list, shell listing/cat output, and explicit file-content claims without a matching read), but arbitrary `run_command` claims and broad read/answer factual claims are not completely covered.
+
+Secret redaction is best-effort. It covers common key=value secret shapes, known canaries, common standalone token prefixes, AWS access-key shapes, JWT-like tokens, PEM private-key blocks, and URL/connection-string userinfo in model-context and durable sinks. Command-output handoff also withholds bounded high-entropy command streams before model context. This is not complete secret, PII, or credential detection. Do not rely on Talos to scrub arbitrary sensitive text from files it reads, command output, sessions, or traces.
+
+`run_command` stdout and stderr pass through the model-context handoff boundary. Non-sensitive command output remains visible to the model for verification answers; command output that required secret redaction is withheld from model context and replaced with a bounded notice. This is not a complete command-output privacy proof. Do not run commands that print real credentials in this beta.
+
+Windows trailing-dot and trailing-space path aliases are canonicalized before protected-path matching; this is not a complete Windows path-security proof.
+
+Chat model endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend; when remote chat is explicitly allowed, full prompts can leave this machine. Keep chat endpoints on `127.0.0.1`, `::1`, or `localhost` to remain local-first.
+
+On Windows, the local secret-store master key is protected at rest with DPAPI CurrentUser and is tied to the Windows user account. This is not hardware-backed custody and does not protect against a same-user process that can ask Windows to unprotect it. On non-Windows platforms, master-key custody remains unchanged and is not yet OS-backed. Treat the `~/.talos/secrets/` directory and your OS account as part of the trust boundary; use OS-level disk encryption.
+
+Local traces and logs are durable evidence artifacts, but they are not tamper-evident. Local traces and turn logs are best-effort plaintext diagnostic artifacts stored under `~/.talos`. They are NOT tamper-evident: there is no hash chain, signature, or append-only enforcement, so any process with write access to your home directory (including a later Talos turn) can alter or delete them undetectably. Treat them as local debugging evidence, not as a cryptographically provable audit trail.
+
+Indirect read results are treated as a privacy boundary, but this is currently
+best-effort: protected and unsupported files are omitted by path policy, and
+non-protected matches are sanitized only by the current pattern redactor before
+model handoff. Protected and unsupported files are excluded from new RAG indexes
+by default, and stale index metadata is used to force rebuilds when the
+privacy/file-capability policy changes.
+
+Approved direct protected reads are different. In developer/default mode, an
+approved `talos.read_file(".env")` or `talos.read_file("secrets/...")` may place
+protected file contents into model context for that turn. In private mode,
+approved protected reads default to `LOCAL_DISPLAY_ONLY`: the runtime reads the
+file locally after approval, but withholds raw contents from model context and
+redacts persisted artifacts unless an explicit `SEND_TO_MODEL_CONTEXT` scope is
+enabled. This is still not enough to position Talos as safe for sensitive
+paperwork folders; private-document positioning still needs stronger real-world
+fixture coverage and private-folder release evidence.
+
+Private mode is user-visible in the REPL:
+
+- `/privacy status` shows the current privacy mode, protected-read handoff
+  scope, RAG/retrieve behavior in private mode, and raw artifact persistence
+  setting. It also states whether the command is changing only the current
+  session/config state.
+- `/privacy private on` switches the current session/config state to private
+  mode.
+- `/privacy private off` restores developer/default behavior after an explicit
+  user command.
+- `/privacy help` explains model-context and artifact boundaries.
+
+`/privacy` does not write persistent defaults to `~/.talos/config.yaml`. Edit
+`~/.talos/config.yaml` when a machine or workspace should start in private mode
+by default.
+
+After a live audit, maintainers can scan runtime artifacts with:
+
 ```powershell
-# Build the distribution
-./gradlew clean installDist
-
-# Install to PATH
-pwsh tools/install-windows.ps1
-
-# Open new terminal and verify
-loqj --version
+./gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/<audit-id>,local/manual-workspaces/<audit-id>" --no-daemon
 ```
 
-**Linux/macOS:**
-```bash
-# Build the distribution
-./gradlew clean installDist
+The normal CI-style broad scan and the targeted live-audit scan are different:
+the targeted scan is the one intended for prompt-debug, provider-body, session,
+trace, turn JSONL, command-output, and generated audit-report directories.
+`checkRuntimeArtifactCanaries` intentionally requires explicit
+`-PartifactScanRoots=...`; it does not default to all historical manual-audit
+folders because older ignored audits can contain stale canaries by design.
 
-# Install to PATH (user-local)
-bash tools/install-unix.sh
+The document-capability live audit script can run a beta-core audit that
+excludes frozen image/PPT prompts and includes private-mode PDF/DOCX/XLSX
+provenance prompts with ordinary private-document fact fixtures:
 
-# Or install system-wide (requires sudo)
-bash tools/install-unix.sh --sudo
-
-# Open new terminal and verify
-loqj --version
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
 ```
 
-### Option 2: Manual Usage
+For the broader private-folder scripted bank, add `-PrivateFolderBank`. This
+adds `/show` local-display checks, private-mode retrieve/reindex checks, a
+protected-read denial probe, and a generated manual runbook for approval-sensitive
+cases that still require interactive capture:
 
-```bash
-# Build & run from project directory
-./gradlew clean installDist
-
-# Windows PowerShell
-./build/install/loqj/bin/loqj.bat --version
-
-# Linux/macOS
-./build/install/loqj/bin/loqj --version
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers
 ```
 
----
+It can also run the frozen image/OCR path separately when that work resumes:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -StopStaleServers
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -UseRealOcr -StopStaleServers
+```
+
+The default non-beta-core mode uses a controlled OCR stub and proves tool
+routing, privacy boundaries, and artifact handling. `-UseRealOcr` requires a
+real local OCR command such as Tesseract, or `-OcrCommand <path>`, and is the
+only mode that counts as production image-OCR evidence. Neither image OCR nor
+PowerPoint counts as beta readiness evidence while those formats are frozen for
+v1.
+
+Talos may warn when a workspace name or shallow metadata looks sensitive, such
+as tax, health, legal, finance, secrets, protected folders, or many private
+document formats. This warning does not prove the folder is safe, and Talos does
+not inspect protected file contents to decide whether to show it.
+
+## How A Turn Works
+
+A Talos turn is handled as an execution cycle:
+
+```text
+    .--------------------.
+    | classify request   |
+    '---------+----------'
+              |
+              v
+    .--------------------.
+    | inspect workspace  |
+    | or retrieve context|
+    '---------+----------'
+              |
+              v
+    .--------------------.
+    | call allowed tools |
+    | when action is     |
+    | required           |
+    '---------+----------'
+              |
+              v
+    .--------------------.
+    | verify, trace,     |
+    | and report outcome |
+    '--------------------'
+```
+
+In practice, a turn can include:
+
+- file reads
+- directory listing
+- grep-style search
+- retrieval from the local index
+- approved file creation and edits
+- approved workspace operations such as mkdir, copy, move, and rename
+- approved bounded command profiles
+- session-memory updates
+- prompt-debug and trace persistence
+- verification-oriented completion checks
+
+Runtime policy decides which tools are visible for the current turn. Mutation
+tools are exposed only for apply-oriented turns, and command execution is exposed
+only for approved command or verification turns.
+
+## What Talos Does Today
+
+Talos currently supports five main workflows:
+
+1. Understand a local workspace.
+2. Retrieve relevant local context.
+3. Inspect, create, and modify workspace files through approved tools.
+4. Keep a local session coherent across turns.
+5. Preserve traceable outcomes for review.
+
+### Workspace Understanding
+
+Talos can answer questions about the current project, inspect specific files,
+list directories, search for patterns, and summarize evidence from the
+workspace.
+
+### Retrieval
+
+Talos has a local indexing and retrieval path:
+
+- `rag-index` builds the local index.
+- `rag-ask` asks through the retrieval pipeline directly.
+- Agent mode can use retrieval as a tool when workspace context is
+  needed.
+
+RAG in Talos means the local Lucene index and retrieval pipeline, not cloud
+search or a vector database. BM25 retrieval works without embeddings and is
+best for exact names, paths, identifiers, config keys, and obvious text
+matches. Vector retrieval requires a local embedding endpoint. When embeddings
+are disabled or fail, Talos falls back to BM25-only retrieval. Use direct file
+reads for exact file contents, edits, line-sensitive reasoning, and
+verification.
+
+### Tool Use
+
+Talos has a focused tool set for local workspace work:
+
+| Tool | Purpose | Approval |
+|---|---|---|
+| `read_file` | read a file with line-oriented output | not required |
+| `list_dir` | inspect workspace structure | not required |
+| `grep` | search for patterns in the workspace | not required |
+| `retrieve` | pull relevant indexed context | not required |
+| `write_file` | create or replace file content | required |
+| `edit_file` | patch file content by targeted replacement | required |
+| `mkdir` | create a directory inside the workspace | required |
+| `copy_path` | copy a file or directory inside the workspace | required |
+| `move_path` | move a file or directory inside the workspace | required |
+| `rename_path` | rename a file or directory inside its parent | required |
+| `delete_path` | delete a file or directory inside the workspace | required |
+| `apply_workspace_batch` | apply a small approved batch of workspace operations | required |
+| `run_command` | run approved bounded command profiles | required |
+
+Write tools are approval-gated. The workspace remains under user control, and
+Talos records the outcome of each governed operation.
+
+### Workspace Boundary
+
+Talos works inside the workspace selected when the session starts. Natural
+requests such as creating files, creating folders, copying paths, or running
+approved checks are scoped to that workspace.
+
+The `/workspace` command shows the current workspace and index paths. To work in
+a different folder, Talos should be started from that folder.
+
+### Session Behavior
+
+Talos maintains local session state:
+
+- conversation history is kept in memory
+- sessions are persisted locally
+- turn logs are written for durability
+- prior session state can be restored for the same workspace
+- prompt-debug and trace artifacts can be reviewed when debugging behavior
+
+## Main User Modes
+
+Talos exposes multiple modes:
+
+- `auto`: default mode for most workspace work; routes structural commands
+  directly and natural-language work to Agent
+- `ask`: read-only answers and workspace inspection; no edits or commands
+- `plan`: read-only planning; can inspect allowed files but does not apply
+  changes
+- `agent`: edit-capable assistant mode, still governed by approval and policy
+
+Legacy aliases `dev`, `chat`, and `unified` resolve to canonical `agent`.
+Legacy `rag` remains available for explicit retrieval-focused compatibility but
+is not part of the primary public mode list. `web` is reserved in this build and
+cannot be selected.
+
+Auto mode is assistant-first. It uses tools and retrieval when needed, while
+runtime policy keeps each turn bounded.
 
 ## Quick Start
 
-```bash
-# Start interactive REPL (shows logo and workspace info)
-loqj
+### Public beta install target
 
-# Start without banner (for scripts)
-loqj run --no-logo
+The packaged public beta install target is Windows x64:
 
-# Check version and system info
-loqj --version
-loqj version
-
-# Check current workspace status
-loqj status
-loqj status --verbose
-
-# Index your current project
-loqj rag-index
-
-# Ask questions about your code
-loqj rag-ask "How does the authentication system work?"
-
-# Work with specific directories
-loqj rag-index --root /path/to/project
-loqj rag-ask --root /path/to/project "What are the main components?"
+```powershell
+winget install --id TalosProject.TalosCLI -e
+talos setup models
+talos status --verbose
+talos
 ```
 
----
+This public path is not live until a signed GitHub Release asset and winget
+manifest are published. The winget package name and moniker should be
+`talos-cli`, with `TalosProject.TalosCLI` as the exact package ID and
+`Vissarion Zounarakis` as publisher. The public installer will include a
+bundled Java runtime, so public users should not need to install Java manually. It
+installs Talos only; it does not bundle a llama.cpp server or model weights.
+Model setup remains an explicit post-install command through
+`talos setup models`.
 
-## Interactive Mode
+Until the public release exists, use the source/developer path below.
 
-When you run `loqj` (or `loqj run`), you enter an interactive REPL with:
-
-- **Dynamic prompt**: `loqj@rag_ >` (updates when you change modes)
-- **ASCII banner**: Shows on startup (skip with `--no-logo`)
-- **Mode switching**: `:mode ask|rag|dev|auto` with live prompt updates
-- **Workspace awareness**: Each directory maintains separate indices
-
-### REPL Commands
-
-```
-:help                 show available commands
-:version              show version information  
-:mode rag             switch to RAG mode (project-aware)
-:mode ask             switch to general Q&A mode
-:mode auto            smart mode selection
-:status               show workspace and configuration
-:status --verbose     detailed system information
-:k 10                 set retrieval top-K
-:debug on             show retrieved chunks
-:models               list available LLM models
-:set model qwen3:8b   switch active model
-:reindex              rebuild current workspace index
-:memory clear         clear conversation history
-:q                    quit
-```
-
----
-
-## Multi-Workspace Usage
-
-LOQ-J keeps each project's data completely separate:
+Linux source/developer beta path:
 
 ```bash
-# Work with web project
-loqj rag-index --root ~/projects/webapp
-loqj rag-ask --root ~/projects/webapp "What APIs are exposed?"
-
-# Switch to mobile project (separate context)
-loqj rag-index --root ~/projects/mobile-app  
-loqj rag-ask --root ~/projects/mobile-app "How is data stored locally?"
-
-# Set default workspace via environment
-export LOQJ_WORKSPACE=~/projects/webapp
-loqj status    # Now uses webapp by default
+./gradlew installDist
+bash tools/install-unix.sh --force
 ```
 
-See [docs/multi-workspace.md](docs/multi-workspace.md) for detailed examples.
+This is a checkout-based Linux source/developer install; no
+DEB/RPM/Homebrew/SDKMAN package claim exists for this beta. macOS is not a
+public beta support claim until separate smoke evidence exists.
 
----
+### 1. Install source/developer prerequisites
 
-## Configuration
+Current practical setup:
 
-LOQ-J uses these settings in priority order:
-1. Command-line flags (`--root`, `--k`, etc.)
-2. Environment variables
-3. Config files
-4. Built-in defaults
+- Windows or Linux source/developer setup
+- Java 21+
+- `llama-server.exe` from llama.cpp on Windows, `llama-server` on Linux, or
+  another configured local backend
+- a configured managed llama.cpp model profile or a local GGUF chat model
+- an embeddings model when vector retrieval is needed
 
-### Environment Variables
+The default product path uses the engine transport with `llama_cpp` as the
+backend. The recommended setup command configures one of the audited managed
+llama.cpp model profiles:
+
+```powershell
+talos setup models
+talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+```
+
+Those profile commands configure Hugging Face model sources and set the managed
+llama.cpp process to use `~/.talos/models/huggingface` as `HF_HOME`, so model
+files are downloaded under the Talos home folder on first model start.
+
+Users who already keep GGUF files elsewhere can point Talos at that file:
+
+```powershell
+talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe --model-path D:/models/agent.gguf --write
+```
+
+Existing configs can be replaced with `--force`; Talos writes a backup first.
+Ollama can still be selected explicitly as a legacy backend when needed.
+On Linux, use the real path to the local `llama-server` binary instead of the
+Windows `.exe` example path.
+
+### 2. Build Talos
+
+```powershell
+.\gradlew.bat installDist
+```
+
+On Linux:
 
 ```bash
-# Default workspace (avoids typing --root every time)
-export LOQJ_WORKSPACE=/path/to/your/project
-
-# Ollama connection
-export LOQJ_OLLAMA_HOST=http://127.0.0.1:11434
-export LOQJ_OLLAMA_MODEL=qwen2.5:7b
-
-# Then just run:
-loqj status
-loqj rag-ask "What does this project do?"
+./gradlew installDist
 ```
 
----
+### 3. Install on Windows
 
-## Requirements
+```powershell
+pwsh tools\install-windows.ps1
+```
 
-- **Java 21+** (for Vector API support)
-- **Ollama** running locally with a model (e.g., `ollama pull qwen2.5:7b`)
-- **4GB+ RAM** recommended for indexing large codebases
+### 3b. Install on Linux
 
----
-
-## Features
-
-✅ **First-class CLI experience** - `loqj` from anywhere after install  
-✅ **Interactive REPL** - Dynamic prompts that show current mode  
-✅ **Multi-workspace** - Each project gets isolated indices and context  
-✅ **Version management** - `loqj -v`, `--version`, `version` subcommand  
-✅ **Offline-first** - No cloud dependencies or data sharing  
-✅ **Fast indexing** - Lucene 10 with optional vector embeddings  
-✅ **Citation-backed** - Every answer includes relevant file references  
-✅ **Mode flexibility** - Ask, RAG, dev, web, and auto modes  
-
----
-
-## Troubleshooting
-
-**"Command not found" errors:**
-- Windows PowerShell: Use `.\loqj.bat` (dot-slash prefix required)
-- After installation: Open new terminal window to reload PATH
-
-**Ollama connection issues:**
 ```bash
-# Check if Ollama is running
-curl http://127.0.0.1:11434/api/version
-
-# Test with LOQ-J
-loqj status --verbose
+bash tools/install-unix.sh --force
 ```
 
-**Empty or slow indices:**
-```bash
-# See what files were found
-loqj status --verbose
+### 4. Run Talos
 
-# Force complete reindex
-loqj rag-index --full
-
-# Use faster BM25-only mode
-loqj run --bm25-only
+```powershell
+talos
 ```
 
-See [docs/multi-workspace.md](docs/multi-workspace.md) for more detailed troubleshooting.
+### 5. Build an index for a workspace when needed
+
+```powershell
+talos rag-index
+```
+
+### 6. Ask workspace questions or request approved changes
+
+```text
+What does this project do?
+Read README.md and explain the architecture.
+Create notes/summary.md with a short project summary.
+Change only the page title in index.html.
+Run the approved Gradle test command profile.
+```
+
+## Common Commands
+
+### Top-level CLI
+
+| Command | Purpose |
+|---|---|
+| `talos` | start the interactive REPL |
+| `talos run` | explicit REPL entry |
+| `talos rag-index` | build or refresh the local index |
+| `talos rag-ask "..."` | ask through the retrieval lane directly |
+| `talos status` | inspect current workspace/config state |
+| `talos diagnose` | inspect retrieval and answer-generation behavior |
+| `talos doctor` | verify the local environment (config, engine, model files, server, index) |
+| `talos version` | print version information |
+| `talos setup` | first-run setup flow |
+| `talos setup models` | configure tested managed llama.cpp model profiles |
+
+### Useful REPL Commands
+
+| Command | Purpose |
+|---|---|
+| `/help` | show commands |
+| `/mode <mode>` | switch active mode |
+| `/models` | list available models |
+| `/set model <backend/model>` | switch active model |
+| `/reindex` | rebuild the current workspace index |
+| `/workspace` | show current workspace status |
+| `/status` | show runtime and indexing details |
+| `/tools` | show the registered tool set |
+| `/doctor` | run environment preflight checks |
+| `/profiles` | inspect or trust workspace verification profiles |
+| `/verify` | run a trusted workspace verification profile |
+| `/checkpoint` | manage local mutation checkpoints |
+| `/undo` | undo the last file write/edit |
+| `/privacy status` | show privacy mode, protected-read scope, RAG/retrieve, and artifact persistence |
+| `/privacy private on` | enable stricter private-mode defaults for this current session/config state |
+| `/privacy private off` | restore developer/default privacy behavior explicitly |
+| `/context` | show context-window usage and compaction state |
+| `/compact` | summarize older exchanges to free context space |
+| `/session info` | inspect current session state |
+| `/session list` | list this workspace's saved sessions |
+| `/session resume [id]` | restore a previous session (latest by default) |
+| `/session export [id]` | export a session transcript to `~/.talos/exports/` |
+| `/clear` | clear conversation memory |
+| `/<template>` | workspace template commands from `.talos/commands/*.md` (`$ARGS` substitution; restart to reload) |
+| `/q` | exit |
+
+## The Talos Work Cycle
+
+Talos has a structured development and review cycle:
+
+- fast local implementation loop
+- normal Gradle verification
+- focused milestone audits when runtime or model behavior changes
+- larger full E2E audits before important release decisions
+
+```text
+    change code
+         |
+         v
+    .----------------------.
+    | versioned candidate  |
+    '----------+-----------'
+               |
+               v
+    build -> test -> e2e -> audit -> review
+               ^                         |
+               |                         |
+               '---- change code if needed
+```
+
+The work-cycle documentation lives here:
+
+- [work-cycle-docs/work-test-cycle.md](work-cycle-docs/work-test-cycle.md)
+- [work-cycle-docs/work-test-cycle-setup.md](work-cycle-docs/work-test-cycle-setup.md)
+- [work-cycle-docs/work-test-cycle-step-by-step.md](work-cycle-docs/work-test-cycle-step-by-step.md)
+- [work-cycle-docs/milestone-audit-workflow.md](work-cycle-docs/milestone-audit-workflow.md)
+- [work-cycle-docs/full-e2e-audit-workflow.md](work-cycle-docs/full-e2e-audit-workflow.md)
+- [docs/setup-managed-models.md](docs/setup-managed-models.md)
+
+Post-0.9.6 architecture direction is documented in
+[docs/architecture/01-execution-discipline-and-local-trust.md](docs/architecture/01-execution-discipline-and-local-trust.md).
+
+## Running Talos Well
+
+### Hardware
+
+Talos can run on modest hardware. Larger local models need more RAM and more
+time.
+
+Practical guidance:
+
+- small local models are comfortable on typical developer machines
+- larger local models benefit from more RAM and faster CPUs/GPUs
+- SSD storage is strongly recommended for smoother indexing and model work
+
+### Software
+
+Current practical setup:
+
+- Windows as the packaged public-beta target
+- Linux source/developer beta support from a checkout
+- Java 21+
+- managed llama.cpp for the primary local model path
+- `talos setup models` for tested Qwen and GPT-OSS profiles
+- Ollama as an optional legacy backend
+
+### Network Expectations
+
+Talos is local-first:
+
+- workspace data is intended to stay local
+- local model backends are expected to run on the same machine or localhost
+- models must be downloaded or configured ahead of use
+
+## Quality Reports
+
+Talos can generate reviewer-friendly Markdown quality reports from the
+machine-readable summaries in `build/reports/talos/`.
+
+Use this command for local snapshots of coverage, E2E, Qodana, and build
+artifact provenance:
+
+```powershell
+./gradlew.bat writeQualityMarkdownReports
+```
+
+For a full fresh local quality run that refreshes native Qodana first:
+
+```powershell
+./gradlew.bat talosQualityLocal
+```
+
+Reports are written to the repository-root `reports/` folder using this format:
+
+```text
+<reportName>-DDMMYYYY-<talosVersion>.md
+```
+
+Example:
+
+```text
+coverage-23042026-090.md
+```
+
+The generated `reports/` folder is intentionally ignored by Git. The tracked
+`reports-disabled/README.md` explains how to use it. Gradle also creates
+`reports/` automatically when the report task runs.
+
+Before writing new reports, the generator removes older generated report
+snapshots with the standard report filename pattern. Manual files with other
+names are preserved.
+
+## Beta Scope
+
+Talos is useful today for local workspace understanding, guarded file operations,
+and evidence-oriented developer workflows. The beta line is still being hardened
+around model reliability, command profiles, semantic verification, binary file
+support, and broader capability growth.
+
+The strongest current path is Windows packaged/source setup or Linux
+source/developer setup plus managed llama.cpp with explicit local model
+configuration. File and workspace operations are gated and traceable. Command
+execution is bounded to approved profiles. Unsupported or unverified results
+are reported as such.
+
+## Repo Layout
+
+High-level layout:
+
+```text
+.
+|-- src/                 Java source
+|-- docs/                tracked project and architecture docs
+|-- scripts/             helper scripts
+|-- tools/               install and support tooling
+|-- local/               ignored local working space
+|-- reports-disabled/    tracked docs for ignored local reports
+|-- build/               generated outputs
+|-- CHANGELOG.md         human-readable version history
+`-- README.md            project overview
+```
+
+The `local/` folder is for personal workspace material on this machine,
+including manual-testing notes. It is intentionally ignored by Git. Generated
+`reports/` are also ignored; usage instructions are kept in `reports-disabled/`.
+
+## Summary
+
+Talos is a local-first workspace assistant and execution harness. It combines
+retrieval, local tools, approval-gated file operations, bounded command
+profiles, local traces, context handling, and verification-oriented outcomes for
+developer workspaces.

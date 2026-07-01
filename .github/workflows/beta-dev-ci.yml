@@ -1,0 +1,130 @@
+name: Talos CI
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [main, v0.9.0-beta-dev]
+  push:
+    branches:
+      - main
+      - v0.9.0-beta-dev
+      - 'codex/**'
+      - 'feature/**'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: beta-dev-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gradle-check:
+    name: Gradle check (Java 21)
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Run site honesty and build checks
+        run: |
+          npm ci --prefix site
+          npm test --prefix site
+          npm run build --prefix site
+
+      - name: Run unit tests
+        run: .\gradlew.bat test --no-daemon
+
+      - name: Run E2E tests
+        run: .\gradlew.bat e2eTest --no-daemon
+
+      - name: Run coverage and artifact gates
+        run: .\gradlew.bat jacocoTestReport checkGeneratedArtifactCanaries jacocoTestCoverageVerification --no-daemon
+
+      - name: Run final Gradle check
+        run: .\gradlew.bat check --no-daemon
+
+      - name: Report test result failures
+        if: failure()
+        shell: pwsh
+        run: |
+          function Escape-Annotation([string] $Value) {
+            return $Value.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+          }
+
+          $found = $false
+          $files = Get-ChildItem -Path build/test-results -Filter *.xml -Recurse -ErrorAction SilentlyContinue
+          foreach ($file in $files) {
+            try {
+              [xml] $xml = Get-Content -LiteralPath $file.FullName -Raw
+            } catch {
+              $path = Escape-Annotation $file.FullName
+              $message = Escape-Annotation $_.Exception.Message
+              Write-Output "::warning file=$path::Could not parse test result XML: $message"
+              continue
+            }
+
+            foreach ($case in $xml.testsuite.testcase) {
+              $nodes = @()
+              if ($case.failure) { $nodes += $case.failure }
+              if ($case.error) { $nodes += $case.error }
+              foreach ($node in $nodes) {
+                $found = $true
+                $message = if ($node.message) { $node.message } elseif ($node.InnerText) { $node.InnerText.Trim() } else { 'Test failed' }
+                $title = "$($case.classname).$($case.name)"
+                $path = Escape-Annotation $file.FullName
+                $safeTitle = Escape-Annotation $title
+                $safeMessage = Escape-Annotation $message
+                Write-Output "::error file=$path,title=$safeTitle::$safeMessage"
+              }
+            }
+          }
+
+          if (-not $found) {
+            Write-Output "No JUnit XML failures found under build/test-results."
+          }
+
+  linux-command-portability:
+    name: Linux command portability smoke (Java 21)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Ensure Gradle wrapper is executable
+        run: chmod +x ./gradlew
+
+      - name: Run Gradle through stripped POSIX environment
+        run: |
+          env -i HOME="$HOME" PATH="$PATH" JAVA_HOME="$JAVA_HOME" \
+            LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" \
+            ./gradlew --no-daemon help
+
+      - name: Run command portability tests
+        run: ./gradlew test --tests "dev.talos.runtime.command.*" --no-daemon

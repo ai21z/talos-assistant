@@ -1,0 +1,2 @@
+sample-scenario
+purpose=tracks the dedicated e2eTest scenario resource lane

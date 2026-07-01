@@ -1,0 +1,15 @@
+{
+  "name": "identity small talk answers as Talos",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "small-talk-contract-does-not-enter-tool-loop",
+    "identity-answer-uses-talos-product-identity"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "hello who are you?",
+  "scriptedResponses": [
+    "I'm Qwen, a large language model created by Alibaba Cloud."
+  ]
+}

@@ -1,0 +1,2 @@
+CANONICAL_PDF_TEXT_ALPHA
+PDF fixture for Talos extraction evidence

@@ -1,35 +1,66 @@
-# LOQ-J Windows Uninstaller
-# Removes LOQ-J from your system by:
-# - Stopping any running LOQ-J Java processes
-# - Removing LOQ-J bin directory from User PATH
-# - Deleting installation directory (%LOCALAPPDATA%\Programs\loqj)
-# - Optionally removing user data (~\.loqj) with -Purge flag
-# - Broadcasting PATH changes to other applications
+<#
+.SYNOPSIS
+  Uninstall Talos from a Windows user profile.
 
-[CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+.DESCRIPTION
+  Reverses tools/install-windows.ps1:
+   - Stops running Talos Java processes (best-effort).
+   - Removes %LOCALAPPDATA%\Programs\talos (or custom -InstallDir).
+   - Removes the Talos bin path from the User PATH only.
+   - Optionally deletes user data at "$HOME\.talos" (indices, caches, config).
+   - Idempotent; safe to run multiple times.
+
+.PARAMETER InstallDir
+  The root installation directory. Default: "$env:LOCALAPPDATA\Programs\talos"
+
+.PARAMETER Purge
+  Shortcut for -RemoveUserData.
+
+.PARAMETER RemoveUserData
+  Remove "$HOME\.talos" (indices, caches, config). Does not touch Ollama models.
+
+.PARAMETER Quiet
+  Suppress confirmation prompt.
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1 -WhatIf
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1 -Quiet
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1 -Quiet -Purge
+#>
+
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\loqj'),
+    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\talos'),
     [switch]$Purge,
     [Alias('RemoveData')][switch]$RemoveUserData,
     [switch]$Quiet
 )
 
-function Write-Step($msg) { Write-Host "• $msg" }
-function Write-Info($msg) { Write-Host "  $msg" -ForegroundColor DarkGray }
-function Write-Warn2($msg){ Write-Warning $msg }
+function Write-Step([string]$msg) { Write-Host ("- " + $msg) }
+function Write-Info([string]$msg) { Write-Host ("  " + $msg) -ForegroundColor DarkGray }
+function Write-Warn2([string]$msg) { Write-Warning $msg }
 
-# Expand Purge shortcut
+# Expand Purge -> RemoveUserData
 if ($Purge) { $RemoveUserData = $true }
 
 # Normalize paths
-$InstallDir = (Resolve-Path -LiteralPath $InstallDir -ErrorAction SilentlyContinue)?.Path ?? $InstallDir
-$BinDir     = Join-Path $InstallDir 'bin'
-$UserData   = Join-Path $HOME '.loqj'
+$resolved = Resolve-Path -LiteralPath $InstallDir -ErrorAction SilentlyContinue
+if ($resolved) { $InstallDir = $resolved.Path }
+$BinDir   = Join-Path $InstallDir 'bin'
+$UserData = Join-Path $HOME '.talos'
 
-# 0) Confirm
-if (-not $Quiet) {
-    $msg = "Uninstall LOQ-J from:`n  Install: $InstallDir`n  Remove PATH entry: $BinDir`n  Remove user data (~\.loqj): " + ($RemoveUserData ? "YES" : "NO")
-    $title = "Confirm LOQ-J uninstall"
+# 0) Confirm (unless -Quiet or -WhatIf or -Confirm:$false)
+if (-not $Quiet -and -not $WhatIfPreference) {
+    $dataRemovalText = if ($RemoveUserData) { "YES" } else { "NO" }
+    $msg = "Uninstall Talos from:`n  Install: $InstallDir`n  Remove PATH entry: $BinDir`n  Remove user data (~\.talos): $dataRemovalText"
+    $title = "Confirm Talos uninstall"
     $choices = New-Object Collections.ObjectModel.Collection[Management.Automation.Host.ChoiceDescription]
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription "&Yes", "Proceed"))
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription "&No", "Cancel"))
@@ -37,73 +68,68 @@ if (-not $Quiet) {
     if ($sel -ne 0) { Write-Host "Cancelled."; return }
 }
 
-# 1) Attempt to stop any LOQ-J-related Java processes
-Write-Step "Stopping running LOQ-J processes (if any)"
+# Set ConfirmPreference if -Quiet is specified (suppresses all confirmation prompts)
+if ($Quiet) {
+    $ConfirmPreference = 'None'
+}
+
+# 1) Stop any Talos Java processes (best-effort)
+Write-Step "Stopping running Talos processes (if any)"
 try {
     $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object {
                 $_.CommandLine -and (
                 $_.CommandLine -match [regex]::Escape($InstallDir) -or
-                        $_.CommandLine -match 'dev\.loqj' -or
-                        $_.CommandLine -match 'loqj\.jar'
+                        $_.CommandLine -match 'dev\.talos' -or
+                        $_.CommandLine -match 'talos\.jar'
                 )
             }
     if ($procs) {
-        $procs | ForEach-Object {
+        foreach ($p in $procs) {
             try {
-                Write-Info "Stopping PID $($_.ProcessId): $($_.Name)"
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                if ($PSCmdlet.ShouldProcess("Process $($p.ProcessId) ($($p.Name))", "Stop-Process")) {
+                    Write-Info ("Stopping PID {0}: {1}" -f $p.ProcessId, $p.Name)
+                    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+                }
             } catch {}
         }
     } else {
         Write-Info "No matching processes found."
     }
 } catch {
-    Write-Warn2 "Process scan failed (continuing): $($_.Exception.Message)"
+    Write-Warn2 ("Process scan failed (continuing): {0}" -f $_.Exception.Message)
 }
 
-# 2) Remove LOQ-J bin from *User* PATH
-function Remove-FromUserPath([string]$target) {
+# 2) Remove Talos bin from User PATH
+Write-Step "Removing Talos bin from User PATH"
+
+if ($PSCmdlet.ShouldProcess($BinDir, "Remove from User PATH")) {
     $current = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (-not $current) { return $false }
-    $parts = $current -split ';' | Where-Object { $_ -and $_.Trim() -ne '' }
-    $before = $parts.Count
-    $filtered = $parts | Where-Object {
-        $p = $_.Trim()
-        # Case-insensitive exact match on normalized path
-        -not ($p.TrimEnd('\') -ieq ($target.TrimEnd('\')))
-    }
-    if ($filtered.Count -ne $before) {
-        $new = ($filtered -join ';')
-        [Environment]::SetEnvironmentVariable('Path', $new, 'User')
-        return $true
-    }
-    return $false
-}
 
-Write-Step "Removing LOQ-J bin from User PATH"
-$removed = Remove-FromUserPath $BinDir  # Remove the Test-Path check - function handles non-existent paths fine
-if ($removed) {
-    Write-Info "Removed PATH entry: $BinDir"
-    # Broadcast environment change to other windows (best-effort)
-    try {
-        Add-Type -Namespace Win32 -Name Native -MemberDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public static class Native {
-  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)]
-  public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
-}
-"@ -ErrorAction SilentlyContinue | Out-Null
-        $HWND_BROADCAST = [IntPtr]0xffff
-        $WM_SETTINGCHANGE = 0x001A
-        $r = [UIntPtr]::Zero
-        [Win32.Native]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, "Environment", 2, 5000, [ref]$r) | Out-Null
-    } catch {
-        Write-Info "PATH updated; open a NEW terminal to pick up changes."
+    if (-not $current) {
+        Write-Info "User PATH is empty (nothing to remove)."
+    } else {
+        $parts = $current -split ';' | Where-Object { $_ -and $_.Trim() -ne '' }
+        $before = $parts.Count
+
+        # Normalize target path for comparison
+        $targetNormalized = $BinDir.TrimEnd('\').ToLower()
+
+        # Filter out entries that match the target path
+        $filtered = $parts | Where-Object {
+            $entryNormalized = $_.Trim().TrimEnd('\').ToLower()
+            $entryNormalized -ne $targetNormalized
+        }
+
+        if ($filtered.Count -ne $before) {
+            $newPath = ($filtered -join ';')
+            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+            Write-Info ("Removed PATH entry: {0}" -f $BinDir)
+            Write-Info "PATH updated in the User profile. Open a NEW terminal to pick up changes."
+        } else {
+            Write-Info "No PATH entry found (already removed or never installed)."
+        }
     }
-} else {
-    Write-Info "No PATH entry found (already removed or never installed)."
 }
 
 # 3) Remove install directory
@@ -112,33 +138,33 @@ if (Test-Path -LiteralPath $InstallDir) {
     if ($PSCmdlet.ShouldProcess($InstallDir, "Remove-Item -Recurse -Force")) {
         try {
             Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction Stop
-            Write-Info "Deleted: $InstallDir"
+            Write-Info ("Deleted: {0}" -f $InstallDir)
         } catch {
-            Write-Warn2 "Could not delete '$InstallDir': $($_.Exception.Message)"
+            Write-Warn2 ("Could not delete '{0}': {1}" -f $InstallDir, $_.Exception.Message)
         }
     }
 } else {
     Write-Info "Install directory not found (already removed?)."
 }
 
-# 4) Optional: remove user data (~\.loqj)
+# 4) Optional: remove user data (~\.talos)
 if ($RemoveUserData) {
-    Write-Step "Removing LOQ-J user data ($UserData)"
+    Write-Step ("Removing Talos user data ({0})" -f $UserData)
     if (Test-Path -LiteralPath $UserData) {
         if ($PSCmdlet.ShouldProcess($UserData, "Remove-Item -Recurse -Force")) {
             try {
                 Remove-Item -LiteralPath $UserData -Recurse -Force -ErrorAction Stop
-                Write-Info "Deleted: $UserData"
+                Write-Info ("Deleted: {0}" -f $UserData)
             } catch {
-                Write-Warn2 "Could not delete '$UserData': $($_.Exception.Message)"
+                Write-Warn2 ("Could not delete '{0}': {1}" -f $UserData, $_.Exception.Message)
             }
         }
     } else {
         Write-Info "User data not found (already removed?)."
     }
 } else {
-    Write-Info "Keeping user data at: $UserData"
+    Write-Info ("Keeping user data at: {0}" -f $UserData)
 }
 
-Write-Host "✔ LOQ-J uninstall complete." -ForegroundColor Green
-Write-Host "   Open a NEW terminal to pick up PATH changes." -ForegroundColor Yellow
+Write-Host "Talos uninstall complete." -ForegroundColor Green
+Write-Host "Open a NEW terminal to pick up PATH changes." -ForegroundColor Yellow

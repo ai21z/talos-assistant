@@ -13,13 +13,67 @@ rag:
     - "**/*.yml"
     - "**/*.yaml"
     - "**/*.json"
+    - "**/*.csv"
+    - "**/*.tsv"
     - "**/*.properties"
     - "**/*.html"
     - "**/*.htm"
+    - "**/*.js"
+    - "**/*.ts"
+    - "**/*.jsx"
+    - "**/*.tsx"
+    - "**/*.css"
+    - "**/*.scss"
+    - "**/*.sass"
+    - "**/*.php"
+    - "**/*.py"
+    - "**/*.rb"
+    - "**/*.go"
+    - "**/*.rs"
+    - "**/*.cpp"
+    - "**/*.c"
+    - "**/*.h"
+    - "**/*.hpp"
+    - "**/*.cs"
+    - "**/*.sql"
+    - "**/*.sh"
+    - "**/*.bat"
+    - "**/*.ps1"
+    - "**/*.dockerfile"
+    - "**/*Dockerfile*"
+    - "**/README*"
+    - "**/LICENSE*"
+    - "**/*.ini"
+    - "**/*.conf"
+    - "**/*.config"
+    - "**/*.toml"
+    - "**/*.pdf"
+    - "**/*.docx"
+    - "**/*.xls"
+    - "**/*.xlsx"
+    - "**/*.png"
+    - "**/*.jpg"
+    - "**/*.jpeg"
+    - "**/*.gif"
+    - "**/*.bmp"
+    - "**/*.webp"
+    - "**/*.tif"
+    - "**/*.tiff"
   excludes:
+    - "**/.env"
+    - "**/.env.*"
+    - "**/*.env"
+    - "**/secrets/**"
+    - "**/.ssh/**"
+    - "**/.aws/**"
+    - "**/.azure/**"
+    - "**/.gnupg/**"
+    - "**/.config/gcloud/**"
+    - "**/protected/**"
     - "**/.git/**"
     - "**/.idea/**"
     - "**/.vscode/**"
+    - "**/.external assistant/**"
     - "**/.gradle/**"
     - "**/.mvn/**"
     - "**/node_modules/**"
@@ -27,47 +81,123 @@ rag:
     - "**/out/**"
     - "**/target/**"
     - "**/dist/**"
+    - "**/prompts/**"
+    - "**/META-INF/**"
     - "**/*.class"
     - "**/*.jar"
     - "**/*.zip"
     - "**/*.tar"
     - "**/*.gz"
-    - "**/*.png"
-    - "**/*.jpg"
-    - "**/*.jpeg"
-    - "**/*.gif"
-    - "**/*.pdf"
+    - "**/*.tgz"
+    - "**/*.7z"
+    - "**/*.rar"
+    - "**/*.doc"
+    - "**/*.ppt"
+    - "**/*.pptx"
     - "**/*.exe"
     - "**/*.dll"
     - "**/*.so"
+    - "**/*.dylib"
+    - "**/*.war"
+    - "**/*.ear"
+    - "**/*.bin"
+    - "**/*.dat"
   top_k: 6
   chunk_chars: 1200
   chunk_overlap: 150
   embed_concurrency: 4  # Control concurrent embedding requests
   force_full_reindex: false  # Set to true to ignore file hashes and rebuild everything
   vectors:
+    enabled: false
+
+document_extraction:
+  enabled: true
+  pdf:
     enabled: true
+  word:
+    enabled: true
+  excel:
+    enabled: true
+  image_ocr:
+    enabled: false
+    command: ""
+    args: []
+    timeout_ms: 10000
 
 llm:
   transport: "engine"
-  default_backend: "ollama"
+  default_backend: "llama_cpp"
+  model: "talos-agent"
 
+embed:
+  provider: "disabled"
+  model: "none"
+  host: ""
+  allow_remote: false
+
+# Optional legacy/provider backend. Managed llama.cpp is the default beta path;
+# this block is used only when the active backend/model selects ollama.
 ollama:
   host: "http://127.0.0.1:11434"
-  model: "qwen3:8b"
+  model: "qwen2.5-coder:14b"
   embed: "bge-m3"
   allow_remote: false  # Set to true to allow non-localhost Ollama hosts
 
+engines:
+  llama_cpp:
+    mode: "managed"               # managed or connect_only
+    server_path: ""               # path to llama-server.exe
+    model_path: ""                # path to local GGUF model
+    hf_repo: ""                   # optional Hugging Face GGUF repo for llama-server --hf-repo
+    hf_file: ""                   # optional GGUF filename within hf_repo
+    hf_cache_dir: ""              # optional HF_HOME for Talos-owned model cache
+    model: "talos-agent"          # API model alias used by chat requests
+    host: "http://127.0.0.1"
+    port: 8080
+    context: 8192                   # Managed mode uses at least 8192 for agent tool turns.
+    jinja: true
+    chat_template: ""
+    chat_template_file: ""
+    server_args: []
+
 net:
-  enabled: false
+  enabled: true
+
+privacy:
+  mode: "developer"              # developer or private
+  protected_read:
+    default_scope: "SEND_TO_MODEL_CONTEXT"
+    allow_send_to_model: false    # private mode requires explicit opt-in before protected content reaches model context
+    persist_raw_artifacts: false
+  document_extraction:
+    allow_send_to_model: false    # private mode keeps extracted PDF/DOCX/XLS/XLSX text local-display-only unless explicitly enabled
+    persist_raw_artifacts: false
+    allow_rag_indexing: false
+  rag:
+    enabled_in_private_mode: false
 
 limits:
   top_k_max: 100
   response_max_chars: 10485760   # 10 MiB
   dir_depth_max: 10
-  file_bytes_max: 20000
-  file_lines_max: 500
+  file_bytes_max: 200000         # 200 KB for realistic docs
+  file_lines_max: 8000           # 8000 lines
   dir_entries_max: 1000
   llm_timeout_ms: 300000         # 5 minutes
   file_timeout_ms: 10000         # 10 seconds
   rate_per_sec: 10
+  llm_context_max_tokens: 8192   # Default token budget for prompt validation (fallback if model info unavailable)
+
+tools:
+  native_calling: true   # Use backend-native structured tool calls when supported; set false for XML prompt injection
+
+session:
+  persistence: true      # Persist session evidence and allow explicit /session load; set false for ephemeral sessions
+  auto_load: false       # Do not inject saved workspace history into prompts unless explicitly enabled
+
+ui:
+  show_status_during_answer: true
+  show_timing_after_answer: true
+  show_breakdown: false
+  status_label: "Answering…"
+  markdown: true         # Styled streaming markdown in capable interactive terminals; redirected/NO_COLOR/ASCII/dumb output always stays plain

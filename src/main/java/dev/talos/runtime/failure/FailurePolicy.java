@@ -1,0 +1,153 @@
+package dev.talos.runtime.failure;
+
+import dev.talos.runtime.toolcall.LoopState;
+import dev.talos.runtime.toolcall.ToolCallExecutionStage;
+
+import java.util.Comparator;
+import java.util.Map;
+
+public record FailurePolicy(
+        int maxIterations,
+        int maxSameToolFailures,
+        int maxSamePathFailures,
+        int maxNoProgressIterations,
+        boolean rereadBeforeRetry,
+        boolean downgradeToInspectOnDrift
+) {
+    public FailurePolicy {
+        maxIterations = Math.max(1, maxIterations);
+        maxSameToolFailures = Math.max(1, maxSameToolFailures);
+        maxSamePathFailures = Math.max(1, maxSamePathFailures);
+        maxNoProgressIterations = Math.max(1, maxNoProgressIterations);
+    }
+
+    public static FailurePolicy defaults(int maxIterations) {
+        return new FailurePolicy(
+                maxIterations,
+                3,
+                3,
+                3,
+                true,
+                false
+        );
+    }
+
+    public FailureDecision afterIteration(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (state == null || outcome == null) return FailureDecision.continueLoop();
+        updateNoProgress(state, outcome);
+        if (outcome.failuresThisIteration() <= 0) {
+            return noProgressDecision(state);
+        }
+
+        FailureDecision emptyEditArgs = repeatedEmptyEditArgumentDecision(state);
+        if (emptyEditArgs.shouldStop()) return withActionForProgress(state, emptyEditArgs.reason());
+
+        FailureDecision samePath = repeatedFailureDecision(
+                state.failureCountsByPath,
+                maxSamePathFailures,
+                "path");
+        if (samePath.shouldStop()) return withActionForProgress(state, samePath.reason());
+
+        FailureDecision sameTool = repeatedFailureDecision(
+                state.failureCountsByTool,
+                maxSameToolFailures,
+                "tool");
+        if (sameTool.shouldStop()) return withActionForProgress(state, sameTool.reason());
+
+        FailureDecision noProgress = noProgressDecision(state);
+        if (noProgress.shouldStop()) return noProgress;
+
+        return FailureDecision.continueLoop();
+    }
+
+    private FailureDecision noProgressDecision(LoopState state) {
+        if (state.noProgressIterations < maxNoProgressIterations) {
+            return FailureDecision.continueLoop();
+        }
+        return withActionForProgress(
+                state,
+                "failure policy stopped the tool loop after "
+                        + state.noProgressIterations
+                        + " consecutive no-progress iteration(s).");
+    }
+
+    private static void updateNoProgress(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (outcome.successesThisIteration() > 0 || outcome.mutationsThisIteration() > 0) {
+            state.noProgressIterations = 0;
+        } else if (outcome.failuresThisIteration() > 0) {
+            state.noProgressIterations++;
+        } else {
+            state.noProgressIterations++;
+        }
+    }
+
+    private static FailureDecision repeatedFailureDecision(
+            Map<String, Integer> counts,
+            int threshold,
+            String label
+    ) {
+        if (counts == null || counts.isEmpty()) return FailureDecision.continueLoop();
+        return counts.entrySet().stream()
+                .filter(entry -> entry.getValue() >= threshold)
+                .max(Comparator.comparingInt(Map.Entry::getValue))
+                .map(entry -> FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        "failure policy stopped the tool loop after "
+                                + entry.getValue()
+                                + " failed call(s) for "
+                                + label
+                                + " `"
+                                + entry.getKey()
+                                + "`."))
+                .orElseGet(FailureDecision::continueLoop);
+    }
+
+    private static FailureDecision repeatedEmptyEditArgumentDecision(LoopState state) {
+        if (state.emptyEditArgumentFailuresByPath.isEmpty()) {
+            return FailureDecision.continueLoop();
+        }
+        return state.emptyEditArgumentFailuresByPath.entrySet().stream()
+                .filter(entry -> entry.getValue() >= 2)
+                .filter(entry -> state.pathsReadThisTurn.contains(entry.getKey()))
+                .max(Comparator.comparingInt(Map.Entry::getValue))
+                .map(entry -> FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        "failure policy stopped the tool loop after "
+                                + entry.getValue()
+                                + " empty talos.edit_file argument failure(s) for path `"
+                                + entry.getKey()
+                                + "` after the file had already been read. "
+                        + "No approval was requested and no file was changed."))
+                .orElseGet(() -> repeatedEmptyEditArgumentAcrossPathsDecision(state));
+    }
+
+    private static FailureDecision repeatedEmptyEditArgumentAcrossPathsDecision(LoopState state) {
+        int total = state.emptyEditArgumentFailuresByPath.values().stream()
+                .mapToInt(Integer::intValue)
+                .sum();
+        if (total < 3 || state.pathsReadThisTurn.isEmpty()) {
+            return FailureDecision.continueLoop();
+        }
+        return FailureDecision.stop(
+                FailureAction.ASK_USER,
+                "failure policy stopped the tool loop after "
+                        + total
+                        + " empty or missing talos.edit_file argument failure(s) across "
+                        + state.emptyEditArgumentFailuresByPath.size()
+                        + " path(s) after workspace files had already been read. "
+                        + "No approval was requested and no file was changed.");
+    }
+
+    private static FailureDecision withActionForProgress(LoopState state, String reason) {
+        FailureAction action = state.mutatingToolSuccesses > 0
+                ? FailureAction.STOP_WITH_PARTIAL
+                : FailureAction.ASK_USER;
+        return FailureDecision.stop(action, reason);
+    }
+}

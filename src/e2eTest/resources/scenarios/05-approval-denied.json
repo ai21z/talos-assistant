@@ -1,0 +1,12 @@
+{
+  "name": "approval denied",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "approval-denial-preserves-files"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "DENY_WRITES",
+  "userPrompt": "Replace index.html with denied content.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<h1>denied</h1>\"}}\n```"
+}

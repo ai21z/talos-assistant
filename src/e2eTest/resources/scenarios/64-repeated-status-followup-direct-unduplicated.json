@@ -1,0 +1,34 @@
+{
+  "name": "repeated status follow-up direct unduplicated",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "status-followup-remains-read-only",
+    "repeated-status-followup-is-direct",
+    "repeated-status-followup-deduplicates-verified-preamble"
+  ],
+  "runner": "executor-history",
+  "approvalPolicy": "APPROVE_ALL",
+  "history": [
+    {
+      "role": "user",
+      "content": "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css and create scripts.js. Make it modern and responsive."
+    },
+    {
+      "role": "assistant",
+      "content": "[Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]\n\nThe turn remains partial. Some changes were applied, but unresolved static problems remain.\n\nRemaining static verification problems:\n- styles.css: expected target was not successfully mutated.\n- HTML does not link JavaScript file: `scripts.js`\n- Calculator/form task is missing a submit/calculate button."
+    },
+    {
+      "role": "user",
+      "content": "did you make the changes?"
+    },
+    {
+      "role": "assistant",
+      "content": "The previous verified result says the last change is not complete.\n\nThe previous verified result says the last change is not complete.\n\n[Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]\n\nThe turn remains partial. Some changes were applied, but unresolved static problems remain.\n\nRemaining static verification problems:\n- styles.css: expected target was not successfully mutated.\n- HTML does not link JavaScript file: `scripts.js`\n- Calculator/form task is missing a submit/calculate button."
+    }
+  ],
+  "userPrompt": "is it working now?",
+  "scriptedResponses": [
+    "Yes, it is done now."
+  ]
+}

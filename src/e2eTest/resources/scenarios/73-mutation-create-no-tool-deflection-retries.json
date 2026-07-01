@@ -1,0 +1,16 @@
+{
+  "name": "mutation create no-tool deflection retries",
+  "v1Pack": true,
+  "claims": [
+    "current-turn-mutating-tool-obligation-retries-no-tool-deflection",
+    "false-workspace-capability-denial-is-not-finalized"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "I want to create a modern BMI calculator website to use! Can you make it?",
+  "scriptedResponses": [
+    "I am unable to create or modify files within your workspace directly as I do not have access to the underlying file system. However, I can provide code snippets.",
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n    <form id=\\\"bmiForm\\\">\\n      <input id=\\\"weight\\\" type=\\\"number\\\">\\n      <input id=\\\"height\\\" type=\\\"number\\\">\\n      <button type=\\\"submit\\\">Calculate</button>\\n    </form>\\n    <p id=\\\"result\\\"></p>\\n  </main>\\n  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body { font-family: Arial, sans-serif; margin: 2rem; }\\n.calculator { max-width: 420px; margin: auto; }\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"document.getElementById('bmiForm').addEventListener('submit', (event) => {\\n  event.preventDefault();\\n  const weight = Number(document.getElementById('weight').value);\\n  const height = Number(document.getElementById('height').value);\\n  const result = document.getElementById('result');\\n  if (!weight || !height) { result.textContent = 'Enter weight and height.'; return; }\\n  result.textContent = `Your BMI is ${(weight / ((height / 100) ** 2)).toFixed(1)}`;\\n});\"}}\n```",
+    "Created the BMI calculator files."
+  ]
+}

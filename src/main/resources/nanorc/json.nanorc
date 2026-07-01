@@ -1,0 +1,6 @@
+# Minimal Talos-authored JSON syntax (T778). Project-licensed; not derived from GNU nano's GPL files.
+syntax "json" "\.json$"
+color brightcyan ""[^"]*"[[:space:]]*:"
+color magenta ":[[:space:]]*"[^"]*""
+color cyan "\<(true|false|null)\>"
+color yellow "\<-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?\>"

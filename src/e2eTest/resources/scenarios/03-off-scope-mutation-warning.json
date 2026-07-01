@@ -1,0 +1,12 @@
+{
+  "name": "off-scope mutation warning",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "off-scope-write-surfaces-warning-before-approval"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Redesign this website.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"math_operations.py\",\"content\":\"print('wrong scope')\\n\"}}\n```"
+}

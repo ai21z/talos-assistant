@@ -35,8 +35,9 @@
 *.hprof
 hs_err_pid*
 replay_pid*
+/reports/
 
-# Qodana (JetBrains code quality) — keep config, ignore outputs
+# Qodana (JetBrains code quality) - keep config, ignore outputs
 .qodana/
 
 # ---- Temporary and scratch files
@@ -67,6 +68,11 @@ test_performance.java
 validation_commands.txt
 test-remote-config.yaml
 
+# ---- Scratch/throwaway test files in root
+/test_*.java
+/test_*.class
+*.class
+
 # ---- Temporary & editor files
 *.tmp
 *.swp
@@ -75,14 +81,37 @@ test-remote-config.yaml
 *.orig
 *.rej
 
-# ---- Local test data (uncomment if you create these)
-# /local/
+# ---- Local test data
+/local/
+# External research scratch (e.g. fetched Hacker News API JSON); not Talos artifacts
+/.hnscratch/
 # /corpus/
 # /sandbox/
-# .loqj/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
+# .talos/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
+
+# ---- Project docs
+# Architecture and cleanup docs under docs/new-architecture are tracked.
+V1_IMPLEMENTATION_BRIDGE.md
+
+# ---- Local-only directories and files
+/playground/
+/.github/
+# ---- local coding assistant: track durable project config, ignore personal + bulk reference
+.external assistant/*
+!.external assistant/skills/
+!.external assistant/rules/
+!.external assistant/agents/
+!.external assistant/hooks/
+!.external assistant/settings.json
+!.external assistant/external assistant.md
+.external assistant/settings.local.json
 
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
 *.env.*
 *.secret.*
 *.private.*
+
+# Tracked fake e2e fixtures; these are not real secrets.
+!src/e2eTest/resources/fixtures/listing-privacy/.env
+!src/e2eTest/resources/fixtures/protected-path/.env

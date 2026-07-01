@@ -1,0 +1,15 @@
+{
+  "name": "small talk answers directly without tools",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "small-talk-contract-does-not-enter-tool-loop",
+    "small-talk-turn-exposes-no-tool-surface"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "hello",
+  "scriptedResponses": [
+    "Hi. Tell me what you want to inspect or change."
+  ]
+}

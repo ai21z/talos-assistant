@@ -1,0 +1,275 @@
+---
+wiki_schema: talos.wikiPage.v1
+title: "Talos Living Evidence Wiki"
+kind: index
+status: active
+last_verified_commit: "141d787269e1d21baaf42435623bbe80b14a94c2"
+evidence_inputs:
+  - type: repo_file
+    ref: "AGENTS.md"
+    selector: "Talos Development, Work-Test, And Audit Instructions"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T807-done-high] architecture-intelligence-report-discipline.md"
+    selector: "Architecture intelligence report discipline"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
+    selector: "Living evidence wiki discipline"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T809-done-high] wiki-evidence-liveness-lint.md"
+    selector: "Wiki evidence-liveness lint"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"
+    selector: "Living wiki operating loop and close gate"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T811-done-high] assistant-turn-executor-lifecycle-ownership-characterization.md"
+    selector: "First Wave 5 lifecycle ownership ticket and turn-preparation extraction"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T812-done-high] assistant-turn-executor-model-dispatch-characterization.md"
+    selector: "Model dispatch characterization"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T813-done-high] assistant-turn-executor-model-dispatch-extraction.md"
+    selector: "Model dispatch extraction"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T814-done-high] assistant-turn-executor-tool-loop-outcome-characterization.md"
+    selector: "Tool-loop outcome characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T815-done-high] assistant-turn-executor-tool-loop-outcome-extraction.md"
+    selector: "Tool-loop outcome resolver extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T816-done-high] assistant-turn-executor-no-tool-outcome-characterization.md"
+    selector: "No-tool outcome characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T817-done-high] assistant-turn-executor-no-tool-outcome-extraction.md"
+    selector: "No-tool outcome resolver extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T818-done-high] assistant-turn-executor-prompt-instruction-adapter-thinning.md"
+    selector: "Prompt-instruction adapter thinning closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T819-done-high] core-tools-cycle-edge-scoping.md"
+    selector: "Core-tools cycle edge scoping closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T820-done-high] context-item-tool-result-adapter-cycle-break.md"
+    selector: "ContextItem tool-result adapter cycle break closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T821-done-high] system-prompt-builder-tool-catalog-cycle-break.md"
+    selector: "SystemPromptBuilder tool-catalog cycle seam closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T822-done-high] rag-tool-protocol-text-cycle-break.md"
+    selector: "RagService tool-protocol text cycle seam closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T823-done-high] tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T824-done-high] tool-call-loop-engine-extraction.md"
+    selector: "ToolCallLoopEngine extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T825-done-high] tool-loop-internals-boundary-scoping.md"
+    selector: "Tool-loop internals boundary scoping closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T826-done-high] tool-call-execution-stage-characterization.md"
+    selector: "ToolCallExecutionStage characterization closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T827-done-high] architecture-intelligence-qodana-summary-ordering.md"
+    selector: "Qodana summary ordering closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T828-done-high] tool-call-execution-stage-guard-chain-extraction.md"
+    selector: "Guard chain extraction closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T829-done-high] tool-call-support-boundary-scoping.md"
+    selector: "ToolCallSupport boundary scoping closeout"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T830-done-high] tool-call-support-native-call-conversion-extraction.md"
+    selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T831-done-high] tool-call-support-result-formatting-extraction.md"
+    selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T832-done-high] in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Completion Evidence"
+  - type: ticket
+    ref: "work-cycle-docs/tickets/done/[T833-done-high] wave6-trust-surface-honest-disclosure.md"
+    selector: "Completion Evidence"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t819-core-tools-cycle-edge-scoping.md"
+    selector: "Generated Package Evidence"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t823-tool-call-loop-orchestration-characterization.md"
+    selector: "ToolCallLoop orchestration boundary"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t825-tool-loop-internals-boundary-scoping.md"
+    selector: "Tool-loop internals boundary scoping"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t826-tool-call-execution-stage-characterization.md"
+    selector: "ToolCallExecutionStage characterization"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t829-tool-call-support-boundary-scoping.md"
+    selector: "ToolCallSupport boundary scoping"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t832-in-turn-compaction-evidence-and-conditional-gist.md"
+    selector: "Answer Quality Finding"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/wave5-structural-decomposition-closeout-ratified.md"
+    selector: "Decision"
+  - type: repo_file
+    ref: "work-cycle-docs/reports/t833-wave6-trust-surface-honest-disclosure.md"
+    selector: "Bounded Trust Claims"
+min_confidence: INFERRED_REVIEW
+confidence_histogram:
+  UNKNOWN: 0
+  INFERRED_REVIEW: 11
+  DETERMINISTIC_STATIC: 19
+  DETERMINISTIC_GENERATED: 0
+  OBSERVED_RUNTIME: 0
+  GATED: 0
+---
+
+# Talos Living Evidence Wiki
+
+This wiki is the committed synthesis layer for current Talos engineering
+understanding. It does not replace policy, runbooks, release ledgers, tickets,
+or generated reports.
+
+## Entry Points
+
+- [CURRENT-STATE.md](CURRENT-STATE.md) - current branch, version, active work,
+  caveats, and next move.
+- [WIKI-SCHEMA.md](WIKI-SCHEMA.md) - page schema, confidence ladder, and update
+  rules.
+- [EVIDENCE-REGISTRY.md](EVIDENCE-REGISTRY.md) - stable IDs for generated
+  evidence used by machine-checkable wiki claims.
+- [LOG.md](LOG.md) - reviewed wiki change log.
+- [concepts/living-evidence-wiki.md](concepts/living-evidence-wiki.md) -
+  rationale and operating model.
+
+## Evidence Boundaries
+
+- [AGENTS.md](../../AGENTS.md) remains repository policy.
+- Runbooks remain procedural instructions.
+- Generated `build/` reports remain current machine evidence.
+- Release packets, GATES files, and ADR-style decisions remain immutable
+  ledger artifacts.
+- Tickets remain task ownership and acceptance records.
+- The evidence registry maps stable IDs to generated evidence that the wiki
+  close gate can refresh.
+- Wiki pages are source-backed synthesis for future engineering behavior.
+
+## Active Tickets
+
+- [T842 Pre-beta full E2E audit](../tickets/done/[T842-done-high]%20wave6-pre-beta-full-e2e-audit.md) (done)
+  - Owner-run Part B at a real PTY plus independent review Part A / verification / findings
+    review; owner cross-verified against disk. Trust surface HELD: no protected
+    leak, no false/unapproved mutation, destructive rewrite denied, `.env`
+    fail-closed. Findings ticketed T866-T872 (T866 read/command fabrication and
+    T872 run_command coverage are before-public-beta gates). Report:
+    [FINDINGS T842](../reports/FINDINGS-T842-capability-live-audit-20260624.md).
+- [T856 Managed llama.cpp embeddings](../tickets/done/[T856-done-high]%20managed-llama-cpp-embeddings.md) (done)
+  - independent review-verified (incl. live smoke): opt-in managed `llama.cpp` embedding server
+    path, `bge-m3` setup profile, honest BM25/hybrid diagnostics, and shared
+    managed endpoint ownership across short-lived query clients.
+  - Implementation report:
+    [T856 managed llama.cpp embeddings](../reports/t856-managed-llama-cpp-embeddings.md)
+  - Status: done (live smoke proved Ollama-free index/query with real bge-m3
+    vectors, one embed server reused across a multi-query session, zero `:11434`;
+    full check only the 2 pre-existing environmental failures, zero new).
+- [T858 Model tool-mode profile compatibility](../tickets/done/[T858-done-high]%20model-tool-mode-profile-compatibility.md) (done)
+  - Records the Qwen/DeepSeek probe finding: DeepSeek is Talos-usable in
+    text/tool-prompt mode with `tools.native_calling:false`; native/default
+    produced zero executable tool calls.
+  - Deterministic implementation report:
+    [T858 model tool-mode profile compatibility](../reports/t858-model-tool-mode-profile-compatibility.md)
+  - Status: done (independent review-verified: SetupCmd per-profile `tools.native_calling`
+    (DeepSeek `false`), bounded docs wording, honesty test forbids
+    "DeepSeek native-tool capable"; full check only the 2 pre-existing
+    environmental failures, zero new).
+- [T859 Managed GGUF profile switching UX](../tickets/done/[T859-done-high]%20managed-gguf-profile-switching-ux.md) (done)
+  - Addresses the `/models` expectation gap: managed `llama_cpp` currently
+    exposes the configured/running model, not every downloaded GGUF in cache.
+  - [T859 implementation report](../reports/t859-managed-gguf-profile-switching-ux.md)
+  - Status: done (independent review-verified: minimal safe path -- honest `/models` +
+    `/set model` messaging pointing to `talos setup models --profile … --write
+    --force` + restart, no hot-swap, no new config-write risk; tests green incl
+    a no-hot-swap assertion; full check only the 2 pre-existing environmental
+    failures, zero new).
+- [T855 Ollama independence truth and default-path gate](../tickets/done/[T855-done-high]%20ollama-independence-truth-and-default-path-gate.md) (done)
+  - Product-truth/default-path hardening for managed `llama.cpp` beta posture.
+  - Deterministic implementation report:
+    [T855 Ollama independence truth and default-path gate](../reports/t855-ollama-independence-truth-and-default-path-gate.md)
+  - Status: done (independent review-verified: BM25-only defaults, `/models` Ollama-catalog
+    gate, bootstrap sync fix, dead-code removal, doc 23 rewrite; full check has
+    only the 2 pre-existing terminal/PTY environmental failures, zero new).
+    Recommended follow-up: gate the bare-name `resolve()` scan for symmetry.
+- [T854 Status active backend diagnostic truth](../tickets/done/[T854-done-high]%20status-active-backend-diagnostic-truth.md) (done)
+  - Diagnostics/product-truth fix for `/status` after `/set model`.
+  - Deterministic implementation report:
+    [T854 status active backend diagnostic truth](../reports/t854-status-active-backend-diagnostic-truth.md)
+  - Status: done (independent review-verified: code + tests + live `/status` after
+    `/set model ollama/...` shows `Engine ollama`; full check has only 2
+    pre-existing terminal/PTY environmental failures, reproduced on parent
+    `b462b168`).
+- [T853 Active backend diagnostic truth and model list grouping](../tickets/done/[T853-done-high]%20active-backend-diagnostic-truth-and-model-list-grouping.md) (done)
+  - Diagnostics/product-truth fix for `/context` after `/set model` and
+    grouped `/models` output.
+  - Deterministic implementation report:
+    [T853 active backend diagnostic truth and model list grouping](../reports/t853-active-backend-diagnostic-truth-and-model-list-grouping.md)
+  - Status: closed after live `/context` review.
+- [T847 Retrieval evidence and gold-context harness](../tickets/done/[T847-done-high]%20retrieval-evidence-and-gold-context-harness.md) (done)
+  - Retrieval/workspace-intelligence measurement track.
+  - Deterministic implementation report:
+    [T847 retrieval evidence and gold-context harness](../reports/t847-retrieval-evidence-and-gold-context-harness.md)
+  - Status: implemented, awaiting review.
+- [T848 Mutation intent fix-file prompts](../tickets/done/[T848-done-high]%20mutation-intent-fix-file-prompts.md) (done)
+- [T849 Absent named-target mutation guard](../tickets/done/[T849-done-high]%20absent-named-target-mutation-guard.md) (done)
+- [T850 Read-only grounding path-name non-invention](../tickets/done/[T850-done-medium]%20read-only-grounding-path-name-non-invention.md) (done)
+  - Deterministic implementation report:
+    [T850 read-only grounding path-name non-invention](../reports/t850-read-only-grounding-path-name-non-invention.md)
+  - Status: closed after qwen scn-10 live review.
+- [T851 Read-display line-number write containment](../tickets/done/[T851-done-high]%20read-display-line-number-write-containment.md) (done)
+  - Deterministic implementation report:
+    [T851 read-display write containment](../reports/t851-read-display-line-number-write-containment.md)
+- [T852 GPT-OSS multi-document no-progress synthesis](../tickets/done/[T852-done-medium]%20gpt-oss-multi-document-no-progress-synthesis.md) (done)
+  - Deterministic implementation report:
+    [T852 GPT-OSS multi-document no-progress synthesis](../reports/t852-gpt-oss-multi-document-no-progress-synthesis.md)
+  - Status: closed after GPT-OSS scn-11 live review.
+
+Completed pre-release tickets:
+
+- [T843 Site pre-publish honesty fixes](../tickets/done/[T843-done-medium]%20site-pre-publish-honesty-fixes.md)
+- [T844 RAG, vectors, and beta best-practices docs](../tickets/done/[T844-done-high]%20rag-vectors-and-beta-best-practices-docs.md)
+- [T845 Beta model and hardware range evidence](../tickets/done/[T845-done-high]%20beta-model-and-hardware-range-evidence.md)
+- [T846 Beta hardware and retrieval diagnostics](../tickets/done/[T846-done-high]%20beta-hardware-and-retrieval-diagnostics.md)
+
+Completed Wave 6 high tickets:
+
+- [T834 Strong redaction across model context and durable sinks](../tickets/done/[T834-done-high]%20strong-redaction-model-context-and-durable-sinks.md)
+  - [T834 implementation report](../reports/t834-strong-redaction-model-context-and-durable-sinks.md)
+- [T835 Chat transport localhost guard](../tickets/done/[T835-done-high]%20chat-transport-localhost-guard.md)
+  - [T835 implementation report](../reports/t835-chat-transport-localhost-guard.md)
+- [T836 Windows protected-path canonicalization](../tickets/done/[T836-done-high]%20windows-protected-path-canonicalization.md)
+  - [T836 implementation report](../reports/t836-windows-protected-path-canonicalization.md)
+- [T837 Run command output handoff boundary](../tickets/done/[T837-done-high]%20run-command-output-handoff-boundary.md)
+  - [T837 implementation report](../reports/t837-run-command-output-handoff-boundary.md)
+- [T838 Master key custody](../tickets/done/[T838-done-high]%20master-key-custody.md)
+  - [T838 implementation report](../reports/t838-master-key-custody.md)
+- [T839 Embedding host locality policy](../tickets/done/[T839-done-high]%20embedding-host-locality-policy.md)
+  - [T839 implementation report](../reports/t839-embedding-host-locality-policy.md)
+- [T840 Protected path realpath-failure fail-closed](../tickets/done/[T840-done-high]%20protected-path-realpath-failure-fail-closed.md)
+- [T841 Competitor claim honesty guard hardening](../tickets/done/[T841-done-medium]%20competitor-claim-honesty-guard-hardening.md)
+
+Wave 5 structural-decomposition closeout is owner-ratified. Production
+compaction behavior remains unchanged until a later ticket is authorized, and
+future Wave 5 follow-up work requires a new scoped ticket. Wave 6 Tier 0
+honest disclosure is complete through T833; T834, T835, T836, and T839 are
+done; T837 is done; T838 master-key custody is done; and T840 closed the
+unresolved Windows 8.3-style short-name fail-closed consolidation follow-up.
+T841 hardened tracked public-doc competitor-claim wording guards while keeping
+the competitor matrix local-only.
+See
+[t833-wave6-trust-surface-honest-disclosure.md](../reports/t833-wave6-trust-surface-honest-disclosure.md).
+
+## Update Rule
+
+Only promote a conclusion into the wiki when it is resolved, source-backed, and
+likely to affect future engineering behavior. Chat history alone is not
+evidence unless converted into a tracked research note or backed by repo,
+generated-report, ticket, runbook, release-ledger, ADR, or external-source
+citations.

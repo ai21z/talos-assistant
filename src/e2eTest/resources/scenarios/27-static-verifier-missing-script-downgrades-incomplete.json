@@ -1,0 +1,16 @@
+{
+  "name": "static verifier missing script downgrades incomplete",
+  "fixture": "doc-repo",
+  "v1Pack": true,
+  "claims": [
+    "pending-expected-target-breach-produces-deterministic-incomplete-outcome",
+    "missing-expected-web-target-is-not-hidden-behind-success-summary"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_REMEMBER_WRITES",
+  "userPrompt": "Create a modern BMI calculator website with separate index.html, style.css, and script.js files. Use file tools; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n  </main>\\n</body>\\n</html>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"style.css\",\"content\":\"body { font-family: Arial, sans-serif; margin: 2rem; }\\n.calculator { max-width: 420px; }\"}}\n```",
+    "Created the BMI calculator website files."
+  ]
+}

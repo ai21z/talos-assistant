@@ -1,0 +1,11 @@
+{
+  "name": "mode field smoke",
+  "fixture": "mini-site",
+  "runner": "turnProcessor",
+  "mode": "plan",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Plan how to improve index.html without editing it.",
+  "scriptedResponses": [
+    "Plan only."
+  ]
+}

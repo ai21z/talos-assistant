@@ -1,0 +1,15 @@
+{
+  "name": "mutation create no-tool deflection fails closed",
+  "v1Pack": true,
+  "claims": [
+    "current-turn-mutating-tool-obligation-fails-closed",
+    "false-workspace-capability-denial-is-not-finalized"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "I want to create a modern BMI calculator website to use! Can you make it?",
+  "scriptedResponses": [
+    "I am unable to create or modify files within your workspace directly as I do not have access to the underlying file system.",
+    "I still do not have access to the underlying file system."
+  ]
+}

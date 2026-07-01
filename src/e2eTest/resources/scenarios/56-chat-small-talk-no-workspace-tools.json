@@ -1,0 +1,15 @@
+{
+  "name": "chat small talk does not execute workspace tools",
+  "fixture": "chat-privacy",
+  "v1Pack": true,
+  "claims": [
+    "chat-small-talk-exposes-no-workspace-tools",
+    "small-talk-text-fallback-tools-are-not-executed"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "hello, answer briefly as Talos",
+  "scriptedResponses": [
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}"
+  ]
+}

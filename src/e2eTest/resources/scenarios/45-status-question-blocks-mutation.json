@@ -1,0 +1,15 @@
+{
+  "name": "status question blocks mutation",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "status-question-verify-only-blocks-mutation-before-approval"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "did you make the changes?",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<h1>Status Question Regression</h1>\"}}\n```",
+    "I did not apply any file changes. The attempted write was blocked because this was a status question."
+  ]
+}

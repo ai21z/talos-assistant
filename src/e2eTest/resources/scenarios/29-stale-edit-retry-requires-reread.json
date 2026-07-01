@@ -1,0 +1,17 @@
+{
+  "name": "stale edit retry requires reread",
+  "fixture": "doc-repo",
+  "v1Pack": true,
+  "claims": [
+    "same-file-stale-edit-after-mutation-requires-reread",
+    "ignored-reread-requirement-stops-before-more-approval"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update README.md with the smallest exact edits. Use edit_file tools.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"README.md\",\"old_string\":\"# Talos\\n\",\"new_string\":\"# Talos Local\\n\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"README.md\",\"old_string\":\"# Talos\\n\\nTalos is a local-first workspace assistant.\\n\",\"new_string\":\"# Talos Local\\n\\nTalos is a disciplined local-first workspace assistant.\\n\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"README.md\",\"old_string\":\"Talos is a local-first workspace assistant.\",\"new_string\":\"Talos is a disciplined local-first workspace assistant.\"}}\n```",
+    "This response should not be reached."
+  ]
+}

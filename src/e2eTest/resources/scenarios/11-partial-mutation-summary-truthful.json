@@ -1,0 +1,16 @@
+{
+  "name": "partial mutation summary is truthful",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "partial-mutation-summaries-are-truthful"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Check it and edit it",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<title>Horror Synthwave Band</title>\\n<head>\\n    <meta charset=\\\"UTF-8\\\">\\n    <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n    <title>Horror Synthwave Band</title>\\n    <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\",\"new_string\":\"<title>Melodic Horror Synthwave</title>\\n<head>\\n    <meta charset=\\\"UTF-8\\\">\\n    <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\\n    <title>Melodic Horror Synthwave</title>\\n    <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<header>\\n      <h1>Welcome to My Website</h1>\\n      <p>Your Ultimate Destination for Modern Web Experiences</p>\\n    </header>\",\"new_string\":\"<header>\\n      <h1>Embrace the Night</h1>\\n      <p>Step into a world where synthwave meets horror.</p>\\n    </header>\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<section id=\\\"hero\\\">\\n      <div class=\\\"hero-content\\\">\\n        <h2>Explore the Future</h2>\\n        <p>Dive into a world of innovation and cutting-edge design.</p>\\n      </div>\\n    </section>\",\"new_string\":\"<section id=\\\"hero\\\">\\n      <div class=\\\"hero-content\\\">\\n        <h2>The Haunted Synthwave</h2>\\n        <p>Experience the thrill of horror in a futuristic synthwave world.</p>\\n      </div>\\n    </section>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"style.css\",\"content\":\".synthwave-theme {\\n  background: linear-gradient(135deg, #1e3c72, #2a5298);\\n  color: #ffffff;\\n  font-family: 'Courier New', Courier, monospace;\\n}\\n\\n.hero-content {\\n  text-align: center;\\n  padding: 40px;\\n}\\n\\n.cta-button {\\n  background-color: #ff6347;\\n  border: none;\\n  color: white;\\n  padding: 15px 32px;\\n  text-align: center;\\n  text-decoration: none;\\n  display: inline-block;\\n  font-size: 16px;\\n  margin: 4px 2px;\\n  cursor: pointer;\\n  border-radius: 8px;\\n}\\n\\n.cta-button:hover {\\n  background-color: #ff4500;\\n}\"}}\n```",
+    "Great! The HTML and CSS files have been updated to better reflect a horror synthwave theme. The title was changed to Melodic Horror Synthwave, the header and hero copy were updated, and style.css was rewritten."
+  ]
+}

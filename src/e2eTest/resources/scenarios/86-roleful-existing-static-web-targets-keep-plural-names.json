@@ -1,0 +1,17 @@
+{
+  "name": "roleful existing static-web targets keep plural names",
+  "fixture": "roleful-static-site",
+  "v1Pack": true,
+  "claims": [
+    "existing-scripts-js-is-used-for-generic-javascript-target",
+    "existing-styles-css-is-used-for-generic-css-target",
+    "singular-conventional-files-are-not-created",
+    "trace-contract-records-reconciled-targets"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Create a modern synthwave website here with CSS styling and JavaScript interaction.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!DOCTYPE html>\\n<html lang=\\\"en\\\">\\n  <head>\\n    <meta charset=\\\"UTF-8\\\">\\n    <title>Scoped Check</title>\\n    <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n  </head>\\n  <body>\\n    <main class=\\\"card\\\">\\n      <h1>Scoped Check</h1>\\n      <button id=\\\"pulse-button\\\" type=\\\"button\\\">Pulse</button>\\n      <p id=\\\"pulse-output\\\">Ready</p>\\n    </main>\\n    <script src=\\\"scripts.js\\\"></script>\\n  </body>\\n</html>\\n\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body {\\n  background: #09031a;\\n  color: #f5f7ff;\\n}\\n.card {\\n  border: 2px solid #00e5ff;\\n  padding: 2rem;\\n}\\n#pulse-button {\\n  cursor: pointer;\\n}\\n\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"document.addEventListener('DOMContentLoaded', () => {\\n  const button = document.getElementById('pulse-button');\\n  const output = document.getElementById('pulse-output');\\n  button.addEventListener('click', () => {\\n    output.textContent = 'Pulse active';\\n  });\\n});\\n\"}}\n```"
+  ]
+}

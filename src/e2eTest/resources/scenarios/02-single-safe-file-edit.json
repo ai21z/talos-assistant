@@ -1,0 +1,12 @@
+{
+  "name": "single safe file edit",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "narrow-file-edit-mutates-only-requested-target"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Change only the title text in index.html to Night Signal.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<title>Night Drive</title>\",\"new_string\":\"<title>Night Signal</title>\"}}\n```"
+}

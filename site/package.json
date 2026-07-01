@@ -1,0 +1,22 @@
+{
+  "name": "talos-site",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "npm run test:static",
+    "test:static": "node --test test/site.test.js",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@fontsource/gfs-neohellenic": "^5.2.7",
+    "@fontsource/im-fell-english": "^5.2.6",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/spectral": "^5.2.8",
+    "@playwright/test": "^1.57.0",
+    "vite": "^7.1.12"
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "schema": "talos.releaseGates.v1",
+  "packet": "current-0.10.2-release-packet-20260611-081900",
+  "branch": "codex/wave1-stability-and-cycle",
+  "sha": "157aedc840877e66bb2e9f5f054a7943de1f4439",
+  "generated": "2026-06-11T08:45:00+02:00",
+  "gates": [
+    {
+      "name": "safe-redirected-gptoss",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900/artifacts/gptoss/talosbench/20260611-083206",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41; piped approval inputs disallowed; StrictEvidence"
+    },
+    {
+      "name": "safe-redirected-qwen",
+      "lane": "SAFE_REDIRECTED_STDIN",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900/artifacts/qwen/talosbench/20260611-082933",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "19 PASS / 22 MANUAL_REQUIRED of 41; piped approval inputs disallowed; StrictEvidence"
+    },
+    {
+      "name": "sync-approval-gptoss",
+      "lane": "SYNC_APPROVAL",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900/artifacts/gptoss/sync-approval",
+      "model": "llama_cpp/gpt-oss-20b",
+      "notes": "31/31, artifact scan PASS, zero ladder rescues, seed 424242"
+    },
+    {
+      "name": "sync-approval-qwen",
+      "lane": "SYNC_APPROVAL",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900/artifacts/qwen/sync-approval",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "31/31 from the committed candidate (first release-grade Qwen full-bank pass); artifact scan PASS; 5/31 bounded T743 rescues honestly recorded; seed 424242"
+    },
+    {
+      "name": "retrieve-focused-probe-qwen",
+      "lane": "SYNC_APPROVAL",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900/artifacts/qwen/retrieve-probe/proposal-only-does-not-mutate",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "TOOL_EXECUTED talos.retrieve success=true; seed-reproducible (seed 7); completes 13/13 native tool coverage"
+    },
+    {
+      "name": "capability-private-mode-both-models",
+      "lane": "CAPABILITY_PRIVATE_MODE",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900-capability",
+      "notes": "48 runs (24/model incl. private-folder bank); 0 secret/canary leaks, 0 overclaims; PASS by process/tool-artifact heuristics; canary scan over capability roots + workspaces PASS with documented fixture allowlist"
+    },
+    {
+      "name": "true-pty-manual-qwen",
+      "lane": "TRUE_PTY_MANUAL",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.1-release-packet-20260610-090049/pty-qwen/artifacts",
+      "model": "llama_cpp/qwen2.5-coder-14b",
+      "notes": "carried from the 0.10.1 packet (owner real-terminal run 2026-06-10; validator + canary PASS, independently rerun); wave-1 did not touch terminal rendering or approval-prompt text; rerun recommended with the next UI-affecting change"
+    },
+    {
+      "name": "deterministic-candidate-summaries",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/candidate-manifest.json",
+      "notes": "scripted cut: all four summaries report 0.10.2; mandatory post-bump check passed; launcher built after the cut commit"
+    },
+    {
+      "name": "qodana-static-analysis",
+      "lane": "STATIC_ANALYSIS",
+      "status": "PASS",
+      "evidencePath": "build/reports/talos/qodana-summary.json",
+      "notes": "fresh native scan (Docker mode broken on this host - documented Gradle-import I/O class); 0 critical, 169 findings triaged in T753; scan source equals cut source (docs-only commits between)"
+    },
+    {
+      "name": "release-clean-canary-scan",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "local/manual-testing/current-0.10.2-release-packet-20260611-081900/artifacts",
+      "notes": "checkRuntimeArtifactCanaries PASS over the packet artifacts root (no allowlist) and the capability roots (fixture allowlist)"
+    }
+  ]
+}
