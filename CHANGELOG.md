@@ -7,6 +7,10 @@
   Windows-style prefix-sibling escapes before writing or deleting outside the
   workspace, while `talos.delete_path` keeps sandbox gating and root refusal
   without a separate lexical containment assumption.
+- [T928] Generated Talos launchers now include
+  `--enable-native-access=ALL-UNNAMED`, suppressing Java FFM native-access
+  warnings from bundled JLine/Lucene paths during normal Linux/WSL status and
+  REPL startup.
 
 ## [0.10.7] - 2026-07-02
 
@@ -1440,4 +1444,3 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
-

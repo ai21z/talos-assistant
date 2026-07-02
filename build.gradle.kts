@@ -770,6 +770,10 @@ application {
         // non-Unicode/redirected output.
         "-Dstdout.encoding=UTF-8",
         "-Dstderr.encoding=UTF-8",
+        // T928: JLine 3.30+ and Lucene 10 use Java FFM/Panama internals on
+        // Java 21+. Allow unnamed-module native access so normal Linux/WSL
+        // status and REPL startup output is not prefixed by JVM warnings.
+        "--enable-native-access=ALL-UNNAMED",
         "-XX:+UseZGC"
     )
 }

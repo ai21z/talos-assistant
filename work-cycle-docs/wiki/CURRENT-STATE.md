@@ -148,10 +148,11 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up) and T926
-  (installation setup wizard) remain open. T918-T922 and T924 are done on
-  public `main`; T925 is done on `v0.9.0-beta-dev` and must be included in any
-  future candidate/release merge.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up), T926
+  (installation setup wizard), and T927 (`/session clear` target mismatch)
+  remain open. T918-T922 and T924 are done on public `main`; T925 and T928 are
+  done on `v0.9.0-beta-dev` and must be included in any future
+  candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
@@ -166,11 +167,12 @@ confidence_histogram:
   `accd47248a88a2f0d0a2019e2b789ecc7106d483`. No public release, tag, winget
   publication, or history rewrite has happened. T923 remains a non-blocking
   custody-hardening design follow-up for the DPAPI raw-key PowerShell transport.
-  T925 was implemented after the green 0.10.7 candidate evidence, so any public
-  release/tag decision now requires a fresh candidate cut rather than reusing
-  the previous 0.10.7 packet.
-- Next move: push the T925 implementation, verify GitHub Actions, then cut a
-  fresh candidate if the owner wants to proceed toward release/tag review.
+  T925 and T928 were implemented after the green 0.10.7 candidate evidence, so
+  any public release/tag decision now requires a fresh candidate cut rather than
+  reusing the previous 0.10.7 packet.
+- Next move: implement T926 milestone 1 as a pure `talos setup wizard --dry-run`
+  decision surface with deterministic tests, then add side-effecting install
+  steps only after the dry-run model is pinned.
 
 ```talos-wiki-claims
 {

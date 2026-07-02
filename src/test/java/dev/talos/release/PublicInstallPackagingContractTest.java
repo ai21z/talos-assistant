@@ -58,6 +58,17 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
+    @DisplayName("generated launchers include Java native-access allowance")
+    void generatedLaunchersAllowNativeAccessForBundledTerminalAndIndexLibraries() throws Exception {
+        String build = read("build.gradle.kts");
+
+        assertTrue(build.contains("applicationDefaultJvmArgs = listOf("),
+                "Gradle application plugin must own generated launcher JVM defaults");
+        assertTrue(build.contains("\"--enable-native-access=ALL-UNNAMED\""),
+                "launchers must suppress Java FFM native-access warnings from bundled JLine/Lucene");
+    }
+
+    @Test
     @DisplayName("signed bootstrap is checksum-based and does not execute downloaded code")
     void bootstrapIsChecksumBasedAndNonBlind() throws Exception {
         String script = read("tools/install-talos.ps1");
