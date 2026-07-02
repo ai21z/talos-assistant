@@ -8,8 +8,11 @@ Priority: high
 - Source: WSL2 Ubuntu install-path smoke plus installation design review
 - Date: 2026-07-02
 - Talos version / commit: 0.10.7 / d17057b9a6c9ca39dcc50d4ded73382a5ae5dfd3
-- Model/backend: managed `llama.cpp` intended beta path; WSL smoke had no Linux
-  `llama-server` configured
+- Follow-up WSL evidence version / commit: 0.10.7 /
+  2314360f2f972d482405437581160436b456c939
+- Model/backend: managed `llama.cpp` intended beta path; initial WSL smoke had
+  no Linux `llama-server` configured; follow-up WSL smoke configured
+  `qwen2.5-coder-14b` through managed `llama.cpp`
 - Workspace fixture: `/home/ai21z/talos-wsl-install-smoke`
 - Verification status: confirmed onboarding gap; implementation deferred
 
@@ -57,6 +60,17 @@ Source anchors:
 - WSL smoke evidence: OpenJDK 21 had to be installed manually, direct
   `/home/ai21z/.local/talos/bin/talos --version` succeeded, `talos setup models`
   rendered, and `talos doctor` failed only on missing Linux model/server config.
+- Follow-up WSL evidence: after installing a Linux `llama-server` binary and
+  writing the `qwen2.5-coder-14b` config, `talos doctor --start` passed all
+  eight checks and reported `Environment is ready`.
+- Follow-up WSL evidence: installed Linux Talos completed a real Qwen-backed
+  REPL turn (`COMPLETE / READ_ONLY_ANSWERED`), `/last trace` recorded
+  `Mode: auto`, and `/prompt-debug last` captured provider-body JSON.
+- Follow-up WSL evidence: `talos status --verbose` and the REPL printed Java
+  native-access warnings before normal output:
+  `java.lang.foreign.Linker::downcallHandle`. Dependency inspection traced the
+  warning source to bundled JLine/Lucene FFM usage; running the same installed
+  Linux binary with `--enable-native-access=ALL-UNNAMED` suppressed it.
 
 ## Classification
 
@@ -160,7 +174,8 @@ Milestone 1 should be a dry-run decision surface, not side effects:
 Runtime flow:
 
 1. Bootstrap script detects OS, distro, arch, WSL, login shell, Java runtime,
-   package manager presence, existing Talos install, and PATH collision risks.
+   package manager presence, existing Talos install, PATH collision risks, and
+   JVM launcher flags required for clean installed-product output.
 2. If Java is missing in a source/developer lane, bootstrap prints the exact
    install command or asks for explicit package-install permission before any
    Talos JVM invocation. Packaged lanes with bundled runtimes skip this paradox.
@@ -256,6 +271,9 @@ Refactor scope:
 - Fresh Ubuntu/WSL path installs Talos and verifies the Linux-installed
   `talos --version` without relying on the Windows-installed Talos in inherited
   WSL PATH.
+- Fresh Ubuntu/WSL installed-product status and REPL startup do not print Java
+  native-access warnings during ordinary `talos status --verbose` or
+  `talos run` startup.
 - In source/developer Linux lanes, missing Java runtime is detected before the
   first Talos JVM invocation and handled by printing the exact command, obtaining
   explicit package-install permission, or producing a clear block message.
@@ -298,6 +316,9 @@ Required deterministic regression:
 - Unit test: bootstrap preflight detects Java missing/present before first JVM
   launch, WSL/non-WSL, login shell/profile target, Linux/Windows server binary
   mismatch, existing config, and disk-space warning.
+- Unit/contract test: generated launcher JVM defaults include the native-access
+  flag required to suppress Java FFM warnings from bundled terminal/index
+  libraries on Linux.
 - Unit test: wizard decision model never installs Java, llama.cpp, models, or
   writes config without confirmation or explicit non-interactive flags.
 - Unit test: package-manager command execution is not selected unless an
@@ -361,6 +382,10 @@ Add broader commands if runtime code changes:
   after a Linux user-local install.
 - Running the Unix installer under bash can mis-detect zsh users unless the
   script uses login-shell/profile detection rather than interpreter variables.
+- Java 21+ emits native-access warnings when JLine or Lucene touches
+  `java.lang.foreign` APIs unless the generated launcher includes the required
+  JVM flag; warning text before normal command output makes a fresh Linux setup
+  look broken even when the environment is functional.
 - Large model downloads can fail on disk, bandwidth, proxy, or Hugging Face
   availability; wizard must distinguish download failure from Talos failure.
 - Installing package-manager dependencies may require sudo or root; no-sudo
