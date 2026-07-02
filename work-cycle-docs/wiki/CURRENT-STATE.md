@@ -148,24 +148,27 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up) remains open.
-  T918-T922 and T924 are done on `main`.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up) and T925
+  (workspace containment consolidation) remain open. T918-T922 and T924 are
+  done on `main`.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
-  stabilization arc. The current work is to stabilize public `main` into a
-  truthful, green, versioned 0.10.7 candidate without creating a release, tag,
-  history rewrite, or branch deletion. T918 has already been pushed and verified
-  green in GitHub Actions for the red-CI containment failure; T919-T923 are
-  committed follow-ups in the same arc.
+  stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
+  candidate without a release, tag, history rewrite, or branch deletion. T918
+  has already been pushed and verified green in GitHub Actions for the red-CI
+  containment failure; T919-T924 are committed follow-ups in the same arc.
 - Known caveats: `scripts/cut-candidate.ps1` created the 0.10.7 cut commit
   `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`, then the mandatory post-bump
   `check` caught this page still reporting version 0.10.6. That evidence failure
-  was repaired forward, not pushed, and the post-bump gates plus installed smoke
-  were rerun from the repaired 0.10.7 tree. No public release, tag, winget
+  was repaired forward, the post-bump gates plus installed smoke were rerun from
+  the repaired 0.10.7 tree, and `main` is green in GitHub Actions at
+  `accd47248a88a2f0d0a2019e2b789ecc7106d483`. No public release, tag, winget
   publication, or history rewrite has happened. T923 remains a non-blocking
   custody-hardening design follow-up for the DPAPI raw-key PowerShell transport.
-- Next move: push the 0.10.7 public-main stabilization commits and verify
-  GitHub Actions green; then keep release/tag/winget decisions separate.
+  T925 records the remaining workspace containment consolidation follow-up found
+  during post-stabilization review.
+- Next move: decide whether to implement T925 before any public release/tag, or
+  keep release/tag/winget decisions separate from this candidate stabilization.
 
 ```talos-wiki-claims
 {
