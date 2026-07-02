@@ -148,8 +148,10 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up) remains open.
-  T918-T922 and T924-T925 are done on `main`.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up) and T926
+  (installation setup wizard) remain open. T918-T922 and T924 are done on
+  public `main`; T925 is done on `v0.9.0-beta-dev` and must be included in any
+  future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
