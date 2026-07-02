@@ -7,8 +7,8 @@ Priority: low
 
 - Source: source review
 - Date: 2026-07-02
-- Talos version / commit: 0.10.6 / 7f75eb3070a6f32be890787decca0254e5972d4b
-- Verification status: design follow-up recorded; not a 0.10.7 candidate blocker
+- Talos version / commit: 0.10.6 / 55e8b19e7e2d78a3667fdf33d9058b9104cabf77
+- Verification status: design follow-up confirmed; not a 0.10.7 candidate blocker
 
 Expected behavior:
 
@@ -25,6 +25,19 @@ The PowerShell DPAPI helper returns the unprotected raw master key to Java as
 base64 over the child process stdout pipe. This is not user console stdout, but
 it can be visible to same-user process instrumentation/transcription/EDR.
 ```
+
+Source anchors:
+
+- `src/main/java/dev/talos/core/security/WindowsDpapiKeyCustody.java`:
+  `UNPROTECT_SCRIPT` calls `ProtectedData.Unprotect(...)` and writes the raw
+  unprotected key bytes as base64 through `[Console]::Out.Write(...)`.
+- `PowerShellDpapiClient.run(...)` redirects child stdout to a Java pipe, reads
+  it as UTF-8 text, and returns `Base64.getDecoder().decode(stdout)`.
+- Existing tests cover fail-closed protect/unprotect failure behavior and
+  migration rollback, but no current implementation avoids this helper-process
+  transport.
+- Dependency evidence: no JNA/native DPAPI dependency is declared for this
+  stabilization pass.
 
 ## Classification
 
@@ -130,4 +143,3 @@ Commands:
 ## Known Follow-Ups
 
 - Evaluate JNA/native Windows DPAPI or credential-manager custody after 0.10.7.
-
