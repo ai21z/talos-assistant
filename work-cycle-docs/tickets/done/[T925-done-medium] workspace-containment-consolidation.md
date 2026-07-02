@@ -1,6 +1,6 @@
-# [T925-open-medium] Workspace containment consolidation
+# [T925-done-medium] Workspace containment consolidation
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -8,7 +8,7 @@ Priority: medium
 - Source: post-0.10.7 public-main stabilization code review
 - Date: 2026-07-02
 - Talos version / commit: 0.10.7 / accd47248a88a2f0d0a2019e2b789ecc7106d483
-- Verification status: source-reviewed follow-up; no code implemented in this ticket
+- Verification status: implemented with red/green regression coverage and full `check`
 
 Expected behavior:
 
@@ -186,19 +186,19 @@ Refactor scope:
 
 ## Acceptance Criteria
 
-- `FileBundleCheckpointStore` no longer uses a separator-unsafe Windows string
+- [x] `FileBundleCheckpointStore` no longer uses a separator-unsafe Windows string
   prefix fallback.
-- Deterministic regression proves a prefix sibling such as `workspace-sibling`
+- [x] Deterministic regression proves a prefix sibling such as `workspace-sibling`
   is not treated as inside `workspace` under Windows-style case-insensitive
   containment.
-- Checkpoint capture and restore reject escaped or prefix-sibling targets before
+- [x] Checkpoint capture and restore reject escaped or prefix-sibling targets before
   writing or deleting anything.
-- `DeletePathTool` preserves sandbox gating and root refusal while avoiding
+- [x] `DeletePathTool` preserves sandbox gating and root refusal while avoiding
   independent lexical containment assumptions.
-- Remaining direct `startsWith` path checks in runtime/tool/safety code are
+- [x] Remaining direct `startsWith` path checks in runtime/tool/safety code are
   audited and either migrated or explicitly classified as non-security
   bookkeeping.
-- No regressions to privacy, permissions, checkpointing, trace redaction, or
+- [x] No regressions to privacy, permissions, checkpointing, trace redaction, or
   outcome truth.
 
 ## Tests / Evidence
@@ -226,6 +226,43 @@ Add broader commands if runtime code changes:
 ```powershell
 .\gradlew.bat check --no-daemon
 ```
+
+## Completion Evidence
+
+- Red test run:
+  `.\gradlew.bat test --tests "dev.talos.runtime.checkpoint.FileBundleCheckpointStoreTest" --no-daemon`
+  failed before production changes with the two expected prefix-sibling
+  assertions:
+  `rejectsWindowsPrefixSiblingEscapeBeforeCapture` and
+  `restoreRejectsWindowsPrefixSiblingManifestEntryBeforeWriting`.
+- Implemented `dev.talos.core.security.WorkspaceContainment` with
+  nearest-existing-parent canonicalization and separator-safe Windows fallback.
+- Migrated checkpoint capture/restore containment from the local
+  `startsWithWorkspace(...)` helper to `WorkspaceContainment.contains(...)`.
+- Migrated `DeletePathTool` root/outside guard to `WorkspaceContainment` while
+  preserving the existing `WorkspaceOperationToolSupport.resolveAllowed(...)`
+  sandbox gate.
+- Added deterministic regressions for prefix-sibling capture rejection,
+  prefix-sibling restore write rejection, prefix-sibling restore delete
+  rejection, and delete root refusal.
+- Focused green:
+  `.\gradlew.bat test --tests "dev.talos.runtime.checkpoint.FileBundleCheckpointStoreTest" --tests "dev.talos.tools.impl.WorkspaceOperationToolsTest" --no-daemon`
+  passed.
+- Full green:
+  `.\gradlew.bat check --no-daemon` passed.
+
+## Direct Containment Audit Notes
+
+- `FileBundleCheckpointStore` no longer has `startsWithWorkspace(...)` or the
+  separator-unsafe `toString().toLowerCase(...).startsWith(...)` fallback.
+- `DeletePathTool` still performs explicit root refusal, but it now uses the
+  same containment primitive after the normal sandbox-backed path resolution.
+- Remaining direct `Path.startsWith(...)` calls outside this ticket include
+  verifier/readback/progress helpers, command-profile loaders, slash-command
+  render paths, session-id prefix logic, and protected-path classification.
+  They were not mechanically replaced because several are non-security
+  bookkeeping or have their own protected-path/sandbox owner. Future work should
+  migrate them only with targeted red regressions.
 
 ## Work-Test Cycle Notes
 

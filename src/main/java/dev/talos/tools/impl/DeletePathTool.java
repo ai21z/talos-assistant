@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
@@ -84,11 +85,11 @@ public final class DeletePathTool implements TalosTool {
     private static ToolResult rejectWorkspaceRoot(ToolContext ctx, Path target) {
         Path root = ctx.workspace().toAbsolutePath().normalize();
         Path resolved = target.toAbsolutePath().normalize();
-        if (!resolved.startsWith(root)) {
+        if (!WorkspaceContainment.contains(root, resolved)) {
             return ToolResult.fail(ToolError.invalidParams(
                     "Path not allowed: target is outside the workspace."));
         }
-        if (resolved.equals(root)) {
+        if (WorkspaceContainment.samePath(root, resolved)) {
             return ToolResult.fail(ToolError.invalidParams("Refusing to delete the workspace root."));
         }
         return null;

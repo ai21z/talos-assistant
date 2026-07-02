@@ -196,6 +196,19 @@ class WorkspaceOperationToolsTest {
     }
 
     @Test
+    void deletePathRejectsWorkspaceRoot(@TempDir Path workspace) {
+        var tool = new DeletePathTool();
+
+        ToolResult result = tool.execute(
+                new ToolCall("talos.delete_path", Map.of("path", ".")),
+                context(workspace));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("workspace root"), result.errorMessage());
+        assertTrue(Files.exists(workspace), "workspace root must remain present");
+    }
+
+    @Test
     void deletePathDeletesDirectoryOnlyWhenRecursiveIsExplicit(@TempDir Path workspace) throws Exception {
         Files.createDirectories(workspace.resolve("docs/nested"));
         Files.writeString(workspace.resolve("docs/nested/file.txt"), "nested");

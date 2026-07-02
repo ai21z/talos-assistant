@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T925] Workspace containment now has a shared canonical primitive for the
+  checkpoint and delete-root guard paths. Checkpoint capture and restore reject
+  Windows-style prefix-sibling escapes before writing or deleting outside the
+  workspace, while `talos.delete_path` keeps sandbox gating and root refusal
+  without a separate lexical containment assumption.
+
 ## [0.10.7] - 2026-07-02
 
 - [T918] Redacted audit snapshots now canonicalize the output path through the

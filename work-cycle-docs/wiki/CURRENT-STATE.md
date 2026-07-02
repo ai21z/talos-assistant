@@ -148,9 +148,8 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up) and T925
-  (workspace containment consolidation) remain open. T918-T922 and T924 are
-  done on `main`.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up) remains open.
+  T918-T922 and T924-T925 are done on `main`.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
@@ -165,10 +164,11 @@ confidence_histogram:
   `accd47248a88a2f0d0a2019e2b789ecc7106d483`. No public release, tag, winget
   publication, or history rewrite has happened. T923 remains a non-blocking
   custody-hardening design follow-up for the DPAPI raw-key PowerShell transport.
-  T925 records the remaining workspace containment consolidation follow-up found
-  during post-stabilization review.
-- Next move: decide whether to implement T925 before any public release/tag, or
-  keep release/tag/winget decisions separate from this candidate stabilization.
+  T925 was implemented after the green 0.10.7 candidate evidence, so any public
+  release/tag decision now requires a fresh candidate cut rather than reusing
+  the previous 0.10.7 packet.
+- Next move: push the T925 implementation, verify GitHub Actions, then cut a
+  fresh candidate if the owner wants to proceed toward release/tag review.
 
 ```talos-wiki-claims
 {

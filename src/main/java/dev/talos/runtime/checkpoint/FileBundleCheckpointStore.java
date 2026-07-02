@@ -3,6 +3,7 @@ package dev.talos.runtime.checkpoint;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
+import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
@@ -59,7 +60,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
 
         Path ws = workspace.toAbsolutePath().normalize();
         Path target = ws.resolve(pathParam).normalize();
-        if (!startsWithWorkspace(target, ws)) {
+        if (!WorkspaceContainment.contains(ws, target)) {
             return CheckpointCaptureResult.failure("Checkpoint target escapes workspace: " + pathParam);
         }
         if (Files.isDirectory(target)) {
@@ -150,7 +151,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             List<Path> targets = new ArrayList<>();
             for (String requestedRel : normalizedPaths) {
                 Path target = ws.resolve(requestedRel).normalize();
-                if (!startsWithWorkspace(target, ws)) {
+                if (!WorkspaceContainment.contains(ws, target)) {
                     return CheckpointCaptureResult.failure("Checkpoint target escapes workspace: " + requestedRel);
                 }
                 targets.add(target);
@@ -229,7 +230,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                     continue;
                 }
                 Path target = ws.resolve(rel).normalize();
-                if (!startsWithWorkspace(target, ws)) {
+                if (!WorkspaceContainment.contains(ws, target)) {
                     failed++;
                     continue;
                 }
@@ -495,19 +496,6 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             if (value != null && !value.isBlank()) return value;
         }
         return "";
-    }
-
-    private static boolean startsWithWorkspace(Path resolved, Path workspace) {
-        if (resolved.startsWith(workspace)) return true;
-        if (isWindows()) {
-            return resolved.toString().toLowerCase(java.util.Locale.ROOT)
-                    .startsWith(workspace.toString().toLowerCase(java.util.Locale.ROOT));
-        }
-        return false;
-    }
-
-    private static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 
     private static String normalizeRelative(Path relative) {
