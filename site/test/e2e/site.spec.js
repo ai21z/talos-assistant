@@ -189,7 +189,7 @@ test("hero CTAs are real links, not placeholder beta actions", async ({ page }) 
   await page.goto("/");
   await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
     "href",
-    "https://github.com/ai21z/talos-cli",
+    "https://github.com/ai21z/talos-assistant",
   );
   await expect(page.getByRole("link", { name: "Read docs" }).first()).toHaveAttribute("href", "#docs");
   await expect(page.getByRole("button", { name: "Get beta build" })).toHaveCount(0);

@@ -62,7 +62,7 @@ package mean change cost and regression risk are high in exactly the hottest pat
 
 - **Branch:** `feature/archunit-architecture-guards`
 - **Commit:** `ed3d1eb6` (descends from `v0.9.0-beta-dev`)
-- **Repo:** `ai21z/talos-cli` (local working dir `loqj-cli`), Java 21, Gradle 8.14 Kotlin DSL, JUnit 5.
+- **Repo:** `ai21z/talos-assistant` (local working dir `loqj-cli`), Java 21, Gradle 8.14 Kotlin DSL, JUnit 5.
 
 **Commands run (this review):**
 - `git rev-parse --abbrev-ref HEAD` / `--short HEAD` / `git log --oneline -1` → branch/commit confirmed.

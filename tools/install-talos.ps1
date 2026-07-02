@@ -9,7 +9,7 @@ installs Talos only. Local model configuration remains a separate
 #>
 [CmdletBinding()]
 param(
-    [string]$Repository = "ai21z/talos-cli",
+    [string]$Repository = "ai21z/talos-assistant",
     [string]$Version = "latest",
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\Talos"),
     [switch]$AllowUnsigned,

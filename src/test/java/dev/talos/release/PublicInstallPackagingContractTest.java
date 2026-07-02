@@ -62,8 +62,10 @@ class PublicInstallPackagingContractTest {
     void bootstrapIsChecksumBasedAndNonBlind() throws Exception {
         String script = read("tools/install-talos.ps1");
 
-        assertTrue(script.contains("ai21z/talos-cli"),
+        assertTrue(script.contains("ai21z/talos-assistant"),
                 "bootstrap must download from the canonical GitHub Releases repository");
+        assertFalse(script.contains("ai21z/talos-cli"),
+                "bootstrap must not point at the pre-rename GitHub repository");
         assertTrue(script.contains("checksums.txt"),
                 "bootstrap must verify against the release checksum manifest");
         assertTrue(script.contains("Get-FileHash"),

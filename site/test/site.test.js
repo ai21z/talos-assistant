@@ -337,7 +337,8 @@ describe("Talos landing page static contract", () => {
     const externalHrefs = Array.from(text.matchAll(/href="(https?:\/\/[^"]+)"/g), (m) => m[1]);
     for (const href of externalHrefs) {
       // GitHub repo links, plus the author's own site in the footer signature.
-      assert.match(href, /^https:\/\/(github\.com\/ai21z\/talos-cli|zounarakis\.com)/, `unexpected external href: ${href}`);
+      assert.match(href, /^https:\/\/(github\.com\/ai21z\/talos-assistant|zounarakis\.com)/, `unexpected external href: ${href}`);
+      assert.doesNotMatch(href, /github\.com\/ai21z\/talos-cli/, `stale GitHub repo href: ${href}`);
     }
 
     for (const misleading of [

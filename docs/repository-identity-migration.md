@@ -4,9 +4,9 @@ Talos is the current public identity for this repository.
 
 - Product name: Talos
 - Repository name: `talos-cli`
-- GitHub repository: `ai21z/talos-cli`
-- GitHub URL: `https://github.com/ai21z/talos-cli`
-- SSH URL: `git@github.com:ai21z/talos-cli.git`
+- GitHub repository: `ai21z/talos-assistant`
+- GitHub URL: `https://github.com/ai21z/talos-assistant`
+- SSH URL: `git@github.com:ai21z/talos-assistant.git`
 - Public description: "Local-first CLI workspace assistant with retrieval, approval-gated file operations, traces, context handling, and verification-oriented outcomes."
 
 Historical context should stay brief and intentional: Talos started as LOQ-J,
@@ -19,15 +19,15 @@ badges, examples, or install instructions.
 
 | Old | New |
 | --- | --- |
-| `https://github.com/ai21z/loqj-cli` | `https://github.com/ai21z/talos-cli` |
-| `git@github.com:ai21z/loqj-cli.git` | `git@github.com:ai21z/talos-cli.git` |
+| `https://github.com/ai21z/loqj-cli` | `https://github.com/ai21z/talos-assistant` |
+| `git@github.com:ai21z/loqj-cli.git` | `git@github.com:ai21z/talos-assistant.git` |
 
 ## Rename Checklist
 
-- Rename GitHub repository to `ai21z/talos-cli` through the GitHub UI.
+- Rename GitHub repository to `ai21z/talos-assistant` through the GitHub UI.
 - Update local git remote:
   ```powershell
-  git remote set-url origin https://github.com/ai21z/talos-cli.git
+  git remote set-url origin https://github.com/ai21z/talos-assistant.git
   ```
 - Verify local remote:
   ```powershell

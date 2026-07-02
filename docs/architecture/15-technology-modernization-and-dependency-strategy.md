@@ -100,7 +100,7 @@ the local-first/trust doctrine while solving no real Talos problem.
 ## 2. Evidence Base
 
 - **Branch:** `feature/archunit-architecture-guards` · **Commit:** `8c749bba`.
-- **Repo:** `ai21z/talos-cli`, Java 21, Gradle 8.14 (Kotlin DSL), JUnit 5.
+- **Repo:** `ai21z/talos-assistant`, Java 21, Gradle 8.14 (Kotlin DSL), JUnit 5.
 - **Current dependency versions (from `gradle.properties` / `build.gradle.kts`):** Lucene 10.2.2,
   sqlite-jdbc 3.46.0.0, Jackson 2.17.1, Picocli 4.7.6, JLine 3.26.3, JavaFX 21.0.3 (win), PDFBox 3.0.7,
   POI 5.5.1, HtmlUnit 4.21.0, SLF4J 2.0.12, Logback 1.4.14, ArchUnit 1.4.2. `talosVersion=0.9.9`,
@@ -690,7 +690,7 @@ timeline
 - github.com/async-profiler/async-profiler - no Windows binary. P
 - micrometer.io ; opentelemetry.io/docs/languages/java - registry/collector runtime cost. P
 
-**Local evidence:** `ai21z/talos-cli` source (`LuceneStore`, `RetrievalPipeline`, `CacheDb`, `CompatEmbeddingsClient`, `LocalTurnTraceCapture`, `TalosBootstrap`, `EngineRegistry`), `gradle.properties`, `build.gradle.kts`, `docs/architecture/14`.
+**Local evidence:** `ai21z/talos-assistant` source (`LuceneStore`, `RetrievalPipeline`, `CacheDb`, `CompatEmbeddingsClient`, `LocalTurnTraceCapture`, `TalosBootstrap`, `EngineRegistry`), `gradle.properties`, `build.gradle.kts`, `docs/architecture/14`.
 
 ---
 

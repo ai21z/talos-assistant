@@ -1,6 +1,6 @@
-# [T919-open-medium] Public repo identity truth
+# [T919-done-medium] Public repo identity truth
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -117,3 +117,22 @@ npm test --prefix site
 git diff --check
 ```
 
+Observed evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+BUILD SUCCESSFUL
+
+npm test --prefix site
+tests 33, pass 33, fail 0
+```
+
+Notes:
+
+```text
+npm run test:e2e --prefix site was attempted after updating the Playwright
+assertion, but the run was contaminated by serving a different page
+("Aris Zounarakis | Software Engineer in Barcelona") and failed before the
+repo-link assertion could prove this ticket. The static site contract is the
+scoped T919 acceptance gate.
+```

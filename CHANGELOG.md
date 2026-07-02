@@ -7,6 +7,10 @@
   paths that resolve inside the workspace are rejected, and output path
   canonicalization failures fail closed before any snapshot directory is
   created.
+- [T919] Public repository identity now points at `ai21z/talos-assistant`
+  across installer defaults, site links, public docs, architecture notes, and
+  release/site contract tests while preserving the intentional `talos-cli`
+  package and winget moniker identity.
 - [T862] Maven workspace verification is now documented as a trusted
   workspace-profile flow instead of a built-in Maven command profile. User docs
   show the `ws:maven_verify` `.talos/profiles.yaml` recipe, `/profiles trust`,
