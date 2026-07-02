@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07"
+last_verified_commit: "1dcb3b43b1e0102b4097fd96e3ab680aea3572de"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -143,31 +143,30 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `main`
-- Commit: `01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07`
-- Talos version: `0.10.6`
+- Commit: `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`
+- Talos version: `0.10.7`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: public-main stabilization T921-T924 remain open. T918
-  (red-CI audit snapshot containment), T919 (public repository identity), and
-  T920 (public metadata/legal/docs truth) are done on `main`.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up) and T924
+  (0.10.7 candidate cut evidence repair) remain open. T918-T922 are done on
+  `main`.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. The current work is to stabilize public `main` into a
   truthful, green, versioned 0.10.7 candidate without creating a release, tag,
   history rewrite, or branch deletion. T918 has already been pushed and verified
-  green in GitHub Actions for the red-CI containment failure; T919-T920 are local
+  green in GitHub Actions for the red-CI containment failure; T919-T923 are
   committed follow-ups in the same arc.
-- Known caveats: `0.10.7` has not been cut yet, so candidate evidence does not
-  exist. T923 is intentionally a non-blocking custody-hardening design follow-up
-  for the DPAPI raw-key PowerShell transport unless a minimal no-new-dependency
-  fix is proven safe. The T919 Playwright site e2e attempt was contaminated by
-  serving the wrong local page and is not release evidence.
-- Next move: finish T921 by making wiki `last_verified_commit` values
-  resolve through `git cat-file -e` and correcting the generated coverage
-  report threshold text; then complete T922 cheap trust hardening, record T923
-  as the separated DPAPI transport follow-up, and run the T924 0.10.7 candidate
-  cut from a clean committed tree.
+- Known caveats: `scripts/cut-candidate.ps1` created the 0.10.7 cut commit
+  `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`, then the mandatory post-bump
+  `check` failed because this page still reported version 0.10.6. That failure
+  is a candidate-evidence failure, not a runtime failure; no push has happened
+  after the failed cut. T923 remains a non-blocking custody-hardening design
+  follow-up for the DPAPI raw-key PowerShell transport.
+- Next move: commit this wiki identity repair, rerun the post-bump candidate
+  gates from the repaired 0.10.7 tree, close T924 only after those gates pass,
+  then push and verify GitHub Actions.
 
 ```talos-wiki-claims
 {
