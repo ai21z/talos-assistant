@@ -72,7 +72,7 @@ public final class FileSecretStore implements SecretStore {
     @Override
     public void put(String scope, String key, char[] value) throws Exception {
         Objects.requireNonNull(value, "value");
-        String sc = safe(scope);
+        String sc = safeScopeForPath(scope);
         String k  = safe(key);
         Path dir = baseDir.resolve(sc);
         Path file = dir.resolve(toFileName(k));
@@ -106,7 +106,7 @@ public final class FileSecretStore implements SecretStore {
 
     @Override
     public Optional<char[]> get(String scope, String key) throws Exception {
-        String sc = safe(scope);
+        String sc = safeScopeForPath(scope);
         String k  = safe(key);
         Path file = baseDir.resolve(sc).resolve(toFileName(k));
         if (!Files.exists(file)) return Optional.empty();
@@ -142,7 +142,7 @@ public final class FileSecretStore implements SecretStore {
 
     @Override
     public boolean delete(String scope, String key) throws Exception {
-        String sc = safe(scope);
+        String sc = safeScopeForPath(scope);
         String k  = safe(key);
         Path file = baseDir.resolve(sc).resolve(toFileName(k));
         if (!Files.exists(file)) return false;
@@ -197,6 +197,27 @@ public final class FileSecretStore implements SecretStore {
     private static String safe(String s) {
         if (s == null || s.isBlank()) return "default";
         return s.trim();
+    }
+
+    static String safeScopeForPath(String scope) {
+        String raw = safe(scope);
+        if (raw.chars().allMatch(ch -> ch == '.')) {
+            return "default";
+        }
+        String sanitized = raw
+                .replace('\\', '_')
+                .replace('/', '_')
+                .replaceAll("[^A-Za-z0-9._-]", "_");
+        while (sanitized.contains("..")) {
+            sanitized = sanitized.replace("..", "__");
+        }
+        if (sanitized.isBlank() || sanitized.chars().allMatch(ch -> ch == '.')) {
+            return "default";
+        }
+        if (sanitized.length() > 80) {
+            sanitized = sanitized.substring(0, 80);
+        }
+        return sanitized;
     }
 
     private static String toFileName(String key) {

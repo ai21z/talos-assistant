@@ -12,7 +12,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Optional;
+import java.util.UUID;
 
 import static java.nio.file.StandardOpenOption.CREATE;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
@@ -47,6 +49,42 @@ class FileSecretStoreMasterKeyCustodyTest {
 
         assertFalse(Files.exists(tempDir.resolve(".master.key")),
                 "missing reads must not create or DPAPI-load key material");
+    }
+
+    @Test
+    void unsafeScopeNamesCannotEscapeBaseDirectory() throws Exception {
+        String outsideName = "talos-scope-escape-" + UUID.randomUUID();
+        Path escapedDirectory = tempDir.getParent().resolve(outsideName);
+        FileSecretStore store = new FileSecretStore(tempDir);
+
+        try {
+            store.put("../" + outsideName, "api", "value".toCharArray());
+
+            assertFalse(Files.exists(escapedDirectory),
+                    "scope traversal must not create a sibling directory outside the secret-store base");
+            assertArrayEquals("value".toCharArray(),
+                    store.get("../" + outsideName, "api").orElseThrow());
+            assertTrue(Files.walk(tempDir)
+                            .filter(Files::isRegularFile)
+                            .anyMatch(path -> path.getFileName().toString().equals("api.bin")),
+                    "sanitized scope must still store the entry under the configured base directory");
+        } finally {
+            deleteRecursivelyIfExists(escapedDirectory);
+        }
+    }
+
+    @Test
+    void unsafeScopeNamesAreCollapsedToLocalDirectoryNames() {
+        assertEquals("default", FileSecretStore.safeScopeForPath(null));
+        assertEquals("default", FileSecretStore.safeScopeForPath("  "));
+        assertEquals("default", FileSecretStore.safeScopeForPath(".."));
+        assertEquals("openai", FileSecretStore.safeScopeForPath("openai"));
+        assertEquals("team.scope-1", FileSecretStore.safeScopeForPath("team.scope-1"));
+
+        assertLocalScopeName(FileSecretStore.safeScopeForPath("../escape"));
+        assertLocalScopeName(FileSecretStore.safeScopeForPath("tenant/../../escape"));
+        assertLocalScopeName(FileSecretStore.safeScopeForPath("C:\\Users\\talos"));
+        assertLocalScopeName(FileSecretStore.safeScopeForPath("\\\\server\\share\\talos"));
     }
 
     @Test
@@ -105,6 +143,25 @@ class FileSecretStoreMasterKeyCustodyTest {
                 DPAPI_MASTER_KEY_HEADER,
                 Arrays.copyOf(actual, DPAPI_MASTER_KEY_HEADER.length),
                 "protected master-key file must start with the DPAPI version header");
+    }
+
+    private static void assertLocalScopeName(String scope) {
+        assertNotNull(scope);
+        assertFalse(scope.isBlank());
+        assertFalse(scope.contains("/"), "scope must not contain forward path separators: " + scope);
+        assertFalse(scope.contains("\\"), "scope must not contain Windows path separators: " + scope);
+        assertFalse(scope.contains(":"), "scope must not contain drive syntax: " + scope);
+        assertNotEquals(".", scope);
+        assertNotEquals("..", scope);
+    }
+
+    private static void deleteRecursivelyIfExists(Path root) throws Exception {
+        if (root == null || !Files.exists(root)) return;
+        try (var stream = Files.walk(root)) {
+            for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private static byte[] deterministicLegacyKey() {

@@ -21,6 +21,11 @@
   through structural lint, CURRENT-STATE describes merged `main` instead of the
   stale release branch, and generated coverage reports name the enforced 82%
   instruction gate instead of the old 65% prose.
+- [T922] Secret-store scopes are sanitized to local directory names before
+  path resolution, preventing separator, drive-syntax, or traversal-shaped
+  scopes from escaping the configured secret-store base. Protected path
+  classification now also covers `.kube`, `.docker/config.json`, `.npmrc`,
+  `.netrc`, `.ppk`, and `id_ed25519_sk` credential shapes.
 - [T862] Maven workspace verification is now documented as a trusted
   workspace-profile flow instead of a built-in Maven command profile. User docs
   show the `ws:maven_verify` `.talos/profiles.yaml` recipe, `/profiles trust`,

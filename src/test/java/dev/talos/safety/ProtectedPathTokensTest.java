@@ -48,8 +48,14 @@ class ProtectedPathTokensTest {
         assertEquals("SECRET", ProtectedPathTokens.protectedKind(".ssh/config"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind(".aws/config"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind(".azure/profile"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".kube/config"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".docker/config.json"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".npmrc"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind(".netrc"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_rsa"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("id_ed25519_sk"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("keys/server.pem"));
+        assertEquals("SECRET", ProtectedPathTokens.protectedKind("keys/deploy.ppk"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("certs/tls.key"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("store.p12"));
         assertEquals("SECRET", ProtectedPathTokens.protectedKind("bundle.pfx"));
@@ -145,7 +151,13 @@ class ProtectedPathTokensTest {
         assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".git/config"));
         assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".ssh/known_hosts"));
         assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".gnupg/trustdb.gpg"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".kube/config"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".docker/config.json"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".npmrc"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath(".netrc"));
         assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("backup/id_rsa"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("backup/id_ed25519_sk"));
+        assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("keys/deploy.ppk"));
         assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("credentials/aws.txt"));
         assertTrue(ProtectedPathTokens.isSensitiveReadbackPath("club-secret.md"));
         // Fail-closed expansion vs the old copies (intended): the full

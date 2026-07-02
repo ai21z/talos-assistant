@@ -1,6 +1,6 @@
-# [T922-open-medium] Secret-store scope and protected vocabulary hardening
+# [T922-done-medium] Secret-store scope and protected vocabulary hardening
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -114,6 +114,17 @@ Refactor scope:
 - `.kube`, `.npmrc`, `.netrc`, `.ppk`, `.docker/config.json`, and `id_ed25519_sk` classify protected.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or outcome truth.
 
+## Completion Evidence
+
+- Added a behavioral regression proving `../<sibling>` scope input stores under
+  the configured secret-store base and does not create a sibling directory.
+- Added a package-local scope sanitizer regression for blank, all-dot,
+  traversal, drive-syntax, and UNC-shaped scope values while preserving ordinary
+  scope names.
+- Expanded the canonical protected-path classifier to cover `.kube`,
+  `.docker`, `.npmrc`, `.netrc`, `.ppk`, and `id_ed25519_sk`; readback
+  sensitivity inherits the same classifier coverage.
+
 ## Tests / Evidence
 
 Commands:
@@ -123,4 +134,3 @@ Commands:
 git diff --check
 .\gradlew.bat check --no-daemon
 ```
-

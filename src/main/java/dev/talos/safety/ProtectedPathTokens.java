@@ -23,10 +23,10 @@ public final class ProtectedPathTokens {
     private ProtectedPathTokens() {}
 
     private static final List<String> PRIVATE_KEY_FILENAMES =
-            List.of("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519");
+            List.of("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_ed25519_sk");
 
     private static final List<String> PRIVATE_KEY_EXTENSIONS =
-            List.of(".pem", ".key", ".p12", ".pfx");
+            List.of(".pem", ".key", ".p12", ".pfx", ".ppk");
 
     /**
      * Secret-name stems matched equals-or-suffix against letter runs.
@@ -86,7 +86,9 @@ public final class ProtectedPathTokens {
             if (segment.endsWith(".env")) return "SECRET";
             if (segment.equals("secrets") || segment.equals("tokens") || segment.equals("credentials")) return "SECRET";
             if (segment.equals("protected")) return "SECRET";
-            if (segment.equals(".ssh") || segment.equals(".aws") || segment.equals(".azure")) return "SECRET";
+            if (segment.equals(".npmrc") || segment.equals(".netrc")) return "SECRET";
+            if (segment.equals(".ssh") || segment.equals(".aws") || segment.equals(".azure")
+                    || segment.equals(".kube") || segment.equals(".docker")) return "SECRET";
             if (PRIVATE_KEY_FILENAMES.contains(segment)) return "SECRET";
             if (hasSecretWordRun(segment)) return "SECRET";
         }
