@@ -8,7 +8,13 @@
   Windows `.exe` llama-server paths as incompatible under WSL, lists the two
   accepted beta model profiles, writes `~/.talos/config.yaml` only after
   explicit confirmation, backs up existing configs, and still performs no
-  package installs, model downloads, model starts, or doctor execution.
+  package installs, model downloads, model starts, or doctor execution. The
+  Unix source/developer installer now has a bootstrap dry-run, detects Java
+  21+ before launching Talos, prints an exact Ubuntu/Debian Java 21 command
+  without running it by default, selects PATH profile files from the user's
+  login shell or an explicit `--profile-file`, verifies the direct Linux
+  installed binary before inherited PATH candidates, and hands off to
+  `talos setup wizard`.
 - [T925] Workspace containment now has a shared canonical primitive for the
   checkpoint and delete-root guard paths. Checkpoint capture and restore reject
   Windows-style prefix-sibling escapes before writing or deleting outside the

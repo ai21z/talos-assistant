@@ -14,7 +14,8 @@ Priority: high
   no Linux `llama-server` configured; follow-up WSL smoke configured
   `qwen2.5-coder-14b` through managed `llama.cpp`
 - Workspace fixture: `/home/ai21z/talos-wsl-install-smoke`
-- Verification status: confirmed onboarding gap; implementation deferred
+- Verification status: milestones 1-3 implemented; engine install, model
+  download, doctor execution, final docs, and full setup smoke remain open
 
 Expected behavior:
 
@@ -71,6 +72,11 @@ Source anchors:
   `java.lang.foreign.Linker::downcallHandle`. Dependency inspection traced the
   warning source to bundled JLine/Lucene FFM usage; running the same installed
   Linux binary with `--enable-native-access=ALL-UNNAMED` suppressed it.
+- Milestone 3 WSL evidence: the Unix installer now detects Java 21 before
+  Talos launch, writes PATH to an explicit/login-shell profile, verifies
+  `/home/ai21z/.local/talos/bin/talos --version` directly, warns when inherited
+  WSL PATH still resolves `talos` to the Windows install, and preserves
+  idempotent PATH entries.
 
 ## Classification
 
@@ -379,6 +385,101 @@ WSL-visible `llama-server.exe` was rejected as not Linux-compatible; accepted
 config only after creating a backup preserving the old content. No package
 install, model download, model/server start, or `doctor --start` execution was
 performed.
+```
+
+## Milestone 3 Implementation Evidence
+
+Status:
+
+```text
+Implemented as Unix bootstrap prerequisite/profile hardening only. T926 remains
+open because pinned llama.cpp manifest/install, model downloads, doctor
+execution, final docs, and a full fresh-machine setup smoke are later
+milestones.
+```
+
+Implemented surface:
+
+- `tools/install-unix.sh --dry-run`
+- `tools/install-unix.sh --profile-file <path>`
+- `tools/install-unix.sh --allow-package-install`
+- Java 21+ preflight before the first Talos JVM invocation.
+- Exact Ubuntu/Debian Java guidance:
+  `sudo apt update && sudo apt install -y openjdk-21-jre-headless`
+- Login-shell profile selection through `$SHELL` / `getent passwd`, not
+  `ZSH_VERSION` / `BASH_VERSION` interpreter variables.
+- Direct installed-binary verification:
+  `"$INSTALL_DIR/bin/talos" --version`
+- PATH-shadow warning when inherited WSL PATH resolves `talos` to another
+  install.
+- Handoff text to `talos setup wizard`.
+
+Non-goals preserved:
+
+- No hidden package-manager execution.
+- No pinned llama.cpp install.
+- No llama.cpp download.
+- No model download.
+- No model/server start.
+- No `doctor --start` execution.
+
+Code:
+
+- `tools/install-unix.sh`
+- `src/test/java/dev/talos/release/PublicInstallPackagingContractTest.java`
+
+TDD red:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+```
+
+Result:
+
+```text
+BUILD FAILED
+8 tests completed, 3 failed
+```
+
+Focused green:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.release.PublicInstallPackagingContractTest" --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.cli.setup.SetupWizardPlannerTest" --no-daemon
+```
+
+Result:
+
+```text
+BUILD SUCCESSFUL
+```
+
+WSL bootstrap smoke:
+
+```powershell
+.\gradlew.bat clean installDist --no-daemon
+wsl.exe -e bash -lc 'cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli; bash tools/install-unix.sh --force --profile-file /tmp/talos-t926-profile'
+```
+
+Observed installer evidence:
+
+```text
+Java 21 detected.
+Verifying direct installed Talos binary...
+Talos 0.10.7 - Java 21.0.11+10-1-26.04.2-Ubuntu - Linux amd64
+Warning: current PATH resolves talos to /mnt/c/Users/arisz/AppData/Local/Programs/talos/bin/talos
+```
+
+Additional WSL probes:
+
+```text
+SHELL=/usr/bin/zsh -> Shell profile: /home/ai21z/.zshrc
+SHELL=/bin/bash -> Shell profile: /home/ai21z/.bashrc
+SHELL=/usr/bin/fish -> Shell profile: /home/ai21z/.config/fish/config.fish
+Rerun profile entry count: 1
+source /tmp/talos-t926-profile; command -v talos -> /home/ai21z/.local/talos/bin/talos
+Installed `talos setup wizard --dry-run` rendered Ubuntu 26.04 WSL, Java 21,
+missing config, no detected llama-server, accepted beta profiles, and the
+no-side-effects milestone boundary.
 ```
 
 ## Architecture Metadata

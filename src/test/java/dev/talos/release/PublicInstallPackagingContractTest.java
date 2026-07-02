@@ -101,6 +101,65 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
+    @DisplayName("Unix bootstrap verifies Java and the direct installed Talos binary")
+    void unixBootstrapVerifiesJavaAndDirectInstalledBinary() throws Exception {
+        String script = read("tools/install-unix.sh");
+
+        assertTrue(script.contains("--dry-run"),
+                "Unix installer must expose a dry-run/bootstrap preflight path for deterministic smoke tests");
+        assertTrue(script.contains("detect_java_feature"),
+                "Unix installer must detect Java before first Talos JVM invocation");
+        assertTrue(script.contains("openjdk-21-jre-headless"),
+                "Ubuntu/WSL source setup must render the exact Java 21 runtime package command");
+        assertTrue(script.contains("Java 21+ was not detected"),
+                "missing Java must produce a clear block before Talos is invoked");
+        assertTrue(script.contains("\"$INSTALL_DIR/bin/talos\" --version"),
+                "Unix installer must verify the direct Linux-installed binary, not inherited PATH talos");
+        assertFalse(script.contains("run: talos --version"),
+                "Unix installer verification copy must not rely on inherited PATH talos");
+    }
+
+    @Test
+    @DisplayName("Unix bootstrap uses login-shell profile detection instead of interpreter variables")
+    void unixBootstrapUsesLoginShellProfileDetection() throws Exception {
+        String script = read("tools/install-unix.sh");
+
+        assertTrue(script.contains("--profile-file"),
+                "Unix installer must allow an explicit profile target for deterministic installs");
+        assertTrue(script.contains("select_shell_profile"),
+                "Unix installer must centralize shell-profile selection");
+        assertTrue(script.contains("$SHELL"),
+                "Unix installer must inspect the user's login shell");
+        assertTrue(script.contains("getent passwd"),
+                "Unix installer must fall back to passwd shell data when SHELL is unavailable");
+        assertTrue(script.contains(".zshrc"),
+                "zsh login-shell users must be routed to .zshrc");
+        assertTrue(script.contains(".bashrc"),
+                "bash login-shell users must be routed to .bashrc");
+        assertFalse(script.contains("ZSH_VERSION"),
+                "script interpreter variables must not decide the user's shell profile");
+        assertFalse(script.contains("BASH_VERSION"),
+                "running the installer under bash must not force .bashrc for zsh users");
+    }
+
+    @Test
+    @DisplayName("Unix bootstrap keeps package-manager and model setup explicit")
+    void unixBootstrapKeepsPackageManagerAndModelSetupExplicit() throws Exception {
+        String script = read("tools/install-unix.sh");
+
+        assertTrue(script.contains("--allow-package-install"),
+                "package-manager execution must require an explicit opt-in flag");
+        assertTrue(script.contains("ALLOW_PACKAGE_INSTALL=false"),
+                "package-manager execution must be disabled by default");
+        assertTrue(script.contains("talos setup wizard"),
+                "successful bootstrap should hand off to the Talos-owned setup wizard");
+        assertFalse(script.matches("(?is).*(?:curl|wget|gh release download|huggingface-cli|hf download).*llama[-.]cpp.*"),
+                "Unix bootstrap must not download llama.cpp in this milestone");
+        assertFalse(script.matches("(?is).*(?:curl|wget|huggingface-cli|hf download).*(?:qwen|gpt-oss|gguf).*"),
+                "Unix bootstrap must not download model weights in this milestone");
+    }
+
+    @Test
     @DisplayName("docs and site describe the beta install support boundary truthfully")
     void docsAndSiteDescribeInstallBoundary() throws Exception {
         String readme = read("README.md");

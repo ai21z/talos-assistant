@@ -93,6 +93,16 @@ This log is append-only by convention. T808 structural lint checks the file
 exists and has valid frontmatter, but it does not enforce append-only history
 mechanically.
 
+## [2026-07-03] setup | T926 Unix bootstrap milestone
+
+- Recorded that T926 milestone 3 landed as Unix bootstrap prerequisite/profile
+  hardening on `v0.9.0-beta-dev`.
+- Kept T926 open because pinned llama.cpp manifest/install, model download,
+  doctor execution, final docs, and full fresh-machine setup smoke remain future
+  milestones.
+- Updated the current-state next move to T926 milestone 4 design for a pinned
+  llama.cpp engine manifest/install path before model downloads.
+
 ## [2026-07-02] setup | T926 dry-run milestone
 
 - Recorded that T926 milestone 1 landed as `talos setup wizard --dry-run` on
