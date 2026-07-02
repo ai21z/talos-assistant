@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Log"
 kind: log
 status: active
-last_verified_commit: "f35b8bc88533152c4c307a70a7b5814eba04c489"
+last_verified_commit: "01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T808-done-high] living-evidence-wiki-discipline.md"
@@ -92,6 +92,16 @@ confidence_histogram:
 This log is append-only by convention. T808 structural lint checks the file
 exists and has valid frontmatter, but it does not enforce append-only history
 mechanically.
+
+## [2026-07-02] hardening | Public-main wiki truth
+
+- Refreshed the current-state page from the pre-merge
+  `improvement/qodana-cleanup` topology to public `main` during the 0.10.7
+  stabilization arc.
+- Made `last_verified_commit` liveness a structural wiki lint by requiring each
+  required page's frontmatter SHA to resolve with `git cat-file -e`.
+- Corrected the generated coverage report wording to describe the enforced
+  82% instruction gate instead of the stale 65% report text.
 
 ## [2026-06-13] ingest | Living evidence wiki spine
 

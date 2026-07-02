@@ -137,6 +137,10 @@ class QualityMarkdownReportsTaskTest {
         assertTrue(coverage.contains("This report is useful as a release gate snapshot"));
         assertFalse(coverage.contains("Usefulness Assessment"));
         assertTrue(coverage.contains("80.00%"));
+        assertTrue(coverage.contains("82.00% gate"),
+                "coverage report must describe the enforced 82% instruction gate");
+        assertFalse(coverage.contains("65.00%"),
+                "coverage report must not describe the stale 65% instruction gate");
         assertTrue(e2e.contains("sample flow"));
         assertTrue(e2e.contains("## V1 Scenario Pack"));
         assertTrue(e2e.contains("PASSED"));

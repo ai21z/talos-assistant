@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Living Evidence Wiki"
 kind: concept
 status: active
-last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
+last_verified_commit: "01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07"
 evidence_inputs:
   - type: external_source
     ref: "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"

@@ -2038,7 +2038,7 @@ tasks.register("writeQualityMarkdownReports") {
         val coverageTests = mdMap(coverage["tests"])
         val instructionPercent = (instructionCoverage["percent"] as? Number)?.toDouble()
         val branchPercent = (branchCoverage["percent"] as? Number)?.toDouble()
-        val gate = 65.0
+        val gate = 82.0
         val gateMargin = if (instructionPercent == null) null else instructionPercent - gate
         val coverageTotalTests = mdInt(coverageTests["total"])
         val coveragePassed = mdInt(coverageTests["passed"])
@@ -2064,7 +2064,7 @@ tasks.register("writeQualityMarkdownReports") {
             | Question | Answer | Confidence |
             | --- | --- | --- |
             | Did the candidate test lane pass? | ${if (coverageFailures == 0 && coverageErrors == 0) "Yes, with `$coverageSkipped` skipped tests" else "No, failures or errors are present"} | High |
-            | Is instruction coverage above the local gate? | ${if (instructionPercent != null && instructionPercent >= gate) "Yes, `${mdPercent(instructionPercent)}` vs `65.00%`" else "No or unknown"} | High |
+            | Is instruction coverage above the local gate? | ${if (instructionPercent != null && instructionPercent >= gate) "Yes, `${mdPercent(instructionPercent)}` vs `${mdPercent(gate)}`" else "No or unknown"} | High |
             | Is branch coverage strong? | ${if (branchPercent != null && branchPercent >= 65.0) "Yes, `${mdPercent(branchPercent)}`" else "Mixed, `${mdPercent(branchPercent)}` leaves risk in conditional paths"} | Medium |
             | Is this report useful for release review? | Yes for regression gating, not enough for feature-risk assessment alone | Medium |
 
@@ -2075,7 +2075,7 @@ tasks.register("writeQualityMarkdownReports") {
             ```text
             Instruction coverage gate
 
-            0%                 65.00% gate      ${mdPercent(instructionPercent)} actual             100%
+            0%                 ${mdPercent(gate)} gate      ${mdPercent(instructionPercent)} actual             100%
             |----------------------|==============|--------------------------|
                                    |<-- ${if (gateMargin == null) "n/a" else "%+.2f pts".format(gateMargin)} -->|
 

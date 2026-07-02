@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Living Evidence Wiki"
 kind: index
 status: active
-last_verified_commit: "141d787269e1d21baaf42435623bbe80b14a94c2"
+last_verified_commit: "01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07"
 evidence_inputs:
   - type: repo_file
     ref: "AGENTS.md"

@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Talos Wiki Evidence Registry"
 kind: registry
 status: active
-last_verified_commit: "48c9608056f7d7891fbcef952bef7d45e2f1db82"
+last_verified_commit: "01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07"
 evidence_inputs:
   - type: ticket
     ref: "work-cycle-docs/tickets/done/[T810-done-high] living-wiki-operating-loop-and-close-gate.md"

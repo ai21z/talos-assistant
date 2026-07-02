@@ -1,6 +1,6 @@
-# [T921-open-high] Wiki and report truth hardening
+# [T921-done-high] Wiki and report truth hardening
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -110,13 +110,25 @@ Refactor scope:
 - `wikiEvidenceCloseGate --rerun-tasks` passes after the update.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or outcome truth.
 
+## Completion Evidence
+
+- Added a structural wiki lint assertion that every required page's
+  `last_verified_commit` is a full SHA resolving through
+  `git cat-file -e <sha>^{commit}`.
+- Refreshed required wiki page frontmatter to an existing `main` commit and
+  rewrote `CURRENT-STATE.md` away from stale `improvement/qodana-cleanup`
+  topology to the public-main stabilization state.
+- Corrected the generated coverage Markdown report to describe the enforced
+  82% instruction gate instead of the stale 65% report prose.
+- Added regression coverage for the generated coverage report text.
+
 ## Tests / Evidence
 
 Commands:
 
 ```powershell
 .\gradlew.bat test --tests "dev.talos.wiki.WikiLintStructuralTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.build.QualityMarkdownReportsTaskTest" --no-daemon
 .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
 git diff --check
 ```
-

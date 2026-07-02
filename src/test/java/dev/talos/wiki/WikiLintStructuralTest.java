@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -96,6 +97,18 @@ class WikiLintStructuralTest {
             assertTrue(CONFIDENCE_LABELS.contains(confidence),
                     "invalid min_confidence on " + page + ": " + confidence);
             assertConfidenceHistogram(frontmatter, confidence, page);
+        }
+    }
+
+    @Test
+    @DisplayName("wiki last_verified_commit values resolve to local git commits")
+    void wikiLastVerifiedCommitsResolveToGitCommits() throws IOException, InterruptedException {
+        for (Path page : REQUIRED_PAGES) {
+            String frontmatter = frontmatter(readPage(page), page);
+            String commit = scalar(frontmatter, "last_verified_commit", page);
+            assertTrue(commit.matches("[0-9a-f]{40}"),
+                    "last_verified_commit must be a full SHA on " + page + ": " + commit);
+            assertGitCommitExists(commit, page);
         }
     }
 
@@ -332,5 +345,16 @@ class WikiLintStructuralTest {
         String version = properties.getProperty("talosVersion");
         assertTrue(version != null && !version.isBlank(), "gradle.properties must declare talosVersion");
         return version.trim();
+    }
+
+    private static void assertGitCommitExists(String commit, Path page) throws IOException, InterruptedException {
+        Process process = new ProcessBuilder("git", "cat-file", "-e", commit + "^{commit}")
+                .redirectErrorStream(true)
+                .start();
+        boolean exited = process.waitFor(5, TimeUnit.SECONDS);
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(exited, "git cat-file timed out for " + page + " last_verified_commit " + commit);
+        assertEquals(0, process.exitValue(),
+                "last_verified_commit on " + page + " does not resolve: " + commit + "\n" + output);
     }
 }

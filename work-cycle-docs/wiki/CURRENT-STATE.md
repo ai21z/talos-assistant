@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "b6ca07a9ffe0ab372a34bbfd90207b1927dc7340"
+last_verified_commit: "01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -142,52 +142,32 @@ confidence_histogram:
 
 ## Last Verified Evidence Identity
 
-- Branch: `improvement/qodana-cleanup`
-- Commit: `b6ca07a9ffe0ab372a34bbfd90207b1927dc7340`
+- Branch: `main`
+- Commit: `01431aa3a4ad4ac86bf0356a63d574aa2bfe1a07`
 - Talos version: `0.10.6`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: none in the current main-merge line.
-  T866 (git-status fabrication), T867 (protected-path alias classification),
-  T868 (private-mode retrieve tool-surface narrowing),
-  T908 (Plan
-  read-only target/progress obligations), T909 (protected-read session approval
-  UI), T913 (Agent command fallback + false approval-denial claim), T914
-  (ignored-instruction output target role projection), T912 (Plan static-web
-  evidence-bound diagnostics),
-  T916 (read-only command refusal no-inspection), T911 (read-only no-tool
-  manifest evidence mismatch), T917 (static-web verifier CSS requirement for
-  JS-only fixes), T910 (zero changed-files false mutation warning), T897
-  (static-web redesign inferred satellites), T907 (`/last trace` canonical
-  mode rendering), T906 (shell-command hint short-prose false positives), T905
-  (set-model alias guidance), T886 (configure/test/guide supported models), and
-  T885 (terminal UI for verification profiles), and T915 (`/prompt` read-only
-  capability advertising residual), and T872 (run_command +
-  batch/local-display coverage reprobe), T871 (qwen grounding/edit-shape
-  deterministic steering), T873 (broader command-output truthfulness
-  shapes), T870 (redacted-search rendering cleanliness), and T869
-  (failed/denied/semantically unsatisfied mutation outcome label), and T862
-  (Maven workspace-profile verification docs) are done; the T834 mutation
-  anti-overclaim path is done.
-- Active wave context: the Wave 5 structural-decomposition arc (T807-T832) and
-  the Wave 6 trust-surface arc (T833-T841) are both closed and owner-ratified.
-  The current phase is the v0.10.6 main-merge preparation on
-  `improvement/qodana-cleanup`: the 0.10.6 candidate is cut, the marketing site
-  is refreshed, and the Qodana cleanup (merge-plan step 3.2) is done -- 315 to 86
-  findings via behaviour-preserving fixes plus a committed Ultimate-scan baseline,
-  with the deep security scan clean.
-- Known caveats: the 86 residual Qodana findings are triaged and accepted via
-  `qodana-baseline.sarif.json` (style nits, intentional/trust-surface guards,
-  advisory refactors, and one non-exploitable taint flow); scans now gate on NEW
-  only. T807 generated reports remain ignored build evidence, Qodana stays a
-  read-only input for architecture reporting, and the wiki evidence-liveness lint
-  is limited to generated JSON report claims. The branch is local-only; no push.
-- Next move: merge-plan step 3.1 (the docs/report prune and this page's
-  condensation) is done, and the 2026-06-26 manual-testing findings are captured as
-  tickets T874-T880. The only remaining move is to merge
-  `improvement/qodana-cleanup` into main as the v0.10.6 line -- a deliberate
-  non-fast-forward merge, since main carries 4 governance commits the branch lacks.
+- Active tickets: public-main stabilization T921-T924 remain open. T918
+  (red-CI audit snapshot containment), T919 (public repository identity), and
+  T920 (public metadata/legal/docs truth) are done on `main`.
+- Active wave context: the v0.9.0-beta-dev line has been merged to public
+  `main`; the branch retained for beta-dev continuity is separate from this
+  stabilization arc. The current work is to stabilize public `main` into a
+  truthful, green, versioned 0.10.7 candidate without creating a release, tag,
+  history rewrite, or branch deletion. T918 has already been pushed and verified
+  green in GitHub Actions for the red-CI containment failure; T919-T920 are local
+  committed follow-ups in the same arc.
+- Known caveats: `0.10.7` has not been cut yet, so candidate evidence does not
+  exist. T923 is intentionally a non-blocking custody-hardening design follow-up
+  for the DPAPI raw-key PowerShell transport unless a minimal no-new-dependency
+  fix is proven safe. The T919 Playwright site e2e attempt was contaminated by
+  serving the wrong local page and is not release evidence.
+- Next move: finish T921 by making wiki `last_verified_commit` values
+  resolve through `git cat-file -e` and correcting the generated coverage
+  report threshold text; then complete T922 cheap trust hardening, record T923
+  as the separated DPAPI transport follow-up, and run the T924 0.10.7 candidate
+  cut from a clean committed tree.
 
 ```talos-wiki-claims
 {

@@ -16,6 +16,11 @@
   workflow, third-party notices cover the major declared dependencies without
   guessed license placeholders, and the user command reference includes
   `talos doctor`, `talos doctor --start`, and `/doctor`.
+- [T921] Wiki and generated report truth are hardened for the public-main
+  stabilization arc: required wiki `last_verified_commit` values now resolve
+  through structural lint, CURRENT-STATE describes merged `main` instead of the
+  stale release branch, and generated coverage reports name the enforced 82%
+  instruction gate instead of the old 65% prose.
 - [T862] Maven workspace verification is now documented as a trusted
   workspace-profile flow instead of a built-in Maven command profile. User docs
   show the `ws:maven_verify` `.talos/profiles.yaml` recipe, `/profiles trust`,
