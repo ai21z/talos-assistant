@@ -161,3 +161,10 @@ talos doctor --start
   - `talos setup models` rendered accepted beta stability profiles,
     experimental profiles, configure/test/guide steps, managed cache guidance,
     and user-owned GGUF guidance.
+- Remote CI first run for `97087353bfbbeabbbcc05ea940b6b409e8408b0d`
+  failed in `WikiLintStructuralTest` because the GitHub workflow used the
+  default shallow checkout, so valid historical `last_verified_commit` objects
+  were absent from the runner clone. The fix is workflow-owned: both
+  `actions/checkout@v6` steps now set `fetch-depth: 0`, pinned by
+  `CiWorkflowContractTest`, so the hard `git cat-file -e` wiki liveness check
+  has full repository history in CI.
