@@ -102,6 +102,18 @@ mechanically.
 - Updated the current-state next move from implementing the dry-run to WSL
   installed-product dry-run smoke and then T926 milestone 2 design.
 
+## [2026-07-02] setup | T926 interactive config milestone
+
+- Recorded that T926 milestone 2 landed as interactive `talos setup wizard`
+  config-only setup on `v0.9.0-beta-dev`.
+- Kept T926 open because engine install, model download, doctor execution,
+  bootstrap Java/package-manager handling, installer-profile fixes, docs, and
+  full installed smoke remain future milestones.
+- Updated the current-state next move to installed-product WSL smoke for the
+  interactive config-only wizard.
+- Recorded the installed WSL smoke result in T926 after denial, WSL `.exe`
+  rejection, successful throwaway config write, and backup probes passed.
+
 ## [2026-07-02] hardening | Public-main wiki truth
 
 - Refreshed the current-state page from the pre-merge

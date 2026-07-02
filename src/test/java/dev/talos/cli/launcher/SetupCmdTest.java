@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -85,10 +86,32 @@ class SetupCmdTest {
     }
 
     @Test
-    void setupWizardRequiresDryRunUntilInteractiveExecutionLands() {
-        int exit = new CommandLine(new SetupCmd()).execute("wizard");
+    void setupWizardInteractiveWritesConfigAfterExplicitConfirmations() throws Exception {
+        Path server = tempDir.resolve("llama-server");
+        Files.writeString(server, "fake", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayInputStream stdin = new ByteArrayInputStream("y\n1\ny\n".getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        var previousIn = System.in;
+        var previousOut = System.out;
 
-        assertEquals(2, exit);
+        int exit;
+        try {
+            System.setIn(stdin);
+            System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "wizard",
+                    "--server-path", server.toString(),
+                    "--config", config.toString());
+        } finally {
+            System.setIn(previousIn);
+            System.setOut(previousOut);
+        }
+
+        assertEquals(0, exit);
+        String yaml = Files.readString(config, StandardCharsets.UTF_8);
+        assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""), yaml);
+        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("No package installs, model downloads, or model starts were run"));
     }
 
     @Test

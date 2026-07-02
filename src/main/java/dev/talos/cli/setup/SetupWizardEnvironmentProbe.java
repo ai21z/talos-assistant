@@ -20,9 +20,15 @@ public final class SetupWizardEnvironmentProbe {
     private SetupWizardEnvironmentProbe() {}
 
     public static SetupWizardSnapshot capture(Path explicitConfigPath) {
+        return capture(explicitConfigPath, null);
+    }
+
+    public static SetupWizardSnapshot capture(Path explicitConfigPath, Path explicitServerPath) {
         Path configPath = explicitConfigPath == null ? defaultConfigPath() : explicitConfigPath;
         boolean configExists = configPath != null && Files.isRegularFile(configPath);
-        Path serverPath = configExists
+        Path serverPath = explicitServerPath != null
+                ? explicitServerPath
+                : configExists
                 ? configuredServerPath(configPath).orElseGet(SetupWizardEnvironmentProbe::pathServerCandidate)
                 : pathServerCandidate();
 

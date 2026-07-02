@@ -278,6 +278,109 @@ No changes will be made: no package installs, no model downloads, no config writ
 CONFIG_NOT_CREATED
 ```
 
+## Milestone 2 Implementation Evidence
+
+Status:
+
+```text
+Implemented as an interactive config-only setup wizard. T926 remains open
+because bootstrap Java/package-manager handling, pinned llama.cpp manifest,
+engine install, model download, doctor execution, installer profile fixes, docs,
+and full installed-product smoke are later milestones.
+```
+
+Implemented surface:
+
+- `talos setup wizard`
+- `talos setup wizard --dry-run` remains side-effect-free.
+- The interactive wizard:
+  - prints the detected environment and a no-installs/no-downloads/no-starts
+    boundary;
+  - accepts an existing detected `llama-server` only after explicit `y/yes`;
+  - rejects Windows `.exe` `llama-server` paths under WSL;
+  - allows the user to enter a Linux-compatible `llama-server` path or skip;
+  - lists only accepted beta profiles `qwen2.5-coder-14b` and `gpt-oss-20b`;
+  - previews the generated config;
+  - writes config only after final explicit confirmation;
+  - backs up any existing config before overwrite;
+  - prints `talos doctor --start` as the next command instead of running it.
+
+Non-goals preserved:
+
+- No package-manager execution.
+- No pinned llama.cpp install.
+- No model download.
+- No model/server start.
+- No `doctor --start` execution.
+
+Code:
+
+- `src/main/java/dev/talos/cli/setup/SetupWizardRunner.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardEnvironmentProbe.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardPlanner.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardRenderer.java`
+- `src/main/java/dev/talos/cli/launcher/SetupCmd.java`
+
+Pinned behavior:
+
+- Denying the final write leaves config absent.
+- Accepting detected Linux-compatible `llama-server` plus a selected accepted
+  beta profile writes the expected config.
+- Existing config is backed up before overwrite.
+- WSL-visible Windows `.exe` server paths are rejected and do not produce config
+  when the user skips replacement.
+- CLI wiring can write config through `talos setup wizard --server-path ...`
+  after explicit prompt input.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.cli.setup.SetupWizardPlannerTest" --no-daemon
+```
+
+Result:
+
+```text
+BUILD SUCCESSFUL
+SetupCmdTest: 15 tests, 0 failures, 0 errors
+SetupWizardPlannerTest: 7 tests, 0 failures, 0 errors
+```
+
+Installed WSL smoke:
+
+```powershell
+.\gradlew.bat clean installDist --no-daemon
+wsl.exe bash -lc 'cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli; bash tools/install-unix.sh --force'
+```
+
+Installed executable:
+
+```text
+/home/ai21z/.local/talos/bin/talos
+Talos 0.10.7 / Linux amd64 / Java 21.0.11 / build 2026-07-02T21:51:39.787830500Z
+```
+
+Smoke probes:
+
+```text
+DENIAL_NO_CONFIG
+EXE_REJECTED
+WRITE_CONFIG_OK
+BACKUP_OK
+```
+
+Interpretation:
+
+```text
+The installed WSL binary exercised the interactive wizard against throwaway
+`/tmp/t926-wizard-smoke` paths. Final write denial left config absent; a
+WSL-visible `llama-server.exe` was rejected as not Linux-compatible; accepted
+`gpt-oss-20b` wrote a config; accepted `qwen2.5-coder-14b` overwrote an existing
+config only after creating a backup preserving the old content. No package
+install, model download, model/server start, or `doctor --start` execution was
+performed.
+```
+
 ## Architecture Metadata
 
 Capability:

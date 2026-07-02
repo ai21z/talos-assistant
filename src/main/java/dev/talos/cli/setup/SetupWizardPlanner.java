@@ -52,7 +52,7 @@ public final class SetupWizardPlanner {
                 "config",
                 SetupWizardStep.Action.ASK,
                 "Talos config",
-                "No config found at " + path + "; a later interactive milestone must ask before writing it.");
+                "No config found at " + path + "; the interactive wizard must ask before writing it.");
     }
 
     private static SetupWizardStep llamaServerStep(SetupWizardSnapshot snapshot) {
@@ -97,7 +97,7 @@ public final class SetupWizardPlanner {
                     .append(profile.hfFile())
                     .append(")");
         }
-        detail.append(". A later interactive milestone must show size/RAM guidance and ask before any model download.");
+        detail.append(". A later download milestone must show size/RAM guidance and ask before any model download.");
         return new SetupWizardStep(
                 "model-profile",
                 SetupWizardStep.Action.ASK,

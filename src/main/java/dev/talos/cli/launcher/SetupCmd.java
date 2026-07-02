@@ -3,6 +3,7 @@ package dev.talos.cli.launcher;
 import dev.talos.cli.setup.SetupWizardEnvironmentProbe;
 import dev.talos.cli.setup.SetupWizardPlanner;
 import dev.talos.cli.setup.SetupWizardRenderer;
+import dev.talos.cli.setup.SetupWizardRunner;
 import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
 import picocli.CommandLine;
 
@@ -204,8 +205,7 @@ public class SetupCmd implements Callable<Integer> {
     @Override public Integer call() {
         try {
             if ("wizard".equalsIgnoreCase(Objects.toString(topic, ""))) {
-                runWizard();
-                return 0;
+                return runWizard();
             }
             if ("models".equalsIgnoreCase(Objects.toString(topic, ""))) {
                 runModelsSetup();
@@ -237,13 +237,26 @@ public class SetupCmd implements Callable<Integer> {
         }
     }
 
-    private void runWizard() {
-        if (!dryRun) {
-            throw new IllegalArgumentException("setup wizard currently supports --dry-run only; interactive execution is tracked by T926.");
-        }
-        var snapshot = SetupWizardEnvironmentProbe.capture(configPath);
+    private int runWizard() {
+        var snapshot = SetupWizardEnvironmentProbe.capture(configPath, serverPath);
         var plan = SetupWizardPlanner.plan(snapshot);
-        System.out.println(SetupWizardRenderer.render(plan));
+        if (dryRun) {
+            System.out.println(SetupWizardRenderer.render(plan));
+            return 0;
+        }
+        var result = SetupWizardRunner.run(
+                plan,
+                System.in,
+                System.out,
+                (profileName, server, cache, setupPort) -> renderManagedLlamaCppProfileConfig(
+                        profileName,
+                        server,
+                        null,
+                        cache,
+                        setupPort),
+                cacheDir == null ? defaultHfCacheDir() : cacheDir,
+                port);
+        return result.exitCode();
     }
 
     private void runModelsSetup() throws Exception {

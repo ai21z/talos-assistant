@@ -50,8 +50,8 @@ public final class SetupWizardRenderer {
         out.append("""
 
                 Milestone boundary:
-                  This build only renders the setup plan. Interactive Y/N execution, package-manager execution,
-                  pinned llama.cpp install, model download, config write, and doctor start are not implemented here.
+                  This dry run only renders the setup plan. Package-manager execution, pinned llama.cpp install,
+                  model download, config write, and doctor start are not performed here.
                 """);
         return out.toString();
     }
