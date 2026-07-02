@@ -202,6 +202,82 @@ Runtime flow:
     engine source, model profile, config write, and doctor behavior.
 ```
 
+## Milestone 1 Implementation Evidence
+
+Status:
+
+```text
+Implemented as a dry-run decision surface only. T926 remains open because the
+interactive wizard, bootstrap Java/package-manager handling, pinned llama.cpp
+manifest, model download, config write, doctor execution, installer profile
+fixes, docs, and full installed-product smoke are later milestones.
+```
+
+Implemented surface:
+
+- `talos setup wizard --dry-run`
+- `talos setup wizard` without `--dry-run` fails closed with an explicit
+  milestone-boundary message.
+- The dry run prints:
+  - detected OS/arch/WSL, distro when available, Java feature version,
+    config path/existence, detected `llama-server`, usable disk, and JVM max
+    memory;
+  - a decision plan for Java, config, `llama-server`, accepted beta model
+    profile selection, and `talos doctor --start` verification;
+  - an explicit no-side-effects boundary: no package installs, no model
+    downloads, no config writes, and no model starts.
+
+Code:
+
+- `src/main/java/dev/talos/cli/setup/SetupWizardSnapshot.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardStep.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardPlan.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardPlanner.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardRenderer.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardEnvironmentProbe.java`
+- `src/main/java/dev/talos/cli/launcher/SetupCmd.java`
+
+Pinned behavior:
+
+- Fresh Ubuntu/WSL-like state queues manual choices without side effects.
+- Existing Java 21+, config, and Linux-compatible `llama-server` are detected
+  as skip/reuse-or-ask decisions.
+- A Windows `.exe` `llama-server` visible from WSL is not treated as a
+  compatible Linux engine binary.
+- The model step lists only the accepted beta profiles
+  `qwen2.5-coder-14b` and `gpt-oss-20b` from the shared
+  `LlamaCppModelProfiles` registry.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.cli.setup.SetupWizardPlannerTest" --no-daemon
+```
+
+Result:
+
+```text
+BUILD SUCCESSFUL
+SetupCmdTest: 15 tests, 0 failures, 0 errors
+SetupWizardPlannerTest: 3 tests, 0 failures, 0 errors
+```
+
+Installed-distribution smoke:
+
+```powershell
+.\gradlew.bat clean installDist --no-daemon
+.\build\install\talos\bin\talos.bat setup wizard --dry-run --config build\tmp\t926-dry-run-config.yaml
+```
+
+Result:
+
+```text
+BUILD SUCCESSFUL
+Talos setup wizard dry run
+No changes will be made: no package installs, no model downloads, no config writes, no model starts.
+CONFIG_NOT_CREATED
+```
+
 ## Architecture Metadata
 
 Capability:

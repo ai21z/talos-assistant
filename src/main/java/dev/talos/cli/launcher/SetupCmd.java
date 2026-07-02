@@ -1,5 +1,8 @@
 package dev.talos.cli.launcher;
 
+import dev.talos.cli.setup.SetupWizardEnvironmentProbe;
+import dev.talos.cli.setup.SetupWizardPlanner;
+import dev.talos.cli.setup.SetupWizardRenderer;
 import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
 import picocli.CommandLine;
 
@@ -21,8 +24,11 @@ public class SetupCmd implements Callable<Integer> {
     @CommandLine.Option(names="--models", description="Legacy Ollama: comma-separated list to pull")
     String models;
 
-    @CommandLine.Parameters(index = "0", arity = "0..1", description = "Setup topic. Use 'models' for model setup.")
+    @CommandLine.Parameters(index = "0", arity = "0..1", description = "Setup topic. Use 'models' for model setup or 'wizard' for guided setup.")
     String topic;
+
+    @CommandLine.Option(names = "--dry-run", description = "Render setup wizard decisions without installing, downloading, writing config, or starting models")
+    boolean dryRun;
 
     @CommandLine.Option(names = "--profile", description = "Managed llama.cpp profile, for example qwen2.5-coder-14b, gpt-oss-20b, qwen36vf-q6k, or deepseek-v2lite-q4km")
     String profile;
@@ -197,6 +203,10 @@ public class SetupCmd implements Callable<Integer> {
  
     @Override public Integer call() {
         try {
+            if ("wizard".equalsIgnoreCase(Objects.toString(topic, ""))) {
+                runWizard();
+                return 0;
+            }
             if ("models".equalsIgnoreCase(Objects.toString(topic, ""))) {
                 runModelsSetup();
                 return 0;
@@ -225,6 +235,15 @@ public class SetupCmd implements Callable<Integer> {
             System.err.println("setup failed: " + e.getMessage());
             return 2;
         }
+    }
+
+    private void runWizard() {
+        if (!dryRun) {
+            throw new IllegalArgumentException("setup wizard currently supports --dry-run only; interactive execution is tracked by T926.");
+        }
+        var snapshot = SetupWizardEnvironmentProbe.capture(configPath);
+        var plan = SetupWizardPlanner.plan(snapshot);
+        System.out.println(SetupWizardRenderer.render(plan));
     }
 
     private void runModelsSetup() throws Exception {

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T926] `talos setup wizard --dry-run` now renders a side-effect-free setup
+  decision plan. The dry run detects Java/config/server state, rejects
+  Windows `.exe` llama-server paths as incompatible under WSL, lists the two
+  accepted beta model profiles, and states that package installs, model
+  downloads, config writes, and model starts are not performed in this
+  milestone.
 - [T925] Workspace containment now has a shared canonical primitive for the
   checkpoint and delete-root guard paths. Checkpoint capture and restore reject
   Windows-style prefix-sibling escapes before writing or deleting outside the

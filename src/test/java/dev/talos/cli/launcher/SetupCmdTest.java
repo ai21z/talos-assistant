@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,6 +52,43 @@ class SetupCmdTest {
         assertTrue(help.contains("talos setup models --profile"));
         assertTrue(help.contains(".talos/models"));
         assertFalse(help.contains("Tested profiles:"), help);
+    }
+
+    @Test
+    void setupWizardDryRunRendersDecisionPlanWithoutSideEffects() throws Exception {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        PrintStream previousOut = System.out;
+
+        try {
+            System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+            int exit = new CommandLine(new SetupCmd()).execute(
+                    "wizard",
+                    "--dry-run",
+                    "--config", config.toString());
+
+            assertEquals(0, exit);
+        } finally {
+            System.setOut(previousOut);
+        }
+
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Talos setup wizard dry run"), text);
+        assertTrue(text.contains("No changes will be made"), text);
+        assertTrue(text.contains("no package installs"), text);
+        assertTrue(text.contains("no model downloads"), text);
+        assertTrue(text.contains("no config writes"), text);
+        assertTrue(text.contains("qwen2.5-coder-14b"), text);
+        assertTrue(text.contains("gpt-oss-20b"), text);
+        assertTrue(text.contains("talos doctor --start"), text);
+        assertFalse(Files.exists(config), "dry-run must not create config");
+    }
+
+    @Test
+    void setupWizardRequiresDryRunUntilInteractiveExecutionLands() {
+        int exit = new CommandLine(new SetupCmd()).execute("wizard");
+
+        assertEquals(2, exit);
     }
 
     @Test
