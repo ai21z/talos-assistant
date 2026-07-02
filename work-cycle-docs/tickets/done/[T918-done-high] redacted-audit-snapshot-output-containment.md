@@ -1,6 +1,6 @@
-# [T918-open-high] Redacted audit snapshot output containment
+# [T918-done-high] Redacted audit snapshot output containment
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -128,7 +128,13 @@ git diff --check
 .\gradlew.bat check --no-daemon
 ```
 
+Observed evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.runtime.policy.RedactedAuditSnapshotWriterTest" --no-daemon
+BUILD SUCCESSFUL
+```
+
 ## Known Risks
 
 - Host-specific Windows alias behavior is hard to reproduce portably; test via a deterministic seam.
-

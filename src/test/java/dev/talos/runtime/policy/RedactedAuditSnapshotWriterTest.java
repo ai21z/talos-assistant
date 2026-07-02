@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -86,5 +87,40 @@ class RedactedAuditSnapshotWriterTest {
         assertEquals(1, code);
         assertTrue(err.toString(StandardCharsets.UTF_8).contains("output directory must not be inside workspace"),
                 err.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void rejectsOutputWhoseExistingParentCanonicalizesInsideWorkspace(@TempDir Path tempDir) throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace")).toRealPath();
+        Files.writeString(workspace.resolve("README.md"), "safe\n");
+        Path aliasParent = Files.createDirectories(tempDir.resolve("WORKSP~1"));
+        Path outputViaAlias = aliasParent.resolve("audit-output");
+
+        IOException failure = assertThrows(IOException.class, () -> RedactedAuditSnapshotWriter.write(
+                new RedactedAuditSnapshotWriter.Options(workspace, outputViaAlias, "alias"),
+                path -> path.toAbsolutePath().normalize().equals(aliasParent.toAbsolutePath().normalize())
+                        ? workspace
+                        : path.toRealPath()));
+
+        assertTrue(failure.getMessage().contains("output directory must not be inside workspace"),
+                failure.getMessage());
+        assertFalse(Files.exists(outputViaAlias), "unsafe output directory must not be created");
+    }
+
+    @Test
+    void rejectsOutputWhenCanonicalizationCannotEstablishContainment(@TempDir Path tempDir) throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace")).toRealPath();
+        Files.writeString(workspace.resolve("README.md"), "safe\n");
+        Path output = tempDir.resolve("snapshot");
+
+        IOException failure = assertThrows(IOException.class, () -> RedactedAuditSnapshotWriter.write(
+                new RedactedAuditSnapshotWriter.Options(workspace, output, "failure"),
+                path -> {
+                    throw new IOException("synthetic canonicalization failure");
+                }));
+
+        assertTrue(failure.getMessage().contains("Unable to resolve output path"),
+                failure.getMessage());
+        assertFalse(Files.exists(output), "output directory must not be created when safety cannot be proven");
     }
 }

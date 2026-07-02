@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T918] Redacted audit snapshots now canonicalize the output path through the
+  nearest existing parent before checking workspace containment. Alias-shaped
+  paths that resolve inside the workspace are rejected, and output path
+  canonicalization failures fail closed before any snapshot directory is
+  created.
 - [T862] Maven workspace verification is now documented as a trusted
   workspace-profile flow instead of a built-in Maven command profile. User docs
   show the `ws:maven_verify` `.talos/profiles.yaml` recipe, `/profiles trust`,

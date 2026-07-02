@@ -24,6 +24,11 @@ public final class RedactedAuditSnapshotWriter {
 
     private RedactedAuditSnapshotWriter() {}
 
+    @FunctionalInterface
+    interface PathCanonicalizer {
+        Path canonicalize(Path path) throws IOException;
+    }
+
     public record Options(Path workspace, Path output, String label) {
         public Options {
             if (workspace == null) throw new IllegalArgumentException("workspace is required");
@@ -46,12 +51,17 @@ public final class RedactedAuditSnapshotWriter {
     }
 
     public static Summary write(Options options) throws IOException {
+        return write(options, path -> path.toRealPath());
+    }
+
+    static Summary write(Options options, PathCanonicalizer canonicalizer) throws IOException {
         Path workspace = options.workspace().toRealPath();
         if (!Files.isDirectory(workspace)) {
             throw new IOException("workspace is not a directory: " + workspace);
         }
         Path output = options.output().toAbsolutePath().normalize();
-        if (output.startsWith(workspace)) {
+        Path canonicalOutput = canonicalizeOutputForContainment(output, canonicalizer);
+        if (canonicalOutput.startsWith(workspace)) {
             throw new IOException("output directory must not be inside workspace");
         }
         if (Files.exists(output) && hasAnyEntry(output)) {
@@ -67,6 +77,34 @@ public final class RedactedAuditSnapshotWriter {
         int included = (int) entries.stream().filter(FileEntry::included).count();
         int omitted = entries.size() - included;
         return new Summary(options.label(), output, entries.size(), included, omitted);
+    }
+
+    private static Path canonicalizeOutputForContainment(Path output, PathCanonicalizer canonicalizer)
+            throws IOException {
+        Path absolute = output.toAbsolutePath().normalize();
+        List<Path> missingSegments = new ArrayList<>();
+        Path existing = absolute;
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            Path fileName = existing.getFileName();
+            if (fileName != null) {
+                missingSegments.add(0, fileName);
+            }
+            existing = existing.getParent();
+        }
+        if (existing == null) {
+            throw new IOException("Unable to resolve output path: " + output);
+        }
+        Path canonicalExisting;
+        try {
+            canonicalExisting = canonicalizer.canonicalize(existing).toAbsolutePath().normalize();
+        } catch (Exception e) {
+            throw new IOException("Unable to resolve output path: " + output, e);
+        }
+        Path canonicalOutput = canonicalExisting;
+        for (Path segment : missingSegments) {
+            canonicalOutput = canonicalOutput.resolve(segment.toString()).normalize();
+        }
+        return canonicalOutput;
     }
 
     private static boolean hasAnyEntry(Path output) throws IOException {
