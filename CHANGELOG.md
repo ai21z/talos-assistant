@@ -11,6 +11,11 @@
   across installer defaults, site links, public docs, architecture notes, and
   release/site contract tests while preserving the intentional `talos-cli`
   package and winget moniker identity.
+- [T920] Public repository metadata is refreshed for Talos: NOTICE no longer
+  contains template ownership, CONTRIBUTING describes the current GitHub/Gradle
+  workflow, third-party notices cover the major declared dependencies without
+  guessed license placeholders, and the user command reference includes
+  `talos doctor`, `talos doctor --start`, and `/doctor`.
 - [T862] Maven workspace verification is now documented as a trusted
   workspace-profile flow instead of a built-in Maven command profile. User docs
   show the `ws:maven_verify` `.talos/profiles.yaml` recipe, `/profiles trust`,

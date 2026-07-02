@@ -1,6 +1,6 @@
-# [T920-open-medium] Public metadata legal docs truth
+# [T920-done-medium] Public metadata legal docs truth
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -118,3 +118,9 @@ Commands:
 git diff --check
 ```
 
+Observed evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.release.PublicRepositoryMetadataTest" --no-daemon
+BUILD SUCCESSFUL
+```

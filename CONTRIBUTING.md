@@ -1,26 +1,54 @@
-# Contributing to LOQ-J
+# Contributing to Talos
 
-Thanks for helping build a secure, local-first RAG CLI! This guide keeps contributions fast, safe, and consistent.
+Talos is a local-first Java CLI workspace assistant. Changes should preserve
+its trust discipline: inspect before acting, retrieve before guessing, ask
+before writing, verify before claiming completion, and keep local evidence.
 
-## TL;DR checklist
-- Use JDK **21** and the Gradle wrapper (`./gradlew`).
-- Keep the app **offline-by-default**. No telemetry. Only localhost (Ollama) calls.
-- Run: `./gradlew clean test` before pushing.
-- Format & add SPDX headers: `./gradlew spotlessApply`.
-- Use **feature branches** + **Conventional Commits**.
-- Open a Merge Request (MR) with tests + docs when behavior changes.
+## Quick Checklist
 
-## Project goals (north star)
-- **Secure & local**: all inference and embeddings run locally by default.
-- **Simple CLI UX**: small, composable commands; inline citations.
-- **Portable**: Windows/macOS/Linux; Java 21.
+- Use JDK 21 or newer.
+- Use the Gradle wrapper from the repository root.
+- Keep changes small, ticketed, and evidence-backed.
+- Add or update tests for behavior changes.
+- Open a GitHub pull request with the relevant test output and docs updates.
 
-## Getting started
+## Local Build
+
+On Windows:
+
+```powershell
+.\gradlew.bat --version
+.\gradlew.bat check --no-daemon
+.\gradlew.bat installDist
+.\build\install\talos\bin\talos.bat --version
+```
+
+On Linux/macOS developer shells:
+
 ```bash
-# Clone & build
 ./gradlew --version
-./gradlew clean test
-
-# Install local dist (optional)
+./gradlew check --no-daemon
 ./gradlew installDist
-build/install/loqj/bin/loqj --version
+./build/install/talos/bin/talos --version
+```
+
+## Contribution Rules
+
+- Do not add telemetry, remote model defaults, or hidden background execution.
+- Do not weaken approval gates, protected-path handling, trace capture, or
+  verification without an explicit ticket and regression tests.
+- Do not commit generated `build/`, local audit transcripts, prompt-debug
+  artifacts, model caches, or private workspace data.
+- Update user docs when public commands, setup flows, trust boundaries, or
+  installation behavior changes.
+- For release/candidate work, follow the repository work-test cycle under
+  `work-cycle-docs/`.
+
+## Pull Requests
+
+Pull requests should include:
+
+- the ticket or finding ID being addressed;
+- the exact tests or commands run;
+- any known skipped/failed checks and why they are not part of the change;
+- screenshots or terminal transcripts only when the change affects UI/output.

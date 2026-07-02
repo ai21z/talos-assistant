@@ -29,6 +29,8 @@ Show REPL help:
 | `talos version` | Print version information. |
 | `talos status` | Show current workspace/config status. |
 | `talos status --verbose` | Show diagnostics, config path, engine health, and user config status. |
+| `talos doctor` | Run fast environment preflight probes without starting a managed model server. |
+| `talos doctor --start` | Start the managed server for a model-smoke check, require the smoke reply token, then release it. |
 | `talos setup` | Show setup summary. |
 | `talos setup models` | Show managed model setup help. |
 | `talos diagnose -q "<question>"` | Diagnose RAG configuration and prompt sizing. |
@@ -54,6 +56,7 @@ Show REPL help:
 | `/models` | List models visible to the engine catalog. Managed `llama.cpp` shows the configured/running GGUF, not every downloaded cache entry. |
 | `/set model <backend/model>` | Switch among visible active/catalog models. For managed GGUF profile changes, use `talos setup models ... --write --force` and restart. |
 | `/mode <mode>` | Switch mode; public modes are `auto`, `ask`, `plan`, and `agent`. Legacy `dev`, `chat`, and `unified` resolve to `agent`; legacy `rag` remains hidden but selectable. Reserved `web` performs no external network calls in this build and cannot be selected. |
+| `/doctor` | Run the same fast preflight probe family from inside the REPL; it does not start the managed model server. |
 | `/privacy status` | Show privacy settings. |
 | `/privacy private on` | Enable private mode. |
 | `/last trace` | Show evidence from the last turn. |
