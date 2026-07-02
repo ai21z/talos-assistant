@@ -148,9 +148,8 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up) and T924
-  (0.10.7 candidate cut evidence repair) remain open. T918-T922 are done on
-  `main`.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up) remains open.
+  T918-T922 and T924 are done on `main`.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. The current work is to stabilize public `main` into a
@@ -160,13 +159,13 @@ confidence_histogram:
   committed follow-ups in the same arc.
 - Known caveats: `scripts/cut-candidate.ps1` created the 0.10.7 cut commit
   `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`, then the mandatory post-bump
-  `check` failed because this page still reported version 0.10.6. That failure
-  is a candidate-evidence failure, not a runtime failure; no push has happened
-  after the failed cut. T923 remains a non-blocking custody-hardening design
-  follow-up for the DPAPI raw-key PowerShell transport.
-- Next move: commit this wiki identity repair, rerun the post-bump candidate
-  gates from the repaired 0.10.7 tree, close T924 only after those gates pass,
-  then push and verify GitHub Actions.
+  `check` caught this page still reporting version 0.10.6. That evidence failure
+  was repaired forward, not pushed, and the post-bump gates plus installed smoke
+  were rerun from the repaired 0.10.7 tree. No public release, tag, winget
+  publication, or history rewrite has happened. T923 remains a non-blocking
+  custody-hardening design follow-up for the DPAPI raw-key PowerShell transport.
+- Next move: push the 0.10.7 public-main stabilization commits and verify
+  GitHub Actions green; then keep release/tag/winget decisions separate.
 
 ```talos-wiki-claims
 {

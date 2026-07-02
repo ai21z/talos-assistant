@@ -1,14 +1,14 @@
-# [T924-open-high] Cut 0.10.7 candidate
+# [T924-done-high] Cut 0.10.7 candidate
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
 
 - Source: release/candidate runbook
 - Date: 2026-07-02
-- Talos version / commit: starts at 0.10.6 / 7f75eb3070a6f32be890787decca0254e5972d4b
-- Verification status: pending T918-T922 completion
+- Talos version / commit: 0.10.7 / be5752867aee5176f3d7f0ee24482d983a5e9bf2 before ticket close
+- Verification status: local candidate evidence repaired and installed smoke passed; remote Actions verification remains the next external check
 
 Expected behavior:
 
@@ -130,3 +130,34 @@ talos --version
 talos doctor --start
 ```
 
+## Completion Evidence
+
+- `.\scripts\cut-candidate.ps1` bumped `talosVersion` to `0.10.7`, promoted
+  `CHANGELOG.md` into `## [0.10.7] - 2026-07-02`, committed
+  `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`, and built `installDist`.
+- The scripted run then failed in the mandatory post-bump `check` because
+  `work-cycle-docs/wiki/CURRENT-STATE.md` still reported `Talos version:
+  0.10.6`. This was a real evidence-lint failure caught before any push.
+- Repaired forward in `be5752867aee5176f3d7f0ee24482d983a5e9bf2` by updating
+  the wiki identity state to `0.10.7`.
+- Re-run local candidate evidence after repair:
+  - `.\gradlew.bat installDist --no-daemon` passed.
+  - `.\build\install\talos\bin\talos.bat --version` reported `Talos 0.10.7`.
+  - `.\gradlew.bat check --no-daemon` passed.
+  - `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+  - `.\gradlew.bat talosQualitySummaries --no-daemon` passed and all four
+    summary JSON files report version `0.10.7`.
+  - Repaired `build/reports/talos/candidate-manifest.json` records version
+    `0.10.7` and SHA `be5752867aee5176f3d7f0ee24482d983a5e9bf2`.
+- Clean global install smoke:
+  - `.\tools\install-windows.ps1 -Force` refreshed
+    `%LOCALAPPDATA%\Programs\talos`.
+  - `talos --version` reported `Talos 0.10.7`.
+  - `talos status --verbose` started and reported the configured llama.cpp
+    profile.
+  - REPL `/status --verbose` and `/help` worked through installed `talos`.
+  - `talos doctor --start` passed 8/8 checks, verified end-to-end model smoke,
+    and released the managed server.
+  - `talos setup models` rendered accepted beta stability profiles,
+    experimental profiles, configure/test/guide steps, managed cache guidance,
+    and user-owned GGUF guidance.
