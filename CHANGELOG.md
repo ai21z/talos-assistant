@@ -14,7 +14,12 @@
   without running it by default, selects PATH profile files from the user's
   login shell or an explicit `--profile-file`, verifies the direct Linux
   installed binary before inherited PATH candidates, and hands off to
-  `talos setup wizard`.
+  `talos setup wizard`. The setup wizard now offers an explicit pinned
+  Ubuntu/WSL x64 CPU `llama.cpp` engine install when no compatible
+  `llama-server` exists, verifies the artifact SHA-256 before extraction,
+  follows GitHub release redirects, handles cross-filesystem staging promotion,
+  reuses an existing installed engine, and still does not download model
+  weights, start the server, or run doctor.
 - [T925] Workspace containment now has a shared canonical primitive for the
   checkpoint and delete-root guard paths. Checkpoint capture and restore reject
   Windows-style prefix-sibling escapes before writing or deleting outside the

@@ -13,6 +13,17 @@ separate step.
 
 Local-first depends on the configured chat endpoint. Chat endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend. When remote chat is explicitly allowed, full prompts, including retrieved file contents, can be sent to that host.
 
+## Guided Engine Install On Ubuntu/WSL x64
+
+On Ubuntu/WSL x64, `talos setup wizard` can offer a pinned CPU `llama.cpp`
+engine install when no compatible `llama-server` is detected. The wizard prints
+the upstream tag, asset name, download size, install directory, and SHA-256
+before asking for confirmation.
+
+This installs only the `llama.cpp` engine binary. It does not download GGUF
+model weights, start the server, or run `talos doctor --start`. Model selection
+and config writes remain explicit wizard steps.
+
 ## Show Setup Help
 
 ```powershell

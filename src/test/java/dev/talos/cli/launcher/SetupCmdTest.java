@@ -82,6 +82,7 @@ class SetupCmdTest {
         assertTrue(text.contains("qwen2.5-coder-14b"), text);
         assertTrue(text.contains("gpt-oss-20b"), text);
         assertTrue(text.contains("talos doctor --start"), text);
+        assertFalse(text.contains("latest"), text);
         assertFalse(Files.exists(config), "dry-run must not create config");
     }
 
@@ -111,7 +112,7 @@ class SetupCmdTest {
         assertEquals(0, exit);
         String yaml = Files.readString(config, StandardCharsets.UTF_8);
         assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""), yaml);
-        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("No package installs, model downloads, or model starts were run"));
+        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("No model downloads, model starts, or doctor execution were run"));
     }
 
     @Test

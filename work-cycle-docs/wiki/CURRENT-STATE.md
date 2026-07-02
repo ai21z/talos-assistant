@@ -150,11 +150,12 @@ confidence_histogram:
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T926
   (installation setup wizard), and T927 (`/session clear` target mismatch)
-  remain open. T926 milestones 1-3 (`talos setup wizard --dry-run`, the
-  interactive config-only wizard, and Unix bootstrap prerequisite/profile
-  hardening) are implemented on `v0.9.0-beta-dev`; the ticket remains open for
-  pinned engine-install manifest/download, model-download, doctor-execution,
-  final docs, and full installed-smoke milestones. T918-T922 and T924 are done
+  remain open. T926 milestones 1-4 (`talos setup wizard --dry-run`, the
+  interactive config-only wizard, Unix bootstrap prerequisite/profile
+  hardening, and pinned Ubuntu/WSL x64 CPU `llama.cpp` engine install) are
+  implemented on `v0.9.0-beta-dev`; the ticket remains open for model-download,
+  doctor-execution, final docs, and full installed-smoke milestones. T918-T922
+  and T924 are done
   on public `main`; T925 and T928 are done on `v0.9.0-beta-dev` and must be
   included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
@@ -174,10 +175,9 @@ confidence_histogram:
   T925, T926 milestones 1-3, and T928 were implemented after the green 0.10.7
   candidate evidence, so any public release/tag decision now requires a fresh
   candidate cut rather than reusing the previous 0.10.7 packet.
-- Next move: design T926 milestone 4 around the pinned llama.cpp engine
-  manifest/install path before model downloads. The manifest must name source
-  URL or Talos-hosted artifact, upstream tag/version, OS/arch/backend variant,
-  install path, and SHA-256 before executable install code lands.
+- Next move: design T926 milestone 5 around explicit model-download choices,
+  disk/RAM guidance, config/write handoff, and doctor verification after the
+  pinned engine-install path.
 
 ```talos-wiki-claims
 {

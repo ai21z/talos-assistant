@@ -72,11 +72,23 @@ public final class SetupWizardPlanner {
                     "llama.cpp server",
                     "Linux-compatible llama-server detected at " + server + "; ask whether to use this path.");
         }
+        var manifest = LlamaCppEngineManifest.select(snapshot);
+        if (manifest.isPresent()) {
+            var entry = manifest.get();
+            return new SetupWizardStep(
+                    "llama-server",
+                    SetupWizardStep.Action.ASK,
+                    "llama.cpp server",
+                    "No compatible llama-server detected; ask whether to install pinned "
+                            + entry.variant() + " llama.cpp " + entry.upstreamTag()
+                            + " from " + entry.assetName()
+                            + " (SHA-256 " + entry.sha256() + "), provide a path, or skip model setup.");
+        }
         return new SetupWizardStep(
                 "llama-server",
                 SetupWizardStep.Action.ASK,
                 "llama.cpp server",
-                "No compatible llama-server detected; ask whether to provide a path, install from a future pinned Talos manifest, or skip model setup.");
+                "No compatible llama-server detected; ask whether to provide a path or skip model setup.");
     }
 
     private static SetupWizardStep modelProfileStep() {

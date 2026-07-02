@@ -1,5 +1,6 @@
 package dev.talos.cli.launcher;
 
+import dev.talos.cli.setup.LlamaCppEngineInstaller;
 import dev.talos.cli.setup.SetupWizardEnvironmentProbe;
 import dev.talos.cli.setup.SetupWizardPlanner;
 import dev.talos.cli.setup.SetupWizardRenderer;
@@ -244,6 +245,7 @@ public class SetupCmd implements Callable<Integer> {
             System.out.println(SetupWizardRenderer.render(plan));
             return 0;
         }
+        Path userHome = Path.of(System.getProperty("user.home"));
         var result = SetupWizardRunner.run(
                 plan,
                 System.in,
@@ -255,7 +257,9 @@ public class SetupCmd implements Callable<Integer> {
                         cache,
                         setupPort),
                 cacheDir == null ? defaultHfCacheDir() : cacheDir,
-                port);
+                port,
+                userHome,
+                new LlamaCppEngineInstaller()::install);
         return result.exitCode();
     }
 

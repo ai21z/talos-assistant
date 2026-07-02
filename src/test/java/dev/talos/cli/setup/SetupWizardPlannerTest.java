@@ -40,9 +40,19 @@ class SetupWizardPlannerTest {
         assertEquals(SetupWizardStep.Action.ASK, plan.requiredStep("config").action());
         assertEquals(SetupWizardStep.Action.ASK, plan.requiredStep("llama-server").action());
         assertEquals(SetupWizardStep.Action.ASK, plan.requiredStep("model-profile").action());
+        assertTrue(plan.requiredStep("llama-server").detail().contains("pinned"));
+        assertTrue(plan.requiredStep("llama-server").detail().contains("b9860"));
+        assertTrue(plan.requiredStep("llama-server").detail().contains("ubuntu-x64-cpu"));
+        assertTrue(plan.requiredStep("llama-server").detail().contains("SHA-256"));
         assertTrue(plan.requiredStep("model-profile").detail().contains("qwen2.5-coder-14b"));
         assertTrue(plan.requiredStep("model-profile").detail().contains("gpt-oss-20b"));
         assertTrue(plan.requiredStep("verification").detail().contains("talos doctor --start"));
+
+        String dryRun = SetupWizardRenderer.render(plan);
+        assertTrue(dryRun.contains("b9860"), dryRun);
+        assertTrue(dryRun.contains("llama-b9860-bin-ubuntu-x64.tar.gz"), dryRun);
+        assertTrue(dryRun.contains("SHA-256"), dryRun);
+        assertFalse(dryRun.contains("latest"), dryRun);
     }
 
     @Test
@@ -157,6 +167,68 @@ class SetupWizardPlannerTest {
         assertTrue(result.output().contains("not Linux-compatible"), result.output());
     }
 
+    @Test
+    void interactiveWizardDeniesPinnedEngineInstallWithoutSideEffects() throws Exception {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, null, false, true));
+        FakeEngineInstaller installer = new FakeEngineInstaller();
+
+        SetupWizardRunner.Result result = run(plan, "n\n\n", installer);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(0, installer.calls);
+        assertFalse(result.wroteConfig());
+        assertFalse(Files.exists(config), "engine denial and path skip must leave config absent");
+        assertTrue(result.output().contains("Model setup skipped"), result.output());
+    }
+
+    @Test
+    void defaultRunnerUsesUserHomeAsManifestBaseWithoutDoubleTalosHome() throws Exception {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, null, false, true));
+        String previousHome = System.getProperty("user.home");
+        try {
+            System.setProperty("user.home", tempDir.toString());
+
+            SetupWizardRunner.Result result = run(plan, "n\n\n");
+
+            String normalized = result.output().replace('\\', '/');
+            assertTrue(normalized.contains(tempDir.resolve(".talos").resolve("engines").toString().replace('\\', '/')),
+                    result.output());
+            assertFalse(normalized.contains(".talos/.talos/engines"), result.output());
+        } finally {
+            if (previousHome == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previousHome);
+            }
+        }
+    }
+
+    @Test
+    void interactiveWizardInstallsPinnedEngineThenWritesConfigAfterConfirmation() throws Exception {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        Path installedServer = tempDir.resolve(".talos")
+                .resolve("engines")
+                .resolve("llama.cpp")
+                .resolve("b9860")
+                .resolve("ubuntu-x64-cpu")
+                .resolve("bin")
+                .resolve("llama-server");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, null, false, true));
+        FakeEngineInstaller installer = new FakeEngineInstaller(installedServer);
+
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\n", installer);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(1, installer.calls);
+        assertTrue(result.wroteConfig());
+        String yaml = Files.readString(config, StandardCharsets.UTF_8);
+        assertTrue(yaml.contains("server_path: \"" + installedServer.toAbsolutePath().normalize().toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(result.output().contains("Installed pinned llama.cpp engine"), result.output());
+        assertTrue(result.output().contains("No model downloads"), result.output());
+    }
+
     private SetupWizardRunner.Result run(SetupWizardPlan plan, String input) {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         return SetupWizardRunner.run(
@@ -166,6 +238,22 @@ class SetupWizardPlannerTest {
                 this::renderConfig,
                 tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
                 18115);
+    }
+
+    private SetupWizardRunner.Result run(
+            SetupWizardPlan plan,
+            String input,
+            SetupWizardRunner.EngineInstaller installer) {
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        return SetupWizardRunner.run(
+                plan,
+                new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)),
+                new PrintStream(stdout, true, StandardCharsets.UTF_8),
+                this::renderConfig,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115,
+                tempDir,
+                installer);
     }
 
     private String renderConfig(String profile, Path server, Path cacheDir, int port) {
@@ -204,5 +292,35 @@ class SetupWizardPlannerTest {
                 serverExists,
                 512_000,
                 16_384);
+    }
+
+    private static final class FakeEngineInstaller implements SetupWizardRunner.EngineInstaller {
+        private final Path serverPath;
+        int calls;
+
+        FakeEngineInstaller() {
+            this(null);
+        }
+
+        FakeEngineInstaller(Path serverPath) {
+            this.serverPath = serverPath;
+        }
+
+        @Override
+        public LlamaCppEngineInstaller.Result install(LlamaCppEngineManifest.Entry entry, Path talosHome) throws Exception {
+            calls++;
+            if (serverPath == null) {
+                return new LlamaCppEngineInstaller.Result(
+                        LlamaCppEngineInstaller.Status.FAILED,
+                        null,
+                        "fake failure");
+            }
+            Files.createDirectories(serverPath.getParent());
+            Files.writeString(serverPath, "server", StandardCharsets.UTF_8);
+            return new LlamaCppEngineInstaller.Result(
+                    LlamaCppEngineInstaller.Status.INSTALLED,
+                    serverPath.toAbsolutePath().normalize(),
+                    "Installed pinned llama.cpp engine at " + serverPath.getParent());
+        }
     }
 }

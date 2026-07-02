@@ -160,6 +160,27 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
+    @DisplayName("setup wizard owns a pinned llama.cpp engine manifest without model downloads")
+    void setupWizardOwnsPinnedLlamaCppEngineManifestWithoutModelDownloads() throws Exception {
+        String manifest = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineManifest.java");
+        String installer = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineInstaller.java");
+        String runner = read("src/main/java/dev/talos/cli/setup/SetupWizardRunner.java");
+
+        assertTrue(manifest.contains("llama-b9860-bin-ubuntu-x64.tar.gz"),
+                "manifest must pin the Ubuntu x64 CPU llama.cpp artifact");
+        assertTrue(manifest.contains("b68e8072eb88d1cc8b8e9d6ea8237aae87b34c6d8bbffda958c870e4dc949714"),
+                "manifest must pin the artifact SHA-256");
+        assertFalse(manifest.contains("releases/latest"),
+                "manifest must not follow upstream latest");
+        assertTrue(installer.contains("SHA-256 mismatch"),
+                "installer must fail closed on checksum mismatch");
+        assertTrue(runner.contains("Install this pinned llama.cpp engine now? [y/N]"),
+                "wizard must require explicit engine-install confirmation");
+        assertFalse(runner.matches("(?is).*huggingface-cli.*download.*|.*hf download.*|.*gguf.*download.*"),
+                "milestone 4 must not download model weights");
+    }
+
+    @Test
     @DisplayName("docs and site describe the beta install support boundary truthfully")
     void docsAndSiteDescribeInstallBoundary() throws Exception {
         String readme = read("README.md");

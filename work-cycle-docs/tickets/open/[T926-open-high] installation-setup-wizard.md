@@ -14,8 +14,8 @@ Priority: high
   no Linux `llama-server` configured; follow-up WSL smoke configured
   `qwen2.5-coder-14b` through managed `llama.cpp`
 - Workspace fixture: `/home/ai21z/talos-wsl-install-smoke`
-- Verification status: milestones 1-3 implemented; engine install, model
-  download, doctor execution, final docs, and full setup smoke remain open
+- Verification status: milestones 1-4 implemented; model download, doctor
+  execution, final docs, and full setup smoke remain open
 
 Expected behavior:
 
@@ -161,9 +161,9 @@ download, config writes, and doctor verification.
 - No GUI installer in this ticket.
 - No deb/rpm/AppImage packaging in this ticket.
 - No hidden or default elevated package-manager execution.
-- No implementation of pinned llama.cpp install until a Talos-owned manifest
-  names source URL, upstream tag or Talos-hosted artifact, OS/arch variant, and
-  SHA-256.
+- No unpinned or dynamically-latest llama.cpp install path; every Talos-owned
+  engine install must name source URL, upstream tag or Talos-hosted artifact,
+  OS/arch/backend variant, install path, and SHA-256.
 - No conflating Windows packaged install with bundled runtime and Linux
   source/developer install with user-provided Java.
 - No bypassing approval, permission, checkpoint, trace, or verification.
@@ -480,6 +480,97 @@ source /tmp/talos-t926-profile; command -v talos -> /home/ai21z/.local/talos/bin
 Installed `talos setup wizard --dry-run` rendered Ubuntu 26.04 WSL, Java 21,
 missing config, no detected llama-server, accepted beta profiles, and the
 no-side-effects milestone boundary.
+```
+
+## Milestone 4 Implementation Evidence
+
+Status:
+
+```text
+Implemented as pinned Ubuntu/WSL x64 CPU engine install only. T926 remains open
+because model downloads, doctor execution, final docs, and a full fresh-machine
+setup smoke are later milestones.
+```
+
+Implemented surface:
+
+- `talos setup wizard` offers a pinned `llama.cpp` engine install when no
+  compatible `llama-server` is detected on Ubuntu/WSL x64.
+- The wizard prints the variant, upstream tag, asset name, approximate size,
+  install directory, and SHA-256 before asking for confirmation.
+- Denying the engine install does not call the installer and does not write
+  config.
+- Accepting the engine install verifies SHA-256 before extraction, discovers
+  `llama-server`, promotes the staged engine only after discovery succeeds, and
+  feeds the installed Linux `llama-server` path into the existing explicit
+  config preview/write flow.
+- Existing installed pinned engines are reused without download.
+- GitHub release asset redirects are followed by the production downloader.
+- Non-empty staging directory promotion falls back to recursive copy when direct
+  directory moves fail across filesystems.
+
+Non-goals preserved:
+
+- No dynamic GitHub `latest` lookup.
+- No model download.
+- No model/server start.
+- No `talos doctor --start` execution.
+- No package-manager execution from the Talos wizard.
+- No Windows/macOS engine install lane.
+
+Pinned artifact:
+
+```text
+tag: b9860
+variant: ubuntu-x64-cpu
+asset: llama-b9860-bin-ubuntu-x64.tar.gz
+url: https://github.com/ggml-org/llama.cpp/releases/download/b9860/llama-b9860-bin-ubuntu-x64.tar.gz
+sha256: b68e8072eb88d1cc8b8e9d6ea8237aae87b34c6d8bbffda958c870e4dc949714
+size: 15851454
+install root: ~/.talos/engines/llama.cpp/b9860/ubuntu-x64-cpu
+```
+
+Code:
+
+- `src/main/java/dev/talos/cli/setup/LlamaCppEngineManifest.java`
+- `src/main/java/dev/talos/cli/setup/LlamaCppEngineInstaller.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardPlanner.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardRunner.java`
+- `src/main/java/dev/talos/cli/launcher/SetupCmd.java`
+
+Pinned behavior:
+
+- The manifest selects only Ubuntu Linux x64/amd64/x86_64, and rejects Windows,
+  ARM, and non-Ubuntu Linux for this first lane.
+- Installer checksum mismatch fails closed and does not promote an install
+  directory.
+- Missing `llama-server` after extraction fails closed and does not promote an
+  install directory.
+- Redirected release downloads and cross-filesystem staging promotion have
+  deterministic regressions.
+- Planner and dry-run rendering name the pinned manifest on matching Ubuntu/WSL
+  x64 snapshots.
+- Public install packaging contract pins that the wizard owns a manifest and
+  does not download model weights in this milestone.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.setup.LlamaCppEngineManifestTest" --tests "dev.talos.cli.setup.LlamaCppEngineInstallerTest" --tests "dev.talos.cli.setup.SetupWizardPlannerTest" --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --tests "dev.talos.docs.TicketHygieneTest" --tests "dev.talos.wiki.WikiLintStructuralTest" --no-daemon
+.\gradlew.bat check --no-daemon
+.\gradlew.bat clean installDist --no-daemon
+wsl.exe -e bash -lc 'cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli; bash tools/install-unix.sh --force --profile-file /tmp/talos-t926-profile'
+```
+
+Observed WSL installed-product evidence:
+
+```text
+DENIAL_NO_CONFIG
+ENGINE_SERVER_EXECUTABLE
+INSTALL_SMOKE_NO_CONFIG_WRITE
+REUSE_SMOKE_NO_CONFIG_WRITE
+Installed pinned llama.cpp engine at /home/ai21z/.talos/engines/llama.cpp/b9860/ubuntu-x64-cpu
+Reusing existing llama.cpp engine at /home/ai21z/.talos/engines/llama.cpp/b9860/ubuntu-x64-cpu/llama-b9860/llama-server
 ```
 
 ## Architecture Metadata

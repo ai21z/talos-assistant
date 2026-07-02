@@ -93,6 +93,15 @@ This log is append-only by convention. T808 structural lint checks the file
 exists and has valid frontmatter, but it does not enforce append-only history
 mechanically.
 
+## [2026-07-03] setup | T926 pinned llama.cpp engine milestone
+
+- Recorded that T926 milestone 4 landed as an explicit pinned Ubuntu/WSL x64 CPU
+  `llama.cpp` engine install path on `v0.9.0-beta-dev`.
+- Kept T926 open because model download, doctor execution, final docs, and full
+  fresh-machine setup smoke remain future milestones.
+- Updated the current-state next move to T926 milestone 5 design for explicit
+  model-download choices and doctor verification after pinned engine install.
+
 ## [2026-07-03] setup | T926 Unix bootstrap milestone
 
 - Recorded that T926 milestone 3 landed as Unix bootstrap prerequisite/profile

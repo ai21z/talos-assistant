@@ -15,9 +15,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Interactive setup wizard milestone 2. This runner is deliberately limited to
- * explicit config writing. It never installs packages, downloads models, starts
- * llama.cpp, or runs doctor.
+ * Interactive setup wizard. It may install a pinned engine only after explicit
+ * confirmation, but it does not install system packages, download models, start
+ * llama.cpp, or run doctor.
  */
 public final class SetupWizardRunner {
     private SetupWizardRunner() {}
@@ -25,6 +25,11 @@ public final class SetupWizardRunner {
     @FunctionalInterface
     public interface ConfigRenderer {
         String render(String profile, Path serverPath, Path cacheDir, int port);
+    }
+
+    @FunctionalInterface
+    public interface EngineInstaller {
+        LlamaCppEngineInstaller.Result install(LlamaCppEngineManifest.Entry entry, Path talosHome) throws Exception;
     }
 
     public record Result(int exitCode, boolean wroteConfig, Path configPath, Path backupPath, String output) {}
@@ -36,12 +41,32 @@ public final class SetupWizardRunner {
             ConfigRenderer renderer,
             Path cacheDir,
             int port) {
+        return run(
+                plan,
+                input,
+                out,
+                renderer,
+                cacheDir,
+                port,
+                Path.of(System.getProperty("user.home", ".")),
+                new LlamaCppEngineInstaller()::install);
+    }
+
+    public static Result run(
+            SetupWizardPlan plan,
+            InputStream input,
+            PrintStream out,
+            ConfigRenderer renderer,
+            Path cacheDir,
+            int port,
+            Path talosHome,
+            EngineInstaller engineInstaller) {
         StringBuilder log = new StringBuilder();
         BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
         try {
             SetupWizardSnapshot snapshot = plan.snapshot();
             line(out, log, "Talos setup wizard");
-            line(out, log, "No package installs, model downloads, or model starts will be run.");
+            line(out, log, "No model downloads, model starts, or doctor execution will be run.");
             line(out, log, "");
             renderDetectedEnvironment(plan, out, log);
 
@@ -50,7 +75,7 @@ public final class SetupWizardRunner {
                 return new Result(2, false, snapshot.configPath(), null, log.toString());
             }
 
-            Path serverPath = chooseServer(snapshot, reader, out, log);
+            Path serverPath = chooseServer(snapshot, reader, out, log, talosHome, engineInstaller);
             if (serverPath == null) {
                 line(out, log, "Model setup skipped. No config written.");
                 line(out, log, "Next: provide a Linux-compatible llama-server path, then rerun `talos setup wizard`.");
@@ -88,7 +113,7 @@ public final class SetupWizardRunner {
             }
             line(out, log, "Wrote Talos model config: " + configPath);
             line(out, log, "Selected profile: " + profile);
-            line(out, log, "No package installs, model downloads, or model starts were run.");
+            line(out, log, "No model downloads, model starts, or doctor execution were run.");
             line(out, log, "Next: run `talos doctor --start` to verify this machine-local setup.");
             return new Result(0, true, configPath, backup, log.toString());
         } catch (Exception error) {
@@ -117,18 +142,57 @@ public final class SetupWizardRunner {
             SetupWizardSnapshot snapshot,
             BufferedReader reader,
             PrintStream out,
-            StringBuilder log) throws Exception {
+            StringBuilder log,
+            Path talosHome,
+            EngineInstaller engineInstaller) throws Exception {
         Path detected = snapshot.llamaServerPath();
         if (detected != null && snapshot.wsl() && isWindowsExecutable(detected)) {
             line(out, log, "Detected llama-server is not Linux-compatible under WSL: " + detected);
-            return promptForServer(reader, out, log, snapshot);
-        }
-        if (detected != null && Files.isRegularFile(detected)) {
+        } else if (detected != null && Files.isRegularFile(detected)) {
             if (askYes(reader, out, log, "Use detected llama-server at " + detected + "? [y/N] ")) {
                 return detected;
             }
         }
+
+        Path installed = offerPinnedEngineInstall(snapshot, reader, out, log, talosHome, engineInstaller);
+        if (installed != null) {
+            return installed;
+        }
         return promptForServer(reader, out, log, snapshot);
+    }
+
+    private static Path offerPinnedEngineInstall(
+            SetupWizardSnapshot snapshot,
+            BufferedReader reader,
+            PrintStream out,
+            StringBuilder log,
+            Path talosHome,
+            EngineInstaller engineInstaller) throws Exception {
+        var manifest = LlamaCppEngineManifest.select(snapshot);
+        if (manifest.isEmpty()) {
+            return null;
+        }
+
+        var entry = manifest.get();
+        line(out, log, "Pinned llama.cpp engine available:");
+        line(out, log, "  variant: " + entry.variant());
+        line(out, log, "  tag: " + entry.upstreamTag());
+        line(out, log, "  asset: " + entry.assetName());
+        line(out, log, "  size: ~" + Math.max(1, entry.sizeBytes() / (1024 * 1024)) + " MB");
+        line(out, log, "  SHA-256: " + entry.sha256());
+        line(out, log, "  install dir: " + entry.installDir(talosHome));
+        if (!askYes(reader, out, log, "Install this pinned llama.cpp engine now? [y/N] ")) {
+            return null;
+        }
+
+        var install = engineInstaller.install(entry, talosHome);
+        line(out, log, install.message());
+        if (install.status() == LlamaCppEngineInstaller.Status.INSTALLED
+                || install.status() == LlamaCppEngineInstaller.Status.REUSED) {
+            return install.serverPath();
+        }
+        line(out, log, "Pinned engine install failed; you can provide a Linux-compatible llama-server path or skip.");
+        return null;
     }
 
     private static Path promptForServer(
