@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-07-02
+
 - [T918] Redacted audit snapshots now canonicalize the output path through the
   nearest existing parent before checking workspace containment. Alias-shaped
   paths that resolve inside the workspace are rejected, and output path
@@ -1432,3 +1434,4 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
+
