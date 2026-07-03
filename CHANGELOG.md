@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T935] Added release provenance metadata support without promoting it to a
+  QA substitute: staged Windows and Linux artifact sets now include a
+  checksummed CycloneDX SBOM generated from the runtime classpath, and the
+  manual release-staging workflow now requests explicit OIDC/attestation
+  permissions to create GitHub artifact and SBOM attestations for staged files.
+  Public installation docs now explain what checksums, SBOMs, and attestations
+  prove and do not prove, with `gh attestation verify` examples.
 - [T933] Tightened CI/release-control policy: Talos CI push triggers now match
   the real `main` / `v0.9.0-beta-dev` branch model instead of dead branch
   patterns, public installation docs now record the required `main` branch

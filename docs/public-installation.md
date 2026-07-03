@@ -74,6 +74,7 @@ Windows x64:
 Talos-<version>-windows-x64.msi
 talos-<version>-windows-x64-app.zip
 install-talos.ps1
+talos-<version>-sbom.cdx.json
 checksums.txt
 ```
 
@@ -82,6 +83,7 @@ Ubuntu/WSL x64:
 ```text
 talos-<version>-linux-x64-app.tar.gz
 install-talos.sh
+talos-<version>-sbom.cdx.json
 checksums.txt
 ```
 
@@ -89,7 +91,6 @@ Optional later artifacts:
 
 ```text
 Sigstore bundle
-SBOM
 winget local-validation manifest evidence
 ```
 
@@ -131,6 +132,7 @@ Windows x64:
 Talos-<version>-windows-x64.msi
 talos-<version>-windows-x64-app.zip
 install-talos.ps1
+talos-<version>-sbom.cdx.json
 checksums.txt
 ```
 
@@ -139,6 +141,7 @@ Linux x64:
 ```text
 talos-<version>-linux-x64-app.tar.gz
 install-talos.sh
+talos-<version>-sbom.cdx.json
 checksums.txt
 ```
 
@@ -242,6 +245,49 @@ There is intentionally no publication workflow in this staging step. A future
 publication workflow must require an explicit QA packet reference satisfying
 T929 before it can create a draft or prerelease GitHub Release.
 No tag, push, pull-request, or release event may publish public artifacts.
+
+## Checksums, SBOMs, And Attestations
+
+Checksums prove that downloaded bytes match the published checksum manifest.
+They do not prove the files behave correctly, were tested, are vulnerability
+free, or are safe to run in a particular workspace.
+
+The SBOM is a CycloneDX dependency inventory for the Talos runtime dependency
+graph staged with each OS artifact set. It helps reviewers and downstream
+users inspect what runtime libraries were packaged. It is not a vulnerability
+scan, license audit, malware scan, behavioral QA result, or model-safety
+result.
+
+Artifact attestations bind staged files to a GitHub Actions workflow run,
+repository, source commit, and subject digest when verified against the
+expected repository, signer workflow, and candidate SHA. They help prove where
+and how the staged artifact was built. The workflow still produces the
+predicate, so predicate fields are not a substitute for a trusted build policy.
+They do not prove the installer was manually smoked, the model path works, the
+two-model audit passed, or that Talos made truthful runtime claims.
+
+None of these metadata artifacts prove Talos behavior is correct. Behavioral
+release readiness remains owned by T929: full automated gates, manual PTY
+evidence, two-model large-scale live audit evidence, runtime artifact canary
+scans, and explicit exclusions before public release assets are created.
+
+Online provenance verification after release-staging artifacts exist:
+
+```powershell
+gh attestation verify Talos-<version>-windows-x64.msi `
+  --repo ai21z/talos-assistant `
+  --signer-workflow ai21z/talos-assistant/.github/workflows/release-staging.yml `
+  --source-digest <candidate-sha>
+
+gh attestation verify Talos-<version>-windows-x64.msi `
+  --repo ai21z/talos-assistant `
+  --signer-workflow ai21z/talos-assistant/.github/workflows/release-staging.yml `
+  --source-digest <candidate-sha> `
+  --predicate-type https://cyclonedx.org/bom
+```
+
+Linux uses the same repository and signer-workflow checks against
+`talos-<version>-linux-x64-app.tar.gz`.
 
 ## Signing And Checksum Rules
 

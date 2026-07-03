@@ -87,6 +87,35 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
+    @DisplayName("release build publishes a checksummed CycloneDX SBOM with both OS artifact sets")
+    void releaseBuildPublishesChecksummedCycloneDxSbom() throws Exception {
+        String build = read("build.gradle.kts");
+
+        for (String task : new String[] {
+                "releaseSbom",
+                "copyWindowsReleaseSbom",
+                "copyLinuxReleaseSbom"
+        }) {
+            assertTrue(build.contains("\"" + task + "\""), "missing SBOM release task: " + task);
+        }
+
+        assertTrue(build.contains("talos-${version}-sbom.cdx.json"),
+                "release SBOM must use the canonical CycloneDX JSON artifact name");
+        assertTrue(build.contains("\"bomFormat\" to \"CycloneDX\""),
+                "release SBOM must identify the CycloneDX format");
+        assertTrue(build.contains("\"specVersion\" to \"1.6\""),
+                "release SBOM must use a stable CycloneDX spec version");
+        assertTrue(build.contains("runtimeClasspath"),
+                "release SBOM must inventory the runtime dependency graph");
+        assertTrue(build.contains("dependsOn(\"windowsReleaseMsi\", \"windowsReleaseAppZip\", \"copyWindowsReleaseBootstrap\", \"copyWindowsReleaseSbom\")"),
+                "Windows checksums must include the SBOM artifact");
+        assertTrue(build.contains("publicReleaseSbomArtifactName"),
+                "checksum manifests must include the SBOM filename");
+        assertTrue(build.contains("dependsOn(\"linuxReleaseAppTar\", \"copyLinuxReleaseBootstrap\", \"copyLinuxReleaseSbom\")"),
+                "Linux checksums must include the SBOM artifact");
+    }
+
+    @Test
     @DisplayName("generated launchers include Java native-access allowance")
     void generatedLaunchersAllowNativeAccessForBundledTerminalAndIndexLibraries() throws Exception {
         String build = read("build.gradle.kts");

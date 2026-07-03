@@ -149,9 +149,9 @@ confidence_histogram:
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), and T935-T937 (provenance follow-up,
-  0.10.8 candidate cut, and winget/signing policy) remain open. T933, T932,
-  T934, T931, T930, T929, T926, T925, and T928 are done on
+  (`/session clear` target mismatch), and T936-T937 (0.10.8 candidate cut and
+  winget/signing policy) remain open. T935, T933, T932, T934, T931, T930,
+  T929, T926, T925, and T928 are done on
   `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
@@ -173,9 +173,8 @@ confidence_histogram:
   T925, T926, and T928 were implemented after the green 0.10.7 candidate
   evidence, so any public release/tag decision now requires a fresh 0.10.8
   candidate packet rather than reusing the previous 0.10.7 packet.
-- Next move: implement T935 because CI/branch protection is now pinned and
-  provenance/SBOM/attestation policy is the next release-control surface before
-  the 0.10.8 candidate cut.
+- Next move: implement T936 because release provenance metadata is now pinned
+  and the next release-control step is a fresh 0.10.8 candidate packet.
 
 ```talos-wiki-claims
 {

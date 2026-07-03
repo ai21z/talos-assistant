@@ -91,6 +91,22 @@ class CiWorkflowContractTest {
                 "Linux uploaded artifact must be explicitly named as QA staging");
         assertTrue(workflow.contains("build/release/linux/"),
                 "Linux uploaded staging artifact must come from the Linux release output folder");
+        assertTrue(workflow.contains("id-token: write"),
+                "release staging must request OIDC only for GitHub artifact attestations");
+        assertTrue(workflow.contains("attestations: write"),
+                "release staging must request explicit attestation write permission");
+        assertTrue(workflow.contains("uses: actions/attest@v4"),
+                "release staging must use GitHub's current attestation action");
+        assertTrue(workflow.contains("subject-path: |"),
+                "release staging must attest the staged release files by path");
+        assertTrue(workflow.contains("build/release/windows/*"),
+                "Windows staged release files must be attested");
+        assertTrue(workflow.contains("build/release/linux/*"),
+                "Linux staged release files must be attested");
+        assertTrue(workflow.contains("sbom-path: build/release/windows/talos-${{ inputs.version }}-sbom.cdx.json"),
+                "Windows staged release artifacts must carry an SBOM attestation");
+        assertTrue(workflow.contains("sbom-path: build/release/linux/talos-${{ inputs.version }}-sbom.cdx.json"),
+                "Linux staged release artifacts must carry an SBOM attestation");
 
         assertNoReleasePublication(workflow, "release staging workflow");
         assertTrue(!workflow.contains("push:"),
@@ -150,6 +166,27 @@ class CiWorkflowContractTest {
                 "docs must state release staging is manually dispatched");
         assertTrue(docs.contains("No tag, push, pull-request, or release event may publish public artifacts"),
                 "docs must block accidental publication triggers");
+    }
+
+    @Test
+    @DisplayName("public installation docs describe checksum, SBOM, and attestation boundaries")
+    void publicInstallDocsDescribeProvenanceBoundaries() throws IOException {
+        String docs = Files.readString(Path.of("docs", "public-installation.md"));
+
+        assertTrue(docs.contains("Checksums prove that downloaded bytes match the published checksum manifest"),
+                "docs must explain the checksum boundary");
+        assertTrue(docs.contains("The SBOM is a CycloneDX dependency inventory"),
+                "docs must explain the SBOM boundary");
+        assertTrue(docs.contains("Artifact attestations bind staged files to a GitHub Actions workflow run"),
+                "docs must explain the attestation boundary");
+        assertTrue(docs.contains("None of these metadata artifacts prove Talos behavior is correct"),
+                "docs must prevent supply-chain metadata from replacing QA");
+        assertTrue(docs.contains("gh attestation verify"),
+                "docs must include the attestation verification command");
+        assertTrue(docs.contains("--predicate-type https://cyclonedx.org/bom"),
+                "docs must include the SBOM attestation verification command");
+        assertTrue(docs.contains("T929"),
+                "docs must keep behavioral release readiness owned by the QA gate");
     }
 
     private static void assertNoReleasePublication(String workflow, String label) {

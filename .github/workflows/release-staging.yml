@@ -13,7 +13,9 @@ on:
         type: string
 
 permissions:
+  id-token: write
   contents: read
+  attestations: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -110,6 +112,20 @@ jobs:
           }
           $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path build/release/windows/staging-manifest.json -Encoding UTF8
 
+      - name: Attest Windows QA staging files
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            build/release/windows/*
+
+      - name: Attest Windows SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            build/release/windows/Talos-${{ inputs.version }}-windows-x64.msi
+            build/release/windows/talos-${{ inputs.version }}-windows-x64-app.zip
+          sbom-path: build/release/windows/talos-${{ inputs.version }}-sbom.cdx.json
+
       - name: Upload Windows QA staging artifact
         uses: actions/upload-artifact@v4
         with:
@@ -187,6 +203,19 @@ jobs:
             "t929Boundary": "GitHub Release, draft release, signed, tagged, winget-linked, and release-named artifacts remain blocked until QA passes."
           }
           EOF
+
+      - name: Attest Linux QA staging files
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            build/release/linux/*
+
+      - name: Attest Linux SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            build/release/linux/talos-${{ inputs.version }}-linux-x64-app.tar.gz
+          sbom-path: build/release/linux/talos-${{ inputs.version }}-sbom.cdx.json
 
       - name: Upload Linux QA staging artifact
         uses: actions/upload-artifact@v4

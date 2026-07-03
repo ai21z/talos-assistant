@@ -1,6 +1,6 @@
-# [T935-open-medium] Provenance attestation and SBOM follow-up
+# [T935-done-medium] Provenance attestation and SBOM follow-up
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -122,26 +122,68 @@ Refactor scope:
 - Verification command for attestations is documented.
 - Behavioral release readiness remains owned by T929, not this ticket.
 
+## Resolution
+
+Implemented on `v0.9.0-beta-dev` during the 0.10.7-to-0.10.8 staging arc:
+
+- Added a `releaseSbom` Gradle task that writes
+  `talos-<version>-sbom.cdx.json` as a CycloneDX 1.6 JSON inventory of the
+  resolved runtime classpath.
+- Added `copyWindowsReleaseSbom` and `copyLinuxReleaseSbom`, and included the
+  SBOM file in both Windows and Linux release checksum manifests.
+- Updated `.github/workflows/release-staging.yml` to request explicit OIDC and
+  attestation permissions, produce provenance attestations over staged files,
+  and produce SBOM attestations for the primary package artifacts using
+  `actions/attest@v4`.
+- Updated public installation docs to state the boundary between checksums,
+  SBOMs, artifact attestations, and behavioral QA, including `gh attestation
+  verify` examples and the CycloneDX predicate type.
+
+Deliberately not done:
+
+- No GitHub Release, draft release, tag, winget publication, or public
+  artifact publication.
+- No new SBOM plugin or broad dependency churn.
+- No claim that attestations prove Talos runtime behavior. T929 remains the
+  release-readiness owner.
+
 ## Tests / Evidence
 
-Required deterministic regression:
+Deterministic regression:
 
-- Unit test: not required unless build task contract is added.
-- Integration/executor test: workflow dry run or draft release evidence.
-- JSON e2e scenario: not applicable.
-- Trace assertion: not applicable.
+- `PublicInstallPackagingContractTest` pins the SBOM task names, CycloneDX
+  format metadata, runtime classpath inventory source, and checksum inclusion.
+- `CiWorkflowContractTest` pins release-staging attestation permissions,
+  `actions/attest@v4`, provenance/SBOM attestation inputs, and docs boundary
+  wording.
 
-Commands:
+Commands run:
 
 ```powershell
+.\gradlew.bat test --tests "dev.talos.release.CiWorkflowContractTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+.\gradlew.bat releaseSbom --no-daemon
 git diff --check
 ```
 
-If build/workflow tasks change:
+Required after build/workflow changes:
 
 ```powershell
 .\gradlew.bat check --no-daemon
 ```
+
+Local evidence:
+
+- The focused release contract tests first failed on missing attestation,
+  SBOM, and docs boundary behavior, then passed after implementation.
+- `releaseSbom` produced
+  `build/release/sbom/talos-0.10.7-sbom.cdx.json` with CycloneDX metadata and
+  runtime components.
+
+Not locally proven:
+
+- GitHub-hosted attestation creation was not run locally. It requires the
+  GitHub Actions OIDC/attestation environment and is verified by the workflow
+  contract plus the next release-staging run.
 
 ## Known Risks
 

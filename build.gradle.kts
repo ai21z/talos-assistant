@@ -843,6 +843,18 @@ tasks.jar {
 val windowsReleaseDir = layout.buildDirectory.dir("release/windows")
 val publicMsiArtifactName = "Talos-${version}-windows-x64.msi"
 val publicAppZipArtifactName = "talos-${version}-windows-x64-app.zip"
+val publicReleaseSbomArtifactName = "talos-${version}-sbom.cdx.json"
+val releaseSbomDir = layout.buildDirectory.dir("release/sbom")
+val releaseSbomFile = releaseSbomDir.map { it.file(publicReleaseSbomArtifactName) }
+
+fun mavenPurl(group: String, name: String, version: String): String {
+    val namespace = group.replace('.', '/')
+    return if (namespace.isBlank()) {
+        "pkg:maven/$name@$version"
+    } else {
+        "pkg:maven/$namespace/$name@$version"
+    }
+}
 
 fun appendJpackageResources(args: MutableList<String>) {
     val resDir = file("src/main/jpackage")
@@ -852,6 +864,82 @@ fun appendJpackageResources(args: MutableList<String>) {
     val iconFile = file("src/main/jpackage/icon.ico")
     if (iconFile.exists()) {
         args.addAll(listOf("--icon", iconFile.absolutePath))
+    }
+}
+
+tasks.register("releaseSbom") {
+    group = "distribution"
+    description = "Writes the CycloneDX runtime dependency inventory for staged release artifacts."
+
+    outputs.file(releaseSbomFile)
+
+    doLast {
+        val rootRef = "pkg:maven/dev/talos/talos@${version}"
+        val artifacts = configurations.runtimeClasspath.get()
+            .resolvedConfiguration
+            .resolvedArtifacts
+            .sortedWith(compareBy(
+                { it.moduleVersion.id.group },
+                { it.name },
+                { it.moduleVersion.id.version },
+                { it.classifier ?: "" },
+                { it.extension }
+            ))
+
+        val components = artifacts.map { artifact ->
+            val id = artifact.moduleVersion.id
+            val componentRef = mavenPurl(id.group, artifact.name, id.version)
+            val component = linkedMapOf<String, Any>(
+                "type" to "library",
+                "bom-ref" to componentRef,
+                "group" to id.group,
+                "name" to artifact.name,
+                "version" to id.version,
+                "purl" to componentRef
+            )
+            if (artifact.file.isFile) {
+                component["hashes"] = listOf(
+                    mapOf(
+                        "alg" to "SHA-256",
+                        "content" to sha256Hex(artifact.file)
+                    )
+                )
+            }
+            component
+        }
+
+        writeJson(
+            releaseSbomFile.get().asFile,
+            linkedMapOf(
+                "\$schema" to "https://cyclonedx.org/schema/bom-1.6.schema.json",
+                "bomFormat" to "CycloneDX",
+                "specVersion" to "1.6",
+                "version" to 1,
+                "metadata" to linkedMapOf(
+                    "tools" to listOf(
+                        linkedMapOf(
+                            "vendor" to "Talos",
+                            "name" to "Gradle releaseSbom task",
+                            "version" to version.toString()
+                        )
+                    ),
+                    "component" to linkedMapOf(
+                        "type" to "application",
+                        "bom-ref" to rootRef,
+                        "name" to "talos",
+                        "version" to version.toString(),
+                        "purl" to rootRef
+                    )
+                ),
+                "components" to components,
+                "dependencies" to listOf(
+                    linkedMapOf(
+                        "ref" to rootRef,
+                        "dependsOn" to components.map { it["bom-ref"].toString() }
+                    )
+                )
+            )
+        )
     }
 }
 
@@ -951,8 +1039,14 @@ tasks.register<Copy>("copyWindowsReleaseBootstrap") {
     into(windowsReleaseDir)
 }
 
+tasks.register<Copy>("copyWindowsReleaseSbom") {
+    dependsOn("releaseSbom")
+    from(releaseSbomFile)
+    into(windowsReleaseDir)
+}
+
 tasks.register("windowsReleaseChecksums") {
-    dependsOn("windowsReleaseMsi", "windowsReleaseAppZip", "copyWindowsReleaseBootstrap")
+    dependsOn("windowsReleaseMsi", "windowsReleaseAppZip", "copyWindowsReleaseBootstrap", "copyWindowsReleaseSbom")
 
     val checksumFile = windowsReleaseDir.map { it.file("checksums.txt") }
     outputs.file(checksumFile)
@@ -964,7 +1058,8 @@ tasks.register("windowsReleaseChecksums") {
         val artifactNames = listOf(
             publicMsiArtifactName,
             publicAppZipArtifactName,
-            "install-talos.ps1"
+            "install-talos.ps1",
+            publicReleaseSbomArtifactName
         )
         val lines = artifactNames.map { name ->
             val artifact = releaseDir.resolve(name)
@@ -1045,8 +1140,14 @@ tasks.register<Copy>("copyLinuxReleaseBootstrap") {
     into(linuxReleaseDir)
 }
 
+tasks.register<Copy>("copyLinuxReleaseSbom") {
+    dependsOn("releaseSbom")
+    from(releaseSbomFile)
+    into(linuxReleaseDir)
+}
+
 tasks.register("linuxReleaseChecksums") {
-    dependsOn("linuxReleaseAppTar", "copyLinuxReleaseBootstrap")
+    dependsOn("linuxReleaseAppTar", "copyLinuxReleaseBootstrap", "copyLinuxReleaseSbom")
 
     val checksumFile = linuxReleaseDir.map { it.file("checksums.txt") }
     outputs.file(checksumFile)
@@ -1057,7 +1158,8 @@ tasks.register("linuxReleaseChecksums") {
 
         val artifactNames = listOf(
             publicLinuxAppTarArtifactName,
-            "install-talos.sh"
+            "install-talos.sh",
+            publicReleaseSbomArtifactName
         )
         val lines = artifactNames.map { name ->
             val artifact = releaseDir.resolve(name)
