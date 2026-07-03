@@ -1,6 +1,6 @@
-# [T930-open-high] Release workflow and artifact discipline
+# [T930-done-high] Release workflow and artifact discipline
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -206,3 +206,39 @@ If workflow code changes:
 
 - Artifact attestations and SBOM generation after the first workflow is stable.
 - Winget submission after a signed Windows artifact exists.
+
+## Resolution
+
+Implemented the first QA-staging workflow discipline in:
+
+- `.github/workflows/release-staging.yml`
+- `.gitignore`
+- `docs/public-installation.md`
+- `src/test/java/dev/talos/release/CiWorkflowContractTest.java`
+
+The workflow is manual `workflow_dispatch` only and requires an exact
+`target_sha` plus expected `version`. It checks out the requested commit,
+verifies `git rev-parse HEAD`, verifies `talosVersion=<version>`, verifies the
+matching changelog heading, fails if the checkout is dirty before staging, runs
+the automated T929 gate, builds `windowsReleaseArtifacts`, writes a staging
+manifest, and uploads only the non-release workflow artifact
+`qa-staging-talos-<version>-windows-x64`.
+
+Public GitHub Release creation remains absent by design. The workflow requests
+only `contents: read`, contains no `gh release` or release-action path, and
+does not create draft/prerelease assets. `docs/public-installation.md` now names
+the staging workflow, states that the uploaded artifact is not a GitHub Release
+asset, and blocks draft GitHub Release assets until a T929 QA packet passes.
+
+Regression coverage:
+
+- `CiWorkflowContractTest` pins exact-SHA checkout, version/changelog checks,
+  dirty-tree fail-fast, T929 automated gates, Windows artifact staging,
+  non-release artifact naming, absence of release publication paths, workflow
+  trackability through `.gitignore`, and public-install docs truth.
+
+Verification:
+
+```text
+.\gradlew.bat test --tests "dev.talos.release.CiWorkflowContractTest" --no-daemon
+```

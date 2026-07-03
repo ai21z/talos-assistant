@@ -95,7 +95,9 @@ V1_IMPLEMENTATION_BRIDGE.md
 
 # ---- Local-only directories and files
 /playground/
-/.github/
+/.github/*
+!/.github/workflows/
+!/.github/workflows/*.yml
 # ---- local coding assistant: track durable project config, ignore personal + bulk reference
 .external assistant/*
 !.external assistant/skills/

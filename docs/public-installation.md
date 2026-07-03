@@ -128,6 +128,45 @@ If the repository wrapper is not executable, run:
 chmod +x ./gradlew
 ```
 
+## Release Staging Workflow
+
+The first public artifact lane is staged by
+`.github/workflows/release-staging.yml`. It is a manual `workflow_dispatch`
+workflow with two required inputs:
+
+```text
+target_sha
+version
+```
+
+The workflow checks out `target_sha`, verifies that `git rev-parse HEAD`
+matches the requested commit, verifies `gradle.properties` contains
+`talosVersion=<version>`, and verifies `CHANGELOG.md` has a matching version
+heading. It then runs the automated portion of the T929 gate:
+
+```powershell
+git diff --check
+.\gradlew.bat clean check --no-daemon
+.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
+.\gradlew.bat talosQualitySummaries --no-daemon
+.\gradlew.bat windowsReleaseArtifacts --no-daemon
+```
+
+The upload name is:
+
+```text
+qa-staging-talos-<version>-windows-x64
+```
+
+That upload is a short-lived GitHub Actions workflow artifact, not a GitHub Release asset.
+It is QA input only: it is not tagged, not signed as a public release, not
+winget-linked, and not a public install promise.
+
+No draft GitHub Release asset may be created before the T929 QA packet passes.
+There is intentionally no publication workflow in this staging step. A future
+publication workflow must require an explicit QA packet reference satisfying
+T929 before it can create a draft or prerelease GitHub Release.
+
 ## Signing And Checksum Rules
 
 Public Windows installers must be signed. The bootstrap script uses

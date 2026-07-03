@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T930] Added a manual release-staging GitHub Actions workflow that checks out
+  an exact candidate SHA, verifies version and changelog identity, fails on a
+  dirty checkout, runs the automated T929 gate, builds Windows artifacts, writes
+  a staging manifest, and uploads only the non-release
+  `qa-staging-talos-<version>-windows-x64` workflow artifact. Public and draft
+  GitHub Release assets remain blocked until a T929 QA packet passes.
 - [T929] Release QA now has an explicit pre-artifact gate. The work-test
   runbooks distinguish local/CI staging artifacts from public release artifacts,
   treat draft GitHub Release assets as release assets, and require automated

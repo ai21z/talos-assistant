@@ -149,10 +149,10 @@ confidence_histogram:
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), and T930-T937 (artifact workflow,
-  Linux public artifact, Windows installer handoff, CI/branch protection,
-  public docs truth, provenance follow-up, 0.10.8 candidate cut, and
-  winget/signing policy) remain open. T929, T926, T925, and T928 are done on
+  (`/session clear` target mismatch), and T931-T937 (Linux public artifact,
+  Windows installer handoff, CI/branch protection, public docs truth,
+  provenance follow-up, 0.10.8 candidate cut, and winget/signing policy)
+  remain open. T930, T929, T926, T925, and T928 are done on
   `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
@@ -171,8 +171,8 @@ confidence_histogram:
   T925, T926, and T928 were implemented after the green 0.10.7 candidate
   evidence, so any public release/tag decision now requires a fresh 0.10.8
   candidate packet rather than reusing the previous 0.10.7 packet.
-- Next move: implement T930 so release staging workflow work follows the
-  now-explicit T929 QA-before-publication gate.
+- Next move: implement T931 so the Linux public artifact lane is defined with
+  the same QA-before-publication discipline as the Windows staging workflow.
 
 ```talos-wiki-claims
 {
