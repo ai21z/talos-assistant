@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T941] Added a manual Cloudflare Pages staging workflow for the
+  `taloslocal` project. The workflow checks out an exact SHA, verifies the
+  requested Talos version, runs site tests/build/deploy-surface leak scanning,
+  and deploys only to the `site-staging` preview branch when the required
+  Cloudflare GitHub credentials are present.
 - [T940] Added the first Cloudflare site deployment hygiene guardrail:
   Cloudflare now has a manually created Pages project named exactly
   `taloslocal` with no Git auto-deploy source or production domain binding, and
