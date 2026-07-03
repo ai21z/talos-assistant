@@ -7,15 +7,15 @@ Priority: high
 
 - Source: current branch state and release planning
 - Date: 2026-07-03
-- Talos version / commit: 0.10.7 /
-  cfd60a76eee85371e9435f14896b78213871cb74
+- Talos version / commit: 0.10.8 candidate product /
+  f291e902c28d1c84bbc27756f3b8822569eef0c1
 - Branch: `v0.9.0-beta-dev`
 - Evidence:
-  - `CHANGELOG.md` has `[Unreleased]` entries after `0.10.7`, including T925,
-    T926, and T928 work.
-  - `gradle.properties` still reports `talosVersion=0.10.7`.
-  - The owner selected the next candidate direction as `0.10.8`, not `0.11.0`,
-    for this planning arc.
+  - `CHANGELOG.md` promoted the post-0.10.7 entries into the `0.10.8`
+    candidate section.
+  - `gradle.properties` reports `talosVersion=0.10.8`.
+  - Automated candidate gates passed after the wiki identity repair at
+    `f291e902c28d1c84bbc27756f3b8822569eef0c1`.
   - T929 defines the QA packet required before public release artifacts.
 
 ## Classification
@@ -156,13 +156,58 @@ Refactor scope:
   `0.10.7`. This was an evidence-state failure, not a runtime/product failure.
 - `CURRENT-STATE.md` was repaired forward to the `0.10.8` cut identity.
 
+2026-07-03 automated candidate evidence from repaired tree:
+
+- `git diff --check` passed.
+- `.\gradlew.bat installDist --no-daemon` passed.
+- Installed launcher identity check reported `Talos 0.10.8`.
+- `.\gradlew.bat check --no-daemon` passed.
+- `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon` passed.
+- `.\gradlew.bat talosQualitySummaries --no-daemon` passed.
+- Candidate manifest:
+  `build/reports/talos/candidate-manifest.json`
+  recorded version `0.10.8`, SHA
+  `f291e902c28d1c84bbc27756f3b8822569eef0c1`, and release status
+  `candidate-automated-evidence-only-not-release-ready`.
+
+2026-07-03 T929 installed-product QA start:
+
+- Clean global install refreshed to:
+  `C:\Users\arisz\AppData\Local\Programs\talos\bin\talos.bat`
+- Installed identity:
+  `Talos 0.10.8 - Java 21.0.9+10-LTS - Windows 11 amd64`
+- Fresh QA packet root:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238`
+- Fresh workspace root:
+  `local/manual-workspaces/t936-0.10.8-release-qa-20260703-1238`
+- Qwen installed smoke and `talos doctor --start` passed against isolated
+  home/config:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/artifacts/qwen/doctor-start.txt`
+- GPT-OSS installed smoke and `talos doctor --start` passed against isolated
+  home/config:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/artifacts/gptoss/doctor-start.txt`
+- Qwen synchronized approval live bank passed with 33 scenarios and artifact
+  scan PASS:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/artifacts/qwen/synchronized-approval/SYNCHRONIZED-APPROVAL-AUDIT.md`
+- Initial GPT-OSS synchronized approval live bank failed at
+  `mutation-forbidden-sibling-target-blocked-before-approval`.
+  Inspection proved the product safety invariant held: `script.js` changed,
+  `scripts.js` stayed unchanged, approval was requested/granted for
+  `script.js`, and verification passed. Root cause was a QA-harness
+  false-negative on a single missing terminal LF in `script.js`, tracked and
+  fixed as T938.
+- Corrected GPT-OSS synchronized approval live bank rerun passed with 33
+  scenarios and artifact scan PASS:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/artifacts/gptoss/synchronized-approval-rerun-t938/SYNCHRONIZED-APPROVAL-AUDIT.md`
+
 Remaining:
 
-- Rerun automated candidate gates from the repaired 0.10.8 tree.
-- Generate/review the candidate manifest and quality summaries from the
-  repaired tree.
-- Run the T929 manual PTY and two-model installed-product QA packet before any
-  public artifact decision.
+- Run/record the remaining manual PTY installed-product lane against the clean
+  installed 0.10.8 product.
+- Run the manual audit artifact canary scan for the QA roots.
+- Commit the T938 harness correction and this T936 evidence update.
+- Rerun required local gates after the T938 evidence commit, then push
+  `v0.9.0-beta-dev` and verify GitHub Actions only if T929 remains clean.
 
 ## Tests / Evidence
 

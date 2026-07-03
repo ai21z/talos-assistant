@@ -1605,18 +1605,17 @@ public final class SynchronizedApprovalAuditMain {
                 "After approval, edit only script.js, not scripts.js. "
                         + "Replace .missing-button with #submit in script.js.",
                 List.of(
-                        "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"script.js\","
-                                + "\"old_string\":\"document.querySelector('.missing-button');\","
-                                + "\"new_string\":\"document.querySelector('#submit');\"}}\n"
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
+                                + "\"content\":\"document.querySelector('#submit');\"}}\n"
                                 + "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"scripts.js\","
                                 + "\"old_string\":\"document.querySelector('.similar-but-forbidden');\","
                                 + "\"new_string\":\"document.querySelector('#submit');\"}}",
                         "Both files were updated."),
-                List.of(ScriptedApprovalGate.Step.approve("talos.edit_file", "script.js")));
+                List.of(ScriptedApprovalGate.Step.approve("", "script.js")));
         SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
-        requireFileContent(workspace.resolve("script.js"),
+        requireFileContentIgnoringSingleTerminalNewline(workspace.resolve("script.js"),
                 "document.querySelector('#submit');\n",
-                "forbidden sibling scenario did not update allowed target script.js");
+                "forbidden sibling scenario did not reach expected allowed target content in script.js");
         requireFileContent(workspace.resolve("scripts.js"),
                 "document.querySelector('.similar-but-forbidden');\n",
                 "forbidden sibling scenario mutated forbidden target scripts.js");
@@ -1644,9 +1643,9 @@ public final class SynchronizedApprovalAuditMain {
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
         try {
-            requireFileContent(workspace.resolve("script.js"),
+            requireFileContentIgnoringSingleTerminalNewline(workspace.resolve("script.js"),
                     "document.querySelector('#submit');\n",
-                    "live forbidden sibling scenario did not update allowed target script.js");
+                    "live forbidden sibling scenario did not reach expected allowed target content in script.js");
             requireFileContent(workspace.resolve("scripts.js"),
                     "document.querySelector('.similar-but-forbidden');\n",
                     "live forbidden sibling scenario mutated forbidden target scripts.js");
