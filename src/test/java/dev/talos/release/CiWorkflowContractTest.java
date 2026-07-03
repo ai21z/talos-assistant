@@ -118,6 +118,59 @@ class CiWorkflowContractTest {
     }
 
     @Test
+    @DisplayName("site staging deploy is manual, preview-only, and explicitly named")
+    void siteStagingWorkflowDeploysOnlyNamedCloudflarePreview() throws IOException {
+        String workflow = Files.readString(Path.of(".github", "workflows", "site-staging.yml"));
+
+        assertTrue(workflow.contains("workflow_dispatch:"),
+                "site staging must be manually dispatched against an explicit candidate");
+        assertTrue(workflow.contains("target_sha:"),
+                "site staging must require an exact candidate commit SHA");
+        assertTrue(workflow.contains("version:"),
+                "site staging must require the expected Talos version");
+        assertTrue(workflow.contains("ref: ${{ inputs.target_sha }}"),
+                "checkout must use the requested candidate SHA, not the branch head");
+        assertTrue(workflow.contains("git rev-parse HEAD"),
+                "workflow must verify the checked-out SHA");
+        assertTrue(workflow.contains("talosVersion=${{ inputs.version }}"),
+                "workflow must verify gradle.properties matches the requested version");
+        assertTrue(workflow.contains("CLOUDFLARE_API_TOKEN"),
+                "workflow must use an explicit Cloudflare API token secret");
+        assertTrue(workflow.contains("CLOUDFLARE_ACCOUNT_ID"),
+                "workflow must use an explicit Cloudflare account id variable or secret");
+        assertTrue(workflow.contains("npm ci --prefix site"),
+                "workflow must install site dependencies from the lockfile");
+        assertTrue(workflow.contains("npm test --prefix site"),
+                "workflow must run site honesty/static tests before building");
+        assertTrue(workflow.contains("npm run build --prefix site"),
+                "workflow must build the Vite site before deployment");
+        assertTrue(workflow.contains("npm run test:deploy-surface --prefix site"),
+                "workflow must scan built site output before deployment");
+        assertTrue(workflow.contains("npx --yes wrangler@"),
+                "workflow must deploy through an explicit Wrangler invocation");
+        assertTrue(workflow.contains("pages deploy site/dist"),
+                "workflow must deploy only the built site/dist directory");
+        assertTrue(workflow.contains("--project-name=taloslocal"),
+                "Cloudflare Pages project name must be explicit and product-owned");
+        assertTrue(workflow.contains("--branch=site-staging"),
+                "workflow must deploy to the site-staging preview branch, not production");
+        assertTrue(workflow.contains("site-staging.taloslocal.pages.dev"),
+                "workflow output must name the expected preview alias");
+
+        assertNoReleasePublication(workflow, "site staging workflow");
+        assertTrue(!workflow.contains("push:"),
+                "site staging must not run from branch or tag pushes");
+        assertTrue(!workflow.contains("release:"),
+                "site staging must not run from GitHub Release events");
+        assertTrue(!workflow.contains("pull_request:"),
+                "site staging must not run from pull request events");
+        assertTrue(!workflow.contains("taloslocal.com"),
+                "site staging must not bind or claim the production domain");
+        assertTrue(!workflow.contains("codex"),
+                "site staging workflow must not leak assistant/tool resource names");
+    }
+
+    @Test
     @DisplayName("release workflow files are not silently ignored")
     void releaseWorkflowFilesAreNotSilentlyIgnored() throws IOException {
         String gitignore = Files.readString(Path.of(".gitignore"));

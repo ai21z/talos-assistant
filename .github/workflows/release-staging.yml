@@ -78,6 +78,7 @@ jobs:
           npm ci --prefix site
           npm test --prefix site
           npm run build --prefix site
+          npm run test:deploy-surface --prefix site
 
       - name: Run T929 automated candidate gate
         shell: pwsh
