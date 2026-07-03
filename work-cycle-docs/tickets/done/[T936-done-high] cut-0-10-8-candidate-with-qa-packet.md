@@ -1,6 +1,6 @@
-# [T936-open-high] Cut 0.10.8 candidate with QA packet
+# [T936-done-high] Cut 0.10.8 candidate with QA packet
 
-Status: in-progress
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -222,12 +222,22 @@ Refactor scope:
   expectation mismatch, not a release-blocking product failure.
 - Manual audit artifact canary scan passed for the manual evidence root:
   `.\gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/t936-0.10.8-release-qa-20260703-1238" --no-daemon`
+- Post-QA local release gates passed at
+  `7dcb969e11e78a10da0b13234cf7e854fb931eba`:
+  `git diff --check`,
+  `.\gradlew.bat clean check --no-daemon`,
+  `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon`, and
+  `.\gradlew.bat talosQualitySummaries --no-daemon`.
+- `v0.9.0-beta-dev` was pushed to
+  `7dcb969e11e78a10da0b13234cf7e854fb931eba`.
+- GitHub Actions run `28657059098` passed for
+  `7dcb969e11e78a10da0b13234cf7e854fb931eba`:
+  `https://github.com/ai21z/talos-assistant/actions/runs/28657059098`
 
 Remaining:
 
-- Commit this T936 evidence update.
-- Rerun required local gates after the T936 evidence commit, then push
-  `v0.9.0-beta-dev` and verify GitHub Actions only if the gates remain clean.
+- None for the 0.10.8 candidate QA packet. This ticket does not publish a
+  release artifact, create a tag, or make a release decision.
 
 ## Tests / Evidence
 

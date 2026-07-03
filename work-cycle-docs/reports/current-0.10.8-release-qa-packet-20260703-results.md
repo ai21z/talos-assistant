@@ -171,5 +171,18 @@ Local T929 QA evidence is acceptable for the 0.10.8 candidate after T938:
   checkpointing, and verification;
 - artifact canary scan passes for manual evidence roots.
 
-Remote branch push and GitHub Actions verification were still pending when this
-packet was written.
+Post-QA local release gates passed at
+`7dcb969e11e78a10da0b13234cf7e854fb931eba`:
+
+- `git diff --check`
+- `.\gradlew.bat clean check --no-daemon`
+- `.\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon`
+- `.\gradlew.bat talosQualitySummaries --no-daemon`
+
+`v0.9.0-beta-dev` was pushed to
+`7dcb969e11e78a10da0b13234cf7e854fb931eba`, and GitHub Actions run
+`28657059098` passed:
+`https://github.com/ai21z/talos-assistant/actions/runs/28657059098`.
+
+No release artifact, draft release asset, signed artifact, tag-bound artifact,
+or winget-linked artifact was created.
