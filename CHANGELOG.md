@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.8] - 2026-07-03
+
 - [T935] Added release provenance metadata support without promoting it to a
   QA substitute: staged Windows and Linux artifact sets now include a
   checksummed CycloneDX SBOM generated from the runtime classpath, and the
@@ -1513,3 +1515,4 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
+
