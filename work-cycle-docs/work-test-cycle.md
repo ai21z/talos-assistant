@@ -165,6 +165,50 @@ artifacts, and review model answers for truthfulness. It is not a substitute for
 `check`; it runs after the deterministic work-test cycle has made the candidate
 worth auditing.
 
+## Release QA Gate
+
+The candidate packet above is necessary, but it is not enough to publish a
+public beta artifact. Talos release publication has a stricter gate because the
+product claim is installed local trust, not only test-suite health.
+
+Before any public release artifact exists, the candidate SHA must have:
+
+- full automated candidate evidence from the current task and workflow
+  inventory;
+- `./gradlew.bat check --no-daemon`;
+- `./gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon`;
+- `./gradlew.bat talosQualitySummaries --no-daemon`;
+- any release-relevant installer/package contract tests and CI jobs that are
+  not already covered by `check`;
+- a manual PTY transcript from a clean installed product;
+- a two-model large-scale live audit using the standard Qwen and GPT-OSS
+  managed `llama.cpp` lanes, unless the release scope names a narrower model
+  boundary;
+- prompt-debug, `/last trace`, provider-body, approval, final-file, and diff
+  evidence for live turns where those artifacts matter;
+- a runtime artifact canary scan for local manual audit roots and redacted
+  snapshots; and
+- named exclusions for any skipped tool, task, CI job, platform, model, or
+  audit lane.
+
+Artifact taxonomy:
+
+- Local staging artifact: a build output under `build/` or an explicit local
+  scratch path. It may exist after automated gates so installer QA can run, but
+  it is not a release and must not be named or documented as one.
+- CI staging artifact: an Actions artifact attached to a workflow run for QA
+  download only. It may exist after automated gates if it is named `staging` or
+  `qa-staging`, but it must not be attached to a tag, GitHub Release, draft
+  GitHub Release, or winget manifest.
+- Public release artifact: any asset attached to a GitHub Release, including a
+  draft GitHub Release asset or prerelease asset; any signed artifact; any
+  tag-bound artifact; any winget-linked artifact; or any artifact whose filename
+  or docs call it the release.
+
+No public release artifact may be created until the release QA packet passes.
+Checksums, SBOMs, and attestations are useful provenance evidence, but they do
+not replace tests, manual PTY evidence, or the large-scale live audit.
+
 ## Current Practical Commands
 
 ### Inner Dev Loop
@@ -222,6 +266,9 @@ Notes:
 - the paid `jetbrains/qodana-jvm` image still requires a token and should not be used for the local-free candidate path
 - the setup guide is `work-cycle-docs/work-test-cycle-setup.md`
 - the practical step-by-step runbook is `work-cycle-docs/work-test-cycle-step-by-step.md`
+- public release artifacts require the Release QA Gate above; a green candidate
+  packet alone is not permission to create a tag, signed artifact, GitHub
+  Release asset, draft GitHub Release asset, or winget-linked asset
 
 ## What Good Looks Like
 

@@ -93,6 +93,46 @@ This log is append-only by convention. T808 structural lint checks the file
 exists and has valid frontmatter, but it does not enforce append-only history
 mechanically.
 
+## [2026-07-03] setup | T926 pinned llama.cpp engine milestone
+
+- Recorded that T926 milestone 4 landed as an explicit pinned Ubuntu/WSL x64 CPU
+  `llama.cpp` engine install path on `v0.9.0-beta-dev`.
+- Kept T926 open because model download, doctor execution, final docs, and full
+  fresh-machine setup smoke remain future milestones.
+- Updated the current-state next move to T926 milestone 5 design for explicit
+  model-download choices and doctor verification after pinned engine install.
+
+## [2026-07-03] setup | T926 Unix bootstrap milestone
+
+- Recorded that T926 milestone 3 landed as Unix bootstrap prerequisite/profile
+  hardening on `v0.9.0-beta-dev`.
+- Kept T926 open because pinned llama.cpp manifest/install, model download,
+  doctor execution, final docs, and full fresh-machine setup smoke remain future
+  milestones.
+- Updated the current-state next move to T926 milestone 4 design for a pinned
+  llama.cpp engine manifest/install path before model downloads.
+
+## [2026-07-02] setup | T926 dry-run milestone
+
+- Recorded that T926 milestone 1 landed as `talos setup wizard --dry-run` on
+  `v0.9.0-beta-dev`.
+- Kept T926 open for the remaining interactive/bootstrap setup wizard
+  milestones.
+- Updated the current-state next move from implementing the dry-run to WSL
+  installed-product dry-run smoke and then T926 milestone 2 design.
+
+## [2026-07-02] setup | T926 interactive config milestone
+
+- Recorded that T926 milestone 2 landed as interactive `talos setup wizard`
+  config-only setup on `v0.9.0-beta-dev`.
+- Kept T926 open because engine install, model download, doctor execution,
+  bootstrap Java/package-manager handling, installer-profile fixes, docs, and
+  full installed smoke remain future milestones.
+- Updated the current-state next move to installed-product WSL smoke for the
+  interactive config-only wizard.
+- Recorded the installed WSL smoke result in T926 after denial, WSL `.exe`
+  rejection, successful throwaway config write, and backup probes passed.
+
 ## [2026-07-02] hardening | Public-main wiki truth
 
 - Refreshed the current-state page from the pre-merge

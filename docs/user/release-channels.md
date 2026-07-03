@@ -21,7 +21,8 @@ until release artifacts exist.
 
 ## Planned Public Beta
 
-The planned packaged public beta install target is Windows x64.
+The planned packaged public beta install targets are Windows x64 and
+Ubuntu/WSL x64.
 
 The Linux source/developer beta path is a checkout-based install:
 
@@ -31,6 +32,14 @@ bash tools/install-unix.sh --force
 ```
 
 That is not a DEB/RPM/Homebrew/SDKMAN/JBang package promise.
+
+The first Ubuntu/WSL x64 public artifact shape is a runtime-bundled tarball:
+
+```text
+talos-<version>-linux-x64-app.tar.gz
+install-talos.sh
+checksums.txt
+```
 
 The planned package identity is:
 
@@ -59,11 +68,19 @@ install-talos.ps1
 checksums.txt
 ```
 
+The planned Ubuntu/WSL x64 release artifacts are:
+
+```text
+talos-<version>-linux-x64-app.tar.gz
+install-talos.sh
+checksums.txt
+```
+
 Until those artifacts exist in a signed release, do not present public package
 installation as available.
 
-Linux beta evidence is source/developer evidence unless a future ticket adds a
-native package lane.
+Linux native package-manager evidence is out of scope for this beta tarball
+lane.
 
 ## Verification Expectations
 

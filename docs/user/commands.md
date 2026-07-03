@@ -32,6 +32,7 @@ Show REPL help:
 | `talos doctor` | Run fast environment preflight probes without starting a managed model server. |
 | `talos doctor --start` | Start the managed server for a model-smoke check, require the smoke reply token, then release it. |
 | `talos setup` | Show setup summary. |
+| `talos setup wizard` | Run the guided Ubuntu/WSL x64 setup flow for pinned llama.cpp, accepted model download, config write, and optional doctor verification. |
 | `talos setup models` | Show managed model setup help. |
 | `talos diagnose -q "<question>"` | Diagnose RAG configuration and prompt sizing. |
 | `talos rag-index` | Build or update the workspace index. |

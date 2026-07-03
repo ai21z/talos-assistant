@@ -6,10 +6,11 @@ Jump to [Current Support](#current-support) if you need the current install stat
 
 ## Current Support
 
-The current reliable path is source/developer setup. Windows packaged install is
-planned, but do not present it as available until a signed release artifact and
-package manifest exist. Linux beta support is source/developer support from a
-checkout, not a DEB/RPM/Homebrew/SDKMAN package.
+The current reliable path is source/developer setup. Windows packaged install
+and the Ubuntu/WSL x64 tarball target are planned public paths, but do not
+present either as available until GitHub Release assets exist. Linux
+source/developer support remains checkout-based, not a
+DEB/RPM/Homebrew/SDKMAN package.
 
 ## 1. Check Prerequisites
 
@@ -20,8 +21,10 @@ Required for source setup:
 - Java 21.
 - Gradle through the repository wrapper.
 - A local checkout of the Talos repository.
-- A local `llama-server.exe` on Windows, or `llama-server` on Linux, when
-  configuring managed llama.cpp.
+- On Ubuntu/WSL x64, the guided setup wizard can install the pinned CPU
+  `llama.cpp` engine and download an accepted beta model after confirmation.
+- On Windows or direct/expert Linux setup, provide a local `llama-server.exe`
+  or `llama-server` when configuring managed llama.cpp.
 
 Verify Java:
 
@@ -82,6 +85,16 @@ talos --version
 ## 4. Configure A Model
 
 See [Model Setup](model-setup.md) for full details.
+
+On Ubuntu/WSL x64, use the guided wizard:
+
+```bash
+talos setup wizard
+```
+
+The wizard asks before installing the pinned CPU `llama.cpp` engine, before
+downloading Qwen or GPT-OSS model weights, before writing config, and before
+running `talos doctor --start`.
 
 Show model setup help:
 

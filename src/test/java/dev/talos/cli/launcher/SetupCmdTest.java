@@ -4,6 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,6 +53,67 @@ class SetupCmdTest {
         assertTrue(help.contains("talos setup models --profile"));
         assertTrue(help.contains(".talos/models"));
         assertFalse(help.contains("Tested profiles:"), help);
+    }
+
+    @Test
+    void setupWizardDryRunRendersDecisionPlanWithoutSideEffects() throws Exception {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        PrintStream previousOut = System.out;
+
+        try {
+            System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+            int exit = new CommandLine(new SetupCmd()).execute(
+                    "wizard",
+                    "--dry-run",
+                    "--config", config.toString());
+
+            assertEquals(0, exit);
+        } finally {
+            System.setOut(previousOut);
+        }
+
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Talos setup wizard dry run"), text);
+        assertTrue(text.contains("No changes will be made"), text);
+        assertTrue(text.contains("no package installs"), text);
+        assertTrue(text.contains("no model downloads"), text);
+        assertTrue(text.contains("no config writes"), text);
+        assertTrue(text.contains("qwen2.5-coder-14b"), text);
+        assertTrue(text.contains("gpt-oss-20b"), text);
+        assertTrue(text.contains("talos doctor --start"), text);
+        assertFalse(text.contains("latest"), text);
+        assertFalse(Files.exists(config), "dry-run must not create config");
+    }
+
+    @Test
+    void setupWizardInteractiveDownloadDenialCreatesNoConfig() throws Exception {
+        Path server = tempDir.resolve("llama-server");
+        Files.writeString(server, "fake", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayInputStream stdin = new ByteArrayInputStream("y\n1\nn\n".getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        var previousIn = System.in;
+        var previousOut = System.out;
+
+        int exit;
+        try {
+            System.setIn(stdin);
+            System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "wizard",
+                    "--server-path", server.toString(),
+                    "--config", config.toString());
+        } finally {
+            System.setIn(previousIn);
+            System.setOut(previousOut);
+        }
+
+        assertEquals(0, exit);
+        assertFalse(Files.exists(config), "download denial must not write config");
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Download this model now? [y/N]"), text);
+        assertTrue(text.contains("Model setup skipped. No config written."), text);
     }
 
     @Test

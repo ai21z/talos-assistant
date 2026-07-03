@@ -3,7 +3,7 @@ wiki_schema: talos.wikiPage.v1
 title: "Current Talos Engineering State"
 kind: current-state
 status: active
-last_verified_commit: "1dcb3b43b1e0102b4097fd96e3ab680aea3572de"
+last_verified_commit: "420e6c92b1a5837caa1a1b4f2d79cacac6d9a165"
 evidence_inputs:
   - type: repo_file
     ref: "gradle.properties"
@@ -142,33 +142,36 @@ confidence_histogram:
 
 ## Last Verified Evidence Identity
 
-- Branch: `main`
-- Commit: `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`
-- Talos version: `0.10.7`
+- Branch: `v0.9.0-beta-dev`
+- Commit: `420e6c92b1a5837caa1a1b4f2d79cacac6d9a165`
+- Talos version: `0.10.8`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up) remains open.
-  T918-T922 and T924-T925 are done on `main`.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
+  (`/session clear` target mismatch), T936 (0.10.8 candidate QA packet), and
+  T937 (winget/signing policy) remain open. T935, T933, T932, T934, T931,
+  T930, T929, T926, T925, and T928 are done on
+  `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
-  `main`; the branch retained for beta-dev continuity is separate from this
-  stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
-  candidate without a release, tag, history rewrite, or branch deletion. T918
-  has already been pushed and verified green in GitHub Actions for the red-CI
-  containment failure; T919-T924 are committed follow-ups in the same arc.
-- Known caveats: `scripts/cut-candidate.ps1` created the 0.10.7 cut commit
-  `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`, then the mandatory post-bump
-  `check` caught this page still reporting version 0.10.6. That evidence failure
-  was repaired forward, the post-bump gates plus installed smoke were rerun from
-  the repaired 0.10.7 tree, and `main` is green in GitHub Actions at
-  `accd47248a88a2f0d0a2019e2b789ecc7106d483`. No public release, tag, winget
-  publication, or history rewrite has happened. T923 remains a non-blocking
-  custody-hardening design follow-up for the DPAPI raw-key PowerShell transport.
-  T925 was implemented after the green 0.10.7 candidate evidence, so any public
-  release/tag decision now requires a fresh candidate cut rather than reusing
-  the previous 0.10.7 packet.
-- Next move: push the T925 implementation, verify GitHub Actions, then cut a
-  fresh candidate if the owner wants to proceed toward release/tag review.
+  `main`; the branch retained for beta-dev continuity is now the 0.10.8
+  candidate-prep line. T936 cut commit
+  `420e6c92b1a5837caa1a1b4f2d79cacac6d9a165` promoted the accumulated
+  `Unreleased` notes into `0.10.8`; the remaining T936 work is the T929 manual
+  PTY and two-model installed-product QA packet before any public artifact,
+  tag, signed asset, GitHub Release asset, draft-release asset, or winget-linked
+  asset can be created.
+- Known caveats: The first 0.10.8 post-bump `check` correctly caught this page
+  still reporting the previous 0.10.7 identity. This page is the forward repair
+  for that evidence-state failure; candidate gates must be rerun from the
+  repaired 0.10.8 tree before T936 can claim automated evidence. T923 remains a
+  non-blocking custody-hardening design follow-up for the DPAPI raw-key
+  PowerShell transport, T927 remains a `/session clear` UX mismatch, and T937
+  remains the winget/signing policy follow-up. No public release, tag, winget
+  publication, signed artifact, draft release, or history rewrite has happened.
+- Next move: complete T936 automated candidate evidence from the repaired
+  0.10.8 tree, then run the T929 manual PTY and two-model installed-product QA
+  packet before any public artifact decision.
 
 ```talos-wiki-claims
 {

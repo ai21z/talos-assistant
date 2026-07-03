@@ -145,7 +145,7 @@
               </div>
               <ul class="evidence-row" aria-label="Talos runtime facts">
                 <li class="evidence-tag">java_21</li>
-                <li class="evidence-tag">linux_source</li>
+                <li class="evidence-tag">ubuntu_wsl_tarball</li>
                 <li class="evidence-tag">approved_writes</li>
                 <li class="evidence-tag">local_trace</li>
               </ul>
@@ -156,15 +156,15 @@ talos setup models
 talos status --verbose
 talos</code></pre>
                 <p>
-                  Planned packaged public beta support: Windows x64. Linux source/developer beta support
-                  is a checkout-based install, not a native package-manager package. Exact future ID:
+                  Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
+                  These paths are not live until GitHub Release assets exist. Exact future Windows ID:
                   <code>TalosProject.TalosCLI</code>.
                   Searchable package name and friendly install copy: <code>winget install talos-cli</code>.
                   Publisher: <code>Vissarion Zounarakis</code>. The installer
                   uses a bundled Java runtime and does not bundle a llama.cpp server or model weights.
                 </p>
                 <p>
-                  Source setup remains documented in the
+                  Source setup remains documented as Linux source/developer setup in the
                   <a class="inline-link" href="https://github.com/ai21z/talos-assistant/blob/v0.9.0-beta-dev/docs/public-installation.md">
                     installation docs
                   </a>.
@@ -197,7 +197,7 @@ talos</code></pre>
                     <button type="button" class="terminal-replay" data-live-replay>
                       <span class="terminal-replay-glyph" aria-hidden="true">↻</span> Replay turn
                     </button>
-                    <span class="terminal-foot-meta">v0.10.6 · llama_cpp/gpt-oss-20b</span>
+                    <span class="terminal-foot-meta">v0.10.7 · llama_cpp/gpt-oss-20b</span>
                   </div>
                 </div>
                 <figcaption id="live-terminal-caption" class="banner-caption">
@@ -210,7 +210,7 @@ talos</code></pre>
                 ask, read-only, workspace bounded. Inspect README.md, src/, docs/.
                 Read 4 files in 38 ms. Answer: Local-first CLI workspace operator,
                 Java 21 sources under src/, architecture notes under docs/. Turn 1,
-                1.2 s, /last trace available. Running TALOS v0.10.6 with engine
+                1.2 s, /last trace available. Running TALOS v0.10.7 with engine
                 llama.cpp (managed), model llama_cpp/gpt-oss-20b, index ready
                 (5 chunks), policy ask before mutation.
               </p>
@@ -469,7 +469,7 @@ talos</code></pre>
               <span>Talos</span>
             </a>
             <p class="footer-line">
-              Local-first CLI workspace operator. Java 21. Windows packaged beta; Linux source/developer beta.
+              Local-first CLI workspace operator. Java 21. Windows target; Ubuntu/WSL x64 tarball target.
             </p>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">

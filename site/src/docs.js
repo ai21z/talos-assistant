@@ -207,9 +207,9 @@ const article = document.getElementById("docs-article");
 const navLinks = Array.from(document.querySelectorAll("[data-doc-slug]"));
 const STATUS_NOTE_HTML = `
 <aside class="docs-callout docs-callout--beta" role="note">
-  <p><strong>Beta status.</strong> Talos has a planned Windows packaged public beta and a
-  Linux source/developer beta path. Public installer is planned, not live. Current reliable
-  path is source/developer setup.</p>
+  <p><strong>Beta status.</strong> Talos has planned Windows x64 installer and
+  Ubuntu/WSL x64 tarball targets. These public paths are not live until GitHub
+  Release assets exist. Current reliable path is source/developer setup.</p>
 </aside>`;
 
 function currentRoute() {
@@ -343,7 +343,8 @@ function renderLandingHtml() {
   <h1>Local-first CLI workspace operator docs.</h1>
   <p class="docs-lede">
     Setup, commands, approvals, privacy, and troubleshooting for the current
-    Windows packaged beta; Linux source/developer beta. Source-backed, paired with concrete limits.
+    source/developer setup plus planned Windows and Ubuntu/WSL x64 public
+    artifact targets. Source-backed, paired with concrete limits.
   </p>
   <p class="docs-start-path">
     Start here:

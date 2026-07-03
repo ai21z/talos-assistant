@@ -267,9 +267,11 @@ describe("Talos landing page static contract", () => {
       "planned public beta",
       "winget install talos-cli",
       "TalosProject.TalosCLI",
+      "Ubuntu/WSL x64 tarball target",
       "Vissarion Zounarakis",
       "bundled Java runtime",
       "does not bundle a llama.cpp server or model weights",
+      "not live until GitHub Release assets exist",
       "Source setup remains documented",
     ]) {
       assert.match(text, new RegExp(escapeRegExp(required), "i"));
@@ -650,5 +652,12 @@ describe("Talos in-site documentation contract", () => {
     ]) {
       assert.doesNotMatch(surface, new RegExp(escapeRegExp(banned), "i"));
     }
+  });
+
+  it("README points users to the user-docs entry point", () => {
+    const readme = readFileSync(join(root, "..", "README.md"), "utf8");
+    assert.match(readme, /docs\/user\/index\.md/);
+    assert.match(readme, /docs\/user\/quickstart\.md/);
+    assert.match(readme, /docs\/public-installation\.md/);
   });
 });

@@ -13,13 +13,42 @@ separate step.
 
 Local-first depends on the configured chat endpoint. Chat endpoints are localhost-gated by default. Non-localhost configured chat endpoints (`ollama.host`, `engines.llama_cpp.host`, `TALOS_OLLAMA_HOST`, or Ollama's `TALOS_ENGINE_HOST` override) are rejected unless explicit `allow_remote=true` is configured for that backend. When remote chat is explicitly allowed, full prompts, including retrieved file contents, can be sent to that host.
 
+## Guided Setup Wizard On Ubuntu/WSL x64
+
+On Ubuntu/WSL x64, `talos setup wizard` is the guided setup path after the
+source/developer installer:
+
+```bash
+talos setup wizard
+```
+
+The wizard keeps every side effect explicit:
+
+- If no compatible `llama-server` is detected, it can offer the pinned CPU
+  `llama.cpp` engine. It prints the upstream tag, asset name, download size,
+  install directory, and SHA-256 before asking for confirmation.
+- It offers only the accepted beta profiles `qwen2.5-coder-14b` and
+  `gpt-oss-20b`.
+- Before any model download, it prints the source, GGUF file name, approximate
+  download size, disk/cache requirement, RAM guidance, CPU-only expectation,
+  support level, cache path, and SHA-256.
+- It writes `~/.talos/config.yaml` only after confirmation and backs up an
+  existing config before overwrite.
+- After config write, it asks whether to run `talos doctor --start`.
+
+The Unix installer itself still installs Talos only. It does not silently
+install system packages, llama.cpp, model weights, or config.
+
 ## Show Setup Help
 
 ```powershell
 talos setup models
 ```
 
-This prints the managed profile support levels and example commands.
+This direct command prints the managed profile support levels and example
+commands. Use it when you already have a compatible `llama-server` binary or a
+user-owned GGUF path. On Ubuntu/WSL x64, prefer `talos setup wizard` for the
+first local model setup.
 
 ## Managed Profile Support Levels
 
@@ -115,7 +144,17 @@ used. When `--force` is used, Talos writes a backup first.
 
 ## Talos-Owned Model Cache
 
-For built-in managed Hugging Face profiles, Talos configures the cache directory:
+The Ubuntu/WSL setup wizard downloads accepted beta GGUF files to:
+
+```text
+~/.talos/models/gguf/<profile>/
+```
+
+The generated wizard config uses `model_path` so `talos doctor --start` can
+prove the selected GGUF file exists before starting the managed server.
+
+For direct `talos setup models` built-in managed Hugging Face profiles, Talos
+configures the cache directory:
 
 ```text
 %USERPROFILE%\.talos\models\huggingface

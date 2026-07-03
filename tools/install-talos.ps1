@@ -113,7 +113,26 @@ function Add-UserPathEntry {
         $updated = @($parts + $PathEntry) -join ";"
         [Environment]::SetEnvironmentVariable("Path", $updated, "User")
         $env:Path = "$env:Path;$PathEntry"
+        Publish-EnvironmentChange
     }
+}
+
+function Publish-EnvironmentChange {
+    Add-Type -TypeDefinition @'
+        using System;
+        using System.Runtime.InteropServices;
+        public class TalosInstallerWin32 {
+            [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+            public static extern IntPtr SendMessageTimeout(
+                IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam,
+                uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+        }
+'@
+
+    $HWND_BROADCAST = [IntPtr]0xffff
+    $WM_SETTINGCHANGE = 0x1a
+    $result = [UIntPtr]::Zero
+    [TalosInstallerWin32]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, "Environment", 2, 5000, [ref]$result) | Out-Null
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("talos-install-" + [Guid]::NewGuid().ToString("N"))

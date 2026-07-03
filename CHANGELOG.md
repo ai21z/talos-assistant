@@ -2,11 +2,86 @@
 
 ## [Unreleased]
 
+## [0.10.8] - 2026-07-03
+
+- [T935] Added release provenance metadata support without promoting it to a
+  QA substitute: staged Windows and Linux artifact sets now include a
+  checksummed CycloneDX SBOM generated from the runtime classpath, and the
+  manual release-staging workflow now requests explicit OIDC/attestation
+  permissions to create GitHub artifact and SBOM attestations for staged files.
+  Public installation docs now explain what checksums, SBOMs, and attestations
+  prove and do not prove, with `gh attestation verify` examples.
+- [T933] Tightened CI/release-control policy: Talos CI push triggers now match
+  the real `main` / `v0.9.0-beta-dev` branch model instead of dead branch
+  patterns, public installation docs now record the required `main` branch
+  protection checks and verification command, and release staging remains a
+  manual QA-staging workflow with no tag, push, pull-request, or release event
+  publication path.
+- [T932] Cleaned up Windows installer handoff behavior: the public Windows
+  bootstrap now broadcasts the user PATH change after installing the `talos`
+  shim, the developer Windows installer no longer prints stale `rag-index` /
+  `rag-ask` first-run commands, and release packaging contract tests now pin
+  current Windows setup guidance without pointing Windows users at the
+  Ubuntu/WSL-only setup wizard.
+- [T934] Aligned public docs and the site with the current release truth:
+  README now links the user-docs entry point directly, the landing terminal
+  renders the current `0.10.7` branch version, and public install copy
+  distinguishes source/developer setup from planned Windows and Ubuntu/WSL x64
+  release assets without claiming winget, GitHub Release, or tarball
+  publication before those assets exist.
+- [T931] Added the first Linux public artifact lane for Ubuntu/WSL x64:
+  `linuxReleaseArtifacts` builds a runtime-bundled
+  `talos-<version>-linux-x64-app.tar.gz`, stages `install-talos.sh`, and writes
+  Linux checksums. The new Linux bootstrap verifies `checksums.txt`, installs
+  user-local, detects PATH shadowing, and hands off to `talos setup wizard`
+  without running package managers, model downloads, engine downloads, or
+  servers outside explicit wizard prompts. Release staging now uploads a
+  non-release `qa-staging-talos-<version>-linux-x64` workflow artifact.
+- [T930] Added a manual release-staging GitHub Actions workflow that checks out
+  an exact candidate SHA, verifies version and changelog identity, fails on a
+  dirty checkout, runs the automated T929 gate, builds Windows artifacts, writes
+  a staging manifest, and uploads only the non-release
+  `qa-staging-talos-<version>-windows-x64` workflow artifact. Public and draft
+  GitHub Release assets remain blocked until a T929 QA packet passes.
+- [T929] Release QA now has an explicit pre-artifact gate. The work-test
+  runbooks distinguish local/CI staging artifacts from public release artifacts,
+  treat draft GitHub Release assets as release assets, and require automated
+  candidate gates, manual PTY evidence, two-model large-scale live audit
+  evidence, runtime artifact canary scans, and named exclusions before any
+  release-named, signed, tagged, GitHub Release-hosted, or winget-linked
+  artifact is created.
+- [T926] `talos setup wizard --dry-run` now renders a side-effect-free setup
+  decision plan, and `talos setup wizard` now provides the first interactive
+  config-only setup path. The wizard detects Java/config/server state, rejects
+  Windows `.exe` llama-server paths as incompatible under WSL, lists the two
+  accepted beta model profiles, writes `~/.talos/config.yaml` only after
+  explicit confirmation, backs up existing configs, and still performs no
+  package installs, model downloads, model starts, or doctor execution. The
+  Unix source/developer installer now has a bootstrap dry-run, detects Java
+  21+ before launching Talos, prints an exact Ubuntu/Debian Java 21 command
+  without running it by default, selects PATH profile files from the user's
+  login shell or an explicit `--profile-file`, verifies the direct Linux
+  installed binary before inherited PATH candidates, and hands off to
+  `talos setup wizard`. The setup wizard now offers an explicit pinned
+  Ubuntu/WSL x64 CPU `llama.cpp` engine install when no compatible
+  `llama-server` exists, verifies the artifact SHA-256 before extraction,
+  follows GitHub release redirects, handles cross-filesystem staging promotion,
+  and reuses an existing installed engine. The wizard now also offers explicit
+  accepted-beta GGUF model downloads with size/disk/RAM guidance, SHA-256
+  verification, downloaded `model_path` config handoff, and optional
+  `talos doctor --start` verification after config write. User docs now
+  describe the guided Ubuntu/WSL x64 path, and T926 close evidence includes a
+  real installed WSL Qwen lane through engine install, model download, config
+  write, and doctor pass.
 - [T925] Workspace containment now has a shared canonical primitive for the
   checkpoint and delete-root guard paths. Checkpoint capture and restore reject
   Windows-style prefix-sibling escapes before writing or deleting outside the
   workspace, while `talos.delete_path` keeps sandbox gating and root refusal
   without a separate lexical containment assumption.
+- [T928] Generated Talos launchers now include
+  `--enable-native-access=ALL-UNNAMED`, suppressing Java FFM native-access
+  warnings from bundled JLine/Lucene paths during normal Linux/WSL status and
+  REPL startup.
 
 ## [0.10.7] - 2026-07-02
 

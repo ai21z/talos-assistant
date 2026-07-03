@@ -21,6 +21,14 @@ auditable outcomes.
 The preferred model backend for the current product path is managed
 `llama.cpp`. Ollama remains available as a legacy backend option.
 
+## User Documentation
+
+Start with the user docs before running a public or source setup:
+
+- [User docs index](docs/user/index.md)
+- [Quickstart](docs/user/quickstart.md)
+- [Public installation plan](docs/public-installation.md)
+
 ### File Capability And Privacy Boundaries
 
 Talos is currently best suited for developer and text-oriented local
@@ -339,9 +347,12 @@ runtime policy keeps each turn bounded.
 
 ## Quick Start
 
-### Public beta install target
+### Public beta install targets
 
-The packaged public beta install target is Windows x64:
+The packaged public beta install targets are Windows x64 and Ubuntu/WSL x64.
+Neither public path is live until GitHub Release assets exist.
+
+Windows target:
 
 ```powershell
 winget install --id TalosProject.TalosCLI -e
@@ -350,14 +361,26 @@ talos status --verbose
 talos
 ```
 
-This public path is not live until a signed GitHub Release asset and winget
-manifest are published. The winget package name and moniker should be
+This Windows public path is not live until a signed GitHub Release asset and
+winget manifest are published. The winget package name and moniker should be
 `talos-cli`, with `TalosProject.TalosCLI` as the exact package ID and
 `Vissarion Zounarakis` as publisher. The public installer will include a
 bundled Java runtime, so public users should not need to install Java manually. It
 installs Talos only; it does not bundle a llama.cpp server or model weights.
 Model setup remains an explicit post-install command through
 `talos setup models`.
+
+The first Ubuntu/WSL x64 public artifact target is a
+runtime-bundled tarball:
+
+```bash
+curl -fL -o install-talos.sh https://github.com/ai21z/talos-assistant/releases/download/v<version>/install-talos.sh
+bash install-talos.sh --version <version>
+```
+
+This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
+`checksums.txt`, installs Talos under the user account, and then hands off to
+`talos setup wizard`. It is not live until GitHub Release assets exist.
 
 Until the public release exists, use the source/developer path below.
 
@@ -366,11 +389,16 @@ Linux source/developer beta path:
 ```bash
 ./gradlew installDist
 bash tools/install-unix.sh --force
+talos setup wizard
 ```
 
-This is a checkout-based Linux source/developer install; no
-DEB/RPM/Homebrew/SDKMAN package claim exists for this beta. macOS is not a
-public beta support claim until separate smoke evidence exists.
+This is a checkout-based Linux source/developer install; no DEB/RPM/Homebrew/SDKMAN
+package claim exists for this beta. macOS is not a public beta support claim
+until separate smoke evidence exists. On Ubuntu/WSL x64, `talos setup wizard`
+is the guided post-install path: it asks before installing the pinned CPU
+llama.cpp engine, asks before downloading accepted beta model weights, asks
+before writing `~/.talos/config.yaml`, and asks before running
+`talos doctor --start`.
 
 ### 1. Install source/developer prerequisites
 
@@ -378,14 +406,21 @@ Current practical setup:
 
 - Windows or Linux source/developer setup
 - Java 21+
-- `llama-server.exe` from llama.cpp on Windows, `llama-server` on Linux, or
-  another configured local backend
+- `talos setup wizard` on Ubuntu/WSL x64, or a user-provided
+  `llama-server.exe` on Windows / `llama-server` on Linux
 - a configured managed llama.cpp model profile or a local GGUF chat model
 - an embeddings model when vector retrieval is needed
 
 The default product path uses the engine transport with `llama_cpp` as the
-backend. The recommended setup command configures one of the audited managed
-llama.cpp model profiles:
+backend. On Ubuntu/WSL x64, use the guided wizard first:
+
+```bash
+talos setup wizard
+talos doctor --start
+```
+
+The direct expert setup command remains available when you already have a
+compatible `llama-server` binary and model path/source:
 
 ```powershell
 talos setup models
@@ -469,6 +504,7 @@ Run the approved Gradle test command profile.
 | `talos doctor` | verify the local environment (config, engine, model files, server, index) |
 | `talos version` | print version information |
 | `talos setup` | first-run setup flow |
+| `talos setup wizard` | guided Ubuntu/WSL x64 setup for pinned llama.cpp, accepted model download, config, and doctor |
 | `talos setup models` | configure tested managed llama.cpp model profiles |
 
 ### Useful REPL Commands
@@ -554,8 +590,8 @@ Practical guidance:
 
 Current practical setup:
 
-- Windows as the packaged public-beta target
-- Linux source/developer beta support from a checkout
+- Windows packaged target and Ubuntu/WSL x64 tarball target after release assets exist
+- Linux source/developer support from a checkout
 - Java 21+
 - managed llama.cpp for the primary local model path
 - `talos setup models` for tested Qwen and GPT-OSS profiles
