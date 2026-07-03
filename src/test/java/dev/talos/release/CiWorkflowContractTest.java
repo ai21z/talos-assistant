@@ -62,6 +62,16 @@ class CiWorkflowContractTest {
                 "uploaded artifact must be explicitly named as QA staging");
         assertTrue(workflow.contains("build/release/windows/"),
                 "uploaded staging artifact must come from the Windows release output folder");
+        assertTrue(workflow.contains("linux-qa-staging"),
+                "T931 must add a Linux QA staging job");
+        assertTrue(workflow.contains("needs: windows-qa-staging"),
+                "Linux staging must wait for the Windows T929 automated gate/staging job");
+        assertTrue(workflow.contains("./gradlew linuxReleaseArtifacts --no-daemon"),
+                "workflow must build the Linux release artifact set");
+        assertTrue(workflow.contains("qa-staging-talos-${{ inputs.version }}-linux-x64"),
+                "Linux uploaded artifact must be explicitly named as QA staging");
+        assertTrue(workflow.contains("build/release/linux/"),
+                "Linux uploaded staging artifact must come from the Linux release output folder");
 
         assertNoReleasePublication(workflow, "release staging workflow");
     }

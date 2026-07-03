@@ -3,8 +3,11 @@
 Talos public beta installation has two lanes:
 
 - Windows x64 packaged install is the public installer target.
-- Linux source/developer beta install is supported from a checkout with Java 21,
-  `./gradlew clean installDist`, and `bash tools/install-unix.sh --force`.
+- Ubuntu/WSL x64 has a runtime-bundled Linux tarball target for public beta
+  staging.
+- Linux source/developer beta install remains supported from a checkout with
+  Java 21, `./gradlew clean installDist`, and
+  `bash tools/install-unix.sh --force`.
 
 The Windows public install promise is:
 
@@ -22,14 +25,16 @@ follow the source/developer setup in `README.md`.
 ## Support Boundary
 
 - Supported packaged public beta install: Windows x64.
-- Supported Linux public beta path: source/developer install from a checkout.
+- Supported Linux public beta path: Ubuntu/WSL x64 runtime-bundled tarball.
+- Supported Linux source/developer path: install from a checkout.
 - Windows public installer includes a bundled Java runtime.
+- Linux public tarball includes a runtime-bundled Talos app image.
 - Linux source/developer setup requires a user-provided Java 21 runtime.
 - Public installer installs Talos only.
 - Public installer does not bundle a llama.cpp server or model weights.
 - Model setup remains explicit: `talos setup wizard` on Ubuntu/WSL x64, or
   `talos setup models` for direct/expert managed llama.cpp config.
-- No DEB/RPM/Homebrew/SDKMAN/JBang package is promised for this beta.
+- no DEB/RPM/Homebrew/SDKMAN/JBang package is promised for this beta.
 - macOS is not a public beta support claim until separate smoke evidence exists.
 - `tools/install-unix.sh` is the Linux source/developer install helper, not a
   signed package-manager installer.
@@ -60,10 +65,20 @@ winget install --id TalosProject.TalosCLI -e
 GitHub Release is the canonical artifact host. Each public Windows release must
 publish:
 
+Windows x64:
+
 ```text
 Talos-<version>-windows-x64.msi
 talos-<version>-windows-x64-app.zip
 install-talos.ps1
+checksums.txt
+```
+
+Ubuntu/WSL x64:
+
+```text
+talos-<version>-linux-x64-app.tar.gz
+install-talos.sh
 checksums.txt
 ```
 
@@ -87,8 +102,10 @@ The release builder must run on Windows x64 with:
 The `jpackageApp` task builds the MSI path. The `jpackageAppImage` task builds a
 bundled-runtime app image for the signed bootstrap fallback. `installDist`,
 `distZip`, and `distTar` are development distribution outputs. On Linux,
-`installDist` plus `tools/install-unix.sh` is the beta source/developer lane; it
-is not a native package-manager channel.
+`jpackageLinuxAppImage` builds the runtime-bundled app image and
+`linuxReleaseArtifacts` stages the public tarball lane. `installDist` plus
+`tools/install-unix.sh` remains the beta source/developer lane; it is not a
+native package-manager channel.
 
 ## Release Build Commands
 
@@ -105,12 +122,40 @@ build/release/windows/
 
 Expected files:
 
+Windows x64:
+
 ```text
 Talos-<version>-windows-x64.msi
 talos-<version>-windows-x64-app.zip
 install-talos.ps1
 checksums.txt
 ```
+
+Linux x64:
+
+```text
+talos-<version>-linux-x64-app.tar.gz
+install-talos.sh
+checksums.txt
+```
+
+Linux public tarball staging command:
+
+```bash
+./gradlew linuxReleaseArtifacts --no-daemon
+```
+
+Linux public install command shape after release assets exist:
+
+```bash
+curl -fL -o install-talos.sh https://github.com/ai21z/talos-assistant/releases/download/v<version>/install-talos.sh
+bash install-talos.sh --version <version>
+```
+
+The script downloads `talos-<version>-linux-x64-app.tar.gz`, verifies the
+`checksums.txt` SHA-256 entry, installs user-local, verifies `talos --version`,
+and then launches `talos setup wizard`. For QA against a staged local artifact,
+use `--artifact-file`, `--checksums-file`, and `--no-wizard`.
 
 Linux source/developer beta path:
 
@@ -156,6 +201,7 @@ The upload name is:
 
 ```text
 qa-staging-talos-<version>-windows-x64
+qa-staging-talos-<version>-linux-x64
 ```
 
 That upload is a short-lived GitHub Actions workflow artifact, not a GitHub Release asset.
@@ -186,10 +232,16 @@ bootstrap:
 .\install-talos.ps1
 ```
 
-The script downloads the versioned app-image ZIP from GitHub Releases, verifies
+The Windows script downloads the versioned app-image ZIP from GitHub Releases, verifies
 the SHA256 entry in `checksums.txt`, installs under
 `%LOCALAPPDATA%\Programs\Talos`, writes a lowercase `talos.cmd` command shim,
 and adds the shim directory to the current user's PATH.
+
+The Linux script downloads the versioned runtime-bundled tarball from GitHub
+Releases, verifies the SHA256 entry in `checksums.txt`, installs under
+`~/.local/share/talos`, writes a lowercase `talos` command shim under
+`~/.local/bin`, updates the selected shell profile, verifies `talos --version`,
+and then starts `talos setup wizard` unless `--no-wizard` is used for QA.
 
 ## Model Setup
 

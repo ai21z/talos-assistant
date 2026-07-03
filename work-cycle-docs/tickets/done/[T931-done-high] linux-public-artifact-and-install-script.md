@@ -1,6 +1,6 @@
-# [T931-open-high] Linux public artifact and install script
+# [T931-done-high] Linux public artifact and install script
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -214,3 +214,77 @@ wsl.exe -e bash -lc '<release-like install smoke command>'
 ## Known Follow-Ups
 
 - deb/rpm/Homebrew/AppImage only after tarball/install-script beta is proven.
+
+## Resolution
+
+Implemented the first Linux public artifact lane as the primary
+runtime-bundled target, not the BYO-JDK fallback.
+
+Changed surfaces:
+
+- `build.gradle.kts`
+- `tools/install-talos.sh`
+- `.github/workflows/release-staging.yml`
+- `docs/public-installation.md`
+- `README.md`
+- `docs/user/installation.md`
+- `docs/user/release-channels.md`
+- `src/test/java/dev/talos/release/PublicInstallPackagingContractTest.java`
+- `src/test/java/dev/talos/release/CiWorkflowContractTest.java`
+
+The Gradle release lane now defines:
+
+- `jpackageLinuxAppImage`
+- `linuxReleaseAppTar`
+- `copyLinuxReleaseBootstrap`
+- `linuxReleaseChecksums`
+- `linuxReleaseArtifacts`
+
+Canonical Linux artifact set:
+
+```text
+talos-<version>-linux-x64-app.tar.gz
+install-talos.sh
+checksums.txt
+```
+
+The public Linux bootstrap:
+
+- supports Linux x64 only;
+- installs user-local under `~/.local/share/talos` by default;
+- writes a `talos` shim under `~/.local/bin`;
+- updates the selected shell profile idempotently;
+- downloads from `ai21z/talos-assistant` GitHub Releases by default;
+- supports local QA staging through `--artifact-file` and `--checksums-file`;
+- verifies `checksums.txt` with `sha256sum` before extraction or install;
+- verifies the installed `talos --version`;
+- launches `talos setup wizard` only after Talos itself is installed, with
+  `--no-wizard` available for deterministic smoke;
+- does not run package managers, download model weights, download llama.cpp, or
+  start servers outside the explicit setup wizard prompts.
+
+The release staging workflow now also has a Linux QA staging job. It waits for
+the Windows T929 automated gate/staging job, checks out the exact requested
+SHA, verifies version and changelog identity, builds `linuxReleaseArtifacts`,
+writes a Linux staging manifest, and uploads only
+`qa-staging-talos-<version>-linux-x64`.
+
+Verification:
+
+```text
+.\gradlew.bat test --tests "dev.talos.release.PublicInstallPackagingContractTest" --tests "dev.talos.release.CiWorkflowContractTest" --no-daemon
+wsl.exe -e bash -lc 'cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli && bash -n tools/install-talos.sh'
+wsl.exe -e bash -lc 'cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli && chmod +x ./gradlew && ./gradlew linuxReleaseArtifacts --no-daemon'
+wsl.exe -e bash -lc 'set -euo pipefail; cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli; audit_root="/mnt/c/Users/arisz/Projects/LOQ/loqj-cli/local/manual-testing/t931-linux-install-smoke"; rm -rf "$audit_root"; mkdir -p "$audit_root"; bash tools/install-talos.sh --artifact-file build/release/linux/talos-0.10.7-linux-x64-app.tar.gz --checksums-file build/release/linux/checksums.txt --install-root "$audit_root/install" --bin-dir "$audit_root/bin" --profile-file "$audit_root/profile" --force --no-wizard; "$audit_root/bin/talos" --version; "$audit_root/bin/talos" status --verbose | sed -n "1,18p"'
+```
+
+WSL smoke result:
+
+- Linux x64 host had Java 21 and `/usr/bin/jpackage`.
+- `linuxReleaseArtifacts` completed successfully.
+- `install-talos.sh` installed from the staged tarball with checksum
+  verification.
+- Installed command reported `Talos 0.10.7` on Linux amd64.
+- `status --verbose` started successfully.
+- The script detected inherited PATH shadowing from the Windows-installed Talos
+  path and printed a warning instead of silently trusting it.

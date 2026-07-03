@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T931] Added the first Linux public artifact lane for Ubuntu/WSL x64:
+  `linuxReleaseArtifacts` builds a runtime-bundled
+  `talos-<version>-linux-x64-app.tar.gz`, stages `install-talos.sh`, and writes
+  Linux checksums. The new Linux bootstrap verifies `checksums.txt`, installs
+  user-local, detects PATH shadowing, and hands off to `talos setup wizard`
+  without running package managers, model downloads, engine downloads, or
+  servers outside explicit wizard prompts. Release staging now uploads a
+  non-release `qa-staging-talos-<version>-linux-x64` workflow artifact.
 - [T930] Added a manual release-staging GitHub Actions workflow that checks out
   an exact candidate SHA, verifies version and changelog identity, fails on a
   dirty checkout, runs the automated T929 gate, builds Windows artifacts, writes

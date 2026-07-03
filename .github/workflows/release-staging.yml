@@ -117,3 +117,81 @@ jobs:
           path: build/release/windows/
           if-no-files-found: error
           retention-days: 14
+
+  linux-qa-staging:
+    name: Linux QA staging artifacts
+    runs-on: ubuntu-latest
+    needs: windows-qa-staging
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout requested candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_sha }}
+          fetch-depth: 0
+
+      - name: Verify requested commit and version
+        shell: bash
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "${{ inputs.target_sha }}" ]]; then
+            echo "Checked out SHA $actual_sha does not match requested SHA ${{ inputs.target_sha }}"
+            exit 1
+          fi
+
+          version_line="$(grep -E '^talosVersion=' gradle.properties)"
+          if [[ "$version_line" != "talosVersion=${{ inputs.version }}" ]]; then
+            echo "gradle.properties has '$version_line', expected talosVersion=${{ inputs.version }}"
+            exit 1
+          fi
+
+          changelog_heading="## [${{ inputs.version }}]"
+          if ! grep -Fq "$changelog_heading" CHANGELOG.md; then
+            echo "CHANGELOG.md does not contain $changelog_heading"
+            exit 1
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build Linux staging artifacts
+        shell: bash
+        run: |
+          dirty="$(git status --short)"
+          if [[ -n "$dirty" ]]; then
+            printf '%s\n' "$dirty"
+            echo "Working tree is dirty before Linux release staging"
+            exit 1
+          fi
+          git diff --check
+          chmod +x ./gradlew
+          ./gradlew linuxReleaseArtifacts --no-daemon
+
+      - name: Write Linux staging manifest
+        shell: bash
+        run: |
+          cat > build/release/linux/staging-manifest.json << EOF
+          {
+            "schema": "talos.releaseStagingManifest.v1",
+            "releaseStatus": "qa-staging-not-a-release",
+            "sha": "${{ inputs.target_sha }}",
+            "version": "${{ inputs.version }}",
+            "runId": "${{ github.run_id }}",
+            "runAttempt": "${{ github.run_attempt }}",
+            "artifactDirectory": "build/release/linux",
+            "publicReleaseAssetsCreated": false,
+            "t929Boundary": "GitHub Release, draft release, signed, tagged, winget-linked, and release-named artifacts remain blocked until QA passes."
+          }
+          EOF
+
+      - name: Upload Linux QA staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-staging-talos-${{ inputs.version }}-linux-x64
+          path: build/release/linux/
+          if-no-files-found: error
+          retention-days: 14

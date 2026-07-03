@@ -11,7 +11,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DisplayName("Public Windows install packaging contract")
+@DisplayName("Public install packaging contract")
 class PublicInstallPackagingContractTest {
 
     private static final Path ROOT = Path.of("").toAbsolutePath().normalize();
@@ -55,6 +55,35 @@ class PublicInstallPackagingContractTest {
                 "release app-image ZIP must use the canonical artifact name");
         assertTrue(build.contains("checksums.txt"),
                 "release artifacts must include checksum output");
+    }
+
+    @Test
+    @DisplayName("release build publishes the expected Linux x64 runtime-bundled artifact")
+    void releaseBuildPublishesLinuxRuntimeBundledArtifact() throws Exception {
+        String build = read("build.gradle.kts");
+
+        for (String task : new String[] {
+                "jpackageLinuxAppImage",
+                "linuxReleaseAppTar",
+                "copyLinuxReleaseBootstrap",
+                "linuxReleaseChecksums",
+                "linuxReleaseArtifacts"
+        }) {
+            assertTrue(build.contains("\"" + task + "\""), "missing Linux release task: " + task);
+        }
+
+        assertTrue(build.contains("talos-${version}-linux-x64-app.tar.gz"),
+                "Linux public beta artifact must use the canonical runtime-bundled tarball name");
+        assertTrue(build.contains("\"--type\", \"app-image\""),
+                "Linux public beta lane must use a runtime-bundled jpackage app image");
+        assertTrue(build.contains("\"--name\", \"talos\""),
+                "Linux app image must expose a lowercase talos launcher");
+        assertTrue(build.contains("build/release/linux"),
+                "Linux release artifacts must be staged separately from Windows artifacts");
+        assertTrue(build.contains("install-talos.sh"),
+                "Linux public release artifact set must include the Linux bootstrap script");
+        assertFalse(build.contains("linuxReleaseDistTar"),
+                "T931 must not fall back to a BYO-JDK distTar lane without recorded proof");
     }
 
     @Test
@@ -190,6 +219,68 @@ class PublicInstallPackagingContractTest {
                 "wizard must require explicit model-download confirmation");
         assertFalse(unixBootstrap.matches("(?is).*(?:curl|wget|huggingface-cli|hf download).*(?:qwen|gpt-oss|gguf).*"),
                 "Unix bootstrap must not download model weights; the Talos wizard owns that prompted step");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap verifies release artifacts before user-local install")
+    void linuxPublicBootstrapVerifiesReleaseArtifactsBeforeInstall() throws Exception {
+        String script = read("tools/install-talos.sh");
+
+        assertTrue(script.contains("ai21z/talos-assistant"),
+                "Linux bootstrap must download from the canonical GitHub Releases repository");
+        assertTrue(script.contains("talos-$release_version-linux-x64-app.tar.gz"),
+                "Linux bootstrap must derive the canonical versioned tarball name");
+        assertTrue(script.contains("checksums.txt"),
+                "Linux bootstrap must download or accept a release checksum manifest");
+        assertTrue(script.contains("sha256sum"),
+                "Linux bootstrap must verify SHA-256 before extracting or installing");
+        assertTrue(script.contains("assert_supported_linux_x64"),
+                "Linux bootstrap must refuse unsupported OS/arch before downloading");
+        assertTrue(script.contains("Unsupported OS/arch"),
+                "unsupported platforms must fail with a clear message");
+        assertTrue(script.contains("$HOME/.local/share/talos"),
+                "Linux bootstrap must install under the current user's local data directory");
+        assertTrue(script.contains("$HOME/.local/bin"),
+                "Linux bootstrap must expose a user-local talos command shim");
+        assertTrue(script.contains("talos setup wizard"),
+                "successful install must hand off to the explicit Talos setup wizard");
+        assertTrue(script.contains("--no-wizard"),
+                "release QA must be able to smoke install without launching interactive model setup");
+        assertTrue(script.contains("--artifact-file"),
+                "release QA must support installing a locally staged artifact without a public release");
+        assertTrue(script.contains("--checksums-file"),
+                "release QA must verify locally staged artifacts with the same checksum path");
+
+        assertFalse(script.matches("(?is).*\\b(?:apt|apt-get|dnf|yum|pacman|brew)\\b.*"),
+                "Linux public bootstrap must not run package managers");
+        assertFalse(script.matches("(?im)^.*(?:curl|wget)[^\\r\\n]*\\|[^\\r\\n]*(?:bash|sh).*$"),
+                "Linux public bootstrap must not encourage blind curl/wget pipe-to-shell execution");
+        assertFalse(script.matches("(?is).*(?:curl|wget|gh release download|huggingface-cli|hf download).*llama[-.]cpp.*"),
+                "Linux public bootstrap must not download llama.cpp; the setup wizard owns prompted engine setup");
+        assertFalse(script.matches("(?is).*(?:curl|wget|huggingface-cli|hf download).*(?:qwen|gpt-oss|gguf).*"),
+                "Linux public bootstrap must not download model weights; the setup wizard owns prompted model setup");
+    }
+
+    @Test
+    @DisplayName("public docs describe Linux tarball lane without package-manager overclaim")
+    void publicDocsDescribeLinuxTarballLane() throws Exception {
+        String doc = read("docs/public-installation.md");
+        String readme = read("README.md");
+
+        for (String text : new String[] { doc, readme }) {
+            assertTrue(text.contains("talos-<version>-linux-x64-app.tar.gz"),
+                    "public docs must name the canonical Linux tarball artifact");
+            assertTrue(text.contains("install-talos.sh"),
+                    "public docs must name the Linux public bootstrap script");
+            assertTrue(text.contains("Ubuntu/WSL x64"),
+                    "public docs must keep the first Linux lane narrow");
+            assertTrue(text.contains("runtime-bundled"),
+                    "public docs must state the Linux public artifact includes its runtime");
+            assertTrue(text.contains("talos setup wizard"),
+                    "public docs must hand off to the explicit setup wizard after Talos install");
+            assertTrue(text.contains("no DEB/RPM/Homebrew/SDKMAN"),
+                    "public docs must keep native package-manager formats out of the beta claim");
+        }
     }
 
     @Test

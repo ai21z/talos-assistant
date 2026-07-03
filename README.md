@@ -359,6 +359,18 @@ installs Talos only; it does not bundle a llama.cpp server or model weights.
 Model setup remains an explicit post-install command through
 `talos setup models`.
 
+The first Linux public beta artifact target is Ubuntu/WSL x64 with a
+runtime-bundled tarball:
+
+```bash
+curl -fL -o install-talos.sh https://github.com/ai21z/talos-assistant/releases/download/v<version>/install-talos.sh
+bash install-talos.sh --version <version>
+```
+
+This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
+`checksums.txt`, installs Talos under the user account, and then hands off to
+`talos setup wizard`. It is not live until GitHub Release assets are published.
+
 Until the public release exists, use the source/developer path below.
 
 Linux source/developer beta path:
@@ -369,13 +381,13 @@ bash tools/install-unix.sh --force
 talos setup wizard
 ```
 
-This is a checkout-based Linux source/developer install; no
-DEB/RPM/Homebrew/SDKMAN package claim exists for this beta. macOS is not a
-public beta support claim until separate smoke evidence exists. On Ubuntu/WSL
-x64, `talos setup wizard` is the guided post-install path: it asks before
-installing the pinned CPU llama.cpp engine, asks before downloading accepted
-beta model weights, asks before writing `~/.talos/config.yaml`, and asks before
-running `talos doctor --start`.
+This is a checkout-based Linux source/developer install; no DEB/RPM/Homebrew/SDKMAN
+package claim exists for this beta. macOS is not a public beta support claim
+until separate smoke evidence exists. On Ubuntu/WSL x64, `talos setup wizard`
+is the guided post-install path: it asks before installing the pinned CPU
+llama.cpp engine, asks before downloading accepted beta model weights, asks
+before writing `~/.talos/config.yaml`, and asks before running
+`talos doctor --start`.
 
 ### 1. Install source/developer prerequisites
 

@@ -17,6 +17,7 @@ Current supported user path:
 Planned public beta path:
 
 - Windows x64 package installation.
+- Ubuntu/WSL x64 runtime-bundled Linux tarball install.
 - Linux source/developer beta install from a checkout.
 - Private Java runtime included with the installed app.
 - Talos installed without model weights.
@@ -95,8 +96,11 @@ Vissarion Zounarakis
 Do not treat the public package path as live until release artifacts and package
 manifests are published.
 
-Linux beta support is source/developer support only. There is no current
-DEB/RPM/Homebrew/SDKMAN/JBang package promise.
+Linux public beta support is scoped to the runtime-bundled
+`talos-<version>-linux-x64-app.tar.gz` tarball and `install-talos.sh` on
+Ubuntu/WSL x64 once release assets exist. Linux source/developer support from a
+checkout remains available. There is no current DEB/RPM/Homebrew/SDKMAN/JBang
+package promise.
 
 ## What The Installer Will And Will Not Install
 
@@ -121,6 +125,13 @@ Ubuntu/WSL x64 guided path:
 talos setup wizard
 talos status --verbose
 talos
+```
+
+Linux public tarball install shape after release assets exist:
+
+```bash
+curl -fL -o install-talos.sh https://github.com/ai21z/talos-assistant/releases/download/v<version>/install-talos.sh
+bash install-talos.sh --version <version>
 ```
 
 Direct/expert path when you already have a compatible local `llama-server`

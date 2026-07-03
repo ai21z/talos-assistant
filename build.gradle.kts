@@ -1,5 +1,6 @@
 import java.io.File
 import java.security.MessageDigest
+import org.gradle.api.tasks.bundling.Compression
 
 plugins {
     application
@@ -115,6 +116,19 @@ fun writeJson(target: java.io.File, payload: Any) {
         groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(payload)) + "\n",
         Charsets.UTF_8
     )
+}
+
+fun sha256Hex(file: java.io.File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }
 
 fun parseXml(file: java.io.File): org.w3c.dom.Document {
@@ -947,19 +961,6 @@ tasks.register("windowsReleaseChecksums") {
         val releaseDir = windowsReleaseDir.get().asFile
         releaseDir.mkdirs()
 
-        fun sha256Hex(file: java.io.File): String {
-            val digest = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    digest.update(buffer, 0, read)
-                }
-            }
-            return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        }
-
         val artifactNames = listOf(
             publicMsiArtifactName,
             publicAppZipArtifactName,
@@ -984,6 +985,99 @@ tasks.register("windowsReleaseArtifacts") {
     dependsOn("windowsReleaseChecksums")
     group = "distribution"
     description = "Builds Windows x64 public beta artifacts and checksums."
+}
+
+/* ---------- Linux public beta release packaging ---------- */
+
+// Outputs under build/release/linux.
+val linuxReleaseDir = layout.buildDirectory.dir("release/linux")
+val publicLinuxAppTarArtifactName = "talos-${version}-linux-x64-app.tar.gz"
+
+fun isLinuxX64Host(): Boolean {
+    val osName = System.getProperty("os.name").lowercase()
+    val osArch = System.getProperty("os.arch").lowercase()
+    return osName.contains("linux") && (osArch == "amd64" || osArch == "x86_64")
+}
+
+tasks.register<Exec>("jpackageLinuxAppImage") {
+    dependsOn(tasks.installDist)
+
+    val jpackageExe = providers.environmentVariable("JAVA_HOME")
+        .map { file("$it/bin/jpackage").absolutePath }
+        .orElse("jpackage")
+
+    val appDir = layout.buildDirectory.dir("install/talos")
+    val inputDir = appDir.map { it.dir("lib") }
+    val destDir = layout.buildDirectory.dir("dist/linux-app-image")
+    val appVer = providers.provider { version.toString() }
+
+    doFirst {
+        if (!isLinuxX64Host()) {
+            throw GradleException("Linux release artifacts must be built on Linux x64.")
+        }
+        project.delete(destDir.get().dir("talos"))
+        val args = mutableListOf(
+            jpackageExe.get(),
+            "--type", "app-image",
+            "--name", "talos",
+            "--app-version", appVer.get(),
+            "--vendor", "Vissarion Zounarakis",
+            "--dest", destDir.get().asFile.absolutePath,
+            "--input", inputDir.get().asFile.absolutePath,
+            "--main-jar", "talos.jar",
+            "--main-class", "dev.talos.app.Main"
+        )
+
+        commandLine(args)
+    }
+}
+
+tasks.register<Tar>("linuxReleaseAppTar") {
+    dependsOn("jpackageLinuxAppImage")
+    from(layout.buildDirectory.dir("dist/linux-app-image"))
+    destinationDirectory.set(linuxReleaseDir)
+    archiveFileName.set(publicLinuxAppTarArtifactName)
+    compression = Compression.GZIP
+}
+
+tasks.register<Copy>("copyLinuxReleaseBootstrap") {
+    from("tools/install-talos.sh")
+    into(linuxReleaseDir)
+}
+
+tasks.register("linuxReleaseChecksums") {
+    dependsOn("linuxReleaseAppTar", "copyLinuxReleaseBootstrap")
+
+    val checksumFile = linuxReleaseDir.map { it.file("checksums.txt") }
+    outputs.file(checksumFile)
+
+    doLast {
+        val releaseDir = linuxReleaseDir.get().asFile
+        releaseDir.mkdirs()
+
+        val artifactNames = listOf(
+            publicLinuxAppTarArtifactName,
+            "install-talos.sh"
+        )
+        val lines = artifactNames.map { name ->
+            val artifact = releaseDir.resolve(name)
+            if (!artifact.isFile) {
+                throw GradleException("Missing Linux release artifact: ${artifact.absolutePath}")
+            }
+            "${sha256Hex(artifact)}  $name"
+        }
+
+        checksumFile.get().asFile.writeText(
+            lines.joinToString(System.lineSeparator()) + System.lineSeparator(),
+            Charsets.UTF_8
+        )
+    }
+}
+
+tasks.register("linuxReleaseArtifacts") {
+    dependsOn("linuxReleaseChecksums")
+    group = "distribution"
+    description = "Builds Linux x64 runtime-bundled public beta artifacts and checksums."
 }
 
 /* ---------- JaCoCo code coverage ---------- */
