@@ -357,6 +357,70 @@ Expected result:
 The candidate test lanes are fail-soft. They preserve evidence even when tests
 fail, so the summary can say what failed instead of hiding the result.
 
+## Step 8A: Run The Release QA Gate Before Any Release Artifact
+
+Goal: prove the named candidate is ready for public artifact publication, not
+only local candidate review.
+
+No GitHub Release asset, draft GitHub Release asset, signed artifact,
+tag-bound artifact, winget-linked artifact, or release-named distribution may
+be created before this step passes. A draft release asset is still a release
+asset for this gate.
+
+Artifact boundaries:
+
+- Local staging artifacts may be built under `build/` or another explicit local
+  scratch path after automated gates. They are for QA only and must not be
+  called releases.
+- CI staging artifacts may be uploaded as workflow-run artifacts after
+  automated gates if they are named `staging` or `qa-staging`. They must not be
+  attached to a GitHub Release, tag, draft release, or winget manifest.
+- Public release artifacts include GitHub Release assets, draft release assets,
+  signed artifacts, tag-bound artifacts, winget-linked artifacts, and anything
+  named or documented as the release.
+
+What the developer does:
+
+1. Inventory all current Gradle tasks and CI jobs that could provide
+   release-relevant evidence.
+2. Run the automated candidate gate:
+
+```powershell
+git status --short
+git diff --check
+./gradlew.bat clean check --no-daemon
+./gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
+./gradlew.bat talosQualitySummaries --no-daemon
+```
+
+3. Run any release-relevant installer/package contract tests, scenario lanes,
+   live-audit runner scripts, runtime artifact canary scans, or CI-only checks
+   discovered by the inventory and not already covered by `check`.
+4. Install the candidate into a clean installed-product location.
+5. Capture a manual PTY transcript that proves startup, `/status --verbose`,
+   `/mode`, `/prompt`, `/debug prompt on`, `/last trace`, `/prompt-debug last`,
+   approval denial, approval once, approval allow-in-session, and command
+   approval behavior.
+6. Run the two-model large-scale live audit using the standard Qwen and GPT-OSS
+   managed `llama.cpp` lanes unless the release scope explicitly narrows model
+   coverage.
+7. Save prompt-debug artifacts, provider-body JSON, approval evidence, final
+   workspace diffs, final file state, and server/model logs where relevant.
+8. Run the runtime artifact canary scan against model-facing manual evidence
+   roots and redacted workspace snapshots.
+9. Record named exclusions for every skipped tool, Gradle task, CI job,
+   platform, model, or audit lane.
+
+Expected result:
+
+- The QA packet names branch, commit SHA, version, executable path, installed
+  path, model/backend/profile, every command run, every manual evidence path,
+  and every skipped item with a reason.
+- The manual PTY transcript and live audit evidence belong to the same
+  candidate SHA and installed product.
+- No public release artifact exists until this packet has been reviewed and
+  accepted.
+
 ## Step 9: Review The Packet
 
 Goal: decide whether the candidate is good enough.

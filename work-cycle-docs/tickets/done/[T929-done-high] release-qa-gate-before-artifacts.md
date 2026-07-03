@@ -1,6 +1,6 @@
-# [T929-open-high] Release QA gate before artifacts
+# [T929-done-high] Release QA gate before artifacts
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -315,3 +315,32 @@ git diff --check
 
 - Add a machine-checkable QA manifest once the first 0.10.8 packet shape is
   proven manually.
+
+## Resolution
+
+Implemented as a documented release QA gate in:
+
+- `work-cycle-docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle-step-by-step.md`
+
+The gate now defines:
+
+- local staging artifacts;
+- CI staging artifacts;
+- public release artifacts, including draft GitHub Release assets;
+- the automated gate before staging artifacts;
+- manual PTY evidence;
+- two-model large-scale live-audit evidence;
+- runtime artifact canary scanning for manual roots;
+- named exclusions for skipped tasks, tools, models, platforms, or lanes.
+
+Regression coverage:
+
+- `ReleaseQaGateContractTest` pins the artifact taxonomy and the
+  QA-before-publication boundary in the work-test runbooks.
+
+Verification:
+
+```text
+.\gradlew.bat test --tests "dev.talos.docs.ReleaseQaGateContractTest" --no-daemon
+```

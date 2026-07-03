@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T929] Release QA now has an explicit pre-artifact gate. The work-test
+  runbooks distinguish local/CI staging artifacts from public release artifacts,
+  treat draft GitHub Release assets as release assets, and require automated
+  candidate gates, manual PTY evidence, two-model large-scale live audit
+  evidence, runtime artifact canary scans, and named exclusions before any
+  release-named, signed, tagged, GitHub Release-hosted, or winget-linked
+  artifact is created.
 - [T926] `talos setup wizard --dry-run` now renders a side-effect-free setup
   decision plan, and `talos setup wizard` now provides the first interactive
   config-only setup path. The wizard detects Java/config/server state, rejects
