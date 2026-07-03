@@ -9,6 +9,9 @@ Talos public beta installation has two lanes:
   Java 21, `./gradlew clean installDist`, and
   `bash tools/install-unix.sh --force`.
 
+No public install path is live until GitHub Release assets exist. The commands
+below document the target release shape and the source/developer fallback.
+
 The Windows public install promise is:
 
 ```powershell
@@ -24,8 +27,8 @@ follow the source/developer setup in `README.md`.
 
 ## Support Boundary
 
-- Supported packaged public beta install: Windows x64.
-- Supported Linux public beta path: Ubuntu/WSL x64 runtime-bundled tarball.
+- Supported packaged public beta install target: Windows x64.
+- Supported Ubuntu/WSL x64 public artifact target: runtime-bundled tarball.
 - Supported Linux source/developer path: install from a checkout.
 - Windows public installer includes a bundled Java runtime.
 - Linux public tarball includes a runtime-bundled Talos app image.

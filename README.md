@@ -21,6 +21,14 @@ auditable outcomes.
 The preferred model backend for the current product path is managed
 `llama.cpp`. Ollama remains available as a legacy backend option.
 
+## User Documentation
+
+Start with the user docs before running a public or source setup:
+
+- [User docs index](docs/user/index.md)
+- [Quickstart](docs/user/quickstart.md)
+- [Public installation plan](docs/public-installation.md)
+
 ### File Capability And Privacy Boundaries
 
 Talos is currently best suited for developer and text-oriented local
@@ -339,9 +347,12 @@ runtime policy keeps each turn bounded.
 
 ## Quick Start
 
-### Public beta install target
+### Public beta install targets
 
-The packaged public beta install target is Windows x64:
+The packaged public beta install targets are Windows x64 and Ubuntu/WSL x64.
+Neither public path is live until GitHub Release assets exist.
+
+Windows target:
 
 ```powershell
 winget install --id TalosProject.TalosCLI -e
@@ -350,8 +361,8 @@ talos status --verbose
 talos
 ```
 
-This public path is not live until a signed GitHub Release asset and winget
-manifest are published. The winget package name and moniker should be
+This Windows public path is not live until a signed GitHub Release asset and
+winget manifest are published. The winget package name and moniker should be
 `talos-cli`, with `TalosProject.TalosCLI` as the exact package ID and
 `Vissarion Zounarakis` as publisher. The public installer will include a
 bundled Java runtime, so public users should not need to install Java manually. It
@@ -359,7 +370,7 @@ installs Talos only; it does not bundle a llama.cpp server or model weights.
 Model setup remains an explicit post-install command through
 `talos setup models`.
 
-The first Linux public beta artifact target is Ubuntu/WSL x64 with a
+The first Ubuntu/WSL x64 public artifact target is a
 runtime-bundled tarball:
 
 ```bash
@@ -369,7 +380,7 @@ bash install-talos.sh --version <version>
 
 This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
 `checksums.txt`, installs Talos under the user account, and then hands off to
-`talos setup wizard`. It is not live until GitHub Release assets are published.
+`talos setup wizard`. It is not live until GitHub Release assets exist.
 
 Until the public release exists, use the source/developer path below.
 
@@ -579,8 +590,8 @@ Practical guidance:
 
 Current practical setup:
 
-- Windows as the packaged public-beta target
-- Linux source/developer beta support from a checkout
+- Windows packaged target and Ubuntu/WSL x64 tarball target after release assets exist
+- Linux source/developer support from a checkout
 - Java 21+
 - managed llama.cpp for the primary local model path
 - `talos setup models` for tested Qwen and GPT-OSS profiles

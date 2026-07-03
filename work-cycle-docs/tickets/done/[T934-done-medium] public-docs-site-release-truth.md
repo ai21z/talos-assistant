@@ -1,6 +1,6 @@
-# [T934-open-medium] Public docs and site release truth
+# [T934-done-medium] Public docs and site release truth
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -75,7 +75,9 @@ the examples represent.
 - No winget submission.
 - No broad marketing rewrite.
 - No weakening README limitation language.
-- No claiming Linux packaging until T931 lands.
+- No claiming native Linux package-manager packaging.
+- No claiming live Ubuntu/WSL x64 tarball publication before GitHub Release
+  assets exist.
 
 ## Architecture Metadata
 
@@ -125,13 +127,32 @@ Refactor scope:
 - Site and README do not show stale released/demo version claims.
 - Public install docs distinguish:
   - live source/developer setup;
-  - live Ubuntu/WSL wizard lane if supported by artifact/install script;
+  - Ubuntu/WSL wizard setup from source/developer installs;
+  - planned Ubuntu/WSL x64 tarball lane after GitHub Release assets exist;
   - planned Windows winget;
   - GitHub Release prerequisites;
   - signed vs unsigned beta policy.
 - Docs do not claim winget/release artifacts before they exist.
 - Site tests or docs checks pin the highest-risk public install/status claims
   if a suitable test owner exists.
+
+## Resolution
+
+- `README.md` now exposes a direct user-docs entry point for
+  `docs/user/index.md`, `docs/user/quickstart.md`, and
+  `docs/public-installation.md`.
+- `site/index.html` no longer renders stale `v0.10.6`; the terminal demo text
+  follows the current `0.10.7` branch version.
+- Landing and in-site docs now distinguish current source/developer setup from
+  planned Windows x64 and Ubuntu/WSL x64 public artifact targets.
+- Public copy states that release paths are not live until GitHub Release
+  assets exist and continues to reject model/server bundling claims.
+- User docs now describe Ubuntu/WSL x64 as a tarball target once assets exist,
+  while keeping Linux source/developer setup as the current reliable path and
+  avoiding native package-manager claims.
+- Site regression coverage pins the current-version hero, the Ubuntu/WSL x64
+  tarball target wording, the non-live GitHub Release boundary, and the README
+  user-docs entry point.
 
 ## Tests / Evidence
 
@@ -145,6 +166,8 @@ Required deterministic regression:
 Commands:
 
 ```powershell
+npm test --prefix site
+npm run build --prefix site
 .\gradlew.bat test --tests "dev.talos.docs.*" --no-daemon
 git diff --check
 ```

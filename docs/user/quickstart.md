@@ -6,10 +6,11 @@ Jump to [Current Support](#current-support) if you need the current install stat
 
 ## Current Support
 
-The current reliable path is source/developer setup. Windows packaged install is
-planned, but do not present it as available until a signed release artifact and
-package manifest exist. Linux beta support is source/developer support from a
-checkout, not a DEB/RPM/Homebrew/SDKMAN package.
+The current reliable path is source/developer setup. Windows packaged install
+and the Ubuntu/WSL x64 tarball target are planned public paths, but do not
+present either as available until GitHub Release assets exist. Linux
+source/developer support remains checkout-based, not a
+DEB/RPM/Homebrew/SDKMAN package.
 
 ## 1. Check Prerequisites
 

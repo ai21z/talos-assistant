@@ -96,7 +96,7 @@ Vissarion Zounarakis
 Do not treat the public package path as live until release artifacts and package
 manifests are published.
 
-Linux public beta support is scoped to the runtime-bundled
+Ubuntu/WSL x64 public artifact support is scoped to the runtime-bundled
 `talos-<version>-linux-x64-app.tar.gz` tarball and `install-talos.sh` on
 Ubuntu/WSL x64 once release assets exist. Linux source/developer support from a
 checkout remains available. There is no current DEB/RPM/Homebrew/SDKMAN/JBang

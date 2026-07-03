@@ -33,7 +33,7 @@ bash tools/install-unix.sh --force
 
 That is not a DEB/RPM/Homebrew/SDKMAN/JBang package promise.
 
-The first Linux public beta artifact shape is a runtime-bundled tarball:
+The first Ubuntu/WSL x64 public artifact shape is a runtime-bundled tarball:
 
 ```text
 talos-<version>-linux-x64-app.tar.gz

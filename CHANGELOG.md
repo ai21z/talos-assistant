@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T934] Aligned public docs and the site with the current release truth:
+  README now links the user-docs entry point directly, the landing terminal
+  renders the current `0.10.7` branch version, and public install copy
+  distinguishes source/developer setup from planned Windows and Ubuntu/WSL x64
+  release assets without claiming winget, GitHub Release, or tarball
+  publication before those assets exist.
 - [T931] Added the first Linux public artifact lane for Ubuntu/WSL x64:
   `linuxReleaseArtifacts` builds a runtime-bundled
   `talos-<version>-linux-x64-app.tar.gz`, stages `install-talos.sh`, and writes
