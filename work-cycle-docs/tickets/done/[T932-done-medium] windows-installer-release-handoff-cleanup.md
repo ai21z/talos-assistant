@@ -1,6 +1,6 @@
-# [T932-open-medium] Windows installer release handoff cleanup
+# [T932-done-medium] Windows installer release handoff cleanup
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -138,6 +138,30 @@ Refactor scope:
   behavior, no blind script execution, and current setup handoff.
 - Clean Windows installed-product smoke passes: `talos --version`,
   `talos status --verbose`, setup/help output.
+
+## Resolution
+
+- `tools/install-talos.ps1` now broadcasts `WM_SETTINGCHANGE` through
+  `SendMessageTimeout` after adding the public `talos.cmd` shim directory to
+  the user PATH.
+- Public Windows bootstrap guidance remains Windows-appropriate:
+  `talos --version`, `talos setup models`, `talos status --verbose`, and
+  `talos`; it does not advertise the Ubuntu/WSL-only setup wizard.
+- `tools/install-windows.ps1` no longer prints stale `talos rag-index` or
+  `talos rag-ask` first-run commands; it points users at `talos setup models`
+  and `talos status --verbose`.
+- `docs/public-installation.md` now states that the Windows bootstrap
+  broadcasts the environment change and tells users to open a new PowerShell
+  window if the current shell cannot resolve `talos`.
+- `PublicInstallPackagingContractTest` now pins the public and developer
+  Windows installer setup handoff, PATH refresh behavior, and stale-command
+  exclusions.
+
+Note:
+
+- Clean installed-product Windows smoke is still release/candidate evidence,
+  not produced by this local script cleanup alone because no public Windows
+  release artifact exists yet.
 
 ## Tests / Evidence
 

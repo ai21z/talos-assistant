@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T932] Cleaned up Windows installer handoff behavior: the public Windows
+  bootstrap now broadcasts the user PATH change after installing the `talos`
+  shim, the developer Windows installer no longer prints stale `rag-index` /
+  `rag-ask` first-run commands, and release packaging contract tests now pin
+  current Windows setup guidance without pointing Windows users at the
+  Ubuntu/WSL-only setup wizard.
 - [T934] Aligned public docs and the site with the current release truth:
   README now links the user-docs entry point directly, the landing terminal
   renders the current `0.10.7` branch version, and public install copy

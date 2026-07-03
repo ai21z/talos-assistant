@@ -238,7 +238,9 @@ bootstrap:
 The Windows script downloads the versioned app-image ZIP from GitHub Releases, verifies
 the SHA256 entry in `checksums.txt`, installs under
 `%LOCALAPPDATA%\Programs\Talos`, writes a lowercase `talos.cmd` command shim,
-and adds the shim directory to the current user's PATH.
+adds the shim directory to the current user's PATH, and broadcasts the Windows
+environment change. Open a new PowerShell window if the current shell does not
+resolve `talos` immediately.
 
 The Linux script downloads the versioned runtime-bundled tarball from GitHub
 Releases, verifies the SHA256 entry in `checksums.txt`, installs under

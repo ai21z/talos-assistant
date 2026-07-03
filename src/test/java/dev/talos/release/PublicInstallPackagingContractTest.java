@@ -130,6 +130,52 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
+    @DisplayName("Windows public bootstrap prints current setup handoff and refreshes PATH")
+    void windowsPublicBootstrapPrintsCurrentSetupHandoffAndRefreshesPath() throws Exception {
+        String script = read("tools/install-talos.ps1");
+
+        assertTrue(script.contains("SendMessageTimeout"),
+                "public bootstrap must broadcast PATH changes like the developer installer");
+        assertTrue(script.contains("WM_SETTINGCHANGE"),
+                "public bootstrap must notify Windows that the user environment changed");
+        assertTrue(script.contains("talos --version"),
+                "public bootstrap must tell users how to verify the installed command");
+        assertTrue(script.contains("talos setup models"),
+                "Windows public setup handoff must stay on the Windows-supported model setup path");
+        assertTrue(script.contains("talos status --verbose"),
+                "public bootstrap must point users at verbose status diagnostics");
+        assertFalse(script.contains("talos setup wizard"),
+                "Windows public bootstrap must not advertise the Ubuntu/WSL-only setup wizard");
+        assertFalse(script.contains("rag-index"),
+                "public bootstrap must not advertise stale retrieval subcommands as first-run guidance");
+        assertFalse(script.contains("rag-ask"),
+                "public bootstrap must not advertise stale retrieval subcommands as first-run guidance");
+    }
+
+    @Test
+    @DisplayName("Windows developer installer prints current setup handoff without stale RAG commands")
+    void windowsDeveloperInstallerPrintsCurrentSetupHandoffWithoutStaleRagCommands() throws Exception {
+        String script = read("tools/install-windows.ps1");
+
+        assertTrue(script.contains("SendMessageTimeout"),
+                "developer installer must keep broadcasting PATH changes");
+        assertTrue(script.contains("WM_SETTINGCHANGE"),
+                "developer installer must notify Windows that the user environment changed");
+        assertTrue(script.contains("talos --version"),
+                "developer installer must tell users how to verify the installed command");
+        assertTrue(script.contains("talos setup models"),
+                "developer installer must point Windows users at the supported model setup path");
+        assertTrue(script.contains("talos status --verbose"),
+                "developer installer must point users at verbose status diagnostics");
+        assertFalse(script.contains("talos setup wizard"),
+                "developer Windows installer must not advertise the Ubuntu/WSL-only setup wizard");
+        assertFalse(script.contains("rag-index"),
+                "developer installer must not advertise stale retrieval subcommands as first-run guidance");
+        assertFalse(script.contains("rag-ask"),
+                "developer installer must not advertise stale retrieval subcommands as first-run guidance");
+    }
+
+    @Test
     @DisplayName("Unix bootstrap verifies Java and the direct installed Talos binary")
     void unixBootstrapVerifiesJavaAndDirectInstalledBinary() throws Exception {
         String script = read("tools/install-unix.sh");
