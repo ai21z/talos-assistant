@@ -148,16 +148,12 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up), T926
-  (installation setup wizard), and T927 (`/session clear` target mismatch)
-  remain open. T926 milestones 1-4 (`talos setup wizard --dry-run`, the
-  interactive config-only wizard, Unix bootstrap prerequisite/profile
-  hardening, and pinned Ubuntu/WSL x64 CPU `llama.cpp` engine install) are
-  implemented on `v0.9.0-beta-dev`; the ticket remains open for model-download,
-  doctor-execution, final docs, and full installed-smoke milestones. T918-T922
-  and T924 are done
-  on public `main`; T925 and T928 are done on `v0.9.0-beta-dev` and must be
-  included in any future candidate/release merge.
+- Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
+  (`/session clear` target mismatch), and T929-T937 (0.10.8 release QA,
+  artifact workflow, Linux public artifact, Windows installer handoff, CI/branch
+  protection, public docs truth, provenance follow-up, 0.10.8 candidate cut,
+  and winget/signing policy) remain open. T926, T925, and T928 are done on
+  `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
@@ -172,12 +168,12 @@ confidence_histogram:
   `accd47248a88a2f0d0a2019e2b789ecc7106d483`. No public release, tag, winget
   publication, or history rewrite has happened. T923 remains a non-blocking
   custody-hardening design follow-up for the DPAPI raw-key PowerShell transport.
-  T925, T926 milestones 1-3, and T928 were implemented after the green 0.10.7
-  candidate evidence, so any public release/tag decision now requires a fresh
-  candidate cut rather than reusing the previous 0.10.7 packet.
-- Next move: design T926 milestone 5 around explicit model-download choices,
-  disk/RAM guidance, config/write handoff, and doctor verification after the
-  pinned engine-install path.
+  T925, T926, and T928 were implemented after the green 0.10.7 candidate
+  evidence, so any public release/tag decision now requires a fresh 0.10.8
+  candidate packet rather than reusing the previous 0.10.7 packet.
+- Next move: implement T929 first so the "all automated tests + manual PTY +
+  large-scale live QA before release artifacts" rule is explicit before any
+  packaging/release workflow work.
 
 ```talos-wiki-claims
 {
