@@ -90,6 +90,7 @@ class PublicInstallPackagingContractTest {
     @DisplayName("release build publishes a checksummed CycloneDX SBOM with both OS artifact sets")
     void releaseBuildPublishesChecksummedCycloneDxSbom() throws Exception {
         String build = read("build.gradle.kts");
+        String normalizedBuild = build.replace("\r\n", "\n");
 
         for (String task : new String[] {
                 "releaseSbom",
@@ -105,14 +106,28 @@ class PublicInstallPackagingContractTest {
                 "release SBOM must identify the CycloneDX format");
         assertTrue(build.contains("\"specVersion\" to \"1.6\""),
                 "release SBOM must use a stable CycloneDX spec version");
+        assertTrue(build.contains("\"serialNumber\" to releaseSbomSerialNumber(rootRef, components)"),
+                "release SBOM must include a deterministic RFC-4122 serial for GitHub SBOM attestation");
+        assertTrue(build.contains("UUID.nameUUIDFromBytes("),
+                "release SBOM serial must be deterministic, not random per build");
         assertTrue(build.contains("runtimeClasspath"),
                 "release SBOM must inventory the runtime dependency graph");
+        assertTrue(build.contains("\"validateReleaseSbom\""),
+                "release build must locally validate the generated SBOM before staging");
+        assertTrue(build.contains("16L * 1024L * 1024L"),
+                "release SBOM validation must enforce GitHub's 16 MiB SBOM attestation limit");
+        assertTrue(build.contains("GitHub SBOM attestation"),
+                "release SBOM validation must explicitly pin the GitHub attestation contract");
         assertTrue(build.contains("dependsOn(\"windowsReleaseMsi\", \"windowsReleaseAppZip\", \"copyWindowsReleaseBootstrap\", \"copyWindowsReleaseSbom\")"),
                 "Windows checksums must include the SBOM artifact");
+        assertTrue(normalizedBuild.contains("tasks.register<Copy>(\"copyWindowsReleaseSbom\") {\n    dependsOn(\"validateReleaseSbom\")"),
+                "Windows SBOM staging must depend on local SBOM validation");
         assertTrue(build.contains("publicReleaseSbomArtifactName"),
                 "checksum manifests must include the SBOM filename");
         assertTrue(build.contains("dependsOn(\"linuxReleaseAppTar\", \"copyLinuxReleaseBootstrap\", \"copyLinuxReleaseSbom\")"),
                 "Linux checksums must include the SBOM artifact");
+        assertTrue(normalizedBuild.contains("tasks.register<Copy>(\"copyLinuxReleaseSbom\") {\n    dependsOn(\"validateReleaseSbom\")"),
+                "Linux SBOM staging must depend on local SBOM validation");
     }
 
     @Test

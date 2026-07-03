@@ -1,5 +1,7 @@
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.UUID
 import org.gradle.api.tasks.bundling.Compression
 
 plugins {
@@ -856,6 +858,29 @@ fun mavenPurl(group: String, name: String, version: String): String {
     }
 }
 
+val maxAttestedSbomBytes = 16L * 1024L * 1024L
+val releaseSbomSerialPattern =
+    Regex("^urn:uuid:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
+
+fun releaseSbomSerialNumber(rootRef: String, components: List<Map<String, Any>>): String {
+    val seed = buildString {
+        append("talos.releaseSbom.v1\n")
+        append(rootRef).append('\n')
+        components.forEach { component ->
+            append(component["bom-ref"]).append('|')
+            append(component["version"]).append('|')
+            val sha256 = (component["hashes"] as? Iterable<*>)
+                ?.mapNotNull { it as? Map<*, *> }
+                ?.firstOrNull { it["alg"] == "SHA-256" }
+                ?.get("content")
+                ?.toString()
+                .orEmpty()
+            append(sha256).append('\n')
+        }
+    }
+    return "urn:uuid:${UUID.nameUUIDFromBytes(seed.toByteArray(StandardCharsets.UTF_8))}"
+}
+
 fun appendJpackageResources(args: MutableList<String>) {
     val resDir = file("src/main/jpackage")
     if (resDir.exists()) {
@@ -914,6 +939,7 @@ tasks.register("releaseSbom") {
                 "\$schema" to "https://cyclonedx.org/schema/bom-1.6.schema.json",
                 "bomFormat" to "CycloneDX",
                 "specVersion" to "1.6",
+                "serialNumber" to releaseSbomSerialNumber(rootRef, components),
                 "version" to 1,
                 "metadata" to linkedMapOf(
                     "tools" to listOf(
@@ -940,6 +966,41 @@ tasks.register("releaseSbom") {
                 )
             )
         )
+    }
+}
+
+tasks.register("validateReleaseSbom") {
+    group = "verification"
+    description = "Validates the generated CycloneDX SBOM against the GitHub SBOM attestation contract."
+
+    dependsOn("releaseSbom")
+    inputs.file(releaseSbomFile)
+
+    doLast {
+        val sbom = releaseSbomFile.get().asFile
+        if (!sbom.isFile) {
+            throw GradleException("Release SBOM was not generated: ${sbom.absolutePath}")
+        }
+        val size = sbom.length()
+        if (size <= 0L || size >= maxAttestedSbomBytes) {
+            throw GradleException("Release SBOM must be non-empty and smaller than 16 MiB for GitHub SBOM attestation: ${sbom.absolutePath} ($size bytes)")
+        }
+
+        val parsed = groovy.json.JsonSlurper().parse(sbom) as? Map<*, *>
+            ?: throw GradleException("Release SBOM must be a JSON object: ${sbom.absolutePath}")
+        val bomFormat = parsed["bomFormat"]?.toString()
+        val specVersion = parsed["specVersion"]?.toString()
+        val serialNumber = parsed["serialNumber"]?.toString()
+
+        if (bomFormat != "CycloneDX") {
+            throw GradleException("Release SBOM must set bomFormat=CycloneDX for GitHub SBOM attestation")
+        }
+        if (specVersion.isNullOrBlank()) {
+            throw GradleException("Release SBOM must set specVersion for GitHub SBOM attestation")
+        }
+        if (serialNumber.isNullOrBlank() || !releaseSbomSerialPattern.matches(serialNumber)) {
+            throw GradleException("Release SBOM must set an RFC-4122 urn:uuid serialNumber for GitHub SBOM attestation")
+        }
     }
 }
 
@@ -1040,7 +1101,7 @@ tasks.register<Copy>("copyWindowsReleaseBootstrap") {
 }
 
 tasks.register<Copy>("copyWindowsReleaseSbom") {
-    dependsOn("releaseSbom")
+    dependsOn("validateReleaseSbom")
     from(releaseSbomFile)
     into(windowsReleaseDir)
 }
@@ -1141,7 +1202,7 @@ tasks.register<Copy>("copyLinuxReleaseBootstrap") {
 }
 
 tasks.register<Copy>("copyLinuxReleaseSbom") {
-    dependsOn("releaseSbom")
+    dependsOn("validateReleaseSbom")
     from(releaseSbomFile)
     into(linuxReleaseDir)
 }

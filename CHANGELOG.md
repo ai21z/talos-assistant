@@ -4,6 +4,12 @@
 
 ## [0.10.8] - 2026-07-03
 
+- [T939] Fixed release SBOM attestation compatibility: the generated
+  CycloneDX SBOM now includes a deterministic RFC-4122 `serialNumber` required
+  by GitHub's SBOM attestation parser, and release staging now validates the
+  generated SBOM for parseability, CycloneDX markers, serial shape, and the
+  16 MiB attestation size limit before copying it into Windows or Linux
+  artifact sets.
 - [T935] Added release provenance metadata support without promoting it to a
   QA substitute: staged Windows and Linux artifact sets now include a
   checksummed CycloneDX SBOM generated from the runtime classpath, and the
@@ -1515,4 +1521,3 @@ Initial numeric-version baseline for the current public line.
 - removed hardcoded public version values from build and CLI fallback paths
 - aligned CLI version output with runtime build metadata resolution
 - added this root changelog and a patch bump script for future release discipline
-
