@@ -1,6 +1,6 @@
-# [T933-open-high] CI branch protection and release trigger contract
+# [T933-done-high] CI branch protection and release trigger contract
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -127,12 +127,58 @@ Refactor scope:
 - Release workflow trigger policy is documented and consistent with T929/T930.
 - GitHub API verification is captured after settings change.
 
+## Resolution
+
+- `main` branch protection was set through the GitHub API on 2026-07-03.
+- Read-back verification:
+
+```json
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "Gradle check (Java 21)",
+      "Linux command portability smoke (Java 21)"
+    ]
+  },
+  "enforce_admins": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_pull_request_reviews": null
+}
+```
+
+- The required contexts were taken from the latest green `main` Talos CI run:
+  run `28594381366`, SHA
+  `accd47248a88a2f0d0a2019e2b789ecc7106d483`, conclusion `success`.
+- Check-run read-back for that SHA showed both required contexts completed
+  successfully:
+  - `Gradle check (Java 21)`
+  - `Linux command portability smoke (Java 21)`
+- `v0.9.0-beta-dev` remains intentionally unprotected: direct beta-dev pushes
+  are allowed, with Talos CI running on every push.
+- `.github/workflows/beta-dev-ci.yml` now triggers push CI only on `main` and
+  `v0.9.0-beta-dev`; dead `codex/**` and `feature/**` push patterns were
+  removed.
+- `.github/workflows/release-staging.yml` remains manual `workflow_dispatch`
+  QA staging only. Contract tests now pin that it is not tag-, push-,
+  pull-request-, or release-event driven and cannot publish GitHub Release or
+  draft release assets.
+- `docs/public-installation.md` now records the main protection verification
+  command, required check names, beta-dev integration-branch policy, and release
+  trigger boundary.
+
 ## Tests / Evidence
 
 Required deterministic regression:
 
-- Unit test: none unless workflow contract tests exist.
-- Integration/executor test: CI workflow syntax and observed Actions run.
+- Unit test: `CiWorkflowContractTest` pins CI branch triggers, manual-only
+  release staging, and public docs for branch protection/release-trigger
+  policy.
+- Integration/executor evidence: GitHub API branch-protection read-back and
+  latest green `main` Talos CI run/check-run context evidence. No new Actions
+  run was triggered for this local branch because T933 was not pushed in this
+  ticket turn.
 - JSON e2e scenario: not applicable.
 - Trace assertion: not applicable.
 
@@ -142,6 +188,14 @@ Commands/evidence:
 gh api repos/ai21z/talos-assistant/branches/main/protection
 gh run list --branch main --limit 5
 git diff --check
+```
+
+Additional deterministic regression:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.release.CiWorkflowContractTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.release.CiWorkflowContractTest" --tests "dev.talos.docs.TicketHygieneTest" --tests "dev.talos.wiki.WikiLintStructuralTest" --no-daemon
+.\gradlew.bat check --no-daemon
 ```
 
 ## Known Risks

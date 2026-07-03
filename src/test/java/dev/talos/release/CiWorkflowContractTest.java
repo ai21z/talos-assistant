@@ -30,6 +30,25 @@ class CiWorkflowContractTest {
     }
 
     @Test
+    @DisplayName("CI triggers match the public main and beta-dev branch model")
+    void ciTriggersMatchPublicMainAndBetaDevBranchModel() throws IOException {
+        String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
+
+        assertTrue(workflow.contains("branches: [main, v0.9.0-beta-dev]"),
+                "pull_request CI must target only public main and the beta-dev integration branch");
+        assertTrue(workflow.contains("- main"),
+                "push CI must run on public main");
+        assertTrue(workflow.contains("- v0.9.0-beta-dev"),
+                "push CI must run on the beta-dev integration branch");
+        assertTrue(!workflow.contains("codex/**"),
+                "CI push triggers must not retain dead codex branch patterns");
+        assertTrue(!workflow.contains("feature/**"),
+                "CI push triggers must not retain dead feature branch patterns");
+        assertTrue(!workflow.contains("improvement/**"),
+                "CI push triggers must not add old release-branch patterns as product policy");
+    }
+
+    @Test
     @DisplayName("release staging workflow cannot create public release assets")
     void releaseStagingWorkflowUsesOnlyQaStagingArtifactsBeforePublication() throws IOException {
         String workflow = Files.readString(Path.of(".github", "workflows", "release-staging.yml"));
@@ -74,6 +93,12 @@ class CiWorkflowContractTest {
                 "Linux uploaded staging artifact must come from the Linux release output folder");
 
         assertNoReleasePublication(workflow, "release staging workflow");
+        assertTrue(!workflow.contains("push:"),
+                "release staging must not run from branch or tag pushes");
+        assertTrue(!workflow.contains("release:"),
+                "release staging must not run from GitHub Release events");
+        assertTrue(!workflow.contains("pull_request:"),
+                "release staging must not run from pull request events");
     }
 
     @Test
@@ -104,6 +129,27 @@ class CiWorkflowContractTest {
                 "docs must block draft release assets before T929");
         assertTrue(docs.contains("T929"),
                 "docs must tie publication to the T929 QA gate");
+    }
+
+    @Test
+    @DisplayName("public installation docs describe CI protection and release trigger policy")
+    void publicInstallDocsDescribeCiProtectionAndReleaseTriggerPolicy() throws IOException {
+        String docs = Files.readString(Path.of("docs", "public-installation.md"));
+
+        assertTrue(docs.contains("gh api repos/ai21z/talos-assistant/branches/main/protection"),
+                "docs must capture the branch-protection verification command");
+        assertTrue(docs.contains("Gradle check (Java 21)"),
+                "docs must name the required Windows CI check");
+        assertTrue(docs.contains("Linux command portability smoke (Java 21)"),
+                "docs must name the required Linux portability check");
+        assertTrue(docs.contains("main is protected"),
+                "docs must state the public main protection policy");
+        assertTrue(docs.contains("v0.9.0-beta-dev"),
+                "docs must state the beta-dev integration branch policy");
+        assertTrue(docs.contains("workflow_dispatch"),
+                "docs must state release staging is manually dispatched");
+        assertTrue(docs.contains("No tag, push, pull-request, or release event may publish public artifacts"),
+                "docs must block accidental publication triggers");
     }
 
     private static void assertNoReleasePublication(String workflow, String label) {

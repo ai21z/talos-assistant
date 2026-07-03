@@ -176,6 +176,32 @@ If the repository wrapper is not executable, run:
 chmod +x ./gradlew
 ```
 
+## CI And Branch Protection Policy
+
+`main` is protected by GitHub branch protection. The protected public branch
+requires these Talos CI checks before public main health can be treated as
+green:
+
+In short: main is protected; beta-dev is the integration lane.
+
+```text
+Gradle check (Java 21)
+Linux command portability smoke (Java 21)
+```
+
+Verify the live protection rule with:
+
+```powershell
+gh api repos/ai21z/talos-assistant/branches/main/protection
+```
+
+`v0.9.0-beta-dev` is the beta-dev integration branch. Direct pushes to that
+branch are allowed during beta hardening, but `.github/workflows/beta-dev-ci.yml`
+runs Talos CI on every push to `main` and `v0.9.0-beta-dev`, and on pull
+requests targeting either branch. The workflow intentionally does not keep
+dead `codex/**`, `feature/**`, or old release-branch push patterns as release
+policy.
+
 ## Release Staging Workflow
 
 The first public artifact lane is staged by
@@ -215,6 +241,7 @@ No draft GitHub Release asset may be created before the T929 QA packet passes.
 There is intentionally no publication workflow in this staging step. A future
 publication workflow must require an explicit QA packet reference satisfying
 T929 before it can create a draft or prerelease GitHub Release.
+No tag, push, pull-request, or release event may publish public artifacts.
 
 ## Signing And Checksum Rules
 

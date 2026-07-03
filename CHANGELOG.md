@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T933] Tightened CI/release-control policy: Talos CI push triggers now match
+  the real `main` / `v0.9.0-beta-dev` branch model instead of dead branch
+  patterns, public installation docs now record the required `main` branch
+  protection checks and verification command, and release staging remains a
+  manual QA-staging workflow with no tag, push, pull-request, or release event
+  publication path.
 - [T932] Cleaned up Windows installer handoff behavior: the public Windows
   bootstrap now broadcasts the user PATH change after installing the `talos`
   shim, the developer Windows installer no longer prints stale `rag-index` /

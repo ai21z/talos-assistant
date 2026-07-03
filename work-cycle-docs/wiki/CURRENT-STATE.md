@@ -149,17 +149,19 @@ confidence_histogram:
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), T933 (CI/branch protection), and
-  T935-T937 (provenance follow-up, 0.10.8 candidate cut, and winget/signing
-  policy) remain open. T932, T934, T931, T930, T929, T926, T925, and T928 are
-  done on
+  (`/session clear` target mismatch), and T935-T937 (provenance follow-up,
+  0.10.8 candidate cut, and winget/signing policy) remain open. T933, T932,
+  T934, T931, T930, T929, T926, T925, and T928 are done on
   `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
   `main`; the branch retained for beta-dev continuity is separate from this
   stabilization arc. Public `main` is now a truthful, green, versioned 0.10.7
-  candidate without a release, tag, history rewrite, or branch deletion. T918
-  has already been pushed and verified green in GitHub Actions for the red-CI
-  containment failure; T919-T924 are committed follow-ups in the same arc.
+  candidate without a release, tag, history rewrite, or branch deletion. T933
+  set `main` branch protection to require the Talos CI checks `Gradle check
+  (Java 21)` and `Linux command portability smoke (Java 21)` with strict status
+  checks and admin enforcement. T918 has already been pushed and verified green
+  in GitHub Actions for the red-CI containment failure; T919-T924 are committed
+  follow-ups in the same arc.
 - Known caveats: `scripts/cut-candidate.ps1` created the 0.10.7 cut commit
   `1dcb3b43b1e0102b4097fd96e3ab680aea3572de`, then the mandatory post-bump
   `check` caught this page still reporting version 0.10.6. That evidence failure
@@ -171,9 +173,9 @@ confidence_histogram:
   T925, T926, and T928 were implemented after the green 0.10.7 candidate
   evidence, so any public release/tag decision now requires a fresh 0.10.8
   candidate packet rather than reusing the previous 0.10.7 packet.
-- Next move: implement T933 because Windows installer handoff is now pinned and
-  CI/branch-protection/release-trigger discipline is the next release-control
-  surface before the 0.10.8 candidate cut.
+- Next move: implement T935 because CI/branch protection is now pinned and
+  provenance/SBOM/attestation policy is the next release-control surface before
+  the 0.10.8 candidate cut.
 
 ```talos-wiki-claims
 {
