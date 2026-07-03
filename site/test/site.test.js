@@ -50,6 +50,7 @@ describe("Talos landing page static contract", () => {
     assert.equal(pkg.scripts.preview, "vite preview");
     assert.equal(pkg.scripts.test, "npm run test:static");
     assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js");
+    assert.equal(pkg.scripts["test:deploy-surface"], "node --test test/deploy-surface.test.js");
     assert.equal(pkg.scripts["test:e2e"], "playwright test");
   });
 
@@ -57,6 +58,15 @@ describe("Talos landing page static contract", () => {
     assert.match(read("vite.config.js"), /sourcemap:\s*false/);
     const mapFiles = walkFiles(join(root, "dist")).filter((file) => file.endsWith(".map"));
     assert.deepEqual(mapFiles, []);
+  });
+
+  it("runs the deploy-surface leak check after building the staged site", () => {
+    const workflow = readFileSync(join(root, "..", ".github", "workflows", "release-staging.yml"), "utf8");
+    const buildIndex = workflow.indexOf("npm run build --prefix site");
+    const leakCheckIndex = workflow.indexOf("npm run test:deploy-surface --prefix site");
+
+    assert.ok(buildIndex >= 0, "release staging must build the site");
+    assert.ok(leakCheckIndex > buildIndex, "release staging must scan site/dist after building");
   });
 
   it("uses one descriptive h1 grounded in local-first workspace identity", () => {

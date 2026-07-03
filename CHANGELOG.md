@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T940] Added the first Cloudflare site deployment hygiene guardrail:
+  Cloudflare now has a manually created Pages project named exactly
+  `taloslocal` with no Git auto-deploy source or production domain binding, and
+  release staging now builds the Vite site and scans `site/dist` for forbidden
+  assistant provenance markers (`codex`, `claude`, `copilot`) before any staged
+  site output can be treated as deployable.
+
 ## [0.10.8] - 2026-07-03
 
 - [T939] Fixed release SBOM attestation compatibility: the generated
