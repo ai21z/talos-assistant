@@ -199,15 +199,35 @@ Refactor scope:
 - Corrected GPT-OSS synchronized approval live bank rerun passed with 33
   scenarios and artifact scan PASS:
   `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/artifacts/gptoss/synchronized-approval-rerun-t938/SYNCHRONIZED-APPROVAL-AUDIT.md`
+- Tracked QA packet summary written:
+  `work-cycle-docs/reports/current-0.10.8-release-qa-packet-20260703-results.md`
+- Clean global install rebuilt after T938 and refreshed to:
+  `C:\Users\arisz\AppData\Local\Programs\talos\bin\talos.bat`
+- Installed identity after T938 rebuild:
+  `Talos 0.10.8 - Java 21.0.9+10-LTS - Windows 11 amd64 - build 2026-07-03T10:52:32.463528400Z`
+- Manual PTY lane 1 passed the installed-product basics on Qwen:
+  `talos`, `/debug prompt on`, `/status --verbose`, `/mode`, `/prompt`,
+  read-only answer, `/last trace`, `/prompt-debug last`,
+  `/prompt-debug save`, approval denial, one-time approval, checkpoint creation,
+  and static edit verification. Durable evidence lives under:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/home-qwen/.talos/sessions/0912e1016a3cf6b37b5310fdc589e48a86fcdd1c-20260703105311.turns.jsonl`
+- Manual PTY lane 2 confirmed allow-in-session behavior on Qwen. Turn 1
+  required one approval and changed `README.md` to `# Session Approval A`;
+  turn 2 changed it to `# Session Approval B` with `approvalsRequired=0`,
+  `approvalsGranted=1`, `approvalsDenied=0`. Durable evidence:
+  `local/manual-testing/t936-0.10.8-release-qa-20260703-1238/home-qwen/.talos/sessions/b20020a7a5da2a1056592caee5f8cac0f84a43f2-20260703110039.turns.jsonl`
+- Protected-read-denied rows in both synchronized approval banks were manually
+  reviewed: runtime denied `.env` with `CONFIG_DENY`, no protected content
+  leaked, and the final answer reported the denial. This is a reviewed harness
+  expectation mismatch, not a release-blocking product failure.
+- Manual audit artifact canary scan passed for the manual evidence root:
+  `.\gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/t936-0.10.8-release-qa-20260703-1238" --no-daemon`
 
 Remaining:
 
-- Run/record the remaining manual PTY installed-product lane against the clean
-  installed 0.10.8 product.
-- Run the manual audit artifact canary scan for the QA roots.
-- Commit the T938 harness correction and this T936 evidence update.
-- Rerun required local gates after the T938 evidence commit, then push
-  `v0.9.0-beta-dev` and verify GitHub Actions only if T929 remains clean.
+- Commit this T936 evidence update.
+- Rerun required local gates after the T936 evidence commit, then push
+  `v0.9.0-beta-dev` and verify GitHub Actions only if the gates remain clean.
 
 ## Tests / Evidence
 
