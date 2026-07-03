@@ -1,35 +1,50 @@
 package dev.talos.cli.setup;
 
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
-
+import java.io.ByteArrayOutputStream;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
 /**
  * Interactive setup wizard. It may install a pinned engine only after explicit
- * confirmation, but it does not install system packages, download models, start
- * llama.cpp, or run doctor.
+ * confirmation. Package-manager work remains outside the JVM wizard; engine
+ * install, model download, config write, and doctor start all require explicit
+ * confirmation.
  */
 public final class SetupWizardRunner {
     private SetupWizardRunner() {}
 
     @FunctionalInterface
     public interface ConfigRenderer {
-        String render(String profile, Path serverPath, Path cacheDir, int port);
+        String render(String profile, Path serverPath, Path modelPath, Path cacheDir, int port);
     }
 
     @FunctionalInterface
     public interface EngineInstaller {
         LlamaCppEngineInstaller.Result install(LlamaCppEngineManifest.Entry entry, Path talosHome) throws Exception;
+    }
+
+    @FunctionalInterface
+    public interface ModelDownloader {
+        LlamaCppModelDownloader.Result download(LlamaCppModelManifest.Entry entry, Path userHome) throws Exception;
+    }
+
+    @FunctionalInterface
+    public interface DoctorRunner {
+        int run(Path configPath, Path workspace, Path talosHome, PrintStream out);
+    }
+
+    @FunctionalInterface
+    public interface DiskSpaceProbe {
+        long usableDiskMb(Path targetPath);
     }
 
     public record Result(int exitCode, boolean wroteConfig, Path configPath, Path backupPath, String output) {}
@@ -49,7 +64,14 @@ public final class SetupWizardRunner {
                 cacheDir,
                 port,
                 Path.of(System.getProperty("user.home", ".")),
-                new LlamaCppEngineInstaller()::install);
+                Path.of(".").toAbsolutePath().normalize(),
+                new LlamaCppEngineInstaller()::install,
+                new LlamaCppModelDownloader()::download,
+                (configPath, workspace, talosHome, doctorOut) -> {
+                    doctorOut.println("Doctor execution is not wired for this setup surface.");
+                    return 2;
+                },
+                SetupWizardRunner::usableDiskMb);
     }
 
     public static Result run(
@@ -59,14 +81,72 @@ public final class SetupWizardRunner {
             ConfigRenderer renderer,
             Path cacheDir,
             int port,
-            Path talosHome,
+            Path userHome,
+            Path workspace,
+            EngineInstaller engineInstaller,
+            ModelDownloader modelDownloader,
+            DoctorRunner doctorRunner) {
+        return run(
+                plan,
+                input,
+                out,
+                renderer,
+                cacheDir,
+                port,
+                userHome,
+                workspace,
+                engineInstaller,
+                modelDownloader,
+                doctorRunner,
+                SetupWizardRunner::usableDiskMb);
+    }
+
+    public static Result run(
+            SetupWizardPlan plan,
+            InputStream input,
+            PrintStream out,
+            ConfigRenderer renderer,
+            Path cacheDir,
+            int port,
+            Path userHome,
             EngineInstaller engineInstaller) {
+        return run(
+                plan,
+                input,
+                out,
+                renderer,
+                cacheDir,
+                port,
+                userHome,
+                Path.of(".").toAbsolutePath().normalize(),
+                engineInstaller,
+                new LlamaCppModelDownloader()::download,
+                (configPath, workspace, talosHome, doctorOut) -> {
+                    doctorOut.println("Doctor execution is not wired for this setup surface.");
+                    return 2;
+                },
+                SetupWizardRunner::usableDiskMb);
+    }
+
+    public static Result run(
+            SetupWizardPlan plan,
+            InputStream input,
+            PrintStream out,
+            ConfigRenderer renderer,
+            Path cacheDir,
+            int port,
+            Path userHome,
+            Path workspace,
+            EngineInstaller engineInstaller,
+            ModelDownloader modelDownloader,
+            DoctorRunner doctorRunner,
+            DiskSpaceProbe diskSpaceProbe) {
         StringBuilder log = new StringBuilder();
         BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
         try {
             SetupWizardSnapshot snapshot = plan.snapshot();
             line(out, log, "Talos setup wizard");
-            line(out, log, "No model downloads, model starts, or doctor execution will be run.");
+            line(out, log, "Engine install, model download, config write, and doctor start each ask before running.");
             line(out, log, "");
             renderDetectedEnvironment(plan, out, log);
 
@@ -75,16 +155,21 @@ public final class SetupWizardRunner {
                 return new Result(2, false, snapshot.configPath(), null, log.toString());
             }
 
-            Path serverPath = chooseServer(snapshot, reader, out, log, talosHome, engineInstaller);
+            Path serverPath = chooseServer(snapshot, reader, out, log, userHome, engineInstaller);
             if (serverPath == null) {
                 line(out, log, "Model setup skipped. No config written.");
                 line(out, log, "Next: provide a Linux-compatible llama-server path, then rerun `talos setup wizard`.");
                 return new Result(0, false, snapshot.configPath(), null, log.toString());
             }
 
-            String profile = chooseProfile(reader, out, log);
-            if (profile == null) {
+            LlamaCppModelManifest.Entry model = chooseProfile(reader, out, log);
+            if (model == null) {
                 line(out, log, "Model setup skipped. No config written.");
+                return new Result(0, false, snapshot.configPath(), null, log.toString());
+            }
+
+            Path modelPath = downloadModel(model, reader, out, log, userHome, modelDownloader, diskSpaceProbe);
+            if (modelPath == null) {
                 return new Result(0, false, snapshot.configPath(), null, log.toString());
             }
 
@@ -94,7 +179,7 @@ public final class SetupWizardRunner {
                 return new Result(2, false, null, null, log.toString());
             }
 
-            String yaml = renderer.render(profile, serverPath, cacheDir, Math.max(1, port));
+            String yaml = renderer.render(model.alias(), serverPath, modelPath, cacheDir, Math.max(1, port));
             line(out, log, "");
             line(out, log, "Generated config preview:");
             line(out, log, yaml.stripTrailing());
@@ -112,10 +197,14 @@ public final class SetupWizardRunner {
                 line(out, log, "Backed up existing config to " + backup);
             }
             line(out, log, "Wrote Talos model config: " + configPath);
-            line(out, log, "Selected profile: " + profile);
-            line(out, log, "No model downloads, model starts, or doctor execution were run.");
-            line(out, log, "Next: run `talos doctor --start` to verify this machine-local setup.");
-            return new Result(0, true, configPath, backup, log.toString());
+            line(out, log, "Selected profile: " + model.alias());
+            line(out, log, "Model path: " + modelPath);
+            if (!askYes(reader, out, log, "Run `talos doctor --start` now? [y/N] ")) {
+                line(out, log, "Doctor skipped. Next: run `talos doctor --start` from your workspace to verify this setup.");
+                return new Result(0, true, configPath, backup, log.toString());
+            }
+            int doctorExit = runDoctor(doctorRunner, configPath, workspace, userHome, out, log);
+            return new Result(doctorExit == 0 ? 0 : 1, true, configPath, backup, log.toString());
         } catch (Exception error) {
             line(out, log, "setup wizard failed: " + safeMessage(error));
             return new Result(2, false, plan.snapshot().configPath(), null, log.toString());
@@ -226,13 +315,16 @@ public final class SetupWizardRunner {
         return null;
     }
 
-    private static String chooseProfile(BufferedReader reader, PrintStream out, StringBuilder log) throws Exception {
-        List<LlamaCppModelProfiles.CannedProfile> accepted = acceptedProfiles();
+    private static LlamaCppModelManifest.Entry chooseProfile(BufferedReader reader, PrintStream out, StringBuilder log) throws Exception {
+        var accepted = LlamaCppModelManifest.acceptedBeta();
         line(out, log, "Accepted beta model profiles:");
         for (int i = 0; i < accepted.size(); i++) {
             var profile = accepted.get(i);
-            line(out, log, "  " + (i + 1) + ". " + profile.alias()
-                    + " - " + profile.hfRepo() + " / " + profile.hfFile());
+            line(out, log, "  " + (i + 1) + ". " + profile.alias());
+            line(out, log, "     source: " + profile.hfRepo());
+            line(out, log, "     file: " + profile.hfFile());
+            line(out, log, "     " + profile.guidanceLine());
+            line(out, log, "     support: " + profile.supportLevel());
         }
         String raw = ask(reader, out, log, "Choose profile number/name, or press Enter to skip model config: ");
         if (raw.isBlank() || raw.equalsIgnoreCase("s") || raw.equalsIgnoreCase("skip")) {
@@ -242,28 +334,105 @@ public final class SetupWizardRunner {
         try {
             int index = Integer.parseInt(normalized);
             if (index >= 1 && index <= accepted.size()) {
-                return accepted.get(index - 1).alias();
+                return accepted.get(index - 1);
             }
         } catch (NumberFormatException ignored) {
             // Fall through to alias matching.
         }
         for (var profile : accepted) {
             if (profile.alias().equals(normalized)) {
-                return profile.alias();
+                return profile;
             }
         }
         line(out, log, "Unknown accepted beta profile: " + raw + ". No config written.");
         return null;
     }
 
-    private static List<LlamaCppModelProfiles.CannedProfile> acceptedProfiles() {
-        ArrayList<LlamaCppModelProfiles.CannedProfile> out = new ArrayList<>();
-        for (var profile : LlamaCppModelProfiles.profiles().values()) {
-            if (profile.supportTier() == LlamaCppModelProfiles.SupportTier.ACCEPTED_BETA) {
-                out.add(profile);
-            }
+    private static Path downloadModel(
+            LlamaCppModelManifest.Entry model,
+            BufferedReader reader,
+            PrintStream out,
+            StringBuilder log,
+            Path userHome,
+            ModelDownloader modelDownloader,
+            DiskSpaceProbe diskSpaceProbe) throws Exception {
+        Path modelPath = model.modelPath(userHome);
+        line(out, log, "Selected model download:");
+        line(out, log, "  profile: " + model.alias());
+        line(out, log, "  source: " + model.hfRepo());
+        line(out, log, "  file: " + model.hfFile());
+        line(out, log, "  download: ~" + model.sizeGiB() + " GiB");
+        line(out, log, "  disk needed: ~" + model.requiredFreeDiskGiB() + " GiB free under " + modelPath.getParent());
+        line(out, log, "  RAM guidance: " + model.ramGuidance());
+        line(out, log, "  SHA-256: " + model.sha256());
+        if (!askYes(reader, out, log, "Download this model now? [y/N] ")) {
+            line(out, log, "Model setup skipped. No config written.");
+            return null;
         }
-        return List.copyOf(out);
+
+        long usableMb = diskSpaceProbe == null ? usableDiskMb(modelPath) : diskSpaceProbe.usableDiskMb(modelPath);
+        long requiredMb = bytesToMbCeil(model.requiredFreeDiskBytes());
+        if (usableMb >= 0 && usableMb < requiredMb) {
+            line(out, log, "Blocked: not enough free disk for " + model.alias()
+                    + ". Need ~" + model.requiredFreeDiskGiB() + " GiB free under "
+                    + modelPath.getParent() + "; detected ~" + mbToGiB(usableMb) + " GiB.");
+            return null;
+        }
+
+        LlamaCppModelDownloader.Result result = modelDownloader.download(model, userHome);
+        if (result.status() == LlamaCppModelDownloader.Status.REUSED
+                || result.status() == LlamaCppModelDownloader.Status.DOWNLOADED) {
+            line(out, log, result.message());
+            return result.modelPath();
+        }
+        if (result.status() == LlamaCppModelDownloader.Status.EXISTING_MISMATCH) {
+            line(out, log, result.message());
+            if (!askYes(reader, out, log, "Existing model file does not match the pinned checksum. Replace it? [y/N] ")) {
+                line(out, log, "No config written.");
+                return null;
+            }
+            try {
+                Files.deleteIfExists(result.modelPath());
+            } catch (IOException error) {
+                line(out, log, "Model download failed: could not remove mismatched file: " + safeMessage(error));
+                return null;
+            }
+            LlamaCppModelDownloader.Result retry = modelDownloader.download(model, userHome);
+            if (retry.status() == LlamaCppModelDownloader.Status.REUSED
+                    || retry.status() == LlamaCppModelDownloader.Status.DOWNLOADED) {
+                line(out, log, retry.message());
+                return retry.modelPath();
+            }
+            line(out, log, "Model download failed: " + retry.message());
+            return null;
+        }
+        line(out, log, "Model download failed: " + result.message());
+        return null;
+    }
+
+    private static int runDoctor(
+            DoctorRunner doctorRunner,
+            Path configPath,
+            Path workspace,
+            Path userHome,
+            PrintStream out,
+            StringBuilder log) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        PrintStream doctorOut = new PrintStream(bytes, true, StandardCharsets.UTF_8);
+        Path talosHome = (userHome == null ? Path.of(System.getProperty("user.home", ".")) : userHome)
+                .resolve(".talos")
+                .toAbsolutePath()
+                .normalize();
+        int exit = doctorRunner.run(
+                configPath,
+                workspace == null ? Path.of(".").toAbsolutePath().normalize() : workspace.toAbsolutePath().normalize(),
+                talosHome,
+                doctorOut);
+        doctorOut.flush();
+        String text = bytes.toString(StandardCharsets.UTF_8);
+        out.print(text);
+        log.append(text);
+        return exit;
     }
 
     private static Path writeConfig(Path configPath, String yaml) throws Exception {
@@ -308,6 +477,32 @@ public final class SetupWizardRunner {
     private static boolean isWindowsExecutable(Path path) {
         Path fileName = path.getFileName();
         return fileName != null && fileName.toString().toLowerCase(Locale.ROOT).endsWith(".exe");
+    }
+
+    private static long usableDiskMb(Path target) {
+        try {
+            Path probe = nearestExistingParent(target);
+            FileStore store = Files.getFileStore(probe);
+            return store.getUsableSpace() / (1024 * 1024);
+        } catch (Exception ignored) {
+            return -1;
+        }
+    }
+
+    private static Path nearestExistingParent(Path path) {
+        Path cursor = path == null ? Path.of(".").toAbsolutePath().normalize() : path.toAbsolutePath().normalize();
+        while (cursor != null && !Files.exists(cursor)) {
+            cursor = cursor.getParent();
+        }
+        return cursor == null ? Path.of(".").toAbsolutePath().normalize() : cursor;
+    }
+
+    private static long bytesToMbCeil(long bytes) {
+        return Math.max(0, (bytes + (1024 * 1024) - 1) / (1024 * 1024));
+    }
+
+    private static String mbToGiB(long mb) {
+        return String.format(Locale.ROOT, "%.2f", mb / 1024.0);
     }
 
     private static String safeTimestamp() {

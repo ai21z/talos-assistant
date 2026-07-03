@@ -54,6 +54,7 @@ class LlamaCppEngineManifestTest {
                 null,
                 false,
                 512_000,
-                16_384);
+                16_384,
+                32_768);
     }
 }

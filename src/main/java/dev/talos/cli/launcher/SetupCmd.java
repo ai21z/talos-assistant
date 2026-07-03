@@ -1,10 +1,12 @@
 package dev.talos.cli.launcher;
 
 import dev.talos.cli.setup.LlamaCppEngineInstaller;
+import dev.talos.cli.setup.LlamaCppModelDownloader;
 import dev.talos.cli.setup.SetupWizardEnvironmentProbe;
 import dev.talos.cli.setup.SetupWizardPlanner;
 import dev.talos.cli.setup.SetupWizardRenderer;
 import dev.talos.cli.setup.SetupWizardRunner;
+import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
 import picocli.CommandLine;
 
@@ -250,16 +252,24 @@ public class SetupCmd implements Callable<Integer> {
                 plan,
                 System.in,
                 System.out,
-                (profileName, server, cache, setupPort) -> renderManagedLlamaCppProfileConfig(
+                (profileName, server, model, cache, setupPort) -> renderManagedLlamaCppProfileConfig(
                         profileName,
                         server,
-                        null,
+                        model,
                         cache,
                         setupPort),
                 cacheDir == null ? defaultHfCacheDir() : cacheDir,
                 port,
                 userHome,
-                new LlamaCppEngineInstaller()::install);
+                DoctorCmd.resolveWorkspace(null),
+                new LlamaCppEngineInstaller()::install,
+                new LlamaCppModelDownloader()::download,
+                (writtenConfig, workspace, talosHome, doctorOut) -> DoctorCmd.run(
+                        new Config(writtenConfig),
+                        workspace,
+                        talosHome,
+                        true,
+                        doctorOut));
         return result.exitCode();
     }
 

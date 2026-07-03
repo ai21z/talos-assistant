@@ -160,24 +160,36 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
-    @DisplayName("setup wizard owns a pinned llama.cpp engine manifest without model downloads")
-    void setupWizardOwnsPinnedLlamaCppEngineManifestWithoutModelDownloads() throws Exception {
-        String manifest = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineManifest.java");
+    @DisplayName("setup wizard owns pinned engine and model manifests with explicit model download prompt")
+    void setupWizardOwnsPinnedEngineAndExplicitModelDownloadManifest() throws Exception {
+        String engineManifest = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineManifest.java");
+        String modelManifest = read("src/main/java/dev/talos/cli/setup/LlamaCppModelManifest.java");
         String installer = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineInstaller.java");
         String runner = read("src/main/java/dev/talos/cli/setup/SetupWizardRunner.java");
+        String unixBootstrap = read("tools/install-unix.sh");
 
-        assertTrue(manifest.contains("llama-b9860-bin-ubuntu-x64.tar.gz"),
+        assertTrue(engineManifest.contains("llama-b9860-bin-ubuntu-x64.tar.gz"),
                 "manifest must pin the Ubuntu x64 CPU llama.cpp artifact");
-        assertTrue(manifest.contains("b68e8072eb88d1cc8b8e9d6ea8237aae87b34c6d8bbffda958c870e4dc949714"),
+        assertTrue(engineManifest.contains("b68e8072eb88d1cc8b8e9d6ea8237aae87b34c6d8bbffda958c870e4dc949714"),
                 "manifest must pin the artifact SHA-256");
-        assertFalse(manifest.contains("releases/latest"),
+        assertFalse(engineManifest.contains("releases/latest"),
                 "manifest must not follow upstream latest");
+        assertTrue(modelManifest.contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
+                "model manifest must pin the accepted beta Qwen GGUF filename");
+        assertTrue(modelManifest.contains("gpt-oss-20b-mxfp4.gguf"),
+                "model manifest must pin the accepted beta GPT-OSS GGUF filename");
+        assertTrue(modelManifest.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"),
+                "model manifest must pin Qwen SHA-256");
+        assertTrue(modelManifest.contains("be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935"),
+                "model manifest must pin GPT-OSS SHA-256");
         assertTrue(installer.contains("SHA-256 mismatch"),
                 "installer must fail closed on checksum mismatch");
         assertTrue(runner.contains("Install this pinned llama.cpp engine now? [y/N]"),
                 "wizard must require explicit engine-install confirmation");
-        assertFalse(runner.matches("(?is).*huggingface-cli.*download.*|.*hf download.*|.*gguf.*download.*"),
-                "milestone 4 must not download model weights");
+        assertTrue(runner.contains("Download this model now? [y/N]"),
+                "wizard must require explicit model-download confirmation");
+        assertFalse(unixBootstrap.matches("(?is).*(?:curl|wget|huggingface-cli|hf download).*(?:qwen|gpt-oss|gguf).*"),
+                "Unix bootstrap must not download model weights; the Talos wizard owns that prompted step");
     }
 
     @Test

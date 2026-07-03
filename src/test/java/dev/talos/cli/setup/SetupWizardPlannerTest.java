@@ -31,7 +31,8 @@ class SetupWizardPlannerTest {
                 null,
                 false,
                 512_000,
-                16_384);
+                16_384,
+                32_768);
 
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot);
 
@@ -52,6 +53,12 @@ class SetupWizardPlannerTest {
         assertTrue(dryRun.contains("b9860"), dryRun);
         assertTrue(dryRun.contains("llama-b9860-bin-ubuntu-x64.tar.gz"), dryRun);
         assertTrue(dryRun.contains("SHA-256"), dryRun);
+        assertTrue(dryRun.contains("download: ~8.37 GiB"), dryRun);
+        assertTrue(dryRun.contains("disk needed: ~9.37 GiB free"), dryRun);
+        assertTrue(dryRun.contains("16 GB RAM minimum"), dryRun);
+        assertTrue(dryRun.contains("CPU-only"), dryRun);
+        assertTrue(dryRun.contains("download: ~11.28 GiB"), dryRun);
+        assertTrue(dryRun.contains("24 GB RAM minimum"), dryRun);
         assertFalse(dryRun.contains("latest"), dryRun);
     }
 
@@ -68,7 +75,8 @@ class SetupWizardPlannerTest {
                 Path.of("/home/ai21z/.local/bin/llama-server"),
                 true,
                 512_000,
-                16_384);
+                16_384,
+                32_768);
 
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot);
 
@@ -92,7 +100,8 @@ class SetupWizardPlannerTest {
                 Path.of("/mnt/c/Tools/llama-server.exe"),
                 true,
                 512_000,
-                16_384);
+                16_384,
+                32_768);
 
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot);
 
@@ -107,11 +116,83 @@ class SetupWizardPlannerTest {
         Path config = tempDir.resolve(".talos").resolve("config.yaml");
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
 
-        SetupWizardRunner.Result result = run(plan, "y\n1\nn\n");
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\nn\n");
 
         assertEquals(0, result.exitCode());
         assertFalse(result.wroteConfig());
         assertFalse(Files.exists(config), "final write denial must leave config absent");
+    }
+
+    @Test
+    void interactiveWizardDeniesModelDownloadWithoutConfigOrDoctor() throws Exception {
+        Path server = touch("llama-server");
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
+        FakeModelDownloader downloader = new FakeModelDownloader(LlamaCppModelDownloader.Status.REUSED);
+        FakeDoctorRunner doctor = new FakeDoctorRunner();
+
+        SetupWizardRunner.Result result = run(plan, "y\n1\nn\n", downloader, doctor, path -> 512_000);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(0, downloader.calls);
+        assertEquals(0, doctor.calls);
+        assertFalse(result.wroteConfig());
+        assertFalse(Files.exists(config), "model download denial must leave config absent");
+        assertTrue(result.output().contains("Model setup skipped. No config written."), result.output());
+    }
+
+    @Test
+    void interactiveWizardDoesNotWriteConfigWhenModelDownloadFails() throws Exception {
+        Path server = touch("llama-server");
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
+        FakeModelDownloader downloader = new FakeModelDownloader(LlamaCppModelDownloader.Status.FAILED);
+        FakeDoctorRunner doctor = new FakeDoctorRunner();
+
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\n", downloader, doctor, path -> 512_000);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(1, downloader.calls);
+        assertEquals(0, doctor.calls);
+        assertFalse(result.wroteConfig());
+        assertFalse(Files.exists(config), "failed model download must leave config absent");
+        assertTrue(result.output().contains("Model download failed"), result.output());
+    }
+
+    @Test
+    void interactiveWizardDoesNotReplaceMismatchedExistingModelWithoutConfirmation() throws Exception {
+        Path server = touch("llama-server");
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
+        FakeModelDownloader downloader = new FakeModelDownloader(LlamaCppModelDownloader.Status.EXISTING_MISMATCH);
+        FakeDoctorRunner doctor = new FakeDoctorRunner();
+
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\nn\n", downloader, doctor, path -> 512_000);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(1, downloader.calls);
+        assertEquals(0, doctor.calls);
+        assertFalse(result.wroteConfig());
+        assertFalse(Files.exists(config), "mismatched model denial must leave config absent");
+        assertTrue(result.output().contains("Existing model file does not match"), result.output());
+        assertTrue(result.output().contains("No config written."), result.output());
+    }
+
+    @Test
+    void interactiveWizardBlocksDownloadWhenModelTargetDiskIsTooSmall() throws Exception {
+        Path server = touch("llama-server");
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
+        FakeModelDownloader downloader = new FakeModelDownloader(LlamaCppModelDownloader.Status.REUSED);
+        FakeDoctorRunner doctor = new FakeDoctorRunner();
+
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\n", downloader, doctor, path -> 100);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(0, downloader.calls);
+        assertEquals(0, doctor.calls);
+        assertFalse(result.wroteConfig());
+        assertTrue(result.output().contains("Blocked: not enough free disk"), result.output());
     }
 
     @Test
@@ -120,14 +201,16 @@ class SetupWizardPlannerTest {
         Path config = tempDir.resolve(".talos").resolve("config.yaml");
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
 
-        SetupWizardRunner.Result result = run(plan, "y\n2\ny\n");
+        SetupWizardRunner.Result result = run(plan, "y\n2\ny\ny\nn\n");
 
         assertEquals(0, result.exitCode());
         assertTrue(result.wroteConfig());
         String yaml = Files.readString(config, StandardCharsets.UTF_8);
         assertTrue(yaml.contains("model: \"gpt-oss-20b\""), yaml);
         assertTrue(yaml.contains("server_path: \"" + server.toAbsolutePath().normalize().toString().replace('\\', '/') + "\""), yaml);
-        assertTrue(yaml.contains("hf_repo: \"ggml-org/gpt-oss-20b-GGUF\""), yaml);
+        assertTrue(yaml.contains("model_path: \""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
     }
 
     @Test
@@ -138,7 +221,7 @@ class SetupWizardPlannerTest {
         Files.writeString(config, "existing: true\n", StandardCharsets.UTF_8);
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, true, server, true, true));
 
-        SetupWizardRunner.Result result = run(plan, "y\n1\ny\n");
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\ny\nn\n");
 
         assertEquals(0, result.exitCode());
         assertTrue(result.wroteConfig());
@@ -218,15 +301,39 @@ class SetupWizardPlannerTest {
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, null, false, true));
         FakeEngineInstaller installer = new FakeEngineInstaller(installedServer);
 
-        SetupWizardRunner.Result result = run(plan, "y\n1\ny\n", installer);
+        SetupWizardRunner.Result result = run(plan, "y\n1\ny\ny\nn\n", installer);
 
         assertEquals(0, result.exitCode());
         assertEquals(1, installer.calls);
         assertTrue(result.wroteConfig());
         String yaml = Files.readString(config, StandardCharsets.UTF_8);
         assertTrue(yaml.contains("server_path: \"" + installedServer.toAbsolutePath().normalize().toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("model_path: \""), yaml);
         assertTrue(result.output().contains("Installed pinned llama.cpp engine"), result.output());
-        assertTrue(result.output().contains("No model downloads"), result.output());
+        assertTrue(result.output().contains("Doctor skipped."), result.output());
+    }
+
+    @Test
+    void interactiveWizardRunsDoctorAfterConfigWriteWhenApproved() throws Exception {
+        Path server = touch("llama-server");
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, server, true, true));
+        FakeDoctorRunner doctor = new FakeDoctorRunner();
+
+        SetupWizardRunner.Result result = run(
+                plan,
+                "y\n1\ny\ny\ny\n",
+                new FakeModelDownloader(LlamaCppModelDownloader.Status.REUSED),
+                doctor,
+                path -> 512_000);
+
+        assertEquals(0, result.exitCode());
+        assertTrue(result.wroteConfig());
+        assertEquals(1, doctor.calls);
+        assertEquals(config, doctor.configPath);
+        assertEquals(tempDir.toAbsolutePath().normalize(), doctor.workspace);
+        assertEquals(tempDir.resolve(".talos").toAbsolutePath().normalize(), doctor.talosHome);
+        assertTrue(result.output().contains("Doctor summary:"), result.output());
     }
 
     private SetupWizardRunner.Result run(SetupWizardPlan plan, String input) {
@@ -237,7 +344,13 @@ class SetupWizardPlannerTest {
                 new PrintStream(stdout, true, StandardCharsets.UTF_8),
                 this::renderConfig,
                 tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
-                18115);
+                18115,
+                tempDir,
+                tempDir,
+                new FakeEngineInstaller(),
+                new FakeModelDownloader(LlamaCppModelDownloader.Status.REUSED),
+                new FakeDoctorRunner(),
+                path -> 512_000);
     }
 
     private SetupWizardRunner.Result run(
@@ -253,10 +366,36 @@ class SetupWizardPlannerTest {
                 tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
                 18115,
                 tempDir,
-                installer);
+                tempDir,
+                installer,
+                new FakeModelDownloader(LlamaCppModelDownloader.Status.REUSED),
+                new FakeDoctorRunner(),
+                path -> 512_000);
     }
 
-    private String renderConfig(String profile, Path server, Path cacheDir, int port) {
+    private SetupWizardRunner.Result run(
+            SetupWizardPlan plan,
+            String input,
+            SetupWizardRunner.ModelDownloader downloader,
+            SetupWizardRunner.DoctorRunner doctor,
+            SetupWizardRunner.DiskSpaceProbe diskSpaceProbe) {
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        return SetupWizardRunner.run(
+                plan,
+                new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)),
+                new PrintStream(stdout, true, StandardCharsets.UTF_8),
+                this::renderConfig,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115,
+                tempDir,
+                tempDir,
+                new FakeEngineInstaller(),
+                downloader,
+                doctor,
+                diskSpaceProbe);
+    }
+
+    private String renderConfig(String profile, Path server, Path model, Path cacheDir, int port) {
         return """
                 llm:
                   default_backend: "llama_cpp"
@@ -265,11 +404,13 @@ class SetupWizardPlannerTest {
                 engines:
                   llama_cpp:
                     server_path: "%s"
-                    hf_repo: "%s"
+                    model_path: "%s"
+                    hf_repo: ""
+                    hf_file: ""
                 """.formatted(
                 profile,
                 server.toAbsolutePath().normalize().toString().replace('\\', '/'),
-                "gpt-oss-20b".equals(profile) ? "ggml-org/gpt-oss-20b-GGUF" : "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF");
+                model.toAbsolutePath().normalize().toString().replace('\\', '/'));
     }
 
     private Path touch(String name) throws Exception {
@@ -291,7 +432,8 @@ class SetupWizardPlannerTest {
                 server,
                 serverExists,
                 512_000,
-                16_384);
+                16_384,
+                32_768);
     }
 
     private static final class FakeEngineInstaller implements SetupWizardRunner.EngineInstaller {
@@ -321,6 +463,48 @@ class SetupWizardPlannerTest {
                     LlamaCppEngineInstaller.Status.INSTALLED,
                     serverPath.toAbsolutePath().normalize(),
                     "Installed pinned llama.cpp engine at " + serverPath.getParent());
+        }
+    }
+
+    private static final class FakeModelDownloader implements SetupWizardRunner.ModelDownloader {
+        private final LlamaCppModelDownloader.Status status;
+        int calls;
+
+        FakeModelDownloader(LlamaCppModelDownloader.Status status) {
+            this.status = status;
+        }
+
+        @Override
+        public LlamaCppModelDownloader.Result download(LlamaCppModelManifest.Entry entry, Path userHome) {
+            calls++;
+            Path modelPath = entry.modelPath(userHome);
+            String message = switch (status) {
+                case DOWNLOADED -> "Downloaded verified model to " + modelPath;
+                case REUSED -> "Reusing existing model file at " + modelPath;
+                case EXISTING_MISMATCH -> "Existing model file does not match pinned SHA-256 at " + modelPath;
+                case FAILED -> "Model download failed in fake downloader";
+            };
+            return new LlamaCppModelDownloader.Result(status, modelPath, message);
+        }
+    }
+
+    private static final class FakeDoctorRunner implements SetupWizardRunner.DoctorRunner {
+        int calls;
+        Path configPath;
+        Path workspace;
+        Path talosHome;
+
+        @Override
+        public int run(Path configPath, Path workspace, Path talosHome, PrintStream out) {
+            calls++;
+            this.configPath = configPath;
+            this.workspace = workspace;
+            this.talosHome = talosHome;
+            out.println("PASS  config         fake doctor");
+            out.println();
+            out.println("Doctor summary: 1 passed, 0 warning(s), 0 failed, 0 skipped.");
+            out.println("Environment is ready.");
+            return 0;
         }
     }
 }

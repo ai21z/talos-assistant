@@ -13,5 +13,6 @@ public record SetupWizardSnapshot(
         Path llamaServerPath,
         boolean llamaServerExists,
         long usableDiskMb,
-        long maxMemoryMb) {
+        long maxMemoryMb,
+        long systemMemoryMb) {
 }

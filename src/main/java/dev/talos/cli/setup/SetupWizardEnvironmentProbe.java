@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,7 +45,8 @@ public final class SetupWizardEnvironmentProbe {
                 serverPath,
                 serverPath != null && Files.isRegularFile(serverPath),
                 usableDiskMb(configPath),
-                Runtime.getRuntime().maxMemory() / (1024 * 1024));
+                Runtime.getRuntime().maxMemory() / (1024 * 1024),
+                systemMemoryMb());
     }
 
     private static Path defaultConfigPath() {
@@ -177,6 +180,19 @@ public final class SetupWizardEnvironmentProbe {
             cursor = cursor.getParent();
         }
         return cursor == null ? Path.of(".") : cursor;
+    }
+
+    private static long systemMemoryMb() {
+        try {
+            OperatingSystemMXBean mx = ManagementFactory.getOperatingSystemMXBean();
+            if (mx instanceof com.sun.management.OperatingSystemMXBean sun) {
+                long bytes = sun.getTotalMemorySize();
+                return bytes > 0 ? bytes / (1024 * 1024) : -1;
+            }
+        } catch (RuntimeException ignored) {
+            return -1;
+        }
+        return -1;
     }
 
     private static boolean isWindowsOs() {

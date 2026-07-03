@@ -14,8 +14,8 @@ Priority: high
   no Linux `llama-server` configured; follow-up WSL smoke configured
   `qwen2.5-coder-14b` through managed `llama.cpp`
 - Workspace fixture: `/home/ai21z/talos-wsl-install-smoke`
-- Verification status: milestones 1-4 implemented; model download, doctor
-  execution, final docs, and full setup smoke remain open
+- Verification status: milestones 1-5 implemented; final docs and full
+  fresh-machine setup smoke remain open
 
 Expected behavior:
 
@@ -572,6 +572,124 @@ REUSE_SMOKE_NO_CONFIG_WRITE
 Installed pinned llama.cpp engine at /home/ai21z/.talos/engines/llama.cpp/b9860/ubuntu-x64-cpu
 Reusing existing llama.cpp engine at /home/ai21z/.talos/engines/llama.cpp/b9860/ubuntu-x64-cpu/llama-b9860/llama-server
 ```
+
+## Milestone 5 Implementation Evidence
+
+Status:
+
+```text
+Implemented as explicit accepted-beta GGUF model download and doctor handoff.
+T926 remains open because final user docs and a full fresh-machine setup smoke
+are still pending.
+```
+
+Implemented surface:
+
+- `talos setup wizard --dry-run` now renders model download size, disk, RAM,
+  CPU-only, cache, and support guidance for the accepted beta profiles.
+- `talos setup wizard` now asks before every model download.
+- The model downloader writes to a `.part` file, verifies SHA-256, and promotes
+  to the final model path only after verification passes.
+- Existing verified model files are reused.
+- Existing model files with a wrong checksum are reported as a separate
+  mismatch state and are not replaced unless the user explicitly confirms
+  replacement.
+- Failed downloads and checksum mismatches leave no final model file.
+- The interactive disk gate re-probes the selected model target filesystem
+  before download; it does not rely only on the config-path disk snapshot.
+- The generated wizard config uses the downloaded `model_path` as the active
+  source, leaving `hf_repo` and `hf_file` blank so `doctor` can prove the GGUF
+  file exists before model start.
+- After config write, the wizard asks whether to run `talos doctor --start`.
+  Doctor is run through an injectable seam with `new Config(configPath)`, so
+  hidden test configs and explicit config paths are verified against the exact
+  file the wizard wrote.
+
+Non-goals preserved:
+
+- No package-manager execution from the Talos wizard.
+- No Unix bootstrap model download.
+- No experimental model profiles in the first-run wizard.
+- No hidden model download, hidden config write, or hidden doctor start.
+- No implicit llama.cpp Hugging Face download as the wizard's primary path.
+
+Pinned accepted-beta model artifacts:
+
+```text
+profile: qwen2.5-coder-14b
+source: Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
+file: qwen2.5-coder-14b-instruct-q4_k_m.gguf
+size: 8988110272
+sha256: c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940
+guidance: 16 GB RAM minimum; 24 GB+ comfortable for CPU-only
+
+profile: gpt-oss-20b
+source: ggml-org/gpt-oss-20b-GGUF
+file: gpt-oss-20b-mxfp4.gguf
+size: 12109566560
+sha256: be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935
+guidance: 24 GB RAM minimum; 32 GB+ comfortable for CPU-only
+```
+
+Code:
+
+- `src/main/java/dev/talos/cli/setup/LlamaCppModelManifest.java`
+- `src/main/java/dev/talos/cli/setup/LlamaCppModelDownloader.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardSnapshot.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardEnvironmentProbe.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardPlanner.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardRenderer.java`
+- `src/main/java/dev/talos/cli/setup/SetupWizardRunner.java`
+- `src/main/java/dev/talos/cli/launcher/SetupCmd.java`
+
+Pinned behavior:
+
+- Manifest exposes only `qwen2.5-coder-14b` and `gpt-oss-20b` to the wizard.
+- Downloader reuse, success promotion, checksum mismatch, download exception,
+  and existing wrong-checksum paths have deterministic regression tests.
+- Model download denial writes no config and does not run doctor.
+- Model download failure writes no config and does not run doctor.
+- Existing wrong-checksum denial writes no config and does not run doctor.
+- Config write denial after a successful or reused model leaves config absent.
+- Doctor denial after config write prints the exact manual next command.
+- Doctor approval passes the exact config path, workspace, and Talos home to the
+  doctor seam and captures doctor output in the wizard transcript.
+- Public install packaging contract pins that the Unix bootstrap still does not
+  download model weights; only the Talos wizard owns the prompted model
+  download.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.setup.LlamaCppModelManifestTest" --tests "dev.talos.cli.setup.LlamaCppModelDownloaderTest" --tests "dev.talos.cli.setup.SetupWizardPlannerTest" --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.setup.LlamaCppModelManifestTest" --tests "dev.talos.cli.setup.LlamaCppModelDownloaderTest" --tests "dev.talos.cli.setup.SetupWizardPlannerTest" --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.release.PublicInstallPackagingContractTest" --tests "dev.talos.docs.TicketHygieneTest" --tests "dev.talos.wiki.WikiLintStructuralTest" --no-daemon
+git diff --check
+.\gradlew.bat check --no-daemon
+.\gradlew.bat clean installDist --no-daemon
+wsl.exe -e bash -lc 'cd /mnt/c/Users/arisz/Projects/LOQ/loqj-cli && bash tools/install-unix.sh --force --profile-file /tmp/talos-t926-profile'
+```
+
+Result:
+
+```text
+BUILD SUCCESSFUL
+Full check BUILD SUCCESSFUL in 1m55s
+Direct installed WSL binary: Talos 0.10.7 / Java 21.0.11 / Linux amd64
+WSL_T926_M5_DENIAL_OK
+WSL_T926_M5_MODEL_DENIAL_OK
+```
+
+Installed WSL smoke details:
+
+- `talos setup wizard --dry-run --config /tmp/t926-deny-home/config.yaml`
+  rendered model size/RAM/disk guidance and made no changes.
+- Engine-install denial wrote no config.
+- With a fake Linux `llama-server` path, the installed wizard reached the
+  accepted-beta model choice, printed Qwen/GPT-OSS size/disk/RAM/SHA guidance,
+  prompted `Download this model now? [y/N]`, and download denial wrote no
+  config.
+- No large model download was run in this automated smoke. Real download and
+  doctor success remain manual/fresh-machine evidence for final T926 close.
 
 ## Architecture Metadata
 

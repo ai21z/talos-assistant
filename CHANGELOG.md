@@ -18,8 +18,10 @@
   Ubuntu/WSL x64 CPU `llama.cpp` engine install when no compatible
   `llama-server` exists, verifies the artifact SHA-256 before extraction,
   follows GitHub release redirects, handles cross-filesystem staging promotion,
-  reuses an existing installed engine, and still does not download model
-  weights, start the server, or run doctor.
+  and reuses an existing installed engine. The wizard now also offers explicit
+  accepted-beta GGUF model downloads with size/disk/RAM guidance, SHA-256
+  verification, downloaded `model_path` config handoff, and optional
+  `talos doctor --start` verification after config write.
 - [T925] Workspace containment now has a shared canonical primitive for the
   checkpoint and delete-root guard paths. Checkpoint capture and restore reject
   Windows-style prefix-sibling escapes before writing or deleting outside the

@@ -1,7 +1,5 @@
 package dev.talos.cli.setup;
 
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
-
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Locale;
@@ -94,22 +92,23 @@ public final class SetupWizardPlanner {
     private static SetupWizardStep modelProfileStep() {
         StringBuilder detail = new StringBuilder("Accepted beta profiles: ");
         boolean first = true;
-        for (var profile : LlamaCppModelProfiles.profiles().values()) {
-            if (profile.supportTier() != LlamaCppModelProfiles.SupportTier.ACCEPTED_BETA) {
-                continue;
-            }
+        for (var model : LlamaCppModelManifest.acceptedBeta()) {
             if (!first) {
                 detail.append("; ");
             }
             first = false;
-            detail.append(profile.alias())
+            detail.append(model.alias())
                     .append(" (")
-                    .append(profile.hfRepo())
+                    .append(model.hfRepo())
                     .append(" / ")
-                    .append(profile.hfFile())
+                    .append(model.hfFile())
+                    .append("; ")
+                    .append(model.guidanceLine())
+                    .append("; cache: ~/.talos/models/gguf; support: ")
+                    .append(model.supportLevel())
                     .append(")");
         }
-        detail.append(". A later download milestone must show size/RAM guidance and ask before any model download.");
+        detail.append(". The interactive wizard must ask before any model download.");
         return new SetupWizardStep(
                 "model-profile",
                 SetupWizardStep.Action.ASK,

@@ -38,6 +38,12 @@ public final class SetupWizardRenderer {
         if (snapshot.maxMemoryMb() > 0) {
             out.append("  JVM max memory: ~").append(snapshot.maxMemoryMb()).append(" MB\n");
         }
+        out.append("  System RAM: ");
+        if (snapshot.systemMemoryMb() > 0) {
+            out.append("~").append(snapshot.systemMemoryMb()).append(" MB\n");
+        } else {
+            out.append("unknown\n");
+        }
 
         out.append("\nDecision plan:\n");
         for (SetupWizardStep step : plan.steps()) {

@@ -87,11 +87,11 @@ class SetupCmdTest {
     }
 
     @Test
-    void setupWizardInteractiveWritesConfigAfterExplicitConfirmations() throws Exception {
+    void setupWizardInteractiveDownloadDenialCreatesNoConfig() throws Exception {
         Path server = tempDir.resolve("llama-server");
         Files.writeString(server, "fake", StandardCharsets.UTF_8);
         Path config = tempDir.resolve(".talos").resolve("config.yaml");
-        ByteArrayInputStream stdin = new ByteArrayInputStream("y\n1\ny\n".getBytes(StandardCharsets.UTF_8));
+        ByteArrayInputStream stdin = new ByteArrayInputStream("y\n1\nn\n".getBytes(StandardCharsets.UTF_8));
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         var previousIn = System.in;
         var previousOut = System.out;
@@ -110,9 +110,10 @@ class SetupCmdTest {
         }
 
         assertEquals(0, exit);
-        String yaml = Files.readString(config, StandardCharsets.UTF_8);
-        assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""), yaml);
-        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("No model downloads, model starts, or doctor execution were run"));
+        assertFalse(Files.exists(config), "download denial must not write config");
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Download this model now? [y/N]"), text);
+        assertTrue(text.contains("Model setup skipped. No config written."), text);
     }
 
     @Test
