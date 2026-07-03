@@ -1,6 +1,6 @@
-# [T926-open-high] Installation setup wizard
+# [T926-done-high] Installation setup wizard
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -10,12 +10,18 @@ Priority: high
 - Talos version / commit: 0.10.7 / d17057b9a6c9ca39dcc50d4ded73382a5ae5dfd3
 - Follow-up WSL evidence version / commit: 0.10.7 /
   2314360f2f972d482405437581160436b456c939
+- Fresh WSL full setup evidence version / commit: 0.10.7 /
+  b0ec627628926826d18783b6c4afe2c33ec6c8e2
 - Model/backend: managed `llama.cpp` intended beta path; initial WSL smoke had
   no Linux `llama-server` configured; follow-up WSL smoke configured
-  `qwen2.5-coder-14b` through managed `llama.cpp`
+  `qwen2.5-coder-14b` through managed `llama.cpp`; fresh full setup smoke ran
+  the installed Linux wizard through pinned engine install, Qwen GGUF download,
+  config write, and `talos doctor --start`
 - Workspace fixture: `/home/ai21z/talos-wsl-install-smoke`
-- Verification status: milestones 1-5 implemented; final docs and full
-  fresh-machine setup smoke remain open
+- Fresh setup workspace fixture: `/tmp/t926-qwen-workspace`
+- Fresh setup isolated Java home / Talos home: `/tmp/t926-qwen-home`
+- Verification status: closed after milestone 5 docs and fresh installed WSL
+  Qwen setup smoke
 
 Expected behavior:
 
@@ -688,8 +694,66 @@ Installed WSL smoke details:
   accepted-beta model choice, printed Qwen/GPT-OSS size/disk/RAM/SHA guidance,
   prompted `Download this model now? [y/N]`, and download denial wrote no
   config.
-- No large model download was run in this automated smoke. Real download and
-  doctor success remain manual/fresh-machine evidence for final T926 close.
+- No large model download was run in the automated milestone 5 smoke; the final
+  close evidence below covers a real installed WSL Qwen download and doctor
+  pass.
+
+## Final Close Evidence
+
+Status:
+
+```text
+Closed after a real installed WSL setup lane for the accepted-beta Qwen profile.
+```
+
+Installed product:
+
+```text
+/home/ai21z/.local/talos/bin/talos
+Talos 0.10.7 / Java 21.0.11 / Linux amd64
+```
+
+Fresh WSL lane:
+
+```text
+Workspace: /tmp/t926-qwen-workspace
+Isolated Java user.home / Talos home: /tmp/t926-qwen-home
+Model profile: qwen2.5-coder-14b
+Backend: managed llama.cpp
+Prompted approvals: pinned engine install, Qwen model download, config write,
+doctor --start
+```
+
+Verified results:
+
+```text
+WSL_T926_QWEN_REAL_OK
+Installed pinned llama.cpp engine at
+/tmp/t926-qwen-home/.talos/engines/llama.cpp/b9860/ubuntu-x64-cpu
+Downloaded verified model to
+/tmp/t926-qwen-home/.talos/models/gguf/qwen2.5-coder-14b/qwen2.5-coder-14b-instruct-q4_k_m.gguf
+Wrote Talos model config: /tmp/t926-qwen-home/.talos/config.yaml
+Doctor summary: 8 passed, 0 warning(s), 0 failed, 0 skipped.
+Environment is ready.
+```
+
+Config evidence:
+
+```text
+The generated config uses model_path for the downloaded GGUF and leaves
+hf_repo, hf_file, and hf_cache_dir blank, so doctor proves the local model file
+exists before starting the managed server.
+```
+
+Docs closed:
+
+```text
+README, user installation, quickstart, command reference, model setup, and
+public installation docs now describe the guided Ubuntu/WSL x64 path and keep
+the Unix installer boundary explicit: the installer installs Talos only; the
+wizard performs engine install, model download, config write, and doctor only
+after prompts.
+```
 
 ## Architecture Metadata
 

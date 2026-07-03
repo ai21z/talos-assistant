@@ -366,11 +366,16 @@ Linux source/developer beta path:
 ```bash
 ./gradlew installDist
 bash tools/install-unix.sh --force
+talos setup wizard
 ```
 
 This is a checkout-based Linux source/developer install; no
 DEB/RPM/Homebrew/SDKMAN package claim exists for this beta. macOS is not a
-public beta support claim until separate smoke evidence exists.
+public beta support claim until separate smoke evidence exists. On Ubuntu/WSL
+x64, `talos setup wizard` is the guided post-install path: it asks before
+installing the pinned CPU llama.cpp engine, asks before downloading accepted
+beta model weights, asks before writing `~/.talos/config.yaml`, and asks before
+running `talos doctor --start`.
 
 ### 1. Install source/developer prerequisites
 
@@ -378,14 +383,21 @@ Current practical setup:
 
 - Windows or Linux source/developer setup
 - Java 21+
-- `llama-server.exe` from llama.cpp on Windows, `llama-server` on Linux, or
-  another configured local backend
+- `talos setup wizard` on Ubuntu/WSL x64, or a user-provided
+  `llama-server.exe` on Windows / `llama-server` on Linux
 - a configured managed llama.cpp model profile or a local GGUF chat model
 - an embeddings model when vector retrieval is needed
 
 The default product path uses the engine transport with `llama_cpp` as the
-backend. The recommended setup command configures one of the audited managed
-llama.cpp model profiles:
+backend. On Ubuntu/WSL x64, use the guided wizard first:
+
+```bash
+talos setup wizard
+talos doctor --start
+```
+
+The direct expert setup command remains available when you already have a
+compatible `llama-server` binary and model path/source:
 
 ```powershell
 talos setup models
@@ -469,6 +481,7 @@ Run the approved Gradle test command profile.
 | `talos doctor` | verify the local environment (config, engine, model files, server, index) |
 | `talos version` | print version information |
 | `talos setup` | first-run setup flow |
+| `talos setup wizard` | guided Ubuntu/WSL x64 setup for pinned llama.cpp, accepted model download, config, and doctor |
 | `talos setup models` | configure tested managed llama.cpp model profiles |
 
 ### Useful REPL Commands

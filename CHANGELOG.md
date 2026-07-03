@@ -21,7 +21,10 @@
   and reuses an existing installed engine. The wizard now also offers explicit
   accepted-beta GGUF model downloads with size/disk/RAM guidance, SHA-256
   verification, downloaded `model_path` config handoff, and optional
-  `talos doctor --start` verification after config write.
+  `talos doctor --start` verification after config write. User docs now
+  describe the guided Ubuntu/WSL x64 path, and T926 close evidence includes a
+  real installed WSL Qwen lane through engine install, model download, config
+  write, and doctor pass.
 - [T925] Workspace containment now has a shared canonical primitive for the
   checkpoint and delete-root guard paths. Checkpoint capture and restore reject
   Windows-style prefix-sibling escapes before writing or deleting outside the

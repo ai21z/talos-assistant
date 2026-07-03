@@ -27,7 +27,8 @@ follow the source/developer setup in `README.md`.
 - Linux source/developer setup requires a user-provided Java 21 runtime.
 - Public installer installs Talos only.
 - Public installer does not bundle a llama.cpp server or model weights.
-- Model setup remains explicit: `talos setup models`.
+- Model setup remains explicit: `talos setup wizard` on Ubuntu/WSL x64, or
+  `talos setup models` for direct/expert managed llama.cpp config.
 - No DEB/RPM/Homebrew/SDKMAN/JBang package is promised for this beta.
 - macOS is not a public beta support claim until separate smoke evidence exists.
 - `tools/install-unix.sh` is the Linux source/developer install helper, not a
@@ -117,6 +118,7 @@ Linux source/developer beta path:
 ./gradlew clean installDist --no-daemon
 bash tools/install-unix.sh --force
 talos --version
+talos setup wizard
 talos status --verbose
 ```
 
@@ -152,9 +154,20 @@ and adds the shim directory to the current user's PATH.
 
 ## Model Setup
 
-The installer does not configure models. Users must provide a compatible local
-`llama-server` binary (`llama-server.exe` on Windows) and then run one of the
-setup commands:
+The installer does not configure models. On Ubuntu/WSL x64 source/developer
+installs, the guided path is:
+
+```bash
+talos setup wizard
+```
+
+The wizard asks before installing the pinned CPU `llama.cpp` engine, asks before
+downloading an accepted beta GGUF, asks before writing config, and asks before
+running `talos doctor --start`.
+
+For Windows or direct/expert setup, users must provide a compatible local
+`llama-server` binary (`llama-server.exe` on Windows, `llama-server` on Linux)
+and then run one of the setup commands:
 
 ```powershell
 talos setup models
@@ -198,14 +211,25 @@ talos
 
 Model setup:
 
+Ubuntu/WSL x64 guided path:
+
+```bash
+talos setup wizard
+talos status --verbose
+```
+
+Direct/expert setup:
+
 ```powershell
 talos setup models
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
 talos status --verbose
 ```
 
-On Linux, use the real path to the local `llama-server` binary instead of the
-Windows `.exe` example path.
+On Ubuntu/WSL x64, the wizard should be validated with one accepted profile,
+config write, and `talos doctor --start`. On direct Linux setup, use the real
+path to the local `llama-server` binary instead of the Windows `.exe` example
+path.
 
 Release validation must also verify a fresh PowerShell session sees `talos` on
 PATH, uninstall removes installed program files, and `%USERPROFILE%\.talos`
@@ -214,7 +238,9 @@ survives unless a purge operation is explicitly requested.
 Linux source/developer validation must verify a fresh shell sees `talos` on
 PATH, `talos --version` and `talos status --verbose` start successfully, and
 the built-in Gradle command profiles plan against `./gradlew`, not
-`.\\gradlew.bat`.
+`.\\gradlew.bat`. The Ubuntu/WSL guided setup gate must also verify one
+accepted beta model lane through `talos setup wizard` and `talos doctor
+--start`.
 
 ## Evidence Anchors
 
