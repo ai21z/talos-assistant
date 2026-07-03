@@ -1,6 +1,6 @@
 # [T936-open-high] Cut 0.10.8 candidate with QA packet
 
-Status: open
+Status: in-progress
 Priority: high
 
 ## Evidence Summary
@@ -139,6 +139,30 @@ Refactor scope:
 - Public release artifacts, draft GitHub Release assets, signed assets,
   tag-bound assets, winget-linked assets, and release-named artifacts remain
   blocked until T929 acceptance criteria are satisfied.
+
+## Progress
+
+2026-07-03 candidate-cut start:
+
+- `scripts/cut-candidate.ps1 -SelfTest` passed.
+- `scripts/cut-candidate.ps1 -DryRun` confirmed a clean
+  `v0.9.0-beta-dev` tree at `0.10.7` and planned a `0.10.8` patch bump.
+- `scripts/cut-candidate.ps1` created cut commit
+  `420e6c92b1a5837caa1a1b4f2d79cacac6d9a165` with
+  `talosVersion=0.10.8` and a promoted `CHANGELOG.md` `0.10.8` section.
+- The scripted post-bump `installDist` step passed.
+- The scripted post-bump `check` step failed as designed because
+  `WikiLintStructuralTest` caught `CURRENT-STATE.md` still reporting
+  `0.10.7`. This was an evidence-state failure, not a runtime/product failure.
+- `CURRENT-STATE.md` was repaired forward to the `0.10.8` cut identity.
+
+Remaining:
+
+- Rerun automated candidate gates from the repaired 0.10.8 tree.
+- Generate/review the candidate manifest and quality summaries from the
+  repaired tree.
+- Run the T929 manual PTY and two-model installed-product QA packet before any
+  public artifact decision.
 
 ## Tests / Evidence
 
