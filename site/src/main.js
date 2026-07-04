@@ -226,6 +226,53 @@ function setupTurnTabs() {
   setTerminalState("inspect");
 }
 
+// ---- Planned install command tabs ------------------------------------------
+function setSetupPlatform(nextPlatform) {
+  const panel = document.querySelector("#setup-command");
+  const code = panel?.querySelector("code");
+  const tabs = Array.from(document.querySelectorAll("[data-setup-platform]"));
+  const activeTab = tabs.find((tab) => tab.dataset.setupPlatform === nextPlatform);
+  const command = activeTab?.dataset.setupCommand;
+
+  if (!panel || !code || !activeTab || !command) return;
+
+  code.textContent = command;
+  panel.setAttribute("aria-labelledby", activeTab.id);
+
+  tabs.forEach((tab) => {
+    const selected = tab === activeTab;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+}
+
+function handleSetupTabKey(event, tabs) {
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  const lastIndex = tabs.length - 1;
+  let nextIndex = currentIndex;
+
+  if (event.key === "ArrowRight") nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+  if (event.key === "ArrowLeft") nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+  if (event.key === "Home") nextIndex = 0;
+  if (event.key === "End") nextIndex = lastIndex;
+  if (nextIndex === currentIndex && !["Home", "End"].includes(event.key)) return;
+
+  event.preventDefault();
+  const nextTab = tabs[nextIndex];
+  nextTab.focus();
+  setSetupPlatform(nextTab.dataset.setupPlatform);
+}
+
+function setupInstallTabs() {
+  const tabs = Array.from(document.querySelectorAll("[data-setup-platform]"));
+  if (!tabs.length) return;
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => setSetupPlatform(tab.dataset.setupPlatform));
+    tab.addEventListener("keydown", (event) => handleSetupTabKey(event, tabs));
+  });
+  setSetupPlatform("windows");
+}
+
 // ---- Scroll-spy nav + reveal-on-scroll (native scroll, no hijacking) --------
 function setupSectionNav() {
   const navLinks = Array.from(document.querySelectorAll("[data-section-nav]"));
@@ -892,6 +939,7 @@ setupParallax();
 setupLiveTerminal();
 setupInscription();
 setupTurnTabs();
+setupInstallTabs();
 setupSectionNav();
 setupReveal();
 setupStagger();

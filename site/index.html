@@ -151,20 +151,37 @@
               </ul>
               <div class="setup-strip" aria-label="Talos setup status">
                 <p class="setup-kicker"><span class="setup-pulse" aria-hidden="true"></span>planned public beta</p>
-                <pre><code>winget install --id TalosProject.TalosCLI -e
-talos setup models
-talos status --verbose
-talos</code></pre>
-                <p>
-                  Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
-                  These paths are not live until GitHub Release assets exist. Exact future Windows ID:
-                  <code>TalosProject.TalosCLI</code>.
-                  Searchable package name and friendly install copy: <code>winget install talos-cli</code>.
-                  Publisher: <code>Vissarion Zounarakis</code>. The installer
-                  uses a bundled Java runtime and does not bundle a llama.cpp server or model weights.
+                <div class="setup-tabs" role="tablist" aria-label="Planned Talos install commands">
+                  <button
+                    class="setup-tab"
+                    type="button"
+                    role="tab"
+                    id="setup-tab-windows"
+                    aria-controls="setup-command"
+                    aria-selected="true"
+                    data-setup-platform="windows"
+                    data-setup-command="winget install --id TalosLocal.Talos -e"
+                  >Windows</button>
+                  <button
+                    class="setup-tab"
+                    type="button"
+                    role="tab"
+                    id="setup-tab-linux"
+                    aria-controls="setup-command"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-setup-platform="linux"
+                    data-setup-command="curl -fsSL https://taloslocal.com/install.sh | sh"
+                  >Linux</button>
+                </div>
+                <pre class="setup-command" id="setup-command" role="tabpanel" aria-labelledby="setup-tab-windows"><code>winget install --id TalosLocal.Talos -e</code></pre>
+                <p class="setup-note">
+                  Install commands go live when the first GitHub Release assets are published. The
+                  setup wizard then guides model and llama.cpp configuration.
                 </p>
-                <p>
-                  Source setup remains documented as Linux source/developer setup in the
+                <p class="setup-meta">
+                  Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
+                  Exact future Windows ID: <code>TalosLocal.Talos</code>.
                   <a class="inline-link" href="https://github.com/ai21z/talos-assistant/blob/v0.9.0-beta-dev/docs/public-installation.md">
                     installation docs
                   </a>.

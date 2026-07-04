@@ -15,7 +15,7 @@ below document the target release shape and the source/developer fallback.
 The Windows public install promise is:
 
 ```powershell
-winget install --id TalosProject.TalosCLI -e
+winget install --id TalosLocal.Talos -e
 talos setup models
 talos status --verbose
 talos
@@ -48,7 +48,7 @@ Use `talos-cli` as the public package name and moniker, but keep the exact
 winget package ID in the normal `Publisher.Package` shape:
 
 ```yaml
-PackageIdentifier: TalosProject.TalosCLI
+PackageIdentifier: TalosLocal.Talos
 PackageName: talos-cli
 Publisher: Vissarion Zounarakis
 Moniker: talos-cli
@@ -60,7 +60,7 @@ The friendly install can be `winget install talos-cli` once the package is
 indexed. The exact install command remains:
 
 ```powershell
-winget install --id TalosProject.TalosCLI -e
+winget install --id TalosLocal.Talos -e
 ```
 
 ## Release Artifacts

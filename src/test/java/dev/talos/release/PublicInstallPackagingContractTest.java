@@ -380,9 +380,11 @@ class PublicInstallPackagingContractTest {
         String doc = read("docs/public-installation.md");
         String site = read("site/index.html");
 
-        for (String text : new String[] { readme, doc, site }) {
-            assertTrue(text.contains("winget install --id TalosProject.TalosCLI -e"),
+        for (String text : new String[] { readme, doc }) {
+            assertTrue(text.contains("winget install --id TalosLocal.Talos -e"),
                     "public install target must name the exact winget command");
+            assertFalse(text.contains("TalosProject.TalosCLI"),
+                    "public install identity must not keep the old planned winget package ID");
             assertTrue(text.contains("talos-cli"),
                     "public install copy must expose talos-cli as the searchable package name or moniker");
             assertTrue(text.contains("Vissarion Zounarakis"),
@@ -398,6 +400,21 @@ class PublicInstallPackagingContractTest {
             assertTrue(text.contains("talos setup models"),
                     "model setup must remain a post-install Talos command");
         }
+
+        assertTrue(site.contains("winget install --id TalosLocal.Talos -e"),
+                "site install preview must name the exact planned winget command");
+        assertTrue(site.contains("TalosLocal.Talos"),
+                "site install preview must name the exact planned winget package ID");
+        assertFalse(site.contains("TalosProject.TalosCLI"),
+                "site install preview must not keep the old planned winget package ID");
+        assertTrue(site.contains("Windows x64"),
+                "site install preview must keep the packaged Windows x64 lane explicit");
+        assertTrue(site.contains("Ubuntu/WSL x64 tarball target"),
+                "site install preview must keep the first Linux lane narrow");
+        assertTrue(site.contains("setup wizard then guides model and llama.cpp configuration"),
+                "site install preview must hand post-install model setup to the setup wizard");
+        assertTrue(site.contains("Install commands go live when the first GitHub Release assets are published"),
+                "site install preview must not imply the package commands are live");
 
         String normalizedReadme = readme.replaceAll("\\s+", " ");
 

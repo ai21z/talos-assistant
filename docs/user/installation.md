@@ -84,7 +84,7 @@ talos-cli
 The planned package identity is:
 
 ```text
-TalosProject.TalosCLI
+TalosLocal.Talos
 ```
 
 The planned publisher is:

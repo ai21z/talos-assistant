@@ -180,8 +180,13 @@ test("planned install surface has no fake copy affordance", async ({ page }) => 
   await page.goto("/");
   const setup = page.locator(".setup-strip");
   await expect(setup).toContainText("planned public beta");
-  await expect(setup).toContainText("winget install talos-cli");
-  await expect(setup).toContainText("TalosProject.TalosCLI");
+  await expect(setup.getByRole("tab", { name: "Windows" })).toBeVisible();
+  await expect(setup.getByRole("tab", { name: "Linux" })).toBeVisible();
+  await expect(setup).toContainText("winget install --id TalosLocal.Talos -e");
+  await setup.getByRole("tab", { name: "Linux" }).click();
+  await expect(setup).toContainText("curl -fsSL https://taloslocal.com/install.sh | sh");
+  await expect(setup).toContainText("Install commands go live when the first GitHub Release assets are published");
+  await expect(setup).toContainText("TalosLocal.Talos");
   await expect(page.locator("[data-copy]")).toHaveCount(0);
 });
 

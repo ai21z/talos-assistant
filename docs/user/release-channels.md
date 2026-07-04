@@ -44,7 +44,7 @@ checksums.txt
 The planned package identity is:
 
 ```text
-TalosProject.TalosCLI
+TalosLocal.Talos
 ```
 
 The planned public package name and moniker are:

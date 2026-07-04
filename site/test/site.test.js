@@ -113,6 +113,7 @@ describe("Talos landing page static contract", () => {
   it("uses concrete hero copy, honest setup state, and no fake install CTA", () => {
     const html = read("index.html").replace(/\s+/g, " ");
     const hero = sectionSlice(html, "overview", "execution");
+    const setupTabs = Array.from(hero.matchAll(/class="setup-tab"/g));
 
     for (const copy of [
       "Inspects before acting",
@@ -124,16 +125,23 @@ describe("Talos landing page static contract", () => {
       "View on GitHub",
       "Read docs",
       "planned public beta",
-      "winget install talos-cli",
-      "TalosProject.TalosCLI",
-      "talos",
+      "TalosLocal.Talos",
+      "Windows",
+      "Linux",
+      "curl -fsSL https://taloslocal.com/install.sh | sh",
+      "Install commands go live when the first GitHub Release assets are published",
+      "setup wizard then guides model and llama.cpp configuration",
     ]) {
       assert.match(hero, new RegExp(escapeRegExp(copy), "i"));
     }
 
+    assert.equal(setupTabs.length, 2, "hero install preview should expose exactly two platform tabs");
     assert.doesNotMatch(hero, /Get beta build/i);
     assert.doesNotMatch(hero, /data-beta-placeholder/i);
-    assert.doesNotMatch(hero, /data-copy="[^"]*winget/i);
+    assert.doesNotMatch(hero, /data-copy=/i);
+    assert.doesNotMatch(hero, /talos setup models/i);
+    assert.doesNotMatch(hero, /talos status --verbose/i);
+    assert.doesNotMatch(hero, /TalosProject\.TalosCLI/i);
   });
 
   it("renders the real Talos shield icon as the brand mark", () => {
@@ -275,14 +283,12 @@ describe("Talos landing page static contract", () => {
       "A consistent turn grammar",
       "Runtime policy owns approval, tool exposure, result checks, protected reads, and unsupported-file honesty",
       "planned public beta",
-      "winget install talos-cli",
-      "TalosProject.TalosCLI",
+      "TalosLocal.Talos",
+      "curl -fsSL https://taloslocal.com/install.sh | sh",
       "Ubuntu/WSL x64 tarball target",
-      "Vissarion Zounarakis",
-      "bundled Java runtime",
-      "does not bundle a llama.cpp server or model weights",
-      "not live until GitHub Release assets exist",
-      "Source setup remains documented",
+      "Install commands go live when the first GitHub Release assets are published",
+      "setup wizard then guides model and llama.cpp configuration",
+      "installation docs",
     ]) {
       assert.match(text, new RegExp(escapeRegExp(required), "i"));
     }
@@ -303,6 +309,7 @@ describe("Talos landing page static contract", () => {
       assert.doesNotMatch(text, new RegExp(escapeRegExp(tooAbsolute), "i"));
     }
     assert.match(text, /localhost-gated by default/i);
+    assert.doesNotMatch(text, /TalosProject\.TalosCLI/i);
   });
 
   it("curates the docs gateway to four in-site user documentation cards", () => {
@@ -322,7 +329,6 @@ describe("Talos landing page static contract", () => {
   it("keeps real command examples without marketing maintainer-only debug commands", () => {
     const text = publicText();
     for (const command of [
-      "talos status --verbose",
       "/tools",
       "/models",
       "/workspace",
