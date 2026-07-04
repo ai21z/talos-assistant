@@ -618,6 +618,24 @@ describe("Talos landing page static contract", () => {
     assert.match(main, /setProperty\("--ichor"/);
   });
 
+  it("keeps desktop vein section labels hidden until scroll and unavailable on mobile", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const main = read("src/main.js");
+    const railMatch = html.match(/<nav class="vein-rail"[\s\S]*?<\/nav>/);
+    assert.ok(railMatch, "missing vein rail");
+
+    for (const label of ["Overview", "Execution", "Turn UI", "Local Boundaries", "Good Fits", "Docs"]) {
+      assert.match(railMatch[0], new RegExp(`<span class="vein-stop-label">${escapeRegExp(label)}</span>`));
+    }
+
+    assert.match(main, /has-scrolled/);
+    assert.match(main, /VEIN_LABEL_REVEAL_Y/);
+    assert.match(css, /\.vein-rail\.has-scrolled\s+\.vein-stop-label/);
+    assert.match(css, /\.vein-rail\.has-scrolled\s+\.vein-stop(?:\.is-active|\[aria-current="page"\])\s+\.vein-stop-label/);
+    assert.match(css, /@media\s*\(max-width:\s*920px\)\s*\{[\s\S]*?\.vein-rail\s*\{\s*display:\s*none/);
+  });
+
   it("stages a skippable, fail-safe cold-boot awakening", () => {
     const html = read("index.html");
     const css = read("src/styles.css");

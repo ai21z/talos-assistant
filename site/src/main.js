@@ -407,6 +407,7 @@ function setupVeinRail() {
   if (!rail) return;
   const stops = Array.from(rail.querySelectorAll(".vein-stop"));
   if (!stops.length) return;
+  const VEIN_LABEL_REVEAL_Y = 96;
   let fracs = stops.map(() => 0);
 
   const layout = () => {
@@ -423,6 +424,7 @@ function setupVeinRail() {
   const paint = () => {
     const max = document.documentElement.scrollHeight - window.innerHeight;
     const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    rail.classList.toggle("has-scrolled", window.scrollY >= VEIN_LABEL_REVEAL_Y);
     stops.forEach((stop, i) => stop.classList.toggle("is-reached", p >= fracs[i] - 0.0005));
   };
   let raf = 0;
@@ -433,6 +435,7 @@ function setupVeinRail() {
   layout();
   paint();
   window.addEventListener("scroll", onScroll, { passive: true });
+  document.addEventListener("scroll", onScroll, { passive: true, capture: true });
   window.addEventListener("resize", () => { layout(); paint(); });
   window.addEventListener("load", () => { layout(); paint(); });
   if (document.fonts && document.fonts.ready) {

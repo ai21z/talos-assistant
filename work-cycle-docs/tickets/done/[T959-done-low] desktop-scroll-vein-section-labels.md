@@ -1,6 +1,6 @@
-# [T959-open-low] Desktop scroll vein can reveal section names without replacing the nav bar
+# [T959-done-low] Desktop scroll vein can reveal section names without replacing the nav bar
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -9,13 +9,13 @@ Priority: low
 - Date: 2026-07-04
 - Branch under ticket: `v0.9.0-beta-dev`
 - Talos version / commit: 0.10.8 /
-  `9d7174ee9129c0a566d3a1656adf6d7894f54f5d`
+  closing ticket commit
 - Code under review:
   - `site/index.html`
   - `site/src/main.js`
   - `site/src/styles.css`
   - `site/test/e2e/site.spec.js`
-- Verification status: design direction accepted, not implemented
+- Verification status: implemented and verified locally
 
 Owner direction:
 
@@ -166,7 +166,44 @@ Commands:
 
 ```powershell
 npm test --prefix site
+npm run build --prefix site
 npm run test:e2e --prefix site
+npm run test:deploy-surface --prefix site
+git diff --check
+```
+
+Actual evidence from implementation:
+
+```text
+Red-first:
+- `npm test --prefix site` failed on missing `has-scrolled` rail state.
+- `npm run test:e2e --prefix site -- --grep "desktop vein rail reveals"` failed before implementation.
+
+Green:
+- `npm test --prefix site`: 46 passed.
+- `npm run build --prefix site`: Vite production build succeeded.
+- `npm run test:e2e --prefix site -- --grep "desktop vein rail reveals"`: 1 passed after rebuild.
+- `npm run test:e2e --prefix site`: 25 passed.
+- `npm run test:deploy-surface --prefix site`: 1 passed.
+- `git diff --check`: passed.
+```
+
+Visual evidence:
+
+```text
+local/site-visual/t959-vein-labels/desktop-scrolled-vein-labels.png
+local/site-visual/t959-vein-labels/mobile-scrolled-no-vein-labels.png
+```
+
+Implementation:
+
+```text
+The existing vein rail keeps the same section anchors and navbar. On desktop
+viewports, `setupVeinRail()` adds `has-scrolled` after native scroll passes
+the threshold, causing short section labels to fade in from the rail. The
+active section label is brighter. Mobile viewports still hide the whole rail
+through the existing breakpoint, and reduced-motion users get the state
+without transition animation.
 ```
 
 ## Known Risks
@@ -177,4 +214,3 @@ npm run test:e2e --prefix site
 ## Known Follow-Ups
 
 - If this lands, capture desktop/mobile screenshots before staging the site.
-

@@ -140,6 +140,35 @@ test("scroll-spy moves the active nav state as sections are visited", async ({ p
   expect(scrollState.snapped).not.toMatch(/mandatory/i);
 });
 
+test("desktop vein rail reveals section names only after scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoTalos(page);
+  const rail = page.locator(".vein-rail");
+  const firstStop = rail.locator(".vein-stop").first();
+  const labels = rail.locator(".vein-stop-label");
+  const activeLabel = rail.locator('.vein-stop[aria-current="page"] .vein-stop-label');
+
+  await expect(firstStop).toBeVisible();
+  await expect(rail).not.toHaveClass(/has-scrolled/);
+  await expect
+    .poll(() => labels.first().evaluate((node) => Number(getComputedStyle(node).opacity)), {
+      timeout: 3000,
+    })
+    .toBeLessThan(0.1);
+
+  await page.mouse.wheel(0, 520);
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 3000 }).toBeGreaterThan(96);
+  await expect(rail).toHaveClass(/has-scrolled/);
+  await expect
+    .poll(() => activeLabel.evaluate((node) => Number(getComputedStyle(node).opacity)), {
+      timeout: 3000,
+    })
+    .toBeGreaterThan(0.8);
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expect(firstStop).toBeHidden();
+});
+
 test("staggered card grids reveal when scrolled into view", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoTalos(page);
