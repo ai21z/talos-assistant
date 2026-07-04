@@ -400,7 +400,9 @@ git diff --check
 5. Capture a manual PTY transcript that proves startup, `/status --verbose`,
    `/mode`, `/prompt`, `/debug prompt on`, `/last trace`, `/prompt-debug last`,
    approval denial, approval once, approval allow-in-session, and command
-   approval behavior.
+   approval behavior. PowerShell `Start-Transcript` alone is not enough unless
+   the saved transcript contains the complete JLine session; tail-only captures
+   are validator-failing release evidence.
 6. Run the two-model large-scale live audit using the standard Qwen and GPT-OSS
    managed `llama.cpp` lanes unless the release scope explicitly narrows model
    coverage.

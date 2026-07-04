@@ -1,6 +1,6 @@
-# [T923-open-low] DPAPI raw-key transport design follow-up
+# [T923-done-low] DPAPI raw-key transport design follow-up
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -142,4 +142,45 @@ Commands:
 
 ## Known Follow-Ups
 
-- Evaluate JNA/native Windows DPAPI or credential-manager custody after 0.10.7.
+- Evaluate JNA/native Windows DPAPI or credential-manager custody after public
+  beta only if the dependency/platform complexity is justified by evidence.
+
+## Resolution
+
+This ticket is closed as a documented design boundary, not as a native DPAPI
+transport implementation.
+
+Decision:
+
+```text
+The PowerShell DPAPI bridge remains acceptable for the current beta
+stabilization lane because it improves Windows at-rest custody, fails closed on
+custody failure, verifies protected blobs before replacement, and avoids adding
+a native/JNA dependency during release stabilization.
+```
+
+Changes:
+
+- `docs/user/local-privacy-and-artifacts.md` now states the same-user
+  process-monitoring boundary explicitly: the current DPAPI bridge uses a
+  non-interactive PowerShell child process and raw key bytes can cross
+  Java/helper process pipes during protect/unprotect.
+- `docs/architecture/32-windows-dpapi-custody-transport.md` records the current
+  transport, the accepted beta boundary, and the required bar for any future
+  lower-exposure implementation.
+
+Non-claim:
+
+```text
+No lower-exposure native/JNA custody transport was implemented in this ticket.
+No hardware-backed custody, tamper resistance, or protection from same-user
+host instrumentation is claimed.
+```
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.security.WindowsDpapiKeyCustodyTest" --no-daemon
+```
+
+Result: BUILD SUCCESSFUL.

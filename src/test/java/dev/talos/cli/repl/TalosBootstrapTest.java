@@ -115,6 +115,9 @@ class TalosBootstrapTest {
 
             assertTrue(router.getStartupNotice().contains("saved session found"));
             assertTrue(router.getStartupNotice().contains("Not loaded"));
+            assertTrue(router.getStartupNotice().contains(
+                    "Use /session load to resume or /session list to manage saved sessions"));
+            assertFalse(router.getStartupNotice().contains("/session clear to delete"));
             assertFalse(router.context().conversationManager().hasHistory(),
                     "saved session must not enter prompt context by default");
         });

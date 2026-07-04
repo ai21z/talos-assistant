@@ -5,24 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Talos is a local-first CLI workspace operator. Inspects before acting, asks before mutation, verifies before claiming success, and records local trace evidence for interactive turns."
+      content="Talos is the local CLI that verifies before it claims success. It inspects before acting, asks before mutation, and records local trace evidence for interactive turns."
     />
     <meta name="theme-color" content="#090c0c" />
     <link rel="icon" type="image/png" href="./design/talos-icon-64.png" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Talos. Local-first CLI workspace operator" />
+    <meta property="og:title" content="Talos. The local CLI that verifies before it claims success" />
     <meta
       property="og:description"
       content="Inspects before acting. Asks before mutation. Verifies before claiming success. Local engine, approved writes, local trace evidence."
     />
     <meta property="og:image" content="./design/talos-icon.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Talos. Local-first CLI workspace operator" />
+    <meta name="twitter:title" content="Talos. The local CLI that verifies before it claims success" />
     <meta
       name="twitter:description"
-      content="A local-first CLI operator that inspects, asks before mutation, and verifies before claiming success."
+      content="A local CLI that inspects, asks before mutation, and verifies before claiming success."
     />
-    <title>Talos | Local-first CLI workspace operator</title>
+    <title>Talos | Verifies before it claims success</title>
     <style>
       html.awakening,
       html.awakening body { overflow: hidden; }
@@ -45,7 +45,7 @@
       })();
     </script>
   </head>
-  <body>
+  <body data-talos-site="landing">
     <a class="skip-link" href="#main">Skip to content</a>
     <canvas class="smoke" aria-hidden="true"></canvas>
     <canvas class="mycelium" aria-hidden="true"></canvas>
@@ -128,8 +128,8 @@
           </div>
           <div class="container hero-grid">
             <div class="hero-copy reveal">
-              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>TALOS / Local CLI workspace operator</p>
-              <h1>Local-first CLI operator for your workspace.</h1>
+              <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>TALOS / Local CLI trust harness</p>
+              <h1>The local CLI that verifies before it claims success.</h1>
               <p class="hero-subtitle">
                 Inspects before acting. Asks before mutation. Verifies before claiming success.
               </p>
@@ -151,20 +151,38 @@
               </ul>
               <div class="setup-strip" aria-label="Talos setup status">
                 <p class="setup-kicker"><span class="setup-pulse" aria-hidden="true"></span>planned public beta</p>
-                <pre><code>winget install --id TalosProject.TalosCLI -e
-talos setup models
-talos status --verbose
-talos</code></pre>
-                <p>
-                  Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
-                  These paths are not live until GitHub Release assets exist. Exact future Windows ID:
-                  <code>TalosProject.TalosCLI</code>.
-                  Searchable package name and friendly install copy: <code>winget install talos-cli</code>.
-                  Publisher: <code>Vissarion Zounarakis</code>. The installer
-                  uses a bundled Java runtime and does not bundle a llama.cpp server or model weights.
+                <div class="setup-tabs" role="tablist" aria-label="Planned Talos install commands">
+                  <button
+                    class="setup-tab"
+                    type="button"
+                    role="tab"
+                    id="setup-tab-windows"
+                    aria-controls="setup-command"
+                    aria-selected="true"
+                    data-setup-platform="windows"
+                    data-setup-command="winget install --id TalosLocal.Talos -e"
+                  >Windows</button>
+                  <button
+                    class="setup-tab"
+                    type="button"
+                    role="tab"
+                    id="setup-tab-linux"
+                    aria-controls="setup-command"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-setup-platform="linux"
+                    data-setup-command="curl -fsSL https://taloslocal.com/install.sh | sh"
+                  >Linux</button>
+                </div>
+                <pre class="setup-command" id="setup-command" role="tabpanel" aria-labelledby="setup-tab-windows"><code>winget install --id TalosLocal.Talos -e</code></pre>
+                <p class="setup-note">
+                  Install commands go live when the first GitHub Release assets are published. The
+                  setup wizard then guides model and llama.cpp configuration.
                 </p>
-                <p>
-                  Source setup remains documented as Linux source/developer setup in the
+                <p class="setup-meta">
+                  Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
+                  Exact future Windows ID: <code>TalosLocal.Talos</code>.
+                  Windows beta is signed-only; unsigned scripts stay local QA only.
                   <a class="inline-link" href="https://github.com/ai21z/talos-assistant/blob/v0.9.0-beta-dev/docs/public-installation.md">
                     installation docs
                   </a>.
@@ -483,14 +501,14 @@ talos</code></pre>
           <p class="signature">
             <span class="signature-lead">Lovecrafted by</span>
             <span class="signature-sep" aria-hidden="true">·</span>
-            <a class="signature-sigil-link" href="https://zounarakis.com" aria-label="Vissarion Zounarakis, personal site">
+            <a class="signature-sigil-link" href="https://zounarakis.com" aria-label="Aris Zounarakis, personal site">
               <img class="signature-sigil" src="./design/vz-sigil.png" alt="" width="24" height="24" loading="lazy" decoding="async" />
             </a>
             <span class="signature-sep" aria-hidden="true">·</span>
-            <a class="signature-name" href="https://zounarakis.com">Vissarion Zounarakis</a>
+            <a class="signature-name" href="https://zounarakis.com">Aris Zounarakis</a>
             <span class="signature-year">2026</span>
             <span class="signature-sep" aria-hidden="true">·</span>
-            <a class="signature-email" href="mailto:vissarion@zounarakis.com">vissarion@zounarakis.com</a>
+            <a class="signature-email" href="mailto:aris@zounarakis.com">aris@zounarakis.com</a>
           </p>
         </div>
       </footer>

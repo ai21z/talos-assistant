@@ -15,7 +15,7 @@ below document the target release shape and the source/developer fallback.
 The Windows public install promise is:
 
 ```powershell
-winget install --id TalosProject.TalosCLI -e
+winget install --id TalosLocal.Talos -e
 talos setup models
 talos status --verbose
 talos
@@ -24,6 +24,8 @@ talos
 This is the release target, not a claim that the package is already published.
 Until a signed GitHub Release and winget manifest exist, Windows users should
 follow the source/developer setup in `README.md`.
+
+Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
 
 ## Support Boundary
 
@@ -48,9 +50,9 @@ Use `talos-cli` as the public package name and moniker, but keep the exact
 winget package ID in the normal `Publisher.Package` shape:
 
 ```yaml
-PackageIdentifier: TalosProject.TalosCLI
+PackageIdentifier: TalosLocal.Talos
 PackageName: talos-cli
-Publisher: Vissarion Zounarakis
+Publisher: Aris Zounarakis
 Moniker: talos-cli
 Commands:
   - talos
@@ -60,7 +62,7 @@ The friendly install can be `winget install talos-cli` once the package is
 indexed. The exact install command remains:
 
 ```powershell
-winget install --id TalosProject.TalosCLI -e
+winget install --id TalosLocal.Talos -e
 ```
 
 ## Release Artifacts
@@ -293,8 +295,9 @@ Linux uses the same repository and signer-workflow checks against
 
 Public Windows installers must be signed. The bootstrap script uses
 `Get-AuthenticodeSignature` and refuses unsigned scripts unless the caller passes
-`-AllowUnsigned` for local development. Release assets are verified with
-`Get-FileHash` against `checksums.txt`.
+`-AllowUnsigned` for local development/manual QA only. Release assets are
+verified with `Get-FileHash` against `checksums.txt`. Unsigned bootstrap
+execution is not a public beta install path.
 
 Do not publish a public download flow that asks users to pipe remote text into a
 PowerShell interpreter.

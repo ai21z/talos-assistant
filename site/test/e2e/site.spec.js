@@ -24,18 +24,32 @@ test.beforeEach(async ({ page }) => {
   page.browserIssues = browserIssues;
 });
 
-test("page renders without browser console errors and has one landing h1", async ({ page }) => {
-  await page.goto("/");
+async function expectTalosPage(page, marker) {
   await expect(page).toHaveTitle(/Talos/);
+  await expect(page.locator(`body[data-talos-site="${marker}"]`)).toHaveCount(1);
+}
+
+async function gotoTalos(page, path = "/", marker = "landing") {
+  await page.goto(path);
+  await expectTalosPage(page, marker);
+}
+
+test("preflight verifies this is the Talos site", async ({ page }) => {
+  await gotoTalos(page);
+  await gotoTalos(page, "/docs.html#/quickstart", "docs");
+});
+
+test("page renders without browser console errors and has one landing h1", async ({ page }) => {
+  await gotoTalos(page);
   await expect(page.locator("h1")).toHaveCount(1);
-  await expect(page.locator("h1")).toContainText(/local-first/i);
-  await expect(page.locator("h1")).toContainText(/workspace/i);
+  await expect(page.locator("h1")).toHaveText("The local CLI that verifies before it claims success.");
   expect(page.browserIssues).toEqual([]);
 });
 
 test("nav anchors exist and scroll to real sections", async ({ page }) => {
-  await page.goto("/");
-  const navLinks = page.locator(".site-nav a");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoTalos(page);
+  const navLinks = page.locator(".vein-rail a");
   const count = await navLinks.count();
   expect(count).toBeGreaterThan(4);
 
@@ -54,14 +68,14 @@ test("nav anchors exist and scroll to real sections", async ({ page }) => {
 for (const width of widths) {
   test(`has no horizontal overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/");
+    await gotoTalos(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(1);
   });
 }
 
 test("live hero terminal streams a real turn and can replay", async ({ page }) => {
-  await page.goto("/");
+  await gotoTalos(page);
   const output = page.locator("[data-live-output]");
   // Streams the inspect turn to completion (route → inspect → answer).
   await expect(output).toContainText("route", { timeout: 9000 });
@@ -76,7 +90,7 @@ test("live hero terminal streams a real turn and can replay", async ({ page }) =
 });
 
 test("hero shows the TALOS wordmark and cycling acrostic word", async ({ page }) => {
-  await page.goto("/");
+  await gotoTalos(page);
   const mark = page.locator(".hero-inscription-mark");
   await expect(mark).toHaveText("TALOS");
   await expect(mark).toBeVisible();
@@ -85,7 +99,7 @@ test("hero shows the TALOS wordmark and cycling acrostic word", async ({ page })
 });
 
 test("terminal tabs switch content on click and keyboard", async ({ page }) => {
-  await page.goto("/");
+  await gotoTalos(page);
   const output = page.locator("#terminal-output");
 
   await page.getByRole("tab", { name: "Approve" }).click();
@@ -108,15 +122,14 @@ test("terminal tabs switch content on click and keyboard", async ({ page }) => {
 
 test("scroll-spy moves the active nav state as sections are visited", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Overview");
+  await gotoTalos(page);
+  const rail = page.locator(".vein-rail");
+  await expect(rail.locator('a[aria-current="page"]')).toContainText("Overview");
 
-  await page.getByRole("navigation", { name: "Primary navigation" })
-    .getByRole("link", { name: "Local Boundaries" })
-    .click();
+  await rail.getByRole("link", { name: "Local Boundaries" }).click();
   await expect(page).toHaveURL(/#local-boundaries$/);
   await expect(page.locator("#local-boundaries")).toBeInViewport();
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Local Boundaries");
+  await expect(rail.locator('a[aria-current="page"]')).toContainText("Local Boundaries");
 
   // Native scroll is not hijacked.
   const scrollState = await page.evaluate(() => ({
@@ -129,7 +142,7 @@ test("scroll-spy moves the active nav state as sections are visited", async ({ p
 
 test("staggered card grids reveal when scrolled into view", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
+  await gotoTalos(page);
   const card = page.locator(".boundary-band").first();
   await page.locator("#local-boundaries").scrollIntoViewIfNeeded();
   await expect
@@ -141,7 +154,7 @@ test("staggered card grids reveal when scrolled into view", async ({ page }) => 
 
 test("the ichor vein fills from empty to full as you scroll", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
+  await gotoTalos(page);
   const ichor = () =>
     page.locator(".vein").evaluate((node) => Number(node.style.getPropertyValue("--ichor")) || 0);
   expect(await ichor()).toBeLessThan(0.1);
@@ -160,7 +173,7 @@ test("the cold-boot awakening plays when forced, then clears to reveal the page"
     };
     requestAnimationFrame(tick);
   });
-  await page.goto("/");
+  await gotoTalos(page);
   // It clears itself, restoring scroll + content.
   await expect
     .poll(() => page.evaluate(() => document.documentElement.classList.contains("awakening")), { timeout: 5000 })
@@ -177,16 +190,21 @@ test("the cold-boot awakening plays when forced, then clears to reveal the page"
 });
 
 test("planned install surface has no fake copy affordance", async ({ page }) => {
-  await page.goto("/");
+  await gotoTalos(page);
   const setup = page.locator(".setup-strip");
   await expect(setup).toContainText("planned public beta");
-  await expect(setup).toContainText("winget install talos-cli");
-  await expect(setup).toContainText("TalosProject.TalosCLI");
+  await expect(setup.getByRole("tab", { name: "Windows" })).toBeVisible();
+  await expect(setup.getByRole("tab", { name: "Linux" })).toBeVisible();
+  await expect(setup).toContainText("winget install --id TalosLocal.Talos -e");
+  await setup.getByRole("tab", { name: "Linux" }).click();
+  await expect(setup).toContainText("curl -fsSL https://taloslocal.com/install.sh | sh");
+  await expect(setup).toContainText("Install commands go live when the first GitHub Release assets are published");
+  await expect(setup).toContainText("TalosLocal.Talos");
   await expect(page.locator("[data-copy]")).toHaveCount(0);
 });
 
 test("hero CTAs are real links, not placeholder beta actions", async ({ page }) => {
-  await page.goto("/");
+  await gotoTalos(page);
   await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
     "href",
     "https://github.com/ai21z/talos-assistant",
@@ -196,7 +214,7 @@ test("hero CTAs are real links, not placeholder beta actions", async ({ page }) 
 });
 
 test("docs page routes render without hiding content under the sticky header", async ({ page }) => {
-  await page.goto("/docs.html#/quickstart");
+  await gotoTalos(page, "/docs.html#/quickstart", "docs");
   await expect(page).toHaveTitle(/Quickstart \| Talos documentation/);
   await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
   await expect(page.locator('[data-doc-slug="quickstart"]')).toHaveAttribute("aria-current", "page");
@@ -217,7 +235,7 @@ test("docs page routes render without hiding content under the sticky header", a
 
 test("docs code blocks expose a working copy control", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto("/docs.html#/quickstart");
+  await gotoTalos(page, "/docs.html#/quickstart", "docs");
   const copy = page.locator(".docs-copy").first();
   await expect(copy).toHaveCount(1);
   await copy.click();
@@ -225,7 +243,7 @@ test("docs code blocks expose a working copy control", async ({ page, context })
 });
 
 test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
-  await page.goto("/docs.html#/quickstart");
+  await gotoTalos(page, "/docs.html#/quickstart", "docs");
   await page.getByRole("link", { name: "Current Support" }).click();
   await expect(page).toHaveURL(/\/docs\.html#\/quickstart#current-support$/);
   await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
@@ -235,18 +253,24 @@ test("docs page keeps in-page Markdown anchors inside the current docs route", a
 
 test("mobile header and nav remain usable", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 780 });
-  await page.goto("/");
-  const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
-  await expect(primaryNav).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Overview" })).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Docs" })).toBeVisible();
-  await primaryNav.getByRole("link", { name: "Docs" }).click();
+  await gotoTalos(page);
+  const menuTrigger = page.getByRole("button", { name: "Open menu" });
+  await expect(menuTrigger).toBeVisible();
+  await menuTrigger.click();
+
+  const menu = page.getByRole("dialog", { name: "Talos sections" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("link", { name: /Overview/ })).toBeVisible();
+  await expect(menu.getByRole("link", { name: /Docs/ })).toBeVisible();
+
+  await menu.getByRole("link", { name: /Docs/ }).click();
   await expect(page.locator("#docs")).toBeInViewport();
+  await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
 });
 
 test("mobile hero content fits without horizontal clipping", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto("/");
+  await gotoTalos(page);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 
@@ -269,7 +293,7 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
 
 test("reduced-motion mode leaves content visible without reveal animations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/");
+  await gotoTalos(page);
   const hiddenRevealCount = await page.locator(".reveal").evaluateAll((nodes) =>
     nodes.filter((node) => {
       const style = window.getComputedStyle(node);

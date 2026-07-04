@@ -50,6 +50,11 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(runbookText.contains("Status: MANUAL_REQUIRED"), runbookText);
         assertTrue(runbookText.contains("true PTY/JLine coverage: manual-required"), runbookText);
         assertTrue(runbookText.contains("Do not run this through Gradle redirected stdin"), runbookText);
+        assertTrue(runbookText.contains("Do not rely on PowerShell Start-Transcript alone"), runbookText);
+        assertTrue(runbookText.contains("Start-Transcript may capture only the tail of a JLine session"),
+                runbookText);
+        assertTrue(runbookText.contains("validator-grade only if it contains the complete Talos prompt sequence"),
+                runbookText);
         assertTrue(runbookText.contains("RUN-PTY-MANUAL-AUDIT.ps1"), runbookText);
         assertTrue(runbookText.contains("/show README.md"), runbookText);
         assertTrue(runbookText.contains("/privacy private on"), runbookText);
@@ -100,6 +105,10 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(templateText.contains("Private-document denial prompt visible before response"), templateText);
         assertTrue(templateText.contains("Private-document approval prompt visible before response"), templateText);
         assertTrue(templateText.contains("Private-document approval recorded in trace"), templateText);
+        assertTrue(templateText.contains("Capture method:"), templateText);
+        assertTrue(templateText.contains("PowerShell Start-Transcript alone is not validator-grade"), templateText);
+        assertTrue(templateText.contains("/show README.md, approval windows, /last trace, and /prompt-debug save"),
+                templateText);
 
         String resultTemplateText = Files.readString(resultTemplate);
         assertTrue(resultTemplateText.contains("\"status\" : \"NOT_RUN\""), resultTemplateText);

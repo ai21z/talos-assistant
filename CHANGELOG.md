@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+- [T923] Closed the Windows DPAPI custody-transport follow-up as a documented
+  beta boundary instead of an unreviewed native dependency change. Public
+  privacy docs now state that the PowerShell DPAPI bridge can move raw key
+  bytes across Java/helper process pipes under the same user, and a new
+  architecture note records the future hardening bar for any native/JNA custody
+  redesign.
+- [T927] Fixed the saved-session startup notice and `/session clear` wording so
+  they no longer imply that the current-session clear command deletes an older
+  saved session. Startup now points to `/session load` and `/session list`;
+  clear results explicitly target the current saved session.
+- [T937] Made the Windows public beta distribution policy explicit and pinned
+  it in release packaging tests: Windows public beta is signed-only,
+  `-AllowUnsigned` is local development/manual QA only, and winget remains
+  planned until signed GitHub Release assets and a manifest exist.
+- [T953] Terminal ASCII fallback now maps U+202F narrow no-break space to a
+  normal ASCII space, so model-authored inline code spans such as
+  `` `medical-notes.docx` `` no longer render with `?` replacement glyphs in
+  Unicode-unsafe terminal/capture paths.
+- [T950] Private-document model handoff approval windows now render the
+  non-mutating `sensitive read` risk label even when the approval detail
+  includes a `target:` line. The fix preserves once-only approval semantics for
+  private-document handoff and keeps write/edit approvals labeled as `write`.
+- [T951] Synchronized approval summaries now distinguish proven protected-read
+  config/policy denial from missing approval evidence. Audit transcripts carry
+  redacted permission-decision summaries, and the summary scorer now labels
+  `protected-read-denied` config-deny bundles as `PASS_WITH_POLICY_DENY` only
+  when durable trace-derived evidence shows a protected `talos.read_file`
+  denial before approval; ask-policy lanes still fail when an expected approval
+  prompt is genuinely missing.
+- [T952] Tightened manual PTY release evidence capture: the generated manual
+  PTY packet and release QA runbooks now warn that PowerShell
+  `Start-Transcript` may capture only the tail of JLine sessions, and the PTY
+  validator now emits a capture-specific failure when a PowerShell transcript
+  lacks the complete prompt/window sequence required for release evidence. The
+  validator also accepts the current once-only protected-read approval prompt
+  when it appears in the `.env` denial segment, so completed Qwen/GPT-OSS
+  packet evidence validates against the live UI contract.
 - [T941] Added a manual Cloudflare Pages staging workflow for the
   `taloslocal` project. The workflow checks out an exact SHA, verifies the
   requested Talos version, runs site tests/build/deploy-surface leak scanning,

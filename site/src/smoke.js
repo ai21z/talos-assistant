@@ -1,8 +1,7 @@
 // The bronze dust. The old molten-bronze "forge" smoke, reused here as warm
-// dust that hangs in the hero (top + right) and recedes as you scroll down,
-// counter to the green mycelium that grows. WebGL2 fbm, behind the mycelium
-// layer. Frozen on software renderers and under reduced motion; removes itself
-// (the CSS floor remains) if WebGL2 is unavailable.
+// dust that hangs in the hero (top + right) and recedes as you scroll down.
+// It is transparent over the CSS floor, so a frozen/faded frame can never
+// repaint later sections with an opaque canvas background.
 
 const VERT = `#version 300 es
 void main(){ vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
@@ -29,7 +28,6 @@ void main(){
   vec2 q = vec2(fbm(p + t), fbm(p + vec2(5.2, 1.3) - t));
   float n = fbm(p + 1.6 * q);
 
-  vec3 floorC = vec3(0.043, 0.051, 0.047);  // matches the --bg floor
   vec3 dust   = vec3(0.80, 0.56, 0.31);     // the old bronze
   vec3 dustLo = vec3(0.34, 0.23, 0.12);
 
@@ -39,11 +37,9 @@ void main(){
                  * mix(0.45, 1.0, smoothstep(0.25, 1.0, uv.x));
   float field = smoothstep(0.42, 0.9, n);
   vec3 col = mix(dustLo, dust, smoothstep(0.42, 0.86, n));
-  col = mix(floorC, col, field * 0.18 * presence);
-
   float vig = smoothstep(1.3, 0.32, length((uv - 0.5) * vec2(0.8, 1.18)));
-  col = mix(floorC, col, mix(0.62, 1.0, vig));
-  frag = vec4(col, 1.0);
+  float alpha = field * presence * mix(0.1, 0.2, vig);
+  frag = vec4(col, alpha);
 }`;
 
 export function setupSmoke() {
@@ -52,7 +48,7 @@ export function setupSmoke() {
   let gl = null;
   try {
     gl = canvas.getContext("webgl2", {
-      alpha: false, antialias: false, depth: false, stencil: false,
+      alpha: true, antialias: false, depth: false, stencil: false,
       premultipliedAlpha: false, powerPreference: "low-power",
     });
   } catch (_) { gl = null; }
@@ -101,6 +97,8 @@ export function setupSmoke() {
   }
   function draw(ms) {
     if (lost) return;
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform1f(uTime, ms * 0.001);
     gl.uniform1f(uScroll, progress());
     gl.drawArrays(gl.TRIANGLES, 0, 3);

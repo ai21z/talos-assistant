@@ -187,14 +187,14 @@ class SessionCommandTest {
                     Instant.now(), List.of()));
             Result r = cmd.execute("clear", minimalCtx());
             assertInstanceOf(Result.Info.class, r);
-            assertTrue(((Result.Info) r).text.contains("Saved session deleted"));
+            assertTrue(((Result.Info) r).text.contains("Current saved session deleted"));
             assertTrue(st.load(cmd.sessionId()).isEmpty());
         }
         @Test void clear_noFile_returnsInfo() throws Exception {
             var cmd = new SessionCommand(Path.of("/ws"), store());
             Result r = cmd.execute("clear", minimalCtx());
             assertInstanceOf(Result.Info.class, r);
-            assertTrue(((Result.Info) r).text.contains("No saved session to delete"));
+            assertTrue(((Result.Info) r).text.contains("No current saved session to delete"));
         }
         @Test void clear_turnLogOnly_deletesCompanionFile() throws Exception {
             var st = store();
@@ -204,7 +204,7 @@ class SessionCommandTest {
 
             Result r = cmd.execute("clear", minimalCtx());
             assertInstanceOf(Result.Info.class, r);
-            assertTrue(((Result.Info) r).text.contains("Saved session deleted"));
+            assertTrue(((Result.Info) r).text.contains("Current saved session deleted"));
             assertTrue(st.loadTurns(cmd.sessionId()).isEmpty());
         }
     }

@@ -39,6 +39,28 @@ The wizard keeps every side effect explicit:
 The Unix installer itself still installs Talos only. It does not silently
 install system packages, llama.cpp, model weights, or config.
 
+## Where to get `llama-server`
+
+Recommended Ubuntu/WSL x64 path: use `talos setup wizard`. It can install the
+Talos-pinned CPU engine after confirmation. The current pinned lane is the
+official `ggml-org/llama.cpp` release `b9860`, asset
+`llama-b9860-bin-ubuntu-x64.tar.gz`.
+
+Direct/expert path: download a CPU asset for your OS from the
+[official `ggml-org/llama.cpp` `b9860` release](https://github.com/ggml-org/llama.cpp/releases/tag/b9860).
+
+On that page, use:
+
+- `Ubuntu x64 (CPU)` for Linux x64, Ubuntu, or WSL x64. The extracted
+  executable is `llama-server`.
+- `Windows x64 (CPU)` for Windows x64. The extracted executable is
+  `llama-server.exe`.
+
+Talos does not claim arbitrary latest upstream builds are verified by Talos. If
+you choose another release, a GPU asset, or a user-built binary, treat it as
+user-provided: pass its path with `--server-path`, then prove it on your machine
+with `talos doctor --start`.
+
 ## Show Setup Help
 
 ```powershell
@@ -48,7 +70,8 @@ talos setup models
 This direct command prints the managed profile support levels and example
 commands. Use it when you already have a compatible `llama-server` binary or a
 user-owned GGUF path. On Ubuntu/WSL x64, prefer `talos setup wizard` for the
-first local model setup.
+first local model setup. If you still need the server binary, start with
+[Where to get `llama-server`](#where-to-get-llama-server).
 
 ## Managed Profile Support Levels
 

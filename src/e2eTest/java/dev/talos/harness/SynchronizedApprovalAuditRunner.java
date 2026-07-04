@@ -413,7 +413,7 @@ public final class SynchronizedApprovalAuditRunner {
             Path root
     ) throws IOException {
         Map<String, Object> transcript = new LinkedHashMap<>();
-        transcript.put("schemaVersion", 1);
+        transcript.put("schemaVersion", 2);
         transcript.put("schemaName", "talos.synchronizedApprovalAuditTranscript");
         transcript.put("scenario", request.name());
         transcript.put("workspace", request.workspace().toAbsolutePath().normalize().toString());
@@ -442,7 +442,31 @@ public final class SynchronizedApprovalAuditRunner {
         transcript.put("toolEventTypes", trace == null ? List.of() : trace.events().stream()
                 .map(event -> event.type())
                 .toList());
+        transcript.put("permissionDecisions", permissionDecisions(trace));
         writeSafe(path, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(transcript));
+    }
+
+    private static List<Map<String, Object>> permissionDecisions(LocalTurnTrace trace) {
+        if (trace == null || trace.events().isEmpty()) return List.of();
+        return trace.events().stream()
+                .filter(event -> "PERMISSION_DECISION".equals(event.type()))
+                .map(event -> {
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    Map<String, Object> data = event.data();
+                    out.put("tool", sanitize(event.toolName()));
+                    out.put("action", sanitize(data.get("action")));
+                    out.put("reasonCode", sanitize(data.get("reasonCode")));
+                    out.put("protectedPath", booleanValue(data.get("protectedPath")));
+                    out.put("protectedKind", sanitize(data.get("protectedKind")));
+                    out.put("pathHint", sanitize(data.get("pathHint")));
+                    return out;
+                })
+                .toList();
+    }
+
+    private static boolean booleanValue(Object value) {
+        if (value instanceof Boolean bool) return bool;
+        return "true".equalsIgnoreCase(Objects.toString(value, ""));
     }
 
     private static List<TurnRecord.ToolCallSummary> toolCalls(LocalTurnTrace trace) {
@@ -603,6 +627,10 @@ public final class SynchronizedApprovalAuditRunner {
 
     private static String sanitize(String value) {
         return ProtectedContentPolicy.sanitizeText(Objects.toString(value, ""));
+    }
+
+    private static String sanitize(Object value) {
+        return sanitize(Objects.toString(value, ""));
     }
 
     private static String sha256(String value) {

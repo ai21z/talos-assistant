@@ -44,7 +44,7 @@ checksums.txt
 The planned package identity is:
 
 ```text
-TalosProject.TalosCLI
+TalosLocal.Talos
 ```
 
 The planned public package name and moniker are:
@@ -78,6 +78,8 @@ checksums.txt
 
 Until those artifacts exist in a signed release, do not present public package
 installation as available.
+
+Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
 
 Linux native package-manager evidence is out of scope for this beta tarball
 lane.

@@ -108,6 +108,7 @@ public final class SynchronizedApprovalAuditMain {
         PASS,
         PASS_WITH_RUNTIME_REPAIR,
         PASS_WITH_READBACK_ONLY_LIMITATION,
+        PASS_WITH_POLICY_DENY,
         FAIL_REVIEW_REQUIRED
     }
 
@@ -2676,6 +2677,16 @@ public final class SynchronizedApprovalAuditMain {
             int approvalCount = intValue(transcript.get("approvalCount"));
             int expectedRequiredApprovalCount = intValue(transcript.get("expectedRequiredApprovalCount"));
             if (expectedRequiredApprovalCount > approvalCount) {
+                String policyDenyReason = protectedReadPolicyDenyReason(safeScenario, transcript, eventTypes);
+                if (!policyDenyReason.isBlank()) {
+                    return new ScenarioEvaluation(
+                            safeScenario,
+                            traceStatus,
+                            verificationStatus,
+                            ScenarioScore.PASS_WITH_POLICY_DENY,
+                            "policy deny before approval (" + policyDenyReason
+                                    + "); no approval prompt expected for this protected-read denial lane");
+                }
                 return new ScenarioEvaluation(
                         safeScenario,
                         traceStatus,
@@ -2736,6 +2747,41 @@ public final class SynchronizedApprovalAuditMain {
                     ScenarioScore.FAIL_REVIEW_REQUIRED,
                     "audit transcript could not be parsed: " + e.getClass().getSimpleName());
         }
+    }
+
+    private static String protectedReadPolicyDenyReason(
+            String scenario,
+            Map<String, Object> transcript,
+            List<String> eventTypes
+    ) {
+        if (!"protected-read-denied".equals(scenario)) return "";
+        if (eventTypes == null
+                || !eventTypes.contains("PERMISSION_DECISION")
+                || !eventTypes.contains("TOOL_CALL_BLOCKED")) {
+            return "";
+        }
+        Object rawDecisions = transcript == null ? null : transcript.get("permissionDecisions");
+        if (!(rawDecisions instanceof List<?> decisions)) return "";
+        for (Object rawDecision : decisions) {
+            if (!(rawDecision instanceof Map<?, ?> decision)) continue;
+            String tool = value(decision.get("tool"));
+            String action = value(decision.get("action"));
+            String reasonCode = value(decision.get("reasonCode"));
+            boolean protectedPath = booleanValue(decision.get("protectedPath"));
+            if ("talos.read_file".equals(tool)
+                    && "DENY".equals(action)
+                    && protectedPath
+                    && isPreApprovalPolicyDenyReason(reasonCode)) {
+                return reasonCode;
+            }
+        }
+        return "";
+    }
+
+    private static boolean isPreApprovalPolicyDenyReason(String reasonCode) {
+        return "CONFIG_DENY".equals(reasonCode)
+                || "APPROVAL_POLICY_DENY".equals(reasonCode)
+                || "PROTECTED_PATH_DENY".equals(reasonCode);
     }
 
     private static boolean proposalOnlyContinuationFallbackAfterToolEvidence(
@@ -2849,6 +2895,11 @@ public final class SynchronizedApprovalAuditMain {
         } catch (NumberFormatException ignored) {
             return 0;
         }
+    }
+
+    private static boolean booleanValue(Object value) {
+        if (value instanceof Boolean bool) return bool;
+        return "true".equalsIgnoreCase(value(value));
     }
 
     private static List<String> stringList(Object value) {

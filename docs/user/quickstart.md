@@ -24,7 +24,8 @@ Required for source setup:
 - On Ubuntu/WSL x64, the guided setup wizard can install the pinned CPU
   `llama.cpp` engine and download an accepted beta model after confirmation.
 - On Windows or direct/expert Linux setup, provide a local `llama-server.exe`
-  or `llama-server` when configuring managed llama.cpp.
+  or `llama-server` when configuring managed llama.cpp. See
+  [Where to get `llama-server`](model-setup.md#where-to-get-llama-server).
 
 Verify Java:
 
@@ -104,7 +105,8 @@ talos setup models
 
 Write a managed llama.cpp profile after you have a valid local `llama-server`
 binary. Windows paths usually end in `llama-server.exe`; Linux paths usually do
-not.
+not. If you do not have one yet, use the acquisition notes in
+[Model Setup](model-setup.md#where-to-get-llama-server).
 
 ```powershell
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
