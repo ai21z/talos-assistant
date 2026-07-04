@@ -143,7 +143,7 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `6c77d4b83f4d653a18beb94db2b33c8a244885a9`
+- Commit: `a7f412177a9bf8a8d33ee5b82ee6e2627d2311f9`
 - Talos version: `0.10.8`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
@@ -168,17 +168,18 @@ confidence_histogram:
   candidate/staging line. T936 cut commit
   `420e6c92b1a5837caa1a1b4f2d79cacac6d9a165` promoted the accumulated
   `Unreleased` notes into `0.10.8`; later staging work produced QA staging
-  artifacts, but public artifact publication remains blocked until the
-  current QA/evidence follow-up tickets are fixed and the affected lanes are
-  rerun.
+  artifacts. The T950 affected private-document manual PTY lane was rerun on
+  clean-installed `a7f41217` for both Qwen and GPT-OSS with validator PASS and
+  artifact-canary PASS evidence under
+  `local/manual-testing/t950-0.10.8-a7f41217-pty-20260704-1745`.
 - Known caveats: T923 remains a non-blocking custody-hardening design follow-up
   for the DPAPI raw-key PowerShell transport, T927 remains a `/session clear`
   UX mismatch, T937 remains the winget/signing policy follow-up, and T953 is a
   lower-priority terminal fallback polish follow-up. No public release, tag, winget
   publication, signed artifact, draft release, or history rewrite has happened.
-- Next move: rerun the affected T929 private-document manual PTY lane before
-  any public artifact decision. T953 should follow if time permits before
-  staging.
+- Next move: decide whether to implement T953 before staging; otherwise move
+  back to the public artifact decision path with the T950 affected PTY lane now
+  rerun and validator-passed.
 
 ```talos-wiki-claims
 {

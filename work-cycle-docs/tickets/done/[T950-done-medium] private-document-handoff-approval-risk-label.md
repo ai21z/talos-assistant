@@ -268,3 +268,30 @@ Affected adjacent gates:
   --tests "dev.talos.runtime.trace.LocalTurnTracePrivateDocumentHandoffTest" `
   e2eTest --tests "dev.talos.harness.ApprovalPromptContractTest" --no-daemon
 ```
+
+Post-fix installed-product manual PTY rerun:
+
+- Branch / commit / version: `v0.9.0-beta-dev` /
+  `a7f412177a9bf8a8d33ee5b82ee6e2627d2311f9` / `0.10.8`.
+- Installed command under audit:
+  `build/install/talos/bin/talos.bat`, clean-built with
+  `.\gradlew.bat clean installDist --no-daemon`.
+- Fresh evidence root:
+  `local/manual-testing/t950-0.10.8-a7f41217-pty-20260704-1745`.
+- Fresh workspace root:
+  `local/manual-workspaces/t950-0.10.8-a7f41217-pty-20260704-1745`.
+- Qwen packet:
+  `local/manual-testing/t950-0.10.8-a7f41217-pty-20260704-1745/artifacts/qwen/manual-pty`.
+- GPT-OSS packet:
+  `local/manual-testing/t950-0.10.8-a7f41217-pty-20260704-1745/artifacts/gptoss/manual-pty`.
+- Live PTY observation: both Qwen and GPT-OSS private-document handoff approval
+  windows rendered `Risk    sensitive read` for the denial and approval turns;
+  no private-document approval window rendered `Risk    write`.
+- Qwen validator:
+  `validateSynchronizedApprovalPtyManualAudit` PASS.
+- GPT-OSS validator:
+  `validateSynchronizedApprovalPtyManualAudit` PASS.
+- Combined artifact scan:
+  `checkRuntimeArtifactCanaries` PASS over both fresh manual-testing and
+  manual-workspaces roots with only the generated fixture `.env` files
+  allowlisted.
