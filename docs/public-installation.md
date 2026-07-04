@@ -231,6 +231,20 @@ git diff --check
 .\gradlew.bat windowsReleaseArtifacts --no-daemon
 ```
 
+The workflow must be dispatched on a ref whose SHA is the same commit as
+`target_sha`. In GitHub artifact attestations, `SourceRepositoryDigest` is the
+workflow ref SHA, not a later checkout target. Therefore `target_sha must match
+the workflow ref SHA`; otherwise release staging fails before artifacts are
+accepted. The staging manifest records both identities:
+
+```json
+{
+  "artifactBuildCheckoutSha": "<target_sha>",
+  "attestationSourceRepositoryDigest": "<github.sha>",
+  "attestationDigestPolicy": "target_sha must match the workflow ref SHA; use attestationSourceRepositoryDigest for gh attestation verify --source-digest"
+}
+```
+
 The upload name is:
 
 ```text
@@ -262,11 +276,14 @@ result.
 
 Artifact attestations bind staged files to a GitHub Actions workflow run,
 repository, source commit, and subject digest when verified against the
-expected repository, signer workflow, and candidate SHA. They help prove where
-and how the staged artifact was built. The workflow still produces the
-predicate, so predicate fields are not a substitute for a trusted build policy.
-They do not prove the installer was manually smoked, the model path works, the
-two-model audit passed, or that Talos made truthful runtime claims.
+expected repository, signer workflow, and the manifest's
+`attestationSourceRepositoryDigest`. They help prove where and how the staged
+artifact was built. The workflow rejects dual-SHA staging, so
+`artifactBuildCheckoutSha` and `attestationSourceRepositoryDigest` must match
+for an accepted staging run. The workflow still produces the predicate, so
+predicate fields are not a substitute for a trusted build policy. They do not
+prove the installer was manually smoked, the model path works, the two-model
+audit passed, or that Talos made truthful runtime claims.
 
 None of these metadata artifacts prove Talos behavior is correct. Behavioral
 release readiness remains owned by T929: full automated gates, manual PTY
@@ -279,12 +296,12 @@ Online provenance verification after release-staging artifacts exist:
 gh attestation verify Talos-<version>-windows-x64.msi `
   --repo ai21z/talos-assistant `
   --signer-workflow ai21z/talos-assistant/.github/workflows/release-staging.yml `
-  --source-digest <candidate-sha>
+  --source-digest <attestationSourceRepositoryDigest-from-staging-manifest>
 
 gh attestation verify Talos-<version>-windows-x64.msi `
   --repo ai21z/talos-assistant `
   --signer-workflow ai21z/talos-assistant/.github/workflows/release-staging.yml `
-  --source-digest <candidate-sha> `
+  --source-digest <attestationSourceRepositoryDigest-from-staging-manifest> `
   --predicate-type https://cyclonedx.org/bom
 ```
 

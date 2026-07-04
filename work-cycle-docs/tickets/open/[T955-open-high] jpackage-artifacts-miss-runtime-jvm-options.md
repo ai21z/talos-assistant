@@ -249,3 +249,50 @@ No "WARNING: A restricted method in java.lang.foreign.Linker" output appears.
 - If Windows MSI local smoke remains awkward before a public signed release,
   keep app ZIP smoke as the minimum and record MSI install smoke as a named
   exclusion until a safe per-user install/uninstall script is in place.
+
+## Implementation Status
+
+Implemented locally on `v0.9.0-beta-dev` after commit
+`9d7174ee9129c0a566d3a1656adf6d7894f54f5d`:
+
+- `build.gradle.kts` now owns one `talosRuntimeJvmOptions` list used by
+  `applicationDefaultJvmArgs`.
+- All jpackage tasks call `appendTalosRuntimeJavaOptions(args)`, which emits
+  one `--java-options` entry per Talos runtime JVM option.
+- The shared option set currently includes:
+  - `-Dfile.encoding=UTF-8`
+  - `-Dstdout.encoding=UTF-8`
+  - `-Dstderr.encoding=UTF-8`
+  - `--enable-native-access=ALL-UNNAMED`
+  - `-XX:+UseZGC`
+- `PublicInstallPackagingContractTest` fails if future jpackage tasks stop
+  receiving the shared runtime JVM options.
+
+Status remains `open` until fresh staged Windows/Linux artifacts prove their
+generated launcher config carries these Java options and Linux installed smoke
+no longer emits the native-access warning on `talos status --verbose`.
+
+Focused verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+```
+
+Local packaging smoke:
+
+```powershell
+.\gradlew.bat jpackageAppImage --no-daemon
+Get-Content -Raw -LiteralPath 'build/dist/windows-app-image/Talos/app/Talos.cfg'
+```
+
+Observed generated config:
+
+```text
+[JavaOptions]
+java-options=-Djpackage.app-version=0.10.8
+java-options=-Dfile.encoding=UTF-8
+java-options=-Dstdout.encoding=UTF-8
+java-options=-Dstderr.encoding=UTF-8
+java-options=--enable-native-access=ALL-UNNAMED
+java-options=-XX:+UseZGC
+```

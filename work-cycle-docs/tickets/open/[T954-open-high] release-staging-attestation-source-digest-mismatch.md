@@ -235,3 +235,30 @@ gh attestation verify <downloaded-staged-file> --repo ai21z/talos-assistant --si
 
 - Consider adding a small release-provenance validation script that downloads
   artifacts and verifies checksums, SBOM shape, and attestations in one command.
+
+## Implementation Status
+
+Implemented locally on `v0.9.0-beta-dev` after commit
+`9d7174ee9129c0a566d3a1656adf6d7894f54f5d`:
+
+- `.github/workflows/release-staging.yml` now fails if `target_sha` does not
+  match `${{ github.sha }}`, the digest GitHub binds into artifact
+  attestations.
+- Windows and Linux staging manifests now record:
+  - `artifactBuildCheckoutSha`
+  - `attestationSourceRepositoryDigest`
+  - `attestationDigestPolicy`
+- `docs/public-installation.md` now instructs reviewers to use
+  `attestationSourceRepositoryDigest` for `gh attestation verify
+  --source-digest` and states that `target_sha must match the workflow ref
+  SHA`.
+- `CiWorkflowContractTest` pins the selected strict same-SHA policy.
+
+Status remains `open` until a fresh release-staging run proves the documented
+attestation command succeeds against the newly generated artifacts.
+
+Focused verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.release.CiWorkflowContractTest" --no-daemon
+```

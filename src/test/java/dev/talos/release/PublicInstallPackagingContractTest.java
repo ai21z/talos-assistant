@@ -135,10 +135,29 @@ class PublicInstallPackagingContractTest {
     void generatedLaunchersAllowNativeAccessForBundledTerminalAndIndexLibraries() throws Exception {
         String build = read("build.gradle.kts");
 
-        assertTrue(build.contains("applicationDefaultJvmArgs = listOf("),
-                "Gradle application plugin must own generated launcher JVM defaults");
-        assertTrue(build.contains("\"--enable-native-access=ALL-UNNAMED\""),
-                "launchers must suppress Java FFM native-access warnings from bundled JLine/Lucene");
+        assertTrue(build.contains("val talosRuntimeJvmOptions = listOf("),
+                "runtime JVM flags must have one shared owner for installDist and jpackage launchers");
+        assertTrue(build.contains("applicationDefaultJvmArgs = talosRuntimeJvmOptions"),
+                "Gradle application plugin launchers must use the shared Talos runtime JVM options");
+        assertTrue(build.contains("fun appendTalosRuntimeJavaOptions(args: MutableList<String>)"),
+                "jpackage tasks must share one helper for repeated --java-options entries");
+
+        for (String option : new String[] {
+                "-Dfile.encoding=UTF-8",
+                "-Dstdout.encoding=UTF-8",
+                "-Dstderr.encoding=UTF-8",
+                "--enable-native-access=ALL-UNNAMED",
+                "-XX:+UseZGC"
+        }) {
+            assertTrue(build.contains("\"" + option + "\""),
+                    "shared runtime JVM options must include " + option);
+        }
+
+        int helperCalls = countOccurrences(build, "appendTalosRuntimeJavaOptions(args)");
+        assertTrue(helperCalls >= 3,
+                "Windows MSI, Windows app-image, and Linux app-image jpackage tasks must all receive runtime JVM options");
+        assertTrue(build.contains("\"--java-options\", option"),
+                "jpackage helper must pass each runtime option with --java-options");
     }
 
     @Test
@@ -438,5 +457,15 @@ class PublicInstallPackagingContractTest {
 
     private static String read(String relative) throws IOException {
         return Files.readString(ROOT.resolve(relative), StandardCharsets.UTF_8);
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = haystack.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 }

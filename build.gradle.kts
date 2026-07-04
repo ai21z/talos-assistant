@@ -775,23 +775,25 @@ val candidateE2eTest by tasks.registering(Test::class) {
 
 /* ---------- Application runtime flags ---------- */
 
+val talosRuntimeJvmOptions = listOf(
+    "-Dfile.encoding=UTF-8",
+    // T880: on Java 18+ System.out/err use stdout.encoding/stderr.encoding, which
+    // default to the Windows console code page (e.g. cp1252) and replace the
+    // interactive lane glyphs (bullet, arrow) with '?'. Pin them to UTF-8 so a
+    // Unicode-capable terminal renders them; the ASCII fallback still covers
+    // non-Unicode/redirected output.
+    "-Dstdout.encoding=UTF-8",
+    "-Dstderr.encoding=UTF-8",
+    // T928: JLine 3.30+ and Lucene 10 use Java FFM/Panama internals on
+    // Java 21+. Allow unnamed-module native access so normal Linux/WSL
+    // status and REPL startup output is not prefixed by JVM warnings.
+    "--enable-native-access=ALL-UNNAMED",
+    "-XX:+UseZGC"
+)
+
 application {
     mainClass.set("dev.talos.app.Main")
-    applicationDefaultJvmArgs = listOf(
-        "-Dfile.encoding=UTF-8",
-        // T880: on Java 18+ System.out/err use stdout.encoding/stderr.encoding, which
-        // default to the Windows console code page (e.g. cp1252) and replace the
-        // interactive lane glyphs (bullet, arrow) with '?'. Pin them to UTF-8 so a
-        // Unicode-capable terminal renders them; the ASCII fallback still covers
-        // non-Unicode/redirected output.
-        "-Dstdout.encoding=UTF-8",
-        "-Dstderr.encoding=UTF-8",
-        // T928: JLine 3.30+ and Lucene 10 use Java FFM/Panama internals on
-        // Java 21+. Allow unnamed-module native access so normal Linux/WSL
-        // status and REPL startup output is not prefixed by JVM warnings.
-        "--enable-native-access=ALL-UNNAMED",
-        "-XX:+UseZGC"
-    )
+    applicationDefaultJvmArgs = talosRuntimeJvmOptions
 }
 
 /* ---------- Jar manifest attributes ---------- */
@@ -889,6 +891,12 @@ fun appendJpackageResources(args: MutableList<String>) {
     val iconFile = file("src/main/jpackage/icon.ico")
     if (iconFile.exists()) {
         args.addAll(listOf("--icon", iconFile.absolutePath))
+    }
+}
+
+fun appendTalosRuntimeJavaOptions(args: MutableList<String>) {
+    talosRuntimeJvmOptions.forEach { option ->
+        args.addAll(listOf("--java-options", option))
     }
 }
 
@@ -1038,6 +1046,7 @@ tasks.register<Exec>("jpackageApp") {
             "--win-per-user-install",
             "--install-dir", "Talos"
         )
+        appendTalosRuntimeJavaOptions(args)
         // Keep launcher startup quiet; Lucene falls back when the optional
         // incubator Vector module is not enabled at application launch.
 
@@ -1073,6 +1082,7 @@ tasks.register<Exec>("jpackageAppImage") {
             "--main-class", "dev.talos.app.Main",
             "--win-console"
         )
+        appendTalosRuntimeJavaOptions(args)
         appendJpackageResources(args)
 
         commandLine(args)
@@ -1183,6 +1193,7 @@ tasks.register<Exec>("jpackageLinuxAppImage") {
             "--main-jar", "talos.jar",
             "--main-class", "dev.talos.app.Main"
         )
+        appendTalosRuntimeJavaOptions(args)
 
         commandLine(args)
     }

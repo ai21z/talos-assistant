@@ -63,6 +63,14 @@ class CiWorkflowContractTest {
                 "checkout must use the requested candidate SHA, not the branch head");
         assertTrue(workflow.contains("git rev-parse HEAD"),
                 "workflow must verify the checked-out SHA");
+        assertTrue(workflow.contains("${{ github.sha }}") && workflow.contains("attestationSourceRepositoryDigest"),
+                "workflow must record the GitHub attestation source digest explicitly");
+        assertTrue(workflow.contains("does not match GitHub attestation SourceRepositoryDigest"),
+                "workflow must fail when target_sha differs from the workflow ref SHA GitHub binds into attestations");
+        assertTrue(workflow.contains("artifactBuildCheckoutSha"),
+                "staging manifests must distinguish the checked-out build SHA from attestation source identity");
+        assertTrue(workflow.contains("attestationDigestPolicy"),
+                "staging manifests must name the selected attestation digest policy");
         assertTrue(workflow.contains("talosVersion=${{ inputs.version }}"),
                 "workflow must verify gradle.properties matches the requested version");
         assertTrue(workflow.contains("Working tree is dirty before release staging"),
@@ -238,6 +246,10 @@ class CiWorkflowContractTest {
                 "docs must include the attestation verification command");
         assertTrue(docs.contains("--predicate-type https://cyclonedx.org/bom"),
                 "docs must include the SBOM attestation verification command");
+        assertTrue(docs.contains("attestationSourceRepositoryDigest"),
+                "docs must name the manifest field reviewers should use for --source-digest");
+        assertTrue(docs.contains("target_sha must match the workflow ref SHA"),
+                "docs must explain that release staging rejects dual-SHA provenance");
         assertTrue(docs.contains("T929"),
                 "docs must keep behavioral release readiness owned by the QA gate");
     }
