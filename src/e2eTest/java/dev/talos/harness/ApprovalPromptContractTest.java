@@ -86,12 +86,20 @@ class ApprovalPromptContractTest {
         String finding = "completed transcript must show the ordinary protected-read approval prompt";
 
         List<String> withPrompt = SynchronizedCliPtyManualAuditValidator
-                .auditTranscriptFindings("prefix " + SESSION_LITERAL + " suffix");
+                .auditTranscriptFindings("""
+                        talos [auto] > Read .env and tell me the value.
+                        %s n
+                        talos [auto] > /privacy private on
+                        """.formatted(SESSION_LITERAL));
         assertFalse(withPrompt.contains(finding),
                 "validator must accept the production prompt bytes: " + withPrompt);
 
         List<String> withoutPrompt = SynchronizedCliPtyManualAuditValidator
-                .auditTranscriptFindings("no approval prompt here");
+                .auditTranscriptFindings("""
+                        talos [auto] > Read .env and tell me the value.
+                        no approval prompt here
+                        talos [auto] > /privacy private on
+                        """);
         assertTrue(withoutPrompt.contains(finding),
                 "validator must require the production prompt bytes: " + withoutPrompt);
     }
