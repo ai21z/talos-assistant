@@ -310,6 +310,10 @@ describe("Talos landing page static contract", () => {
     assert.match(css, /\.terminal\b/);
     assert.match(css, /\.terminal-screen\b/);
     assert.match(css, /\.terminal-replay\b/);
+    assert.match(js, /Local-first CLI workspace operator\./);
+    assert.doesNotMatch(js, /Local-first CLI workspace operator\. Java 21 sources/);
+    assert.match(css, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*?\.terminal-screen\s*\{[\s\S]*?white-space:\s*pre-wrap/);
+    assert.match(css, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*?\.terminal-screen\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
   });
 
   it("leads the hero with the TALOS wordmark and a cycling acrostic word", () => {
@@ -616,6 +620,24 @@ describe("Talos landing page static contract", () => {
     // Scroll -> fill is a pure deterministic mapping, not an animation.
     assert.match(main, /function setupVein/);
     assert.match(main, /setProperty\("--ichor"/);
+  });
+
+  it("keeps desktop vein section labels hidden until scroll and unavailable on mobile", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const main = read("src/main.js");
+    const railMatch = html.match(/<nav class="vein-rail"[\s\S]*?<\/nav>/);
+    assert.ok(railMatch, "missing vein rail");
+
+    for (const label of ["Overview", "Execution", "Turn UI", "Local Boundaries", "Good Fits", "Docs"]) {
+      assert.match(railMatch[0], new RegExp(`<span class="vein-stop-label">${escapeRegExp(label)}</span>`));
+    }
+
+    assert.match(main, /has-scrolled/);
+    assert.match(main, /VEIN_LABEL_REVEAL_Y/);
+    assert.match(css, /\.vein-rail\.has-scrolled\s+\.vein-stop-label/);
+    assert.match(css, /\.vein-rail\.has-scrolled\s+\.vein-stop(?:\.is-active|\[aria-current="page"\])\s+\.vein-stop-label/);
+    assert.match(css, /@media\s*\(max-width:\s*920px\)\s*\{[\s\S]*?\.vein-rail\s*\{\s*display:\s*none/);
   });
 
   it("stages a skippable, fail-safe cold-boot awakening", () => {

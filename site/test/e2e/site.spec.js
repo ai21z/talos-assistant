@@ -140,6 +140,35 @@ test("scroll-spy moves the active nav state as sections are visited", async ({ p
   expect(scrollState.snapped).not.toMatch(/mandatory/i);
 });
 
+test("desktop vein rail reveals section names only after scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoTalos(page);
+  const rail = page.locator(".vein-rail");
+  const firstStop = rail.locator(".vein-stop").first();
+  const labels = rail.locator(".vein-stop-label");
+  const activeLabel = rail.locator('.vein-stop[aria-current="page"] .vein-stop-label');
+
+  await expect(firstStop).toBeVisible();
+  await expect(rail).not.toHaveClass(/has-scrolled/);
+  await expect
+    .poll(() => labels.first().evaluate((node) => Number(getComputedStyle(node).opacity)), {
+      timeout: 3000,
+    })
+    .toBeLessThan(0.1);
+
+  await page.mouse.wheel(0, 520);
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 3000 }).toBeGreaterThan(96);
+  await expect(rail).toHaveClass(/has-scrolled/);
+  await expect
+    .poll(() => activeLabel.evaluate((node) => Number(getComputedStyle(node).opacity)), {
+      timeout: 3000,
+    })
+    .toBeGreaterThan(0.8);
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expect(firstStop).toBeHidden();
+});
+
 test("staggered card grids reveal when scrolled into view", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoTalos(page);
@@ -290,6 +319,34 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
     expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390 + 1);
   }
 });
+
+for (const width of [320, 375, 390]) {
+  test(`mobile live terminal fits after answer renders at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoTalos(page);
+    await page.locator("[data-live-replay]").click();
+    await expect(page.locator("[data-live-output]")).toContainText("/last trace", { timeout: 9000 });
+
+    for (const selector of [
+      ".hero-inscription",
+      ".live-terminal",
+      ".live-terminal .terminal",
+      ".live-terminal .terminal-screen",
+      ".live-terminal .terminal-foot",
+      "#live-terminal-caption",
+    ]) {
+      const box = await page.locator(selector).boundingBox();
+      expect(box, `${selector} should render`).not.toBeNull();
+      expect(box.x, `${selector} left edge at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${selector} right edge at ${width}px`).toBeLessThanOrEqual(width + 1);
+    }
+
+    const terminalOverflow = await page.locator(".live-terminal .terminal-screen").evaluate((node) =>
+      node.scrollWidth - node.clientWidth,
+    );
+    expect(terminalOverflow).toBeLessThanOrEqual(1);
+  });
+}
 
 test("reduced-motion mode leaves content visible without reveal animations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });

@@ -26,9 +26,9 @@ const heroTurn = {
     '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, src/, docs/</span>',
     '<span class="t-green">✓</span> read    <span class="t-muted">4 files · 38 ms</span>',
     "",
-    '<span class="t-rail">┌─ answer ───────────────────────────────────────────</span>',
-    '<span class="t-rail">│</span> Local-first CLI workspace operator. Java 21 sources',
-    '<span class="t-rail">│</span> under <span class="t-cyan">src/</span>. Architecture notes under <span class="t-cyan">docs/</span>.',
+    '<span class="t-rail">┌─ answer ─────────────────────</span>',
+    '<span class="t-rail">│</span> Local-first CLI workspace operator.',
+    '<span class="t-rail">│</span> Java 21 sources under <span class="t-cyan">src/</span>. Notes under <span class="t-cyan">docs/</span>.',
     '<span class="t-rail">└─ turn 1 · 1.2 s · <span class="t-muted">/last trace</span></span>',
   ],
 };
@@ -132,9 +132,9 @@ const terminalStates = {
     '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, src/, docs/</span>',
     '<span class="t-green">✓</span> read    <span class="t-muted">4 files · 38 ms</span>',
     "",
-    '<span class="t-rail">┌─ answer ───────────────────────────────────────────</span>',
-    '<span class="t-rail">│</span> Local-first CLI workspace operator. Java 21 sources',
-    '<span class="t-rail">│</span> under <span class="t-cyan">src/</span>. Architecture notes under <span class="t-cyan">docs/</span>.',
+    '<span class="t-rail">┌─ answer ─────────────────────</span>',
+    '<span class="t-rail">│</span> Local-first CLI workspace operator.',
+    '<span class="t-rail">│</span> Java 21 sources under <span class="t-cyan">src/</span>. Notes under <span class="t-cyan">docs/</span>.',
     '<span class="t-rail">└─ turn 1 · 1.2 s · <span class="t-muted">/last trace</span></span>',
   ].join("\n"),
 
@@ -407,6 +407,7 @@ function setupVeinRail() {
   if (!rail) return;
   const stops = Array.from(rail.querySelectorAll(".vein-stop"));
   if (!stops.length) return;
+  const VEIN_LABEL_REVEAL_Y = 96;
   let fracs = stops.map(() => 0);
 
   const layout = () => {
@@ -423,6 +424,7 @@ function setupVeinRail() {
   const paint = () => {
     const max = document.documentElement.scrollHeight - window.innerHeight;
     const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    rail.classList.toggle("has-scrolled", window.scrollY >= VEIN_LABEL_REVEAL_Y);
     stops.forEach((stop, i) => stop.classList.toggle("is-reached", p >= fracs[i] - 0.0005));
   };
   let raf = 0;
@@ -433,6 +435,7 @@ function setupVeinRail() {
   layout();
   paint();
   window.addEventListener("scroll", onScroll, { passive: true });
+  document.addEventListener("scroll", onScroll, { passive: true, capture: true });
   window.addEventListener("resize", () => { layout(); paint(); });
   window.addEventListener("load", () => { layout(); paint(); });
   if (document.fonts && document.fonts.ready) {
