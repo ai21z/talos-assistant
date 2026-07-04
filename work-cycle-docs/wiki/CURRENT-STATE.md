@@ -143,18 +143,21 @@ confidence_histogram:
 ## Last Verified Evidence Identity
 
 - Branch: `v0.9.0-beta-dev`
-- Commit: `420e6c92b1a5837caa1a1b4f2d79cacac6d9a165`
+- Commit: `6c77d4b83f4d653a18beb94db2b33c8a244885a9`
 - Talos version: `0.10.8`
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), and T937 (winget/signing policy) remain
-  open. T944 (public identity alignment), T946 (docs route coverage), T947
-  (docs renderer/fallback), T948 (direct `llama-server` acquisition guidance),
-  T945 (landing page copy/accessibility/render polish), and T949 (site E2E
-  preview isolation) are done in the current 0.10.8 site/docs preparation
-  batch. T936, T935,
+  (`/session clear` target mismatch), T937 (winget/signing policy), T950
+  (private-document approval risk label), T951 (synchronized approval
+  config-deny scoring), T952 (validator-grade PTY evidence capture), and T953
+  (terminal fallback narrow no-break space glyph) remain open. T944 (public
+  identity alignment), T946 (docs route coverage), T947 (docs
+  renderer/fallback), T948 (direct `llama-server` acquisition guidance), T945
+  (landing page copy/accessibility/render polish), and T949 (site E2E preview
+  isolation) are done in the current 0.10.8 site/docs preparation batch. T936,
+  T935,
   T933, T932, T934, T931, T930, T929, T926, T925, and T928 are done on
   `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
 - Active wave context: the v0.9.0-beta-dev line has been merged to public
@@ -163,15 +166,17 @@ confidence_histogram:
   `420e6c92b1a5837caa1a1b4f2d79cacac6d9a165` promoted the accumulated
   `Unreleased` notes into `0.10.8`; later staging work produced QA staging
   artifacts, but public artifact publication remains blocked until the
-  pre-public site/docs truth queue and the required installed-product/manual QA
-  gates are explicitly accepted.
+  current QA/evidence follow-up tickets are fixed and the affected lanes are
+  rerun.
 - Known caveats: T923 remains a non-blocking custody-hardening design follow-up
   for the DPAPI raw-key PowerShell transport, T927 remains a `/session clear`
-  UX mismatch, and T937 remains the winget/signing policy follow-up. No public
-  release, tag, winget publication, signed artifact, draft release, or history
-  rewrite has happened.
-- Next move: run the T929 installed-product/manual QA packet before any public
-  artifact decision.
+  UX mismatch, T937 remains the winget/signing policy follow-up, T950/T951/T952
+  are pre-public QA evidence blockers, and T953 is a lower-priority terminal
+  fallback polish follow-up. No public release, tag, winget publication, signed
+  artifact, draft release, or history rewrite has happened.
+- Next move: implement T952/T951/T950, then rerun only the affected T929 lanes
+  before any public artifact decision. T953 should follow if time permits before
+  staging.
 
 ```talos-wiki-claims
 {
