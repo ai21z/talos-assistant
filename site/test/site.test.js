@@ -1,14 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (path) => readFileSync(join(root, path), "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const publicFiles = ["index.html", "src/main.js", "src/styles.css"];
+const publicFiles = ["index.html", "docs.html", "src/main.js", "src/styles.css"];
 const publicText = () => publicFiles.map(read).join("\n");
+const currentPublicName = "Aris Zounarakis";
+const currentPublicEmail = "aris@zounarakis.com";
+const oldPublicName = `${"Viss"}${"arion"} Zounarakis`;
+const oldPublicEmail = `${"viss"}${"arion"}@zounarakis.com`;
+const oldPublicIdentityPatterns = [
+  new RegExp(escapeRegExp(oldPublicName), "i"),
+  new RegExp(escapeRegExp(oldPublicEmail), "i"),
+];
 
 function currentTalosVersion() {
   const props = readFileSync(join(root, "..", "gradle.properties"), "utf8");
@@ -29,6 +37,36 @@ function anchorTargets(html) {
   return Array.from(html.matchAll(/href="#([^"]+)"/g), (match) => match[1]);
 }
 
+function userDocSlugsFromDisk() {
+  const docsRoot = join(root, "..", "docs", "user");
+  return walkFiles(docsRoot)
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => relative(docsRoot, file).replaceAll("\\", "/").replace(/\.md$/, ""))
+    .sort();
+}
+
+function markdownLinks(md) {
+  return Array.from(md.matchAll(/\[[^\]]+\]\(([^)]+)\)/g), (match) => match[1].trim());
+}
+
+function linkedDocSlug(sourceSlug, href) {
+  const hrefWithoutAnchor = href.split("#")[0].trim();
+  if (!hrefWithoutAnchor || hrefWithoutAnchor.startsWith("#")) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(hrefWithoutAnchor)) return null;
+  if (!hrefWithoutAnchor.endsWith(".md")) return null;
+
+  const parts = sourceSlug.split("/").slice(0, -1);
+  for (const part of hrefWithoutAnchor.split("/")) {
+    if (part === "." || part === "") continue;
+    if (part === "..") {
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  return parts.join("/").replace(/\.md$/, "");
+}
+
 function ids(html) {
   return new Set(Array.from(html.matchAll(/\sid="([^"]+)"/g), (match) => match[1]));
 }
@@ -41,6 +79,32 @@ function sectionSlice(html, startId, endId) {
   return html.slice(start, end);
 }
 
+function cssRule(css, selector) {
+  const pattern = new RegExp(`${escapeRegExp(selector)}\\s*\\{([\\s\\S]*?)\\}`);
+  const match = css.match(pattern);
+  assert.ok(match, `missing CSS rule for ${selector}`);
+  return match[1];
+}
+
+function cssVar(css, name) {
+  const match = css.match(new RegExp(`${escapeRegExp(name)}\\s*:\\s*(#[0-9a-f]{6})`, "i"));
+  assert.ok(match, `missing CSS variable ${name}`);
+  return match[1];
+}
+
+function contrastRatio(foreground, background) {
+  const luminance = (hex) => {
+    const value = hex.replace("#", "");
+    const [r, g, b] = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
+    const linear = (channel) => channel <= 0.03928
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 describe("Talos landing page static contract", () => {
   it("uses the final site package name and required scripts", () => {
     const pkg = JSON.parse(read("package.json"));
@@ -49,7 +113,7 @@ describe("Talos landing page static contract", () => {
     assert.equal(pkg.scripts.build, "vite build");
     assert.equal(pkg.scripts.preview, "vite preview");
     assert.equal(pkg.scripts.test, "npm run test:static");
-    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js");
+    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js test/docs-renderer.test.js");
     assert.equal(pkg.scripts["test:deploy-surface"], "node --test test/deploy-surface.test.js");
     assert.equal(pkg.scripts["test:e2e"], "playwright test");
   });
@@ -69,14 +133,70 @@ describe("Talos landing page static contract", () => {
     assert.ok(leakCheckIndex > buildIndex, "release staging must scan site/dist after building");
   });
 
-  it("uses one descriptive h1 grounded in local-first workspace identity", () => {
+  it("isolates Playwright preview evidence from unrelated local servers", () => {
+    const index = read("index.html");
+    const docs = read("docs.html");
+    const config = read("playwright.config.js");
+    const e2e = read("test/e2e/site.spec.js");
+
+    assert.match(index, /<body\b[^>]*\bdata-talos-site="landing"/);
+    assert.match(docs, /<body\b[^>]*\bdata-talos-site="docs"/);
+    assert.match(config, /TALOS_SITE_E2E_PORT/);
+    assert.match(config, /TALOS_SITE_E2E_BASE_URL/);
+    assert.match(config, /TALOS_SITE_E2E_SKIP_WEBSERVER/);
+    assert.match(config, /--strictPort/);
+    assert.match(config, /reuseExistingServer:\s*false/);
+    assert.doesNotMatch(config, /reuseExistingServer:\s*!process\.env\.CI/);
+    assert.doesNotMatch(config, /127\.0\.0\.1:4173/);
+    assert.match(e2e, /expectTalosPage/);
+    assert.match(e2e, /data-talos-site/);
+  });
+
+  it("publishes the current owner identity on public site and install surfaces", () => {
+    const publicSurfaces = {
+      "site/index.html": read("index.html"),
+      "site/docs.html": read("docs.html"),
+      "README.md": readFileSync(join(root, "..", "README.md"), "utf8"),
+      "docs/public-installation.md": readFileSync(join(root, "..", "docs", "public-installation.md"), "utf8"),
+      "docs/user/installation.md": readFileSync(join(root, "..", "docs", "user", "installation.md"), "utf8"),
+    };
+
+    for (const [file, body] of Object.entries(publicSurfaces)) {
+      assert.doesNotMatch(body, oldPublicIdentityPatterns[0], `${file} still publishes the old owner name`);
+      assert.doesNotMatch(body, oldPublicIdentityPatterns[1], `${file} still publishes the old owner email`);
+    }
+
+    for (const file of ["site/index.html", "site/docs.html"]) {
+      assert.match(publicSurfaces[file], new RegExp(escapeRegExp(currentPublicName)), `${file} missing current owner name`);
+      assert.match(publicSurfaces[file], new RegExp(escapeRegExp(currentPublicEmail)), `${file} missing current owner email`);
+    }
+
+    for (const file of ["README.md", "docs/public-installation.md", "docs/user/installation.md"]) {
+      assert.match(publicSurfaces[file], new RegExp(escapeRegExp(currentPublicName)), `${file} missing current publisher name`);
+    }
+  });
+
+  it("uses one product-specific h1 grounded in Talos trust evidence", () => {
     const html = read("index.html");
     const h1Matches = Array.from(html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi));
     assert.equal(h1Matches.length, 1);
     const h1Text = h1Matches[0][1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    assert.match(h1Text, /local-first/i);
-    assert.match(h1Text, /workspace/i);
+    assert.equal(h1Text, "The local CLI that verifies before it claims success.");
+    assert.doesNotMatch(h1Text, /operator/i);
     assert.notEqual(h1Text.toUpperCase(), "TALOS");
+  });
+
+  it("uses a decisive sticky header and readable trust accent colors", () => {
+    const css = read("src/styles.css");
+    const headerRule = cssRule(css, ".site-header");
+    const headerAlpha = Number(headerRule.match(/background:\s*rgba\(\s*8,\s*9,\s*11,\s*([0-9.]+)\s*\)/)?.[1]);
+    assert.ok(headerAlpha >= 0.9, `site header alpha ${headerAlpha} is too transparent`);
+    assert.match(headerRule, /box-shadow:/, "sticky header needs a separation shadow over scrolled content");
+
+    const background = cssVar(css, "--bg");
+    assert.ok(contrastRatio(cssVar(css, "--red"), background) >= 4.5, "--red must be readable on the page background");
+    assert.match(cssRule(css, ".state--deny"), /background:\s*rgba\(\s*215,\s*95,\s*95,\s*0\.(?:1[2-9]|[2-9]\d)\s*\)/);
+    assert.match(cssRule(css, ".t-rail"), /color:\s*var\(--bronze\)/);
   });
 
   it("uses the six-section map with reduced navigation labels", () => {
@@ -474,6 +594,14 @@ describe("Talos landing page static contract", () => {
     assert.match(mycelium, /canvas\.remove\(\)/);
   });
 
+  it("keeps the smoke canvas transparent so scrolled sections cannot wash out", () => {
+    const smoke = read("src/smoke.js");
+    assert.match(smoke, /alpha:\s*true/);
+    assert.doesNotMatch(smoke, /alpha:\s*false/);
+    assert.match(smoke, /clearColor\(\s*0,\s*0,\s*0,\s*0\s*\)/);
+    assert.match(smoke, /frag\s*=\s*vec4\(col,\s*alpha\)/);
+  });
+
   it("renders the ichor vein and its vigil nail", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
@@ -573,13 +701,15 @@ describe("Talos landing page static contract", () => {
 });
 
 describe("Talos in-site documentation contract", () => {
-  const userDocSlugs = [
+  const sidebarDocSlugs = [
     "index",
     "quickstart",
     "installation",
     "model-setup",
     "first-run",
     "workspaces-and-indexing",
+    "retrieval-and-vectors",
+    "beta-best-practices",
     "how-talos-works",
     "approvals-and-permissions",
     "local-privacy-and-artifacts",
@@ -588,8 +718,9 @@ describe("Talos in-site documentation contract", () => {
     "troubleshooting",
     "release-channels",
   ];
+  const userDocSlugs = userDocSlugsFromDisk();
 
-  it("ships every user doc Markdown source needed by the docs page", () => {
+  it("ships every public user doc Markdown source needed by the docs page", () => {
     const docsRoot = join(root, "..", "docs", "user");
     for (const slug of userDocSlugs) {
       const path = join(docsRoot, `${slug}.md`);
@@ -600,6 +731,54 @@ describe("Talos in-site documentation contract", () => {
       assert.doesNotMatch(body, /\bT\d{3,}\b/, `docs/user/${slug}.md leaks ticket ids`);
       assert.doesNotMatch(body, /work-cycle-docs|tickets\/(?:open|done)/i, `docs/user/${slug}.md leaks internal docs`);
     }
+  });
+
+  it("keeps every public user doc routable or explicitly excluded", () => {
+    assert.deepEqual(userDocSlugs, [
+      "approvals-and-permissions",
+      "beta-best-practices",
+      "commands",
+      "file-support",
+      "first-run",
+      "how-talos-works",
+      "index",
+      "installation",
+      "local-privacy-and-artifacts",
+      "model-profiles/deepseek-v2lite-q4km",
+      "model-profiles/gpt-oss-20b",
+      "model-profiles/qwen2.5-coder-14b",
+      "model-profiles/qwen36vf-q4km",
+      "model-profiles/qwen36vf-q6k",
+      "model-setup",
+      "quickstart",
+      "release-channels",
+      "retrieval-and-vectors",
+      "troubleshooting",
+      "workspaces-and-indexing",
+    ]);
+
+    const js = read("src/docs.js");
+    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/user\/\*\*\/\*\.md"/);
+    assert.match(js, /docs\/user\//);
+    assert.match(js, /replace\(\/\\\.md\$\//);
+  });
+
+  it("resolves internal Markdown links to routable docs pages", () => {
+    const docsRoot = join(root, "..", "docs", "user");
+    const routedSlugs = new Set(userDocSlugs);
+    const missing = [];
+
+    for (const sourceSlug of userDocSlugs) {
+      const body = readFileSync(join(docsRoot, `${sourceSlug}.md`), "utf8");
+      for (const href of markdownLinks(body)) {
+        const targetSlug = linkedDocSlug(sourceSlug, href);
+        if (targetSlug && !routedSlugs.has(targetSlug)) {
+          missing.push(`docs/user/${sourceSlug}.md -> ${href} (${targetSlug})`);
+        }
+      }
+    }
+
+    assert.deepEqual(missing, []);
   });
 
   it("registers docs.html as a Vite page without changing the landing entry", () => {
@@ -615,11 +794,14 @@ describe("Talos in-site documentation contract", () => {
     assert.match(html, /<title>Talos documentation/);
     assert.match(html, /<main id="main" class="docs-main">/);
     assert.match(html, /id="docs-article"/);
+    assert.match(html, /data-docs-fallback/);
+    assert.match(html, /Loading bundled documentation/);
+    assert.match(html, /source Markdown on GitHub/);
     assert.match(html, /type="module"\s+src="\/src\/docs\.js"/);
     for (const group of ["Get Started", "Guides", "Reference", "Concepts"]) {
       assert.match(html, new RegExp(`>${escapeRegExp(group)}<`));
     }
-    for (const slug of userDocSlugs.filter((slug) => slug !== "index")) {
+    for (const slug of sidebarDocSlugs.filter((slug) => slug !== "index")) {
       assert.match(html, new RegExp(`href="#/${escapeRegExp(slug)}"`), `missing #/${slug} docs route`);
       assert.match(html, new RegExp(`data-doc-slug="${escapeRegExp(slug)}"`), `missing ${slug} nav state`);
     }
@@ -627,15 +809,41 @@ describe("Talos in-site documentation contract", () => {
 
   it("renders docs from Markdown sources with a small trusted renderer", () => {
     const js = read("src/docs.js");
-    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/user\/\*\.md"/);
+    const renderer = read("src/docs-markdown.js");
+    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/user\/\*\*\/\*\.md"/);
+    assert.match(js, /from "\.\/docs-markdown\.js"/);
     assert.match(js, /query:\s*"\?raw"/);
-    assert.match(js, /function renderMarkdown/);
-    assert.match(js, /function escapeHtml/);
-    assert.match(js, /docs-table/);
-    assert.match(js, /docs-code/);
-    assert.match(js, /docs-copy/);
+    assert.match(renderer, /export function renderMarkdown/);
+    assert.match(renderer, /export function escapeHtml/);
+    assert.match(renderer, /collectListItems/);
+    assert.match(renderer, /docs-table/);
+    assert.match(renderer, /docs-code/);
+    assert.match(renderer, /docs-copy/);
     assert.match(js, /hashchange/);
     assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);
+    assert.doesNotMatch(renderer, /React|Vue|createApp|tailwind/i);
+  });
+
+  it("curates the docs landing with every top-level guide linked from docs/user/index.md", () => {
+    const js = read("src/docs.js");
+    for (const slug of [
+      "quickstart",
+      "installation",
+      "model-setup",
+      "first-run",
+      "workspaces-and-indexing",
+      "retrieval-and-vectors",
+      "beta-best-practices",
+      "how-talos-works",
+      "approvals-and-permissions",
+      "local-privacy-and-artifacts",
+      "file-support",
+      "commands",
+      "troubleshooting",
+      "release-channels",
+    ]) {
+      assert.match(js, new RegExp(`\\["[^"]+",\\s*"${escapeRegExp(slug)}"`), `docs landing missing ${slug}`);
+    }
   });
 
   it("links the landing docs cards into the in-site docs experience", () => {
@@ -651,6 +859,27 @@ describe("Talos in-site documentation contract", () => {
       assert.match(docs, new RegExp(`href="${escapeRegExp(route)}"`));
     }
     assert.doesNotMatch(docs, /github\.com\/ai21z\/talos-cli\/blob\/v0\.9\.0-beta-dev\/docs\/architecture/);
+  });
+
+  it("tells direct model-setup users where to get a compatible llama-server", () => {
+    const docsRoot = join(root, "..", "docs", "user");
+    const surface = ["quickstart", "installation", "model-setup", "troubleshooting"]
+      .map((slug) => readFileSync(join(docsRoot, `${slug}.md`), "utf8"))
+      .join("\n")
+      .replace(/\s+/g, " ");
+
+    for (const required of [
+      "Where to get `llama-server`",
+      "https://github.com/ggml-org/llama.cpp/releases/tag/b9860",
+      "llama-b9860-bin-ubuntu-x64.tar.gz",
+      "Ubuntu x64 (CPU)",
+      "Windows x64 (CPU)",
+      "talos setup wizard",
+      "talos setup models",
+      "Talos does not claim arbitrary latest upstream builds are verified",
+    ]) {
+      assert.match(surface, new RegExp(escapeRegExp(required), "i"));
+    }
   });
 
   it("does not publish unsupported install or capability claims in docs surface", () => {

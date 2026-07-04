@@ -364,7 +364,7 @@ talos
 This Windows public path is not live until a signed GitHub Release asset and
 winget manifest are published. The winget package name and moniker should be
 `talos-cli`, with `TalosLocal.Talos` as the exact package ID and
-`Vissarion Zounarakis` as publisher. The public installer will include a
+`Aris Zounarakis` as publisher. The public installer will include a
 bundled Java runtime, so public users should not need to install Java manually. It
 installs Talos only; it does not bundle a llama.cpp server or model weights.
 Model setup remains an explicit post-install command through

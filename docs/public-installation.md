@@ -50,7 +50,7 @@ winget package ID in the normal `Publisher.Package` shape:
 ```yaml
 PackageIdentifier: TalosLocal.Talos
 PackageName: talos-cli
-Publisher: Vissarion Zounarakis
+Publisher: Aris Zounarakis
 Moniker: talos-cli
 Commands:
   - talos

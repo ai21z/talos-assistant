@@ -29,7 +29,7 @@ class PublicInstallPackagingContractTest {
                 "Windows CLI package must create a console launcher");
         assertTrue(build.contains("\"--win-per-user-install\""),
                 "public beta MSI must support non-admin per-user install");
-        assertTrue(build.contains("\"--vendor\", \"Vissarion Zounarakis\""),
+        assertTrue(build.contains("\"--vendor\", \"Aris Zounarakis\""),
                 "publisher/vendor identity must match the public winget publisher target");
     }
 
@@ -387,7 +387,7 @@ class PublicInstallPackagingContractTest {
                     "public install identity must not keep the old planned winget package ID");
             assertTrue(text.contains("talos-cli"),
                     "public install copy must expose talos-cli as the searchable package name or moniker");
-            assertTrue(text.contains("Vissarion Zounarakis"),
+            assertTrue(text.contains("Aris Zounarakis"),
                     "public install copy must name the winget publisher");
             assertTrue(text.contains("Windows x64"),
                     "public beta install copy must keep the packaged Windows x64 lane explicit");

@@ -76,6 +76,9 @@ Write a model profile after locating the local `llama-server` binary:
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
 ```
 
+If you have not downloaded a server binary yet, use
+[Where to get `llama-server`](model-setup.md#where-to-get-llama-server).
+
 If config already exists, rerun with `--force` only after reviewing the current
 file:
 

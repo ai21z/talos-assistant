@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "npm run test:static",
-    "test:static": "node --test test/site.test.js",
+    "test:static": "node --test test/site.test.js test/docs-renderer.test.js",
     "test:deploy-surface": "node --test test/deploy-surface.test.js",
     "test:e2e": "playwright test"
   },

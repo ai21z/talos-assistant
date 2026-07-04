@@ -8,6 +8,12 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".svg", ".txt", ".webmanifest", ".xml"]);
 const forbiddenMarkers = ["codex", "claude", "copilot"];
+const oldPublicName = `${"Viss"}${"arion"} Zounarakis`;
+const oldPublicEmail = `${"viss"}${"arion"}@zounarakis.com`;
+const forbiddenIdentityPatterns = [
+  [new RegExp(oldPublicName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), "old public owner name"],
+  [new RegExp(oldPublicEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), "old public owner email"],
+];
 
 function walkFiles(dir) {
   return readdirSync(dir).flatMap((entry) => {
@@ -31,6 +37,11 @@ describe("Talos deploy surface", () => {
       for (const marker of forbiddenMarkers) {
         if (new RegExp(`\\b${marker}\\b`, "i").test(body)) {
           findings.push(`${rel}: forbidden marker ${marker}`);
+        }
+      }
+      for (const [pattern, label] of forbiddenIdentityPatterns) {
+        if (pattern.test(body)) {
+          findings.push(`${rel}: forbidden ${label}`);
         }
       }
     }

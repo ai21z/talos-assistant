@@ -1,5 +1,6 @@
 import "./styles.css";
 import { setupRitualMenu } from "./menu.js";
+import { escapeHtml, renderMarkdown } from "./docs-markdown.js";
 
 document.documentElement.classList.add("js");
 setupRitualMenu();
@@ -7,7 +8,7 @@ setupRitualMenu();
 // Import all user docs as raw strings at build time. The path is relative to
 // this file: site/src -> ../../docs/user. Vite resolves the glob and inlines
 // content into the bundle (no runtime fetch, no path traversal at runtime).
-const docModules = import.meta.glob("../../docs/user/*.md", {
+const docModules = import.meta.glob("../../docs/user/**/*.md", {
   query: "?raw",
   import: "default",
   eager: true,
@@ -15,191 +16,12 @@ const docModules = import.meta.glob("../../docs/user/*.md", {
 
 // Map slug -> raw markdown text. "index" becomes the docs landing page.
 const docsBySlug = {};
+const docsRootPrefix = "../../docs/user/";
 for (const [path, raw] of Object.entries(docModules)) {
-  const slug = path.replace(/^.*\//, "").replace(/\.md$/, "");
+  const slug = path.startsWith(docsRootPrefix)
+    ? path.slice(docsRootPrefix.length).replace(/\.md$/, "")
+    : path.replace(/^.*\//, "").replace(/\.md$/, "");
   docsBySlug[slug] = raw;
-}
-
-// --- Minimal Markdown parser ----------------------------------------------
-// Supports: ATX headings (#-###), paragraphs, unordered (`-`) and ordered
-// (`1.`) lists, GFM-style tables, fenced code blocks, inline code, links,
-// and bold/italic. Intentionally narrow: covers the patterns used in
-// docs/user/*.md and nothing more. No HTML passthrough; user docs are
-// authored, not hostile, but we still escape every literal value.
-function escapeHtml(input) {
-  return input
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function renderInline(text) {
-  // Tokenize inline code first so it is not re-processed.
-  const codeTokens = [];
-  let working = text.replace(/`([^`]+)`/g, (_match, code) => {
-    codeTokens.push(`<code>${escapeHtml(code)}</code>`);
-    return `\u0000${codeTokens.length - 1}\u0000`;
-  });
-
-  working = escapeHtml(working);
-
-  // Bold (**x**) and italic (*x*), bold first.
-  working = working.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  working = working.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
-
-  // Links: [label](href). Rewrite internal `*.md` links to in-site hash routes.
-  working = working.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
-    let safeHref = href.trim();
-    let isExternal = /^https?:\/\//i.test(safeHref);
-    const isAnchorOnly = safeHref.startsWith("#") && !safeHref.startsWith("#/");
-    const hasUnsafeProtocol = /^[a-z][a-z0-9+.-]*:/i.test(safeHref) && !isExternal;
-    if (hasUnsafeProtocol) {
-      safeHref = "#/";
-    }
-    if (isAnchorOnly) {
-      const { slug } = currentRoute();
-      if (slug) {
-        safeHref = `#/${slug}${safeHref}`;
-      }
-    } else if (!isExternal) {
-      // e.g. "installation.md" or "installation.md#section"
-      const mdMatch = safeHref.match(/^([^#?]+)\.md(#.*)?$/);
-      if (mdMatch) {
-        safeHref = `#/${mdMatch[1]}${mdMatch[2] || ""}`;
-      }
-    }
-    isExternal = /^https?:\/\//i.test(safeHref);
-    const target = isExternal ? ` target="_blank" rel="noopener"` : "";
-    return `<a href="${escapeHtml(safeHref)}"${target}>${label}</a>`;
-  });
-
-  // Restore inline code tokens.
-  working = working.replace(/\u0000(\d+)\u0000/g, (_m, i) => codeTokens[Number(i)]);
-  return working;
-}
-
-function slugifyHeading(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-function renderMarkdown(md) {
-  const lines = md.replace(/\r\n/g, "\n").split("\n");
-  const out = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Fenced code block
-    const fence = line.match(/^```(\w*)\s*$/);
-    if (fence) {
-      const lang = fence[1] || "text";
-      const buf = [];
-      i++;
-      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
-        buf.push(lines[i]);
-        i++;
-      }
-      i++; // consume closing fence
-      out.push(
-        `<pre class="docs-code" data-lang="${escapeHtml(lang)}"><button type="button" class="docs-copy" aria-label="Copy code">Copy</button><code>${escapeHtml(
-          buf.join("\n"),
-        )}</code></pre>`,
-      );
-      continue;
-    }
-
-    // Headings
-    const heading = line.match(/^(#{1,4})\s+(.*)$/);
-    if (heading) {
-      const level = heading[1].length;
-      const text = heading[2].trim();
-      const id = slugifyHeading(text);
-      out.push(`<h${level} id="${id}">${renderInline(text)}</h${level}>`);
-      i++;
-      continue;
-    }
-
-    // Table: a header row followed by a separator row of dashes/pipes.
-    if (
-      line.includes("|") &&
-      i + 1 < lines.length &&
-      /^\s*\|?\s*:?-{2,}.*\|/.test(lines[i + 1])
-    ) {
-      const split = (row) =>
-        row
-          .replace(/^\s*\|/, "")
-          .replace(/\|\s*$/, "")
-          .split("|")
-          .map((cell) => cell.trim());
-      const headers = split(line);
-      i += 2; // consume header + separator
-      const rows = [];
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
-        rows.push(split(lines[i]));
-        i++;
-      }
-      out.push(
-        `<div class="docs-table-wrap"><table class="docs-table"><thead><tr>${headers
-          .map((h) => `<th>${renderInline(h)}</th>`)
-          .join("")}</tr></thead><tbody>${rows
-          .map(
-            (row) =>
-              `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join("")}</tr>`,
-          )
-          .join("")}</tbody></table></div>`,
-      );
-      continue;
-    }
-
-    // Unordered list
-    if (/^\s*-\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*-\s+/, ""));
-        i++;
-      }
-      out.push(`<ul>${items.map((it) => `<li>${renderInline(it)}</li>`).join("")}</ul>`);
-      continue;
-    }
-
-    // Ordered list
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
-        i++;
-      }
-      out.push(`<ol>${items.map((it) => `<li>${renderInline(it)}</li>`).join("")}</ol>`);
-      continue;
-    }
-
-    // Blank line
-    if (line.trim() === "") {
-      i++;
-      continue;
-    }
-
-    // Paragraph. Collect contiguous non-blank lines that aren't block starts.
-    const buf = [line];
-    i++;
-    while (i < lines.length) {
-      const next = lines[i];
-      if (next.trim() === "") break;
-      if (/^#{1,4}\s+/.test(next)) break;
-      if (/^```/.test(next)) break;
-      if (/^\s*-\s+/.test(next)) break;
-      if (/^\s*\d+\.\s+/.test(next)) break;
-      buf.push(next);
-      i++;
-    }
-    out.push(`<p>${renderInline(buf.join(" "))}</p>`);
-  }
-  return out.join("\n");
 }
 
 // --- Routing --------------------------------------------------------------
@@ -267,7 +89,7 @@ function renderRoute() {
     return;
   }
 
-  article.innerHTML = renderMarkdown(md);
+  article.innerHTML = renderMarkdown(md, { currentSlug: () => currentRoute().slug });
   const firstHeading = article.querySelector("h1");
   document.title = firstHeading
     ? `${firstHeading.textContent.trim()} | Talos documentation`
@@ -288,6 +110,7 @@ function renderLandingHtml() {
         ["Installation", "installation", "Current install state and planned public beta."],
         ["Model Setup", "model-setup", "Configure a local model engine."],
         ["First Run", "first-run", "Understand the startup banner and prompt."],
+        ["Beta Best Practices", "beta-best-practices", "Use beta Talos safely and effectively."],
       ],
     },
     {
@@ -303,6 +126,7 @@ function renderLandingHtml() {
       items: [
         ["Commands", "commands", "Top-level CLI and REPL slash commands."],
         ["Workspaces And Indexing", "workspaces-and-indexing", "Workspace boundary and index state."],
+        ["Retrieval And Vectors", "retrieval-and-vectors", "RAG, BM25, vectors, and disabled-vector behavior."],
         ["Troubleshooting", "troubleshooting", "Diagnose install, model, and runtime issues."],
         ["Release Channels", "release-channels", "Beta status and planned release artifacts."],
       ],

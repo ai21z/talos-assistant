@@ -90,7 +90,7 @@ TalosLocal.Talos
 The planned publisher is:
 
 ```text
-Vissarion Zounarakis
+Aris Zounarakis
 ```
 
 Do not treat the public package path as live until release artifacts and package
@@ -135,7 +135,8 @@ bash install-talos.sh --version <version>
 ```
 
 Direct/expert path when you already have a compatible local `llama-server`
-binary:
+binary. If you need the binary first, see
+[Where to get `llama-server`](model-setup.md#where-to-get-llama-server):
 
 ```powershell
 talos setup models
@@ -172,7 +173,9 @@ The Unix source/developer installer:
   later.
 
 Offline or restricted-network users can skip the wizard download and use the
-direct path instead:
+direct path instead. Use a server binary you already trust or the pinned
+official release guidance in
+[Model Setup](model-setup.md#where-to-get-llama-server):
 
 ```powershell
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --model-path D:/models/qwen.gguf --write
