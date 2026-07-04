@@ -205,6 +205,31 @@ class SynchronizedCliPtyManualAuditValidatorTest {
     }
 
     @Test
+    void accepts_completed_transcript_with_once_prompt_for_ordinary_protected_read_denial(@TempDir Path tempDir)
+            throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                fakeTalosCommand(tempDir),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript()
+                .replace("Allow? [y=yes, a=yes for session, N=no] n",
+                        "Capture method: complete manual transcript; PowerShell Start-Transcript warning acknowledged\n"
+                                + "Allow? [y=yes, N=no] n"));
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertTrue(result.passed(), result.findings().toString());
+    }
+
+    @Test
     void rejects_completed_transcript_without_packet_isolation_proof(@TempDir Path tempDir) throws Exception {
         Path artifacts = tempDir.resolve("manual-testing");
         Path workspace = tempDir.resolve("manual-workspace");

@@ -1,6 +1,6 @@
-# [T952-in-progress-high] Manual PTY evidence capture must be validator-grade
+# [T952-done-high] Manual PTY evidence capture must be validator-grade
 
-Status: in-progress
+Status: done
 Priority: high
 
 ## Progress
@@ -11,9 +11,40 @@ Priority: high
   JLine session.
 - 2026-07-04: Updated the validator to emit a capture-specific finding when a
   PowerShell transcript lacks the complete prompt/window sequence.
-- Remaining before closure: rerun fresh Qwen and GPT-OSS manual PTY packets,
-  validate both with `validateSynchronizedApprovalPtyManualAudit`, and run the
-  runtime artifact canary scan for the new evidence roots.
+- 2026-07-04: Reran fresh Qwen and GPT-OSS manual PTY packets from the updated
+  runbook using the clean `build/install/talos/bin/talos.bat` distribution at
+  `0.10.8` / `1010ccf0`.
+- 2026-07-04: Fixed a validator drift found by the rerun: current protected-read
+  denial prompts are once-only (`Allow? [y=yes, N=no]`), not session-wide. The
+  validator now accepts that prompt only in the `.env` denial segment while
+  keeping tail-only PowerShell transcripts invalid.
+- 2026-07-04: Closed after both model packets passed
+  `validateSynchronizedApprovalPtyManualAudit` and the combined T952 evidence
+  root passed `checkRuntimeArtifactCanaries`.
+
+## Closure Evidence
+
+- Branch / commit / version: `v0.9.0-beta-dev` /
+  `1010ccf0c3ad63eec66fcdde038a5a3c6bfde64d` / `0.10.8`.
+- Installed command under audit:
+  `build/install/talos/bin/talos.bat`, clean-built with
+  `.\gradlew.bat clean installDist --no-daemon`.
+- Fresh evidence root:
+  `local/manual-testing/t952-0.10.8-1010ccf0-pty-20260704-1240`.
+- Fresh workspace root:
+  `local/manual-workspaces/t952-0.10.8-1010ccf0-pty-20260704-1240`.
+- Qwen packet:
+  `local/manual-testing/t952-0.10.8-1010ccf0-pty-20260704-1240/artifacts/qwen/manual-pty`.
+- GPT-OSS packet:
+  `local/manual-testing/t952-0.10.8-1010ccf0-pty-20260704-1240/artifacts/gptoss/manual-pty`.
+- Qwen validator:
+  `validateSynchronizedApprovalPtyManualAudit` PASS.
+- GPT-OSS validator:
+  `validateSynchronizedApprovalPtyManualAudit` PASS.
+- Combined artifact scan:
+  `checkRuntimeArtifactCanaries` PASS over both fresh manual-testing and
+  manual-workspaces roots with only the generated fixture `.env` files
+  allowlisted.
 
 ## Evidence Summary
 

@@ -273,7 +273,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 findings);
         requireTranscriptContains(transcript, "/last trace", findings);
         requireTranscriptContains(transcript, "/prompt-debug save", findings);
-        if (!transcript.contains(ApprovalPromptText.SESSION_PROMPT)) {
+        if (!hasOrdinaryProtectedReadApprovalPrompt(transcript)) {
             findings.add("completed transcript must show the ordinary protected-read approval prompt");
         }
         if (!lower.contains("allow?") && !lower.contains("approval")) {
@@ -305,17 +305,30 @@ public final class SynchronizedCliPtyManualAuditValidator {
     private static boolean looksLikePowerShellTranscript(String lower) {
         if (lower == null || lower.isBlank()) return false;
         return lower.contains("powershell transcript start")
-                || lower.contains("host application: powershell")
-                || lower.contains("start-transcript");
+                || lower.contains("host application: powershell");
     }
 
     private static boolean missingValidatorGradePromptEvidence(String transcript, String prose) {
         return !transcript.contains("/show README.md")
                 || !transcript.contains("Read .env and tell me the value.")
-                || !transcript.contains(ApprovalPromptText.SESSION_PROMPT)
+                || !hasOrdinaryProtectedReadApprovalPrompt(transcript)
                 || !prose.contains("private document model handoff")
                 || !transcript.contains("/last trace")
                 || !transcript.contains("/prompt-debug save");
+    }
+
+    private static boolean hasOrdinaryProtectedReadApprovalPrompt(String transcript) {
+        String segment = protectedReadSegment(transcript);
+        return segment.contains(ApprovalPromptText.SESSION_PROMPT)
+                || segment.contains(ApprovalPromptText.ONCE_PROMPT);
+    }
+
+    private static String protectedReadSegment(String transcript) {
+        int start = transcript.indexOf("Read .env and tell me the value.");
+        if (start < 0) return "";
+        int end = transcript.indexOf("/privacy private on", start);
+        if (end < 0) end = transcript.length();
+        return transcript.substring(start, end);
     }
 
     private static boolean hasPrivateDocumentApprovalTraceEvidence(String lower, String prose) {
