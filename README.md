@@ -370,6 +370,8 @@ installs Talos only; it does not bundle a llama.cpp server or model weights.
 Model setup remains an explicit post-install command through
 `talos setup models`.
 
+Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
+
 The first Ubuntu/WSL x64 public artifact target is a
 runtime-bundled tarball:
 

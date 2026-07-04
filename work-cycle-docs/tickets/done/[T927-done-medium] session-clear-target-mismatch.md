@@ -1,6 +1,6 @@
-# [T927-open-medium] Session clear target mismatch
+# [T927-done-medium] Session clear target mismatch
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -138,3 +138,25 @@ If implementation touches broader session behavior, also run:
 - This can be fixed before or after T926 milestone 1. It should not block the
   setup wizard dry-run unless the wizard starts relying on session commands.
 
+## Resolution
+
+- Startup saved-session notice now says:
+
+```text
+Use /session load to resume or /session list to manage saved sessions.
+```
+
+- The notice no longer claims `/session clear` deletes the previous saved
+  session reported by startup.
+- `/session clear` now renders `Current saved session deleted.` when it deletes
+  the active run's saved file and `No current saved session to delete.` when the
+  active run has no saved file.
+- No saved session is loaded into prompt context by default.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.repl.TalosBootstrapTest" --tests "dev.talos.cli.repl.slash.SessionCommandTest" --tests "dev.talos.cli.repl.slash.SessionCommandCharacterizationTest" --no-daemon
+```
+
+Result: BUILD SUCCESSFUL.

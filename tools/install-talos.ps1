@@ -30,7 +30,7 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 if ($PSCommandPath -and -not $AllowUnsigned) {
     $signature = Get-AuthenticodeSignature -FilePath $PSCommandPath
     if ($signature.Status -ne "Valid") {
-        throw "Installer signature is $($signature.Status). Download the signed release script or rerun with -AllowUnsigned for local development only."
+        throw "Installer signature is $($signature.Status). Download the signed release script or rerun with -AllowUnsigned for local development/manual QA only."
     }
 }
 

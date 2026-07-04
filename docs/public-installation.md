@@ -25,6 +25,8 @@ This is the release target, not a claim that the package is already published.
 Until a signed GitHub Release and winget manifest exist, Windows users should
 follow the source/developer setup in `README.md`.
 
+Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
+
 ## Support Boundary
 
 - Supported packaged public beta install target: Windows x64.
@@ -293,8 +295,9 @@ Linux uses the same repository and signer-workflow checks against
 
 Public Windows installers must be signed. The bootstrap script uses
 `Get-AuthenticodeSignature` and refuses unsigned scripts unless the caller passes
-`-AllowUnsigned` for local development. Release assets are verified with
-`Get-FileHash` against `checksums.txt`.
+`-AllowUnsigned` for local development/manual QA only. Release assets are
+verified with `Get-FileHash` against `checksums.txt`. Unsigned bootstrap
+execution is not a public beta install path.
 
 Do not publish a public download flow that asks users to pipe remote text into a
 PowerShell interpreter.

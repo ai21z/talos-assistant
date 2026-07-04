@@ -33,7 +33,7 @@ import java.util.List;
  *       other session by default; unique id prefix otherwise)</li>
  *   <li>{@code /session save} - manually save this session to disk</li>
  *   <li>{@code /session load} - alias of {@code resume}</li>
- *   <li>{@code /session clear} - delete this session's stored files</li>
+ *   <li>{@code /session clear} - delete the current session's stored files</li>
  * </ul>
  *
  * <p>T800: sessions are per-run instance files since T799
@@ -214,8 +214,8 @@ public final class SessionCommand implements Command {
     private Result clear() {
         boolean deleted = store.delete(activeSessionId);
         return deleted
-                ? new Result.Info("Saved session deleted.")
-                : new Result.Info("No saved session to delete.");
+                ? new Result.Info("Current saved session deleted.")
+                : new Result.Info("No current saved session to delete.");
     }
     // -- Export (T801) --
     /**

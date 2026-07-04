@@ -148,9 +148,9 @@ confidence_histogram:
 - Note: branch and commit here identify the last generated evidence run tracked
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
-- Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), and T937 (winget/signing policy) remain
-  open. T944 (public
+- Active tickets: none. T923 (DPAPI raw-key transport design follow-up), T927
+  (`/session clear` target mismatch), and T937 (winget/signing policy) are
+  done in the final pre-staging policy/UX closure batch. T944 (public
   identity alignment), T946 (docs route coverage), T947 (docs
   renderer/fallback), T948 (direct `llama-server` acquisition guidance), T945
   (landing page copy/accessibility/render polish), and T949 (site E2E preview
@@ -173,13 +173,12 @@ confidence_histogram:
   clean-installed `a7f41217` for both Qwen and GPT-OSS with validator PASS and
   artifact-canary PASS evidence under
   `local/manual-testing/t950-0.10.8-a7f41217-pty-20260704-1745`.
-- Known caveats: T923 remains a non-blocking custody-hardening design follow-up
-  for the DPAPI raw-key PowerShell transport, T927 remains a `/session clear`
-  UX mismatch, and T937 remains the winget/signing policy follow-up. No public release, tag, winget
-  publication, signed artifact, draft release, or history rewrite has happened.
-- Next move: move back to the public artifact decision path with T950 and T953
-  closed, the T950 affected PTY lane rerun, and validator-passed evidence
-  recorded.
+- Known caveats: T923 is closed as a documented beta custody boundary, not as a
+  native/JNA DPAPI transport implementation. Windows public beta remains
+  signed-only; no public release, tag, winget publication, signed artifact,
+  draft release, or history rewrite has happened.
+- Next move: run the required full verification for this closure batch, then
+  return to the public artifact decision path only from a clean committed tree.
 
 ```talos-wiki-claims
 {

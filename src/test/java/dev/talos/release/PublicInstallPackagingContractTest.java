@@ -156,6 +156,8 @@ class PublicInstallPackagingContractTest {
                 "bootstrap must verify downloaded artifact hashes");
         assertTrue(script.contains("Get-AuthenticodeSignature"),
                 "bootstrap must enforce or explicitly acknowledge script signing");
+        assertTrue(script.contains("-AllowUnsigned for local development/manual QA only"),
+                "unsigned bootstrap execution must remain outside the public beta install path");
         assertTrue(script.contains("$env:LOCALAPPDATA"),
                 "bootstrap must install under the current Windows user profile");
         assertTrue(script.contains("SetEnvironmentVariable"),
@@ -399,6 +401,10 @@ class PublicInstallPackagingContractTest {
                     "installer must not claim to bundle llama.cpp or model weights");
             assertTrue(text.contains("talos setup models"),
                     "model setup must remain a post-install Talos command");
+            assertTrue(text.contains("Windows public beta is signed-only"),
+                    "public docs must make the Windows signing policy explicit");
+            assertTrue(text.contains("`-AllowUnsigned` is local development/manual QA only, not a public beta install path"),
+                    "public docs must not present unsigned bootstrap execution as a user install path");
         }
 
         assertTrue(site.contains("winget install --id TalosLocal.Talos -e"),
@@ -415,6 +421,8 @@ class PublicInstallPackagingContractTest {
                 "site install preview must hand post-install model setup to the setup wizard");
         assertTrue(site.contains("Install commands go live when the first GitHub Release assets are published"),
                 "site install preview must not imply the package commands are live");
+        assertTrue(site.contains("Windows beta is signed-only; unsigned scripts stay local QA only"),
+                "site install preview must keep unsigned execution out of the public install path");
 
         String normalizedReadme = readme.replaceAll("\\s+", " ");
 

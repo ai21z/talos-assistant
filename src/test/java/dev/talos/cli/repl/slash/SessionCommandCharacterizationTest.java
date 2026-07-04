@@ -73,7 +73,7 @@ class SessionCommandCharacterizationTest {
                 ((Result.Info) command.execute("resume", ctx)).text);
         assertEquals("No saved session found for this workspace.",
                 ((Result.Info) command.execute("list", ctx)).text);
-        assertEquals("No saved session to delete.",
+        assertEquals("No current saved session to delete.",
                 ((Result.Info) command.execute("clear", ctx)).text);
 
         Result unknown = command.execute("bogus", ctx);

@@ -715,7 +715,7 @@ public final class TalosBootstrap {
         sb.append("  saved session found: ").append(summary.pairsReplayed()).append(" prior exchange")
                 .append(summary.pairsReplayed() == 1 ? "" : "s");
         if (!age.isBlank()) sb.append(" from ").append(age);
-        sb.append(". Not loaded. Use /session load to resume or /session clear to delete.");
+        sb.append(". Not loaded. Use /session load to resume or /session list to manage saved sessions.");
         return sb.toString();
     }
 

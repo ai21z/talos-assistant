@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- [T923] Closed the Windows DPAPI custody-transport follow-up as a documented
+  beta boundary instead of an unreviewed native dependency change. Public
+  privacy docs now state that the PowerShell DPAPI bridge can move raw key
+  bytes across Java/helper process pipes under the same user, and a new
+  architecture note records the future hardening bar for any native/JNA custody
+  redesign.
+- [T927] Fixed the saved-session startup notice and `/session clear` wording so
+  they no longer imply that the current-session clear command deletes an older
+  saved session. Startup now points to `/session load` and `/session list`;
+  clear results explicitly target the current saved session.
+- [T937] Made the Windows public beta distribution policy explicit and pinned
+  it in release packaging tests: Windows public beta is signed-only,
+  `-AllowUnsigned` is local development/manual QA only, and winget remains
+  planned until signed GitHub Release assets and a manifest exist.
 - [T953] Terminal ASCII fallback now maps U+202F narrow no-break space to a
   normal ASCII space, so model-authored inline code spans such as
   `` `medical-notes.docx` `` no longer render with `?` replacement glyphs in

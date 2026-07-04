@@ -1,6 +1,6 @@
-# [T937-open-medium] Winget and signing release policy
+# [T937-done-medium] Winget and signing release policy
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -157,5 +157,32 @@ git diff --check
 
 ## Known Follow-Ups
 
-- Acquire or configure signing before winget, unless owner explicitly chooses
-  unsigned developer beta.
+- Acquire or configure signing before winget.
+
+## Resolution
+
+Policy decision:
+
+```text
+Windows public beta is signed-only. `-AllowUnsigned` is local
+development/manual QA only, not a public beta install path.
+```
+
+Changes:
+
+- `tools/install-talos.ps1` now reports `-AllowUnsigned` as a local
+  development/manual QA escape hatch only.
+- `README.md`, `docs/public-installation.md`, `docs/user/installation.md`,
+  `docs/user/release-channels.md`, and `site/index.html` now agree that Windows
+  public beta is signed-only and winget remains planned until signed GitHub
+  Release assets and a manifest exist.
+- `PublicInstallPackagingContractTest` pins the signed-only policy and the
+  no-live-winget boundary across script, README, docs, and site.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.release.PublicInstallPackagingContractTest" --no-daemon
+```
+
+Result: BUILD SUCCESSFUL.

@@ -96,6 +96,8 @@ Aris Zounarakis
 Do not treat the public package path as live until release artifacts and package
 manifests are published.
 
+Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
+
 Ubuntu/WSL x64 public artifact support is scoped to the runtime-bundled
 `talos-<version>-linux-x64-app.tar.gz` tarball and `install-talos.sh` on
 Ubuntu/WSL x64 once release assets exist. Linux source/developer support from a
