@@ -1,6 +1,6 @@
 # [T955-open-high] Jpackage release artifacts miss Talos runtime JVM options
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -296,3 +296,80 @@ java-options=-Dstderr.encoding=UTF-8
 java-options=--enable-native-access=ALL-UNNAMED
 java-options=-XX:+UseZGC
 ```
+
+## Closure Evidence
+
+Closed on 2026-07-04 after the fix was merged into `main` and proved by a
+fresh QA staging run:
+
+- Branch/ref: `main`
+- Main HEAD / target SHA:
+  `4f77d560fafed55b48a1dcd4e6562f152363981c`
+- Version: `0.10.8`
+- GitHub Actions run: `28716314570`
+- Downloaded artifact root:
+  `local/release-artifact-smoke/run-28716314570-20260704-211007/`
+
+Verified the staged Windows app ZIP launcher config:
+
+```text
+[JavaOptions]
+java-options=-Djpackage.app-version=0.10.8
+java-options=-Dfile.encoding=UTF-8
+java-options=-Dstdout.encoding=UTF-8
+java-options=-Dstderr.encoding=UTF-8
+java-options=--enable-native-access=ALL-UNNAMED
+java-options=-XX:+UseZGC
+```
+
+Verified the staged Windows app ZIP executable:
+
+```text
+Talos.exe --version
+Talos.exe --help
+Talos.exe status --verbose
+Talos.exe setup wizard --dry-run
+
+WINDOWS_APPZIP_SMOKE: PASS
+```
+
+Verified the staged Linux tarball through the shipped installer in isolated
+WSL `/tmp` paths:
+
+```text
+bash install-talos.sh \
+  --artifact-file talos-0.10.8-linux-x64-app.tar.gz \
+  --checksums-file checksums.txt \
+  --install-root /tmp/talos-staging-smoke-28716314570-*/install \
+  --bin-dir /tmp/talos-staging-smoke-28716314570-*/bin \
+  --profile-file /tmp/talos-staging-smoke-28716314570-*/profile \
+  --force \
+  --no-wizard
+```
+
+The staged Linux launcher config contains the same Java options:
+
+```text
+[JavaOptions]
+java-options=-Djpackage.app-version=0.10.8
+java-options=-Dfile.encoding=UTF-8
+java-options=-Dstdout.encoding=UTF-8
+java-options=-Dstderr.encoding=UTF-8
+java-options=--enable-native-access=ALL-UNNAMED
+java-options=-XX:+UseZGC
+```
+
+Installed Linux smoke commands:
+
+```text
+talos --version
+talos --help
+talos status --verbose
+talos setup wizard --dry-run
+
+LINUX_INSTALLED_SMOKE: PASS
+```
+
+No `WARNING: A restricted method in java.lang.foreign.Linker` or
+`Use --enable-native-access=ALL-UNNAMED` warning appeared in the staged Windows
+or Linux command outputs.

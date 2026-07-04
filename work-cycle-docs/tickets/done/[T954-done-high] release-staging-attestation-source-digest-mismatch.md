@@ -1,6 +1,6 @@
 # [T954-open-high] Release-staging attestations bind to workflow ref SHA, not staged candidate SHA
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -261,4 +261,62 @@ Focused verification:
 
 ```powershell
 .\gradlew.bat test --tests "dev.talos.release.CiWorkflowContractTest" --no-daemon
+```
+
+## Closure Evidence
+
+Closed on 2026-07-04 after the fix was merged into `main` and proved by a
+fresh QA staging run:
+
+- Branch/ref: `main`
+- Main HEAD / target SHA:
+  `4f77d560fafed55b48a1dcd4e6562f152363981c`
+- Version: `0.10.8`
+- GitHub Actions run: `28716314570`
+- Workflow dispatch:
+  `gh workflow run release-staging.yml --repo ai21z/talos-assistant --ref main -f target_sha=4f77d560fafed55b48a1dcd4e6562f152363981c -f version=0.10.8`
+- Downloaded artifact root:
+  `local/release-artifact-smoke/run-28716314570-20260704-211007/`
+
+Verified both staging manifests now record matching source identity:
+
+```text
+sha == 4f77d560fafed55b48a1dcd4e6562f152363981c
+artifactBuildCheckoutSha == 4f77d560fafed55b48a1dcd4e6562f152363981c
+attestationSourceRepositoryDigest == 4f77d560fafed55b48a1dcd4e6562f152363981c
+releaseStatus == qa-staging-not-a-release
+publicReleaseAssetsCreated == false
+```
+
+Verified local artifact integrity:
+
+```text
+Windows checksums: 4/4 matched
+Linux checksums: 3/3 matched
+Windows SBOM: CycloneDX 1.6, serialNumber urn:uuid:da093500-1473-3abe-98ec-9493d51c52de
+Linux SBOM: CycloneDX 1.6, serialNumber urn:uuid:da093500-1473-3abe-98ec-9493d51c52de
+```
+
+Verified GitHub attestations against
+`attestationSourceRepositoryDigest=4f77d560fafed55b48a1dcd4e6562f152363981c`:
+
+```text
+Provenance attestation: Windows MSI
+Provenance attestation: Windows app ZIP
+Provenance attestation: Windows SBOM
+Provenance attestation: Windows staging manifest
+Provenance attestation: Windows install script
+Provenance attestation: Linux tarball
+Provenance attestation: Linux SBOM
+Provenance attestation: Linux staging manifest
+Provenance attestation: Linux install script
+SBOM attestation: Windows MSI
+SBOM attestation: Windows app ZIP
+SBOM attestation: Linux tarball
+```
+
+Result:
+
+```text
+ATTESTATION_VALIDATION: PASS
 ```
