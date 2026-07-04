@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T961] Blocked redacted-read writeback corruption before approval:
+  append-line requests such as `Append the line ... to notes.md` now derive an
+  append expectation, and mutating payloads that try to write Talos redaction
+  placeholders from same-turn redacted read evidence are rejected before
+  session approval, checkpointing, or disk mutation.
 - [T954] Tightened release-staging provenance truth: the workflow now rejects
   dual-SHA staging where `target_sha` differs from GitHub's attested workflow
   source digest, and staging manifests/docs now name

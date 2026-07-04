@@ -242,6 +242,41 @@ final class ToolCallPreExecutionGuardChain {
             return Result.blocked(effective, pathContext, failures, false);
         }
 
+        String redactedReadWritebackDiagnostic = RedactedReadWritebackGuard.diagnostic(
+                effective,
+                state,
+                pathHint);
+        if (redactedReadWritebackDiagnostic != null) {
+            int failures = 0;
+            if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                failures++;
+            }
+            ToolResult result = ToolResult.fail(ToolError.invalidParams(redactedReadWritebackDiagnostic));
+            toolResultEmitter.emit(effective.toolName(), result);
+            LocalTurnTraceCapture.recordActionObligation(
+                    "REDACTED_READ_WRITEBACK",
+                    "FAILED",
+                    redactedReadWritebackDiagnostic,
+                    "REDACTED_READBACK_WRITE_BLOCKED");
+            LocalTurnTraceCapture.recordToolCallBlocked(
+                    "tool_loop",
+                    effective,
+                    redactedReadWritebackDiagnostic);
+            state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                    effective,
+                    pathHint,
+                    redactedReadWritebackDiagnostic,
+                    workspaceOperationPlan,
+                    ToolFailureReason.NONE));
+            resultMessageAppender.append(state, nativePath, callIndex,
+                    ToolCallSupport.formatToolResult(effective, result));
+            LOG.debug("Blocked redacted-read writeback {} for {} before approval: {}",
+                    effective.toolName(),
+                    SafeLogFormatter.value(pathHint),
+                    SafeLogFormatter.text(redactedReadWritebackDiagnostic));
+            return Result.blocked(effective, pathContext, failures, false);
+        }
+
         ToolCall appendLineSteeredEdit = AppendLinePreApprovalGuard.steeredEditFile(
                 effective,
                 state,

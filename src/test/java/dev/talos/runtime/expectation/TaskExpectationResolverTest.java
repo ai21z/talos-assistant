@@ -131,6 +131,23 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsAppendTheLineExpectationForSingleTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append the line SESSION_APPROVAL_PROBE = passed to notes.md. Only edit notes.md.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        TaskExpectation expectation = expectations.getFirst();
+        assertEquals("APPEND_LINE", expectation.kind());
+        assertEquals("notes.md", expectation.targetPath());
+        AppendLineExpectation appendLine = (AppendLineExpectation) expectation;
+        assertEquals("SESSION_APPROVAL_PROBE = passed", appendLine.expectedLine());
+        assertEquals("append-line-exact", appendLine.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
     void extractsReplacementExpectationForSingleTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Replace .missing-button with #submit in script.js.");
