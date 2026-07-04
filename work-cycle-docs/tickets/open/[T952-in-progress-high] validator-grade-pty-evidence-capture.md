@@ -1,7 +1,19 @@
-# [T952-open-high] Manual PTY evidence capture must be validator-grade
+# [T952-in-progress-high] Manual PTY evidence capture must be validator-grade
 
-Status: open
+Status: in-progress
 Priority: high
+
+## Progress
+
+- 2026-07-04: Added deterministic harness coverage that keeps tail-only
+  PowerShell transcripts invalid and requires the manual packet/runbook to warn
+  that `Start-Transcript` is not validator-grade unless it captures the full
+  JLine session.
+- 2026-07-04: Updated the validator to emit a capture-specific finding when a
+  PowerShell transcript lacks the complete prompt/window sequence.
+- Remaining before closure: rerun fresh Qwen and GPT-OSS manual PTY packets,
+  validate both with `validateSynchronizedApprovalPtyManualAudit`, and run the
+  runtime artifact canary scan for the new evidence roots.
 
 ## Evidence Summary
 

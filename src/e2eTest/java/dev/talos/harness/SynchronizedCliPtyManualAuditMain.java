@@ -170,6 +170,7 @@ public final class SynchronizedCliPtyManualAuditMain {
 
                 Do not run this through Gradle redirected stdin, ProcessBuilder, IDE test consoles, or any pipe.
                 This packet exists because the current automated CLI smoke covers redirected stdin/stdout only.
+                Do not rely on PowerShell Start-Transcript alone for this lane. Start-Transcript may capture only the tail of a JLine session, especially when alternate-screen terminal behavior is involved. A transcript is validator-grade only if it contains the complete Talos prompt sequence, prompt rendering, route/progress line, approval windows before responses, `/last trace`, `/prompt-debug save`, and packet isolation evidence.
 
                 %s
 
@@ -252,6 +253,8 @@ public final class SynchronizedCliPtyManualAuditMain {
                    %s
                    ```
 
+                   Capture rule: the completed transcript must be the full visible terminal session, not a shell tail. PowerShell Start-Transcript output is acceptable only after you verify it contains every prompt/window listed in the pass criteria. If it only captures the tail, leave `PTY-MANUAL-AUDIT-RESULT.json` as not passed and rerun with a full terminal capture or paste the complete observed terminal session into `TRANSCRIPT.md`.
+
                 19. Copy `%s` to `PTY-MANUAL-AUDIT-RESULT.json` and update every field from observed evidence, including the launcher script and packet isolated-home markers in the transcript header.
 
                 20. Run the targeted artifact scan:
@@ -321,6 +324,7 @@ public final class SynchronizedCliPtyManualAuditMain {
                 Packet isolated home:
                 Workspace:
                 Terminal application:
+                Capture method:
                 Evidence owner:
 
                 ## Required Observations
@@ -347,6 +351,8 @@ public final class SynchronizedCliPtyManualAuditMain {
 
                 ## Transcript
 
+                Capture requirement: PowerShell Start-Transcript alone is not validator-grade unless this section
+                contains the complete JLine session, including /show README.md, approval windows, /last trace, and /prompt-debug save.
                 Paste transcript here after redacting no additional content beyond Talos runtime redaction.
                 Do not paste the raw fixture canary.
                 """;

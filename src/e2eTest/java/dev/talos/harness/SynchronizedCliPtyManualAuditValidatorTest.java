@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -87,6 +88,40 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                 .anyMatch(f -> f.contains("redirectedOrIdePipe must be false")), result.findings().toString());
         assertTrue(result.findings().stream()
                 .anyMatch(f -> f.contains("raw protected fixture canary appeared")), result.findings().toString());
+    }
+
+    @Test
+    void rejects_tail_only_powershell_transcript_with_capture_specific_finding() {
+        String transcript = """
+                **********************
+                Windows PowerShell transcript start
+                Start time: 20260704134600
+                Username: DESKTOP\\ai21z
+                RunAs User: DESKTOP\\ai21z
+                Machine: DESKTOP
+                Host Application: powershell
+                **********************
+
+                talos [auto] > /last trace
+                Mode: agent
+                Outcome: COMPLETE (READ_ONLY_ANSWERED)
+
+                talos [auto] > /prompt-debug save
+                Saved prompt debug render to prompt-debug.md
+                talos [auto] > /q
+
+                **********************
+                Windows PowerShell transcript end
+                **********************
+                """;
+
+        List<String> findings = SynchronizedCliPtyManualAuditValidator.auditTranscriptFindings(transcript);
+
+        assertFalse(findings.isEmpty(), findings.toString());
+        assertTrue(findings.stream()
+                        .anyMatch(f -> f.contains("PowerShell transcript appears incomplete")
+                                && f.contains("Start-Transcript alone is not validator-grade")),
+                findings.toString());
     }
 
     @Test

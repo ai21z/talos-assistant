@@ -100,6 +100,11 @@ Each full audit must use:
   assistant response
 - copied prompt-debug files, provider-body JSON files, server logs, session
   trace JSON, and session JSONL files
+- complete PTY/manual transcripts when a release gate depends on terminal UI
+  behavior. PowerShell `Start-Transcript` output is acceptable only if it
+  contains the full JLine session, prompts, approval windows, `/last trace`, and
+  `/prompt-debug save`; tail-only captures are observation notes, not completed
+  release evidence.
 
 If a run reuses old workspace state, it is not clean evidence.
 

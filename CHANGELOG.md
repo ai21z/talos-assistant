@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T952] Tightened manual PTY release evidence capture: the generated manual
+  PTY packet and release QA runbooks now warn that PowerShell
+  `Start-Transcript` may capture only the tail of JLine sessions, and the PTY
+  validator now emits a capture-specific failure when a PowerShell transcript
+  lacks the complete prompt/window sequence required for release evidence.
 - [T941] Added a manual Cloudflare Pages staging workflow for the
   `taloslocal` project. The workflow checks out an exact SHA, verifies the
   requested Talos version, runs site tests/build/deploy-surface leak scanning,

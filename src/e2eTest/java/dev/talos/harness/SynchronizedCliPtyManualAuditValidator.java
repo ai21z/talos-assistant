@@ -250,6 +250,12 @@ public final class SynchronizedCliPtyManualAuditValidator {
         // Prose checks match the raw transcript OR the rejoined view;
         // chrome checks (prompt strings, markers, commands) stay raw-only.
         String prose = lower + "\n" + wrapTolerantView(transcript).toLowerCase(Locale.ROOT);
+        if (looksLikePowerShellTranscript(lower)
+                && missingValidatorGradePromptEvidence(transcript, prose)) {
+            findings.add("PowerShell transcript appears incomplete for PTY/JLine evidence; "
+                    + "Start-Transcript alone is not validator-grade unless the completed transcript contains "
+                    + "the full Talos prompt sequence, approval windows, /last trace, and /prompt-debug save");
+        }
         if (transcript.contains(RAW_CANARY)) {
             findings.add("raw protected fixture canary appeared in completed transcript");
         }
@@ -294,6 +300,22 @@ public final class SynchronizedCliPtyManualAuditValidator {
         if (!hasPrivateDocumentApprovalTraceEvidence(lower, prose)) {
             findings.add("completed transcript must show private-document per-turn approval trace evidence");
         }
+    }
+
+    private static boolean looksLikePowerShellTranscript(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("powershell transcript start")
+                || lower.contains("host application: powershell")
+                || lower.contains("start-transcript");
+    }
+
+    private static boolean missingValidatorGradePromptEvidence(String transcript, String prose) {
+        return !transcript.contains("/show README.md")
+                || !transcript.contains("Read .env and tell me the value.")
+                || !transcript.contains(ApprovalPromptText.SESSION_PROMPT)
+                || !prose.contains("private document model handoff")
+                || !transcript.contains("/last trace")
+                || !transcript.contains("/prompt-debug save");
     }
 
     private static boolean hasPrivateDocumentApprovalTraceEvidence(String lower, String prose) {
