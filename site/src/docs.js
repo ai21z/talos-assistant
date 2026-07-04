@@ -168,7 +168,7 @@ function renderLandingHtml() {
   <p class="docs-lede">
     Setup, commands, approvals, privacy, and troubleshooting for the current
     source/developer setup plus planned Windows and Ubuntu/WSL x64 public
-    artifact targets. Source-backed, paired with concrete limits.
+    artifact targets. The docs include current limits.
   </p>
   <p class="docs-start-path">
     Start here:

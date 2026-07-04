@@ -404,8 +404,8 @@ describe("Talos landing page static contract", () => {
 
     for (const required of [
       "Interactive turns leave local trace evidence",
-      "A consistent turn grammar",
-      "Runtime policy owns approval, tool exposure, result checks, protected reads, and unsupported-file honesty",
+      "One ordered flow for local workspace work",
+      "Runtime policy controls approvals, tool access, result checks, protected reads, and unsupported-file handling",
       "planned public beta",
       "TalosLocal.Talos",
       "curl -fsSL https://taloslocal.com/install.sh | sh",
