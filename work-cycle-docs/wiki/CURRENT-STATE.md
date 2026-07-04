@@ -149,8 +149,7 @@ confidence_histogram:
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), T937 (winget/signing policy), T950
-  (private-document approval risk label), and T953
+  (`/session clear` target mismatch), T937 (winget/signing policy), and T953
   (terminal fallback narrow no-break space glyph) remain open. T944 (public
   identity alignment), T946 (docs route coverage), T947 (docs
   renderer/fallback), T948 (direct `llama-server` acquisition guidance), T945
@@ -158,6 +157,8 @@ confidence_histogram:
   isolation) are done in the current 0.10.8 site/docs preparation batch. T951
   (synchronized approval config-deny scoring) and T952 (validator-grade PTY
   evidence capture) are done in the current QA/evidence reconciliation batch.
+  T950 (private-document approval risk label) is done in the same release QA
+  evidence cleanup batch.
   T936,
   T935,
   T933, T932, T934, T931, T930, T929, T926, T925, and T928 are done on
@@ -172,12 +173,12 @@ confidence_histogram:
   rerun.
 - Known caveats: T923 remains a non-blocking custody-hardening design follow-up
   for the DPAPI raw-key PowerShell transport, T927 remains a `/session clear`
-  UX mismatch, T937 remains the winget/signing policy follow-up, T950 remains
-  the active pre-public QA evidence blocker, and T953 is a lower-priority
-  terminal fallback polish follow-up. No public release, tag, winget
+  UX mismatch, T937 remains the winget/signing policy follow-up, and T953 is a
+  lower-priority terminal fallback polish follow-up. No public release, tag, winget
   publication, signed artifact, draft release, or history rewrite has happened.
-- Next move: implement T950, then rerun only the affected T929 lanes before any
-  public artifact decision. T953 should follow if time permits before staging.
+- Next move: rerun the affected T929 private-document manual PTY lane before
+  any public artifact decision. T953 should follow if time permits before
+  staging.
 
 ```talos-wiki-claims
 {

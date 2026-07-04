@@ -201,7 +201,9 @@ public final class CliApprovalGate implements ApprovalGate {
                 .toLowerCase(java.util.Locale.ROOT);
         if (text.contains("protected read")
                 || text.contains("sensitive read")
-                || text.contains("reading protected path")) {
+                || text.contains("reading protected path")
+                || text.contains("private document model handoff")
+                || text.contains("sending extracted document text to model context")) {
             return "sensitive read";
         }
         if (text.contains("delete") || text.contains("destructive") || text.contains("remove")) {

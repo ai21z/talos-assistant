@@ -169,6 +169,29 @@ class CliApprovalGateTest {
         }
 
         @Test
+        void labelsPrivateDocumentModelHandoffAsSensitiveReadEvenWithTargetDetail() {
+            var out = new ByteArrayOutputStream();
+            var gate = new CliApprovalGate(
+                    new ByteArrayInputStream("\n".getBytes(StandardCharsets.UTF_8)),
+                    new PrintStream(out, true, StandardCharsets.UTF_8));
+
+            gate.approveOnce(
+                    "private document model handoff: talos.read_file",
+                    "permission: Private mode requires approval before sending extracted document text "
+                            + "to model context.\n"
+                            + "    target: medical-notes.docx\n"
+                            + "    Approval scope: SEND_TO_MODEL_CONTEXT for this per-turn "
+                            + "private-document handoff.");
+
+            String text = out.toString(StandardCharsets.UTF_8);
+            assertTrue(text.contains("Action  private document model handoff: talos.read_file"), text);
+            assertTrue(text.contains("Risk    sensitive read"), text);
+            assertFalse(text.contains("Risk    write"), text);
+            assertTrue(text.contains("approve this turn"), text);
+            assertFalse(text.contains("approve for session"), text);
+        }
+
+        @Test
         void handlesNullDescription() {
             var gate = gateWith("y\n");
             assertTrue(gate.approve(null, null));

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T950] Private-document model handoff approval windows now render the
+  non-mutating `sensitive read` risk label even when the approval detail
+  includes a `target:` line. The fix preserves once-only approval semantics for
+  private-document handoff and keeps write/edit approvals labeled as `write`.
 - [T951] Synchronized approval summaries now distinguish proven protected-read
   config/policy denial from missing approval evidence. Audit transcripts carry
   redacted permission-decision summaries, and the summary scorer now labels

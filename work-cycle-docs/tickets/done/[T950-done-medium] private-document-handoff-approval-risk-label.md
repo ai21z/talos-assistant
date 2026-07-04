@@ -1,6 +1,6 @@
-# [T950-open-medium] Private-document handoff approval must not render as write risk
+# [T950-done-medium] Private-document handoff approval must not render as write risk
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -224,3 +224,47 @@ Commands:
 ## Known Follow-Ups
 
 - None.
+
+## Resolution
+
+Implemented in the approval risk inference path instead of patching one
+rendered string. `CliApprovalGate.inferRisk` now classifies private-document
+model-context handoff approval as `sensitive read` before the generic
+`target:`-implies-write fallback runs.
+
+The change is intentionally narrow:
+
+- private-document model handoff approvals render `Risk    sensitive read`;
+- the once-only approval prompt still excludes session-remember choices;
+- write/edit approvals with `target:` still render `Risk    write`;
+- private-document handoff trace and model-context policy behavior are
+  unchanged.
+
+## Verification
+
+Red/green focused regression:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.approval.CliApprovalGateTest" --no-daemon
+```
+
+Expected red before implementation:
+
+```text
+CliApprovalGateTest > ScannerBased >
+labelsPrivateDocumentModelHandoffAsSensitiveReadEvenWithTargetDetail() FAILED
+```
+
+Green after implementation:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.approval.CliApprovalGateTest" --no-daemon
+```
+
+Affected adjacent gates:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolResultModelContextHandoffTest" `
+  --tests "dev.talos.runtime.trace.LocalTurnTracePrivateDocumentHandoffTest" `
+  e2eTest --tests "dev.talos.harness.ApprovalPromptContractTest" --no-daemon
+```
