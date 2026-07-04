@@ -150,13 +150,15 @@ confidence_histogram:
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
   (`/session clear` target mismatch), T937 (winget/signing policy), T950
-  (private-document approval risk label), T951 (synchronized approval
-  config-deny scoring), T952 (validator-grade PTY evidence capture), and T953
+  (private-document approval risk label), and T953
   (terminal fallback narrow no-break space glyph) remain open. T944 (public
   identity alignment), T946 (docs route coverage), T947 (docs
   renderer/fallback), T948 (direct `llama-server` acquisition guidance), T945
   (landing page copy/accessibility/render polish), and T949 (site E2E preview
-  isolation) are done in the current 0.10.8 site/docs preparation batch. T936,
+  isolation) are done in the current 0.10.8 site/docs preparation batch. T951
+  (synchronized approval config-deny scoring) and T952 (validator-grade PTY
+  evidence capture) are done in the current QA/evidence reconciliation batch.
+  T936,
   T935,
   T933, T932, T934, T931, T930, T929, T926, T925, and T928 are done on
   `v0.9.0-beta-dev` and must be included in any future candidate/release merge.
@@ -170,13 +172,12 @@ confidence_histogram:
   rerun.
 - Known caveats: T923 remains a non-blocking custody-hardening design follow-up
   for the DPAPI raw-key PowerShell transport, T927 remains a `/session clear`
-  UX mismatch, T937 remains the winget/signing policy follow-up, T950/T951/T952
-  are pre-public QA evidence blockers, and T953 is a lower-priority terminal
-  fallback polish follow-up. No public release, tag, winget publication, signed
-  artifact, draft release, or history rewrite has happened.
-- Next move: implement T952/T951/T950, then rerun only the affected T929 lanes
-  before any public artifact decision. T953 should follow if time permits before
-  staging.
+  UX mismatch, T937 remains the winget/signing policy follow-up, T950 remains
+  the active pre-public QA evidence blocker, and T953 is a lower-priority
+  terminal fallback polish follow-up. No public release, tag, winget
+  publication, signed artifact, draft release, or history rewrite has happened.
+- Next move: implement T950, then rerun only the affected T929 lanes before any
+  public artifact decision. T953 should follow if time permits before staging.
 
 ```talos-wiki-claims
 {

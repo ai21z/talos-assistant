@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T951] Synchronized approval summaries now distinguish proven protected-read
+  config/policy denial from missing approval evidence. Audit transcripts carry
+  redacted permission-decision summaries, and the summary scorer now labels
+  `protected-read-denied` config-deny bundles as `PASS_WITH_POLICY_DENY` only
+  when durable trace-derived evidence shows a protected `talos.read_file`
+  denial before approval; ask-policy lanes still fail when an expected approval
+  prompt is genuinely missing.
 - [T952] Tightened manual PTY release evidence capture: the generated manual
   PTY packet and release QA runbooks now warn that PowerShell
   `Start-Transcript` may capture only the tail of JLine sessions, and the PTY
