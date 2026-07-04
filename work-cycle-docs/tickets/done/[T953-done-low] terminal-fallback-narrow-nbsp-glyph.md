@@ -1,6 +1,6 @@
-# [T953-open-low] Terminal fallback should not render narrow no-break spaces as question marks
+# [T953-done-low] Terminal fallback should not render narrow no-break spaces as question marks
 
-Status: open
+Status: done
 Priority: low
 
 ## Evidence Summary
@@ -206,3 +206,43 @@ Commands:
 ## Known Follow-Ups
 
 - Add additional spacing punctuation only when observed in real terminal output.
+
+## Resolution
+
+Implemented as a narrow terminal ASCII fallback-table fix. `Sanitize.toAsciiFallback`
+now maps U+202F NARROW NO-BREAK SPACE to a normal ASCII space alongside the
+existing U+00A0 non-breaking-space mapping. The existing U+2011 non-breaking
+hyphen fallback remains `-`.
+
+The regression uses the observed GPT-OSS answer shape:
+
+```text
+I\u2019m unable to view the text of the\u202f`medical\u2011notes.docx`\u202ffile.
+```
+
+and pins the fallback output:
+
+```text
+I'm unable to view the text of the `medical-notes.docx` file.
+```
+
+## Verification
+
+Red before implementation:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.util.SanitizeTerminalOutputTest" --no-daemon
+```
+
+Expected failing regression:
+
+```text
+SanitizeTerminalOutputTest >
+asciiFallbackTurnsNarrowNoBreakSpacesAroundInlineCodeIntoSpaces() FAILED
+```
+
+Green after implementation:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.core.util.SanitizeTerminalOutputTest" --no-daemon
+```

@@ -33,4 +33,15 @@ final class SanitizeTerminalOutputTest {
         assertFalse(output.contains("<think>"));
         assertEquals("Hello World  - done", output);
     }
+
+    @Test
+    void asciiFallbackTurnsNarrowNoBreakSpacesAroundInlineCodeIntoSpaces() {
+        String input = "I\u2019m unable to view the text of the\u202f"
+                + "`medical\u2011notes.docx`\u202ffile.";
+
+        String output = Sanitize.toAsciiFallback(input);
+
+        assertEquals("I'm unable to view the text of the `medical-notes.docx` file.", output);
+        assertFalse(output.contains("?"), output);
+    }
 }

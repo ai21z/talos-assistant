@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T953] Terminal ASCII fallback now maps U+202F narrow no-break space to a
+  normal ASCII space, so model-authored inline code spans such as
+  `` `medical-notes.docx` `` no longer render with `?` replacement glyphs in
+  Unicode-unsafe terminal/capture paths.
 - [T950] Private-document model handoff approval windows now render the
   non-mutating `sensitive read` risk label even when the approval detail
   includes a `target:` line. The fix preserves once-only approval semantics for

@@ -149,8 +149,8 @@ confidence_histogram:
   by the wiki. They are advisory metadata, not a claim that this Markdown file
   contains the SHA of its own containing commit.
 - Active tickets: T923 (DPAPI raw-key transport design follow-up), T927
-  (`/session clear` target mismatch), T937 (winget/signing policy), and T953
-  (terminal fallback narrow no-break space glyph) remain open. T944 (public
+  (`/session clear` target mismatch), and T937 (winget/signing policy) remain
+  open. T944 (public
   identity alignment), T946 (docs route coverage), T947 (docs
   renderer/fallback), T948 (direct `llama-server` acquisition guidance), T945
   (landing page copy/accessibility/render polish), and T949 (site E2E preview
@@ -158,7 +158,8 @@ confidence_histogram:
   (synchronized approval config-deny scoring) and T952 (validator-grade PTY
   evidence capture) are done in the current QA/evidence reconciliation batch.
   T950 (private-document approval risk label) is done in the same release QA
-  evidence cleanup batch.
+  evidence cleanup batch. T953 (terminal fallback narrow no-break space glyph)
+  is done in the final pre-staging polish batch.
   T936,
   T935,
   T933, T932, T934, T931, T930, T929, T926, T925, and T928 are done on
@@ -174,12 +175,11 @@ confidence_histogram:
   `local/manual-testing/t950-0.10.8-a7f41217-pty-20260704-1745`.
 - Known caveats: T923 remains a non-blocking custody-hardening design follow-up
   for the DPAPI raw-key PowerShell transport, T927 remains a `/session clear`
-  UX mismatch, T937 remains the winget/signing policy follow-up, and T953 is a
-  lower-priority terminal fallback polish follow-up. No public release, tag, winget
+  UX mismatch, and T937 remains the winget/signing policy follow-up. No public release, tag, winget
   publication, signed artifact, draft release, or history rewrite has happened.
-- Next move: decide whether to implement T953 before staging; otherwise move
-  back to the public artifact decision path with the T950 affected PTY lane now
-  rerun and validator-passed.
+- Next move: move back to the public artifact decision path with T950 and T953
+  closed, the T950 affected PTY lane rerun, and validator-passed evidence
+  recorded.
 
 ```talos-wiki-claims
 {

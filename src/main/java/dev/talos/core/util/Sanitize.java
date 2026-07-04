@@ -95,7 +95,7 @@ public final class Sanitize {
             }
 
             switch (cp) {
-                case 0x00A0 -> out.append(' ');       // non-breaking space
+                case 0x00A0, 0x202F -> out.append(' '); // non-breaking / narrow non-breaking space
                 case 0x2018, 0x2019, 0x201B, 0x2032 -> out.append('\'');
                 case 0x201C, 0x201D, 0x201F, 0x2033 -> out.append('"');
                 case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212 -> out.append('-');
