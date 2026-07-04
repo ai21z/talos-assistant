@@ -45,6 +45,10 @@ jobs:
             throw "Checked out SHA $actualSha does not match requested SHA ${{ inputs.target_sha }}"
           }
 
+          if ("${{ github.sha }}" -ne "${{ inputs.target_sha }}") {
+            throw "target_sha ${{ inputs.target_sha }} does not match GitHub attestation SourceRepositoryDigest ${{ github.sha }}. Dispatch release-staging with --ref resolving to target_sha."
+          }
+
           $versionLine = (Select-String -Path gradle.properties -Pattern '^talosVersion=').Line
           if ($versionLine -ne "talosVersion=${{ inputs.version }}") {
             throw "gradle.properties has '$versionLine', expected talosVersion=${{ inputs.version }}"
@@ -104,6 +108,9 @@ jobs:
             schema = "talos.releaseStagingManifest.v1"
             releaseStatus = "qa-staging-not-a-release"
             sha = "${{ inputs.target_sha }}"
+            artifactBuildCheckoutSha = "${{ inputs.target_sha }}"
+            attestationSourceRepositoryDigest = "${{ github.sha }}"
+            attestationDigestPolicy = "target_sha must match the workflow ref SHA; use attestationSourceRepositoryDigest for gh attestation verify --source-digest"
             version = "${{ inputs.version }}"
             runId = "${{ github.run_id }}"
             runAttempt = "${{ github.run_attempt }}"
@@ -157,6 +164,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "${{ github.sha }}" != "${{ inputs.target_sha }}" ]]; then
+            echo "target_sha ${{ inputs.target_sha }} does not match GitHub attestation SourceRepositoryDigest ${{ github.sha }}. Dispatch release-staging with --ref resolving to target_sha."
+            exit 1
+          fi
+
           version_line="$(grep -E '^talosVersion=' gradle.properties)"
           if [[ "$version_line" != "talosVersion=${{ inputs.version }}" ]]; then
             echo "gradle.properties has '$version_line', expected talosVersion=${{ inputs.version }}"
@@ -196,6 +208,9 @@ jobs:
             "schema": "talos.releaseStagingManifest.v1",
             "releaseStatus": "qa-staging-not-a-release",
             "sha": "${{ inputs.target_sha }}",
+            "artifactBuildCheckoutSha": "${{ inputs.target_sha }}",
+            "attestationSourceRepositoryDigest": "${{ github.sha }}",
+            "attestationDigestPolicy": "target_sha must match the workflow ref SHA; use attestationSourceRepositoryDigest for gh attestation verify --source-digest",
             "version": "${{ inputs.version }}",
             "runId": "${{ github.run_id }}",
             "runAttempt": "${{ github.run_attempt }}",

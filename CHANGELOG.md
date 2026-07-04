@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- [T954] Tightened release-staging provenance truth: the workflow now rejects
+  dual-SHA staging where `target_sha` differs from GitHub's attested workflow
+  source digest, and staging manifests/docs now name
+  `artifactBuildCheckoutSha` and `attestationSourceRepositoryDigest`
+  explicitly. Fresh staging attestation verification is still required before
+  closing the blocker.
+- [T955] Routed all jpackage app images through the shared Talos runtime JVM
+  options, including UTF-8 stdout/stderr and
+  `--enable-native-access=ALL-UNNAMED`, so staged Windows/Linux launchers
+  should preserve the same quiet startup contract as `installDist`. Fresh
+  staged artifact smoke is still required before closing the blocker.
 - [T923] Closed the Windows DPAPI custody-transport follow-up as a documented
   beta boundary instead of an unreviewed native dependency change. Public
   privacy docs now state that the PowerShell DPAPI bridge can move raw key
