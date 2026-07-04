@@ -1523,7 +1523,31 @@ html.menu-open, html.menu-open body { overflow: hidden; }
   .docs-grid { grid-template-columns: 1fr; }
   .lane-legend { grid-template-columns: 1fr; }
   .terminal-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .terminal-screen { padding: 0.85rem; font-size: 0.78rem; }
+  .live-terminal,
+  .live-terminal .terminal,
+  .live-terminal .terminal-screen,
+  .terminal-card,
+  .terminal-card .terminal,
+  .terminal-card .terminal-screen {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .terminal-screen {
+    padding: 0.85rem;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
+  }
+  .terminal-foot {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .terminal-foot-meta {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   .footer-inner { grid-template-columns: 1fr; }
   .footer-nav a { min-height: 44px; display: inline-flex; align-items: center; }
   .hero-inscription-cycle, .hero-inscription-sub { display: none; }

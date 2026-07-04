@@ -320,6 +320,34 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
   }
 });
 
+for (const width of [320, 375, 390]) {
+  test(`mobile live terminal fits after answer renders at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoTalos(page);
+    await page.locator("[data-live-replay]").click();
+    await expect(page.locator("[data-live-output]")).toContainText("/last trace", { timeout: 9000 });
+
+    for (const selector of [
+      ".hero-inscription",
+      ".live-terminal",
+      ".live-terminal .terminal",
+      ".live-terminal .terminal-screen",
+      ".live-terminal .terminal-foot",
+      "#live-terminal-caption",
+    ]) {
+      const box = await page.locator(selector).boundingBox();
+      expect(box, `${selector} should render`).not.toBeNull();
+      expect(box.x, `${selector} left edge at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${selector} right edge at ${width}px`).toBeLessThanOrEqual(width + 1);
+    }
+
+    const terminalOverflow = await page.locator(".live-terminal .terminal-screen").evaluate((node) =>
+      node.scrollWidth - node.clientWidth,
+    );
+    expect(terminalOverflow).toBeLessThanOrEqual(1);
+  });
+}
+
 test("reduced-motion mode leaves content visible without reveal animations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await gotoTalos(page);

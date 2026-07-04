@@ -310,6 +310,10 @@ describe("Talos landing page static contract", () => {
     assert.match(css, /\.terminal\b/);
     assert.match(css, /\.terminal-screen\b/);
     assert.match(css, /\.terminal-replay\b/);
+    assert.match(js, /Local-first CLI workspace operator\./);
+    assert.doesNotMatch(js, /Local-first CLI workspace operator\. Java 21 sources/);
+    assert.match(css, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*?\.terminal-screen\s*\{[\s\S]*?white-space:\s*pre-wrap/);
+    assert.match(css, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*?\.terminal-screen\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
   });
 
   it("leads the hero with the TALOS wordmark and a cycling acrostic word", () => {
