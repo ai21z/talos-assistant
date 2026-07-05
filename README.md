@@ -25,9 +25,9 @@ The preferred model backend for the current product path is managed
 
 Start with the user docs before running a public or source setup:
 
-- [User docs index](docs/user/index.md)
-- [Quickstart](docs/user/quickstart.md)
-- [Public installation plan](docs/public-installation.md)
+- [Documentation index](docs/index.md)
+- [Quickstart](docs/getting-started/quickstart.md)
+- [Release process](docs/development/release-process.md)
 
 ### File Capability And Privacy Boundaries
 
@@ -384,7 +384,7 @@ This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
 `checksums.txt`, installs Talos under the user account, and then hands off to
 `talos setup wizard`. It is not live until GitHub Release assets exist.
 
-Until the public release exists, use the source/developer path below.
+Until the public release exists, use the source setup path below.
 
 Linux source/developer beta path:
 
@@ -402,11 +402,11 @@ llama.cpp engine, asks before downloading accepted beta model weights, asks
 before writing `~/.talos/config.yaml`, and asks before running
 `talos doctor --start`.
 
-### 1. Install source/developer prerequisites
+### 1. Install source prerequisites
 
 Current practical setup:
 
-- Windows or Linux source/developer setup
+- Windows or Linux source setup
 - Java 21+
 - `talos setup wizard` on Ubuntu/WSL x64, or a user-provided
   `llama-server.exe` on Windows / `llama-server` on Linux
@@ -574,14 +574,12 @@ Talos has a structured development and review cycle:
 The work-cycle documentation lives here:
 
 - [work-cycle-docs/work-test-cycle.md](work-cycle-docs/work-test-cycle.md)
-- [work-cycle-docs/work-test-cycle-setup.md](work-cycle-docs/work-test-cycle-setup.md)
-- [work-cycle-docs/work-test-cycle-step-by-step.md](work-cycle-docs/work-test-cycle-step-by-step.md)
-- [work-cycle-docs/milestone-audit-workflow.md](work-cycle-docs/milestone-audit-workflow.md)
-- [work-cycle-docs/full-e2e-audit-workflow.md](work-cycle-docs/full-e2e-audit-workflow.md)
-- [docs/setup-managed-models.md](docs/setup-managed-models.md)
+- [work-cycle-docs/runbooks/release-candidate.md](work-cycle-docs/runbooks/release-candidate.md)
+- [work-cycle-docs/runbooks/manual-qa.md](work-cycle-docs/runbooks/manual-qa.md)
+- [work-cycle-docs/runbooks/live-audit.md](work-cycle-docs/runbooks/live-audit.md)
+- [work-cycle-docs/runbooks/installed-product-smoke.md](work-cycle-docs/runbooks/installed-product-smoke.md)
 
-Post-0.9.6 architecture direction is documented in
-[docs/architecture/01-execution-discipline-and-local-trust.md](docs/architecture/01-execution-discipline-and-local-trust.md).
+Current architecture is documented in [docs/architecture/overview.md](docs/architecture/overview.md).
 
 ## Running Talos Well
 
@@ -600,12 +598,35 @@ Practical guidance:
 
 Current practical setup:
 
-- Windows packaged target and Ubuntu/WSL x64 tarball target after release assets exist
-- Linux source/developer support from a checkout
+- Windows x64 packaged target after release assets exist
+- Ubuntu/WSL x64 runtime-bundled tarball target after release assets exist
+- Linux source/developer beta path from a checkout
 - Java 21+
 - managed llama.cpp for the primary local model path
 - `talos setup models` for tested Qwen and GPT-OSS profiles
+- `talos setup wizard` for the Ubuntu/WSL guided setup lane
 - Ollama as an optional legacy backend
+
+Planned public install targets:
+
+```powershell
+winget install --id TalosLocal.Talos -e
+```
+
+```text
+talos-<version>-linux-x64-app.tar.gz
+install-talos.sh
+```
+
+The Windows package ID is `TalosLocal.Talos`, the searchable package name or
+moniker is `talos-cli`, and the publisher is Aris Zounarakis. Windows public
+beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not
+a public beta install path.
+
+The Linux tarball lane is Ubuntu/WSL x64, runtime-bundled, and has no
+DEB/RPM/Homebrew/SDKMAN package claim. Public installers include a bundled Java
+runtime, but they do not bundle a llama.cpp server or model weights. Model
+setup remains explicit after install.
 
 ### Network Expectations
 
@@ -660,7 +681,7 @@ and evidence-oriented developer workflows. The beta line is still being hardened
 around model reliability, command profiles, semantic verification, binary file
 support, and broader capability growth.
 
-The strongest current path is Windows packaged/source setup or Linux
+The strongest current path is Windows packaged or source setup, or Linux
 source/developer setup plus managed llama.cpp with explicit local model
 configuration. File and workspace operations are gated and traceable. Command
 execution is bounded to approved profiles. Unsupported or unverified results

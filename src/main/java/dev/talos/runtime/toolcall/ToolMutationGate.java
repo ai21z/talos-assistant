@@ -8,7 +8,7 @@ import dev.talos.tools.ToolRegistry;
  * Fail-closed mutation/checkpoint classification for callers that hold only
  * a (possibly alias-form) tool name plus the registry (T757).
  *
- * <p>Doctrine (AGENTS.md, "Risky operations must fail closed"): a tool the
+ * <p>Doctrine (see the trust-boundary docs): a tool the
  * registry cannot resolve, or whose metadata is unavailable, is treated as
  * MUTATING and CHECKPOINT-REQUIRED. The previous hand-maintained name lists
  * had the opposite default - a registered mutating tool missing from the

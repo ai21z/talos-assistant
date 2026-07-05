@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MilestoneAuditWorkflowTest {
 
     @Test
-    void t61PromptSequenceKeepsExactIndexOverwriteAfterStaticWebProbes() throws Exception {
-        String workflow = Files.readString(Path.of("work-cycle-docs", "milestone-audit-workflow.md"));
+    void manualQaRunbookKeepsExactIndexOverwriteAfterStaticWebProbes() throws Exception {
+        String workflow = Files.readString(Path.of("work-cycle-docs", "runbooks", "manual-qa.md"));
 
         int selectorRepair = workflow.indexOf("Make script.js fix the selector bug");
         int staticWebReview = workflow.indexOf("Review the current static web page");
@@ -34,8 +34,9 @@ class MilestoneAuditWorkflowTest {
 
     @Test
     void findingsTemplatesIncludeAuditDesignFailureBucket() throws Exception {
-        String workflow = Files.readString(Path.of("work-cycle-docs", "milestone-audit-workflow.md"));
-        String summaryTemplate = Files.readString(Path.of("docs", "evaluation", "talosbench-summary-template.md"));
+        String workflow = Files.readString(Path.of("work-cycle-docs", "runbooks", "manual-qa.md"));
+        String summaryTemplate = Files.readString(Path.of(
+                "work-cycle-docs", "templates", "talosbench-summary-template.md"));
 
         assertTrue(workflow.contains("audit-design failure"),
                 "milestone workflow must tell auditors to separate audit-design failures");

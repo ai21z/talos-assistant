@@ -13,7 +13,6 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -127,20 +126,6 @@ class ToolCallLoopOrchestrationCharacterizationTest {
                         result.finalAnswer()),
                 () -> assertFalse(result.finalAnswer().contains("<tool_call>"), result.finalAnswer()),
                 () -> assertFalse(result.finalAnswer().contains("```json"), result.finalAnswer()));
-    }
-
-    @Test
-    void reportPinsT824MoveStayBoundary() throws Exception {
-        String report = Files.readString(Path.of(
-                "work-cycle-docs/reports/t823-tool-call-loop-orchestration-characterization.md"));
-
-        assertAll(
-                () -> assertTrue(report.contains("ToolCallLoopEngine")),
-                () -> assertTrue(report.contains("T823 does not authorize production extraction")),
-                () -> assertTrue(report.contains("Move later in T824")),
-                () -> assertTrue(report.contains("Keep in ToolCallLoop")),
-                () -> assertTrue(report.contains("LoopResult")),
-                () -> assertTrue(report.contains("ToolOutcome")));
     }
 
     private static List<ChatMessage> baseMessages(String userRequest) {

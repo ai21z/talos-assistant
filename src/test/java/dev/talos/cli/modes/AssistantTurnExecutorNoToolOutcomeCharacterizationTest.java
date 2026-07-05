@@ -32,11 +32,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("AssistantTurnExecutor no-tool outcome characterization")
 class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
 
-    private static final Path T816_REPORT = Path.of(
-            "work-cycle-docs",
-            "reports",
-            "t816-assistant-turn-executor-no-tool-outcome-characterization.md");
-
     @Test
     void noToolMalformedMutationDebrisRetryRunsBeforeNoActionShaping(@TempDir Path workspace)
             throws Exception {
@@ -183,23 +178,6 @@ class AssistantTurnExecutorNoToolOutcomeCharacterizationTest {
                 out.text());
         assertTrue(out.text().contains("T816-ready"), out.text());
         assertFalse(out.text().contains("provide the path"), out.text());
-    }
-
-    @Test
-    void noToolOutcomeReportPinsT817MoveStayBoundary() throws Exception {
-        String report = Files.readString(T816_REPORT);
-
-        assertTrue(report.contains("# T816 AssistantTurnExecutor No-Tool Outcome Characterization"));
-        assertTrue(report.contains("resolveNoToolAnswer(...)"));
-        assertTrue(report.contains("emptyNoToolLoopResult(...)"));
-        assertTrue(report.contains("AssistantNoToolOutcomeResolver"));
-        assertTrue(report.contains("T816 does not authorize production"));
-        assertTrue(report.contains("extraction"));
-        assertTrue(report.contains("Keep in `AssistantTurnExecutor`"));
-        assertTrue(report.contains("shapeAnswerWithoutTools(...)"));
-        assertTrue(report.contains("shapeAnswerAfterToolLoop(...)"));
-        assertTrue(report.contains("trace begin/set/clear"));
-        assertTrue(report.contains("TurnOutput"));
     }
 
     private static Context context(

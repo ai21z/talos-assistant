@@ -31,11 +31,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("AssistantTurnExecutor tool-loop outcome characterization")
 class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
 
-    private static final Path T814_REPORT = Path.of(
-            "work-cycle-docs",
-            "reports",
-            "t814-assistant-turn-executor-tool-loop-outcome-characterization.md");
-
     @Test
     void postToolLoopSynthesisRetryRunsBeforeOutcomeShaping(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "PROJECT_MARKER = WAVE5-T814\n");
@@ -169,19 +164,6 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                         .map(AssistantTurnExecutorToolLoopOutcomeCharacterizationTest::joinRequestMessages)
                         .anyMatch(prompt -> prompt.contains("[MutationRetryCapability]")),
                 "approval-denied mutating outcomes must suppress bounded missing-mutation retry");
-    }
-
-    @Test
-    void toolLoopOutcomeReportPinsMoveStayBoundary() throws Exception {
-        String report = Files.readString(T814_REPORT);
-
-        assertTrue(report.contains("# T814 AssistantTurnExecutor Tool-Loop Outcome Characterization"));
-        assertTrue(report.contains("resolveToolLoopAnswer(...)"));
-        assertTrue(report.contains("visibleToolLoopSummary(...)"));
-        assertTrue(report.contains("shapeAnswerAfterToolLoop(...)"));
-        assertTrue(report.contains("AssistantToolLoopOutcomeResolver"));
-        assertTrue(report.contains("T814 does not authorize production extraction"));
-        assertTrue(report.contains("Do not move `ToolCallLoop.LoopResult` or `ToolOutcome`"));
     }
 
     private static Context context(

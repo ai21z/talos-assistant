@@ -375,7 +375,7 @@ class PublicInstallPackagingContractTest {
     @Test
     @DisplayName("public docs describe Linux tarball lane without package-manager overclaim")
     void publicDocsDescribeLinuxTarballLane() throws Exception {
-        String doc = read("docs/public-installation.md");
+        String doc = read("docs/development/release-process.md");
         String readme = read("README.md");
 
         for (String text : new String[] { doc, readme }) {
@@ -398,7 +398,7 @@ class PublicInstallPackagingContractTest {
     @DisplayName("docs and site describe the beta install support boundary truthfully")
     void docsAndSiteDescribeInstallBoundary() throws Exception {
         String readme = read("README.md");
-        String doc = read("docs/public-installation.md");
+        String doc = read("docs/development/release-process.md");
         String site = read("site/index.html");
 
         for (String text : new String[] { readme, doc }) {

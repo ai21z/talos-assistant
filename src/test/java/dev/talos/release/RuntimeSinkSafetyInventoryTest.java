@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RuntimeSinkSafetyInventoryTest {
     private static final Path INVENTORY =
-            Path.of("work-cycle-docs/reports/runtime-sink-safety-inventory.md");
+            Path.of("docs/development/runtime-artifacts.md");
 
     @Test
     void inventoryCoversCurrentDurableSinkFamiliesAndOwners() throws Exception {

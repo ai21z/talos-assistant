@@ -12,7 +12,7 @@ class ReleaseQaGateContractTest {
     @Test
     void releaseQaGateDefinesArtifactTaxonomyAndBlocksPublicationBeforeManualQa() throws Exception {
         String workCycle = Files.readString(Path.of("work-cycle-docs", "work-test-cycle.md"));
-        String stepByStep = Files.readString(Path.of("work-cycle-docs", "work-test-cycle-step-by-step.md"));
+        String releaseRunbook = Files.readString(Path.of("work-cycle-docs", "runbooks", "release-candidate.md"));
 
         assertTrue(workCycle.contains("Release QA Gate"),
                 "work-test cycle must name the release QA gate");
@@ -33,19 +33,19 @@ class ReleaseQaGateContractTest {
         assertTrue(workCycle.contains("named exclusions"),
                 "skipped release gates must require named exclusions");
 
-        assertTrue(stepByStep.contains("Release QA Gate"),
-                "step-by-step runbook must include the release QA gate");
-        assertTrue(stepByStep.contains("No GitHub Release asset"),
-                "step-by-step runbook must block release assets before QA");
-        assertTrue(stepByStep.contains("Local staging artifacts"),
-                "step-by-step runbook must permit local staging only as non-release evidence");
-        assertTrue(stepByStep.contains("CI staging artifacts"),
-                "step-by-step runbook must permit CI staging only as non-release evidence");
-        assertTrue(stepByStep.contains("all current Gradle tasks and CI jobs"),
-                "step-by-step runbook must require current task/workflow inventory");
-        assertTrue(stepByStep.contains("manual PTY transcript"),
-                "step-by-step runbook must require a manual PTY transcript");
-        assertTrue(stepByStep.contains("two-model large-scale live audit"),
-                "step-by-step runbook must require the Qwen/GPT-OSS live audit gate");
+        assertTrue(releaseRunbook.contains("Release QA Gate"),
+                "release runbook must include the release QA gate");
+        assertTrue(releaseRunbook.contains("No GitHub Release asset"),
+                "release runbook must block release assets before QA");
+        assertTrue(releaseRunbook.contains("Local staging artifacts"),
+                "release runbook must permit local staging only as non-release evidence");
+        assertTrue(releaseRunbook.contains("CI staging artifacts"),
+                "release runbook must permit CI staging only as non-release evidence");
+        assertTrue(releaseRunbook.contains("all current Gradle tasks and CI jobs"),
+                "release runbook must require current task/workflow inventory");
+        assertTrue(releaseRunbook.contains("manual PTY transcript"),
+                "release runbook must require a manual PTY transcript");
+        assertTrue(releaseRunbook.contains("two-model large-scale live audit"),
+                "release runbook must require the Qwen/GPT-OSS live audit gate");
     }
 }

@@ -1,0 +1,21 @@
+{
+  "schema": "talos.releaseGates.v1",
+  "packet": "fixture-release-gate-ledger",
+  "branch": "fixture",
+  "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "generated": "2026-07-05T00:00:00Z",
+  "gates": [
+    {
+      "name": "automated check",
+      "lane": "DETERMINISTIC",
+      "status": "PASS",
+      "evidencePath": "build/reports/tests/test/index.html"
+    },
+    {
+      "name": "manual PTY audit",
+      "lane": "TRUE_PTY_MANUAL",
+      "status": "MANUAL_REQUIRED",
+      "evidencePath": "local/manual-testing/<audit-id>/"
+    }
+  ]
+}

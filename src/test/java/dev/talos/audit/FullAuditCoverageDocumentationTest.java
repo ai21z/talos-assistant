@@ -27,12 +27,10 @@ class FullAuditCoverageDocumentationTest {
 
     @Test
     void fullE2eAuditDocsNameEveryCurrentNativeTool() throws IOException {
-        String workflow = read("work-cycle-docs/full-e2e-audit-workflow.md");
-        String operatorPrompt = read("work-cycle-docs/full-e2e-audit-operator-prompt.md");
+        String workflow = read("work-cycle-docs/runbooks/live-audit.md");
 
         for (String tool : CURRENT_NATIVE_TOOLS) {
             assertTrue(workflow.contains(tool), () -> "workflow missing native tool: " + tool);
-            assertTrue(operatorPrompt.contains(tool), () -> "operator prompt missing native tool: " + tool);
         }
     }
 

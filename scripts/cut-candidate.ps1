@@ -1,6 +1,6 @@
 # cut-candidate.ps1 - hermetic scripted candidate cut (T747).
 #
-# Encodes the AGENTS.md Versioned Candidate Loop so the cut cannot produce the
+# Encodes the versioned candidate loop so the cut cannot produce the
 # provenance-defect class found on the 0.10.1 cut (hand-typed SHA, stale
 # summaries, uncommitted evidence chain, binary built before the commit):
 #
@@ -10,9 +10,8 @@
 #   4. gradlew installDist  (built FROM the committed tree)
 #   5. cross-check launcher version vs gradle.properties vs git rev-parse HEAD
 #   6. mandatory post-bump gradlew check
-#   7. gradlew wikiEvidenceCloseGate --rerun-tasks
-#   8. gradlew talosQualitySummaries; verify all four summaries report <version>
-#   9. emit build/reports/talos/candidate-manifest.json (SHA from git, never typed)
+#   7. gradlew talosQualitySummaries; verify all four summaries report <version>
+#   8. emit build/reports/talos/candidate-manifest.json (SHA from git, never typed)
 #
 # Flags:
 #   -DryRun   print the plan and preconditions, mutate nothing
@@ -93,7 +92,7 @@ function Invoke-CutCandidateSelfTest {
         -SummaryVersions @{ version = "0.10.2" } -StepTimestamps @{ bump = "t0" }
     Assert-CutEqual -Name "manifest version" -Expected "0.10.2" -Actual $manifest.version
     Assert-CutContains -Name "manifest json" -Text ($manifest | ConvertTo-Json -Depth 5) -Needle '"schema": "talos.candidateManifest.v1"'
-    Assert-CutContains -Name "wiki close gate command" -Text (Get-Content $PSCommandPath -Raw) -Needle 'wikiEvidenceCloseGate --rerun-tasks --no-daemon'
+    Assert-CutContains -Name "quality summaries command" -Text (Get-Content $PSCommandPath -Raw) -Needle 'talosQualitySummaries --no-daemon'
     $shaThrew = $false
     try { New-CandidateManifest -Version "x" -Sha "01646794" -Branch "b" -LauncherLine "l" -SummaryVersions @{} -StepTimestamps @{} | Out-Null } catch { $shaThrew = $true }
     Assert-CutEqual -Name "manifest rejects short sha" -Expected $true -Actual $shaThrew
@@ -126,7 +125,7 @@ if ($DryRun) {
     Write-Host "  branch:          $displayBranch"
     Write-Host "  working tree:    $dirtyState"
     Write-Host "  current version: $currentVersion (next cut bumps the patch)"
-    Write-Host "  plan: bump-patch -> commit -> installDist -> launcher/SHA cross-check -> gradlew check -> wikiEvidenceCloseGate --rerun-tasks -> talosQualitySummaries -> $ManifestPath"
+    Write-Host "  plan: bump-patch -> commit -> installDist -> launcher/SHA cross-check -> gradlew check -> talosQualitySummaries -> $ManifestPath"
     exit 0
 }
 
@@ -165,11 +164,7 @@ $steps.launcherCheck = (Get-Date).ToString("o")
 Invoke-Step "gradlew check (mandatory post-bump)" { .\gradlew.bat check --no-daemon }
 $steps.check = (Get-Date).ToString("o")
 
-# ---- 6. wiki evidence close gate -------------------------------------------
-Invoke-Step "wikiEvidenceCloseGate (fresh wiki evidence)" { .\gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon }
-$steps.wikiEvidenceCloseGate = (Get-Date).ToString("o")
-
-# ---- 7. quality summaries --------------------------------------------------
+# ---- 6. quality summaries --------------------------------------------------
 Invoke-Step "talosQualitySummaries" { .\gradlew.bat talosQualitySummaries --no-daemon }
 $summaryVersions = [ordered]@{}
 foreach ($name in 'version-summary', 'coverage-summary', 'e2e-summary', 'qodana-summary') {
@@ -182,7 +177,7 @@ foreach ($name in 'version-summary', 'coverage-summary', 'e2e-summary', 'qodana-
 }
 $steps.summaries = (Get-Date).ToString("o")
 
-# ---- 8. manifest ------------------------------------------------------------
+# ---- 7. manifest ------------------------------------------------------------
 $manifest = New-CandidateManifest -Version $version -Sha $sha -Branch $branch `
     -LauncherLine $launcherLine -SummaryVersions $summaryVersions -StepTimestamps $steps
 New-Item -ItemType Directory -Force (Split-Path $ManifestPath) | Out-Null

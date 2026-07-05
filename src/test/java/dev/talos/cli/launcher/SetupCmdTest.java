@@ -48,7 +48,7 @@ class SetupCmdTest {
         assertTrue(help.contains("deepseek-v2lite-q4km"));
         assertTrue(help.contains("native/default"));
         assertTrue(help.contains("text/tool-prompt"));
-        assertTrue(help.contains("docs/user/model-profiles/qwen2.5-coder-14b.md"), help);
+        assertTrue(help.contains("docs/reference/model-profiles.md"), help);
         assertTrue(help.contains("talos doctor --start"), help);
         assertTrue(help.contains("talos setup models --profile"));
         assertTrue(help.contains("gpt-oss-20b-mxfp4.gguf"), help);

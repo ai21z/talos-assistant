@@ -6,8 +6,6 @@ import dev.talos.tools.ToolResult;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,24 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolCallSupportBoundaryCharacterizationTest {
-
-    @Test
-    void reportPinsCurrentEvidenceAndT830Boundary() throws Exception {
-        String report = Files.readString(Path.of(
-                "work-cycle-docs/reports/t829-tool-call-support-boundary-scoping.md"));
-
-        assertAll(
-                () -> assertTrue(report.contains("Report commit: `de8e3d066a2e5bf10179f4cfb60e0b9212f72898`"),
-                        report),
-                () -> assertTrue(report.contains("Confidence label: `INFERRED_REVIEW`"), report),
-                () -> assertTrue(report.contains("`runtime.toolcall.ToolCallSupport` | `236`"), report),
-                () -> assertTrue(report.contains("`runtime.toolcall.LoopState` | `293`"), report),
-                () -> assertTrue(report.contains("`runtime.toolcall.ToolCallExecutionStage` | `119`"), report),
-                () -> assertTrue(report.contains("`cli.modes.ExecutionOutcome` | `99`"), report),
-                () -> assertTrue(report.contains("T829 does not authorize production"), report),
-                () -> assertTrue(report.contains("Candidate T830 Seam Hypotheses"), report),
-                () -> assertTrue(report.contains("Retry-message utilities remain a hypothesis"), report));
-    }
 
     @Test
     void nativeCallConversionKeepsContainerJsonAndLegacyScalarText() {

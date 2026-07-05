@@ -8,7 +8,7 @@ before writing, verify before claiming completion, and keep local evidence.
 
 - Use JDK 21 or newer.
 - Use the Gradle wrapper from the repository root.
-- Keep changes small, ticketed, and evidence-backed.
+- Keep changes small, scoped, and evidence-backed.
 - Add or update tests for behavior changes.
 - Open a GitHub pull request with the relevant test output and docs updates.
 
@@ -36,7 +36,7 @@ On Linux/macOS developer shells:
 
 - Do not add telemetry, remote model defaults, or hidden background execution.
 - Do not weaken approval gates, protected-path handling, trace capture, or
-  verification without an explicit ticket and regression tests.
+  verification without explicit acceptance criteria and regression tests.
 - Do not commit generated `build/`, local audit transcripts, prompt-debug
   artifacts, model caches, or private workspace data.
 - Update user docs when public commands, setup flows, trust boundaries, or
@@ -48,7 +48,7 @@ On Linux/macOS developer shells:
 
 Pull requests should include:
 
-- the ticket or finding ID being addressed;
+- the finding or issue being addressed;
 - the exact tests or commands run;
 - any known skipped/failed checks and why they are not part of the change;
 - screenshots or terminal transcripts only when the change affects UI/output.
