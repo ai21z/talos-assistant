@@ -183,7 +183,7 @@
                   Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
                   Exact future Windows ID: <code>TalosLocal.Talos</code>.
                   Windows beta is signed-only; unsigned scripts stay local QA only.
-                  <a class="inline-link" href="https://github.com/ai21z/talos-assistant/blob/v0.9.0-beta-dev/docs/public-installation.md">
+                  <a class="inline-link" href="https://github.com/ai21z/talos-assistant/blob/v0.9.0-beta-dev/docs/development/release-process.md">
                     installation docs
                   </a>.
                 </p>
@@ -200,7 +200,7 @@
                 <span class="hero-inscription-rule"></span>
                 <span class="hero-inscription-cycle" data-inscription-cycle>TRACED</span>
               </p>
-              <p class="hero-inscription-sub" aria-hidden="true">local operator · provable by design</p>
+              <p class="hero-inscription-sub" aria-hidden="true">local operator · traceable by default</p>
               <figure class="live-terminal" aria-labelledby="live-terminal-caption">
                 <div class="terminal" data-live-terminal>
                   <div class="terminal-bar">
@@ -219,7 +219,7 @@
                   </div>
                 </div>
                 <figcaption id="live-terminal-caption" class="banner-caption">
-                  Modeled on the real Talos turn grammar. Values mirror a managed
+                  Modeled on a real Talos terminal turn. Values mirror a managed
                   <code>llama.cpp</code> run on <code>llama_cpp/gpt-oss-20b</code>.
                 </figcaption>
               </figure>
@@ -309,11 +309,11 @@
           <div class="container two-column">
             <div class="section-copy reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Turn UI</p>
-              <h2 id="turn-ui-heading">A consistent turn grammar.</h2>
+              <h2 id="turn-ui-heading">One ordered flow for local workspace work.</h2>
               <p>
-                Normal assistant turns render through the same semantic lanes
-                when Talos has progress, approval, answer, or evidence to show.
-                The terminal grammar is runtime-owned, not model-authored.
+                Talos shows progress, approvals, answers, and evidence in
+                consistent terminal sections. The runtime owns that structure;
+                the model does not write the interface.
               </p>
               <p class="command-strip" aria-label="Core Talos slash commands">
                 <code>/tools</code>
@@ -355,11 +355,11 @@
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Local boundaries</p>
-              <h2 id="boundaries-heading">Policy is visible at the edge.</h2>
+              <h2 id="boundaries-heading">Runtime policy controls the boundary.</h2>
               <p class="section-lede">
-                Runtime policy owns approval, tool exposure, result checks,
-                protected reads, and unsupported-file honesty. Model wording is
-                not the authority boundary.
+                Runtime policy controls approvals, tool access, result checks,
+                protected reads, and unsupported-file handling. The model's
+                wording is not the boundary.
               </p>
             </div>
 
@@ -394,10 +394,10 @@
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Good Fits</p>
-              <h2 id="good-fits-heading">What Talos does today. And what's taking root for v1.</h2>
+              <h2 id="good-fits-heading">What Talos handles now, and what is planned for v1.</h2>
               <p class="section-lede">
-                A living map of the work Talos handles now, and the branches budding
-                for v1. Hover any node for what it covers.
+                A practical map of current support and planned work. Hover any
+                node for what it covers.
               </p>
             </div>
             <div class="scope-layout">
@@ -437,40 +437,40 @@
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Docs</p>
-              <h2 id="docs-heading">Source-backed docs, curated for the first run.</h2>
+              <h2 id="docs-heading">Setup, permissions, models, and traces.</h2>
               <p class="section-lede">
-                The landing page stays narrow. Setup, permissions, local models,
-                and trace details live in the user documentation.
+                The landing page stays narrow. The documentation covers first
+                setup, local models, approval behavior, and trace details.
               </p>
             </div>
             <p class="docs-cta-row">
               <a class="button button--primary" href="./docs.html">Open documentation</a>
-              <a class="button button--ghost" href="./docs.html#/quickstart">Jump to Quickstart</a>
+              <a class="button button--ghost" href="./docs.html#/getting-started/quickstart">Jump to Quickstart</a>
             </p>
             <div class="docs-grid" data-reveal-stagger>
-              <a class="doc-card" href="./docs.html#/quickstart">
+              <a class="doc-card" href="./docs.html#/getting-started/quickstart">
                 <span class="doc-tag">01</span>
                 <h3>Quickstart</h3>
-                <p>Source/developer setup to a working local Talos session.</p>
-                <code>docs/user/quickstart.md</code>
+                <p>Source setup to a working local Talos session.</p>
+                <code>docs/getting-started/quickstart.md</code>
               </a>
-              <a class="doc-card" href="./docs.html#/model-setup">
+              <a class="doc-card" href="./docs.html#/getting-started/model-setup">
                 <span class="doc-tag">02</span>
                 <h3>Model Setup</h3>
                 <p>Configure a managed <code>llama.cpp</code> model profile.</p>
-                <code>docs/user/model-setup.md</code>
+                <code>docs/getting-started/model-setup.md</code>
               </a>
-              <a class="doc-card" href="./docs.html#/approvals-and-permissions">
+              <a class="doc-card" href="./docs.html#/user/permissions-and-approvals">
                 <span class="doc-tag">03</span>
                 <h3>Permissions</h3>
                 <p>When Talos asks before reads, writes, and commands.</p>
-                <code>docs/user/approvals-and-permissions.md</code>
+                <code>docs/user/permissions-and-approvals.md</code>
               </a>
-              <a class="doc-card" href="./docs.html#/how-talos-works">
+              <a class="doc-card" href="./docs.html#/architecture/execution-model">
                 <span class="doc-tag">04</span>
                 <h3>Trace / Audit</h3>
                 <p>Execution discipline, <code>/last trace</code>, and local evidence.</p>
-                <code>docs/user/how-talos-works.md</code>
+                <code>docs/architecture/execution-model.md</code>
               </a>
             </div>
           </div>

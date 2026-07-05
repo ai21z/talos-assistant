@@ -278,20 +278,6 @@ class ToolCallExecutionStageCharacterizationTest {
                 () -> assertTrue(result.content().contains("old_string not found"), result.content()));
     }
 
-    @Test
-    void reportPinsT828MoveStayBoundary() throws Exception {
-        String report = Files.readString(Path.of(
-                "work-cycle-docs/reports/t826-tool-call-execution-stage-characterization.md"));
-
-        assertAll(
-                () -> assertTrue(report.contains("ToolCallExecutionStage.execute"), report),
-                () -> assertTrue(report.contains("public IterationOutcome execute"), report),
-                () -> assertTrue(report.contains("public record IterationOutcome"), report),
-                () -> assertTrue(report.contains("T826 does not authorize production extraction"), report),
-                () -> assertTrue(report.contains("T828 Move/Stay Boundary"), report),
-                () -> assertTrue(report.contains("Do not move yet"), report));
-    }
-
     private ToolCallExecutionStage.IterationOutcome execute(StageHarness harness) {
         ToolCallParseStage.ParsedCalls parsed = new ToolCallParseStage().parse(
                 harness.state().currentText,

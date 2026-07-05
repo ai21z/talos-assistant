@@ -21,7 +21,7 @@ class PublicRepositoryMetadataTest {
         String notice = read("NOTICE");
 
         assertTrue(notice.contains("Talos"), "NOTICE must name the current product");
-        assertTrue(notice.contains("Vissarion Zounarakis"), "NOTICE must name the current owner");
+        assertTrue(notice.contains("Aris Zounarakis"), "NOTICE must name the current owner");
         assertFalse(notice.contains("LOQ-J"), "NOTICE must not publish the old product identity");
         assertFalse(notice.contains("<Your Name or Org>"), "NOTICE must not publish template placeholders");
     }

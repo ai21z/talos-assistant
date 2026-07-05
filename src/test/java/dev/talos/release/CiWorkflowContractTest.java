@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CiWorkflowContractTest {
 
     @Test
-    @DisplayName("CI checkout fetches full history for wiki commit liveness")
-    void ciCheckoutFetchesFullHistoryForWikiCommitLiveness() throws IOException {
+    @DisplayName("CI checkout fetches full history for version and provenance checks")
+    void ciCheckoutFetchesFullHistoryForVersionAndProvenanceChecks() throws IOException {
         String workflow = Files.readString(Path.of(".github", "workflows", "beta-dev-ci.yml"));
         long checkoutUses = Pattern.compile("uses:\\s*actions/checkout@").matcher(workflow).results().count();
         long fullHistoryCheckouts = Pattern.compile(
@@ -26,7 +26,7 @@ class CiWorkflowContractTest {
 
         assertTrue(checkoutUses > 0, "workflow must use actions/checkout");
         assertEquals(checkoutUses, fullHistoryCheckouts,
-                "every checkout must fetch full history so last_verified_commit git cat-file checks work in CI");
+                "every checkout must fetch full history for version/provenance checks");
     }
 
     @Test
@@ -76,11 +76,9 @@ class CiWorkflowContractTest {
         assertTrue(workflow.contains("Working tree is dirty before release staging"),
                 "workflow must fail if candidate checkout becomes dirty before staging artifacts");
         assertTrue(workflow.contains("./gradlew.bat clean check --no-daemon"),
-                "T929 automated gate must run before staging artifacts");
-        assertTrue(workflow.contains("./gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon"),
-                "T929 wiki evidence gate must run before staging artifacts");
+                "automated candidate gate must run before staging artifacts");
         assertTrue(workflow.contains("./gradlew.bat talosQualitySummaries --no-daemon"),
-                "T929 quality summaries must run before staging artifacts");
+                "quality summaries must run before staging artifacts");
         assertTrue(workflow.contains("./gradlew.bat windowsReleaseArtifacts --no-daemon"),
                 "workflow must build the Windows release artifact set");
         assertTrue(workflow.contains("actions/upload-artifact@"),
@@ -92,7 +90,7 @@ class CiWorkflowContractTest {
         assertTrue(workflow.contains("linux-qa-staging"),
                 "T931 must add a Linux QA staging job");
         assertTrue(workflow.contains("needs: windows-qa-staging"),
-                "Linux staging must wait for the Windows T929 automated gate/staging job");
+                "Linux staging must wait for the Windows automated gate/staging job");
         assertTrue(workflow.contains("./gradlew linuxReleaseArtifacts --no-daemon"),
                 "workflow must build the Linux release artifact set");
         assertTrue(workflow.contains("qa-staging-talos-${{ inputs.version }}-linux-x64"),
@@ -194,7 +192,7 @@ class CiWorkflowContractTest {
     @Test
     @DisplayName("public installation docs describe release staging as non-public")
     void publicInstallDocsDescribeQaStagingWorkflowBoundary() throws IOException {
-        String docs = Files.readString(Path.of("docs", "public-installation.md"));
+        String docs = Files.readString(Path.of("docs", "development", "release-process.md"));
 
         assertTrue(docs.contains(".github/workflows/release-staging.yml"),
                 "public install docs must name the release staging workflow");
@@ -203,15 +201,15 @@ class CiWorkflowContractTest {
         assertTrue(docs.contains("not a GitHub Release asset"),
                 "docs must state staging artifacts are not GitHub Release assets");
         assertTrue(docs.contains("No draft GitHub Release asset"),
-                "docs must block draft release assets before T929");
-        assertTrue(docs.contains("T929"),
-                "docs must tie publication to the T929 QA gate");
+                "docs must block draft release assets before QA");
+        assertTrue(docs.contains("Release QA Gate"),
+                "docs must tie publication to the release QA gate");
     }
 
     @Test
     @DisplayName("public installation docs describe CI protection and release trigger policy")
     void publicInstallDocsDescribeCiProtectionAndReleaseTriggerPolicy() throws IOException {
-        String docs = Files.readString(Path.of("docs", "public-installation.md"));
+        String docs = Files.readString(Path.of("docs", "development", "release-process.md"));
 
         assertTrue(docs.contains("gh api repos/ai21z/talos-assistant/branches/main/protection"),
                 "docs must capture the branch-protection verification command");
@@ -232,7 +230,7 @@ class CiWorkflowContractTest {
     @Test
     @DisplayName("public installation docs describe checksum, SBOM, and attestation boundaries")
     void publicInstallDocsDescribeProvenanceBoundaries() throws IOException {
-        String docs = Files.readString(Path.of("docs", "public-installation.md"));
+        String docs = Files.readString(Path.of("docs", "development", "release-process.md"));
 
         assertTrue(docs.contains("Checksums prove that downloaded bytes match the published checksum manifest"),
                 "docs must explain the checksum boundary");
@@ -250,7 +248,7 @@ class CiWorkflowContractTest {
                 "docs must name the manifest field reviewers should use for --source-digest");
         assertTrue(docs.contains("target_sha must match the workflow ref SHA"),
                 "docs must explain that release staging rejects dual-SHA provenance");
-        assertTrue(docs.contains("T929"),
+        assertTrue(docs.contains("Release QA Gate"),
                 "docs must keep behavioral release readiness owned by the QA gate");
     }
 
@@ -265,7 +263,7 @@ class CiWorkflowContractTest {
                 "make_latest"
         }) {
             assertTrue(!normalized.contains(forbidden),
-                    label + " must not create GitHub Release or draft release assets before T929");
+                    label + " must not create GitHub Release or draft release assets before release QA approval");
         }
         assertTrue(!workflow.contains("contents: write"),
                 label + " must not request contents: write while it only stages artifacts");

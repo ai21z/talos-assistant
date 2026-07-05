@@ -243,10 +243,10 @@ test("hero CTAs are real links, not placeholder beta actions", async ({ page }) 
 });
 
 test("docs page routes render without hiding content under the sticky header", async ({ page }) => {
-  await gotoTalos(page, "/docs.html#/quickstart", "docs");
+  await gotoTalos(page, "/docs.html#/getting-started/quickstart", "docs");
   await expect(page).toHaveTitle(/Quickstart \| Talos documentation/);
   await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
-  await expect(page.locator('[data-doc-slug="quickstart"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.locator('[data-doc-slug="getting-started/quickstart"]')).toHaveAttribute("aria-current", "page");
 
   const layout = await page.evaluate(() => {
     const header = document.querySelector(".site-header").getBoundingClientRect();
@@ -264,7 +264,7 @@ test("docs page routes render without hiding content under the sticky header", a
 
 test("docs code blocks expose a working copy control", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await gotoTalos(page, "/docs.html#/quickstart", "docs");
+  await gotoTalos(page, "/docs.html#/getting-started/quickstart", "docs");
   const copy = page.locator(".docs-copy").first();
   await expect(copy).toHaveCount(1);
   await copy.click();
@@ -272,11 +272,78 @@ test("docs code blocks expose a working copy control", async ({ page, context })
 });
 
 test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
-  await gotoTalos(page, "/docs.html#/quickstart", "docs");
-  await page.getByRole("link", { name: "Current Support" }).click();
-  await expect(page).toHaveURL(/\/docs\.html#\/quickstart#current-support$/);
+  await gotoTalos(page, "/docs.html#/getting-started/quickstart", "docs");
+  await page.getByRole("link", { name: "write test" }).click();
+  await expect(page).toHaveURL(/\/docs\.html#\/getting-started\/quickstart#write-test$/);
   await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
-  await expect(page.locator("#current-support")).toBeInViewport();
+  await expect(page.locator("#write-test")).toBeInViewport();
+  expect(page.browserIssues).toEqual([]);
+});
+
+test("mobile architecture diagrams keep arrows visible and sequence cards readable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await gotoTalos(page, "/docs.html#/architecture/execution-model", "docs");
+
+  const layout = await page.evaluate(() => {
+    const sequenceArrow = document.querySelector(".docs-sequence-arrow");
+    const sequenceStep = document.querySelector(".docs-sequence-message .docs-diagram-step");
+    const flowArrow = document.querySelector(".docs-flow-path .docs-flow-arrow");
+    const measure = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        display: style.display,
+        height: rect.height,
+        width: rect.width,
+      };
+    };
+
+    return {
+      flowArrow: measure(flowArrow),
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      sequenceArrow: measure(sequenceArrow),
+      sequenceStep: measure(sequenceStep),
+    };
+  });
+
+  expect(layout.overflow).toBeLessThanOrEqual(1);
+  expect(layout.sequenceArrow.display).not.toBe("none");
+  expect(layout.sequenceArrow.height).toBeGreaterThan(8);
+  expect(layout.sequenceStep.width).toBeLessThanOrEqual(32);
+  expect(layout.flowArrow.display).not.toBe("none");
+  expect(layout.flowArrow.height).toBeGreaterThan(8);
+  expect(page.browserIssues).toEqual([]);
+});
+
+test("desktop architecture sequence diagrams keep actor transitions compact", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await gotoTalos(page, "/docs.html#/architecture/execution-model", "docs");
+
+  const layout = await page.evaluate(() => {
+    const sequence = document.querySelector(".docs-sequence-message");
+    const actors = sequence.querySelectorAll("strong");
+    const textRect = (node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect();
+    };
+    const source = textRect(actors[0]);
+    const target = textRect(actors[1]);
+    const arrow = sequence.querySelector(".docs-sequence-arrow").getBoundingClientRect();
+    const message = sequence.querySelector("p").getBoundingClientRect();
+
+    return {
+      arrowToTargetGap: target.left - arrow.right,
+      sourceToArrowGap: arrow.left - source.right,
+      messageBelowActors: message.top > source.bottom,
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+
+  expect(layout.overflow).toBeLessThanOrEqual(1);
+  expect(layout.sourceToArrowGap).toBeLessThanOrEqual(24);
+  expect(layout.arrowToTargetGap).toBeLessThanOrEqual(24);
+  expect(layout.messageBelowActors).toBe(true);
   expect(page.browserIssues).toEqual([]);
 });
 

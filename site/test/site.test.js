@@ -37,8 +37,8 @@ function anchorTargets(html) {
   return Array.from(html.matchAll(/href="#([^"]+)"/g), (match) => match[1]);
 }
 
-function userDocSlugsFromDisk() {
-  const docsRoot = join(root, "..", "docs", "user");
+function publicDocSlugsFromDisk() {
+  const docsRoot = join(root, "..", "docs");
   return walkFiles(docsRoot)
     .filter((file) => file.endsWith(".md"))
     .map((file) => relative(docsRoot, file).replaceAll("\\", "/").replace(/\.md$/, ""))
@@ -157,8 +157,8 @@ describe("Talos landing page static contract", () => {
       "site/index.html": read("index.html"),
       "site/docs.html": read("docs.html"),
       "README.md": readFileSync(join(root, "..", "README.md"), "utf8"),
-      "docs/public-installation.md": readFileSync(join(root, "..", "docs", "public-installation.md"), "utf8"),
-      "docs/user/installation.md": readFileSync(join(root, "..", "docs", "user", "installation.md"), "utf8"),
+      "docs/development/release-process.md": readFileSync(join(root, "..", "docs", "development", "release-process.md"), "utf8"),
+      "docs/getting-started/installation.md": readFileSync(join(root, "..", "docs", "getting-started", "installation.md"), "utf8"),
     };
 
     for (const [file, body] of Object.entries(publicSurfaces)) {
@@ -171,7 +171,7 @@ describe("Talos landing page static contract", () => {
       assert.match(publicSurfaces[file], new RegExp(escapeRegExp(currentPublicEmail)), `${file} missing current owner email`);
     }
 
-    for (const file of ["README.md", "docs/public-installation.md", "docs/user/installation.md"]) {
+    for (const file of ["README.md", "docs/development/release-process.md", "docs/getting-started/installation.md"]) {
       assert.match(publicSurfaces[file], new RegExp(escapeRegExp(currentPublicName)), `${file} missing current publisher name`);
     }
   });
@@ -404,8 +404,8 @@ describe("Talos landing page static contract", () => {
 
     for (const required of [
       "Interactive turns leave local trace evidence",
-      "A consistent turn grammar",
-      "Runtime policy owns approval, tool exposure, result checks, protected reads, and unsupported-file honesty",
+      "One ordered flow for local workspace work",
+      "Runtime policy controls approvals, tool access, result checks, protected reads, and unsupported-file handling",
       "planned public beta",
       "TalosLocal.Talos",
       "curl -fsSL https://taloslocal.com/install.sh | sh",
@@ -725,77 +725,88 @@ describe("Talos landing page static contract", () => {
 describe("Talos in-site documentation contract", () => {
   const sidebarDocSlugs = [
     "index",
-    "quickstart",
-    "installation",
-    "model-setup",
-    "first-run",
-    "workspaces-and-indexing",
-    "retrieval-and-vectors",
-    "beta-best-practices",
-    "how-talos-works",
-    "approvals-and-permissions",
-    "local-privacy-and-artifacts",
-    "file-support",
-    "commands",
-    "troubleshooting",
-    "release-channels",
+    "getting-started/installation",
+    "getting-started/quickstart",
+    "getting-started/first-run",
+    "getting-started/model-setup",
+    "user/commands",
+    "user/modes",
+    "user/permissions-and-approvals",
+    "user/privacy-and-artifacts",
+    "user/supported-files",
+    "user/troubleshooting",
+    "reference/cli",
+    "reference/config",
+    "reference/model-profiles",
+    "reference/release-channels",
+    "architecture/overview",
+    "architecture/execution-model",
+    "architecture/trust-boundaries",
+    "architecture/package-map",
+    "development/build-and-test",
+    "development/ci-cd",
+    "development/release-process",
+    "development/runtime-artifacts",
   ];
-  const userDocSlugs = userDocSlugsFromDisk();
+  const publicDocSlugs = publicDocSlugsFromDisk();
 
-  it("ships every public user doc Markdown source needed by the docs page", () => {
-    const docsRoot = join(root, "..", "docs", "user");
-    for (const slug of userDocSlugs) {
+  it("ships every public Markdown source needed by the docs page", () => {
+    const docsRoot = join(root, "..", "docs");
+    for (const slug of publicDocSlugs) {
       const path = join(docsRoot, `${slug}.md`);
-      assert.ok(existsSync(path), `missing docs/user/${slug}.md`);
+      assert.ok(existsSync(path), `missing docs/${slug}.md`);
       const body = readFileSync(path, "utf8");
-      assert.match(body, /^#\s+/m, `docs/user/${slug}.md missing h1`);
-      assert.doesNotMatch(body, /<!--|-->/, `docs/user/${slug}.md leaks HTML comments`);
-      assert.doesNotMatch(body, /\bT\d{3,}\b/, `docs/user/${slug}.md leaks ticket ids`);
-      assert.doesNotMatch(body, /work-cycle-docs|tickets\/(?:open|done)/i, `docs/user/${slug}.md leaks internal docs`);
+      assert.match(body, /^#\s+/m, `docs/${slug}.md missing h1`);
+      assert.doesNotMatch(body, /<!--/, `docs/${slug}.md leaks HTML comments`);
+      assert.doesNotMatch(body, /\bT\d{3,}\b/, `docs/${slug}.md leaks ticket ids`);
+      assert.doesNotMatch(body, /work-cycle-docs|tickets\/(?:open|done)/i, `docs/${slug}.md leaks internal docs`);
     }
   });
 
-  it("keeps every public user doc routable or explicitly excluded", () => {
-    assert.deepEqual(userDocSlugs, [
-      "approvals-and-permissions",
-      "beta-best-practices",
-      "commands",
-      "file-support",
-      "first-run",
-      "how-talos-works",
+  it("keeps every public doc routable or explicitly excluded", () => {
+    assert.deepEqual(publicDocSlugs, [
+      "architecture/execution-model",
+      "architecture/overview",
+      "architecture/package-map",
+      "architecture/trust-boundaries",
+      "development/build-and-test",
+      "development/ci-cd",
+      "development/release-process",
+      "development/runtime-artifacts",
+      "getting-started/first-run",
+      "getting-started/installation",
+      "getting-started/model-setup",
+      "getting-started/quickstart",
       "index",
-      "installation",
-      "local-privacy-and-artifacts",
-      "model-profiles/deepseek-v2lite-q4km",
-      "model-profiles/gpt-oss-20b",
-      "model-profiles/qwen2.5-coder-14b",
-      "model-profiles/qwen36vf-q4km",
-      "model-profiles/qwen36vf-q6k",
-      "model-setup",
-      "quickstart",
-      "release-channels",
-      "retrieval-and-vectors",
-      "troubleshooting",
-      "workspaces-and-indexing",
+      "reference/cli",
+      "reference/config",
+      "reference/model-profiles",
+      "reference/release-channels",
+      "user/commands",
+      "user/modes",
+      "user/permissions-and-approvals",
+      "user/privacy-and-artifacts",
+      "user/supported-files",
+      "user/troubleshooting",
     ]);
 
     const js = read("src/docs.js");
-    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/user\/\*\*\/\*\.md"/);
-    assert.match(js, /docs\/user\//);
+    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/\*\*\/\*\.md"/);
+    assert.match(js, /docsRootPrefix\s*=\s*"\.\.\/\.\.\/docs\/"/);
     assert.match(js, /replace\(\/\\\.md\$\//);
   });
 
   it("resolves internal Markdown links to routable docs pages", () => {
-    const docsRoot = join(root, "..", "docs", "user");
-    const routedSlugs = new Set(userDocSlugs);
+    const docsRoot = join(root, "..", "docs");
+    const routedSlugs = new Set(publicDocSlugs);
     const missing = [];
 
-    for (const sourceSlug of userDocSlugs) {
+    for (const sourceSlug of publicDocSlugs) {
       const body = readFileSync(join(docsRoot, `${sourceSlug}.md`), "utf8");
       for (const href of markdownLinks(body)) {
         const targetSlug = linkedDocSlug(sourceSlug, href);
         if (targetSlug && !routedSlugs.has(targetSlug)) {
-          missing.push(`docs/user/${sourceSlug}.md -> ${href} (${targetSlug})`);
+          missing.push(`docs/${sourceSlug}.md -> ${href} (${targetSlug})`);
         }
       }
     }
@@ -820,7 +831,7 @@ describe("Talos in-site documentation contract", () => {
     assert.match(html, /Loading bundled documentation/);
     assert.match(html, /source Markdown on GitHub/);
     assert.match(html, /type="module"\s+src="\/src\/docs\.js"/);
-    for (const group of ["Get Started", "Guides", "Reference", "Concepts"]) {
+    for (const group of ["Get Started", "Using Talos", "Reference", "Architecture", "Development"]) {
       assert.match(html, new RegExp(`>${escapeRegExp(group)}<`));
     }
     for (const slug of sidebarDocSlugs.filter((slug) => slug !== "index")) {
@@ -832,7 +843,7 @@ describe("Talos in-site documentation contract", () => {
   it("renders docs from Markdown sources with a small trusted renderer", () => {
     const js = read("src/docs.js");
     const renderer = read("src/docs-markdown.js");
-    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/user\/\*\*\/\*\.md"/);
+    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/\*\*\/\*\.md"/);
     assert.match(js, /from "\.\/docs-markdown\.js"/);
     assert.match(js, /query:\s*"\?raw"/);
     assert.match(renderer, /export function renderMarkdown/);
@@ -846,26 +857,67 @@ describe("Talos in-site documentation contract", () => {
     assert.doesNotMatch(renderer, /React|Vue|createApp|tailwind/i);
   });
 
-  it("curates the docs landing with every top-level guide linked from docs/user/index.md", () => {
+  it("curates the docs landing with every maintained guide group linked from docs/index.md", () => {
     const js = read("src/docs.js");
     for (const slug of [
-      "quickstart",
-      "installation",
-      "model-setup",
-      "first-run",
-      "workspaces-and-indexing",
-      "retrieval-and-vectors",
-      "beta-best-practices",
-      "how-talos-works",
-      "approvals-and-permissions",
-      "local-privacy-and-artifacts",
-      "file-support",
-      "commands",
-      "troubleshooting",
-      "release-channels",
+      "getting-started/installation",
+      "getting-started/quickstart",
+      "getting-started/first-run",
+      "getting-started/model-setup",
+      "user/commands",
+      "user/modes",
+      "user/permissions-and-approvals",
+      "user/privacy-and-artifacts",
+      "user/supported-files",
+      "user/troubleshooting",
+      "reference/cli",
+      "reference/config",
+      "reference/model-profiles",
+      "reference/release-channels",
+      "architecture/overview",
+      "architecture/execution-model",
+      "architecture/trust-boundaries",
+      "architecture/package-map",
+      "development/build-and-test",
+      "development/ci-cd",
+      "development/release-process",
+      "development/runtime-artifacts",
     ]) {
       assert.match(js, new RegExp(`\\["[^"]+",\\s*"${escapeRegExp(slug)}"`), `docs landing missing ${slug}`);
     }
+  });
+
+  it("uses natural docs landing copy without templated subtitles or arrow glyphs", () => {
+    const js = read("src/docs.js");
+    const html = read("docs.html");
+
+    assert.doesNotMatch(js, /This page answers/i);
+    assert.doesNotMatch(js, /Local-first CLI workspace operator docs/);
+    assert.doesNotMatch(js, /Current install state and planned public beta/);
+    assert.doesNotMatch(js, /Source\/developer setup to first session/);
+    assert.doesNotMatch(js, /→/);
+
+    for (const label of [
+      "Permissions and approvals",
+      "Privacy and artifacts",
+      "Build and test",
+    ]) {
+      assert.match(js, new RegExp(escapeRegExp(label)));
+      assert.match(html, new RegExp(`>${escapeRegExp(label)}<`));
+    }
+    assert.doesNotMatch(js, /Permissions And Approvals|Privacy And Artifacts|Build And Test/);
+    assert.doesNotMatch(html, /Permissions And Approvals|Privacy And Artifacts|Build And Test/);
+  });
+
+  it("keeps public docs prose free of big dash punctuation and stock page subtitles", () => {
+    const surface = [
+      read("src/docs.js"),
+      read("docs.html"),
+      ...publicDocSlugs.map((slug) => readFileSync(join(root, "..", "docs", `${slug}.md`), "utf8")),
+    ].join("\n");
+
+    assert.doesNotMatch(surface, /This page answers/i);
+    assert.doesNotMatch(surface, /[—–]/);
   });
 
   it("links the landing docs cards into the in-site docs experience", () => {
@@ -873,10 +925,10 @@ describe("Talos in-site documentation contract", () => {
     const docs = sectionSlice(html, "docs", null);
     assert.match(docs, /href="\.\/docs\.html"/);
     for (const route of [
-      "./docs.html#/quickstart",
-      "./docs.html#/model-setup",
-      "./docs.html#/approvals-and-permissions",
-      "./docs.html#/how-talos-works",
+      "./docs.html#/getting-started/quickstart",
+      "./docs.html#/getting-started/model-setup",
+      "./docs.html#/user/permissions-and-approvals",
+      "./docs.html#/architecture/execution-model",
     ]) {
       assert.match(docs, new RegExp(`href="${escapeRegExp(route)}"`));
     }
@@ -884,8 +936,13 @@ describe("Talos in-site documentation contract", () => {
   });
 
   it("tells direct model-setup users where to get a compatible llama-server", () => {
-    const docsRoot = join(root, "..", "docs", "user");
-    const surface = ["quickstart", "installation", "model-setup", "troubleshooting"]
+    const docsRoot = join(root, "..", "docs");
+    const surface = [
+      "getting-started/quickstart",
+      "getting-started/installation",
+      "getting-started/model-setup",
+      "user/troubleshooting",
+    ]
       .map((slug) => readFileSync(join(docsRoot, `${slug}.md`), "utf8"))
       .join("\n")
       .replace(/\s+/g, " ");
@@ -905,7 +962,7 @@ describe("Talos in-site documentation contract", () => {
   });
 
   it("does not publish unsupported install or capability claims in docs surface", () => {
-    const surface = [read("docs.html"), read("src/docs.js"), ...userDocSlugs.map((slug) => readFileSync(join(root, "..", "docs", "user", `${slug}.md`), "utf8"))].join("\n");
+    const surface = [read("docs.html"), read("src/docs.js"), ...publicDocSlugs.map((slug) => readFileSync(join(root, "..", "docs", `${slug}.md`), "utf8"))].join("\n");
     for (const banned of [
       "Windows-first",
       "winget install works now",
@@ -923,8 +980,8 @@ describe("Talos in-site documentation contract", () => {
 
   it("README points users to the user-docs entry point", () => {
     const readme = readFileSync(join(root, "..", "README.md"), "utf8");
-    assert.match(readme, /docs\/user\/index\.md/);
-    assert.match(readme, /docs\/user\/quickstart\.md/);
-    assert.match(readme, /docs\/public-installation\.md/);
+    assert.match(readme, /docs\/index\.md/);
+    assert.match(readme, /docs\/getting-started\/quickstart\.md/);
+    assert.match(readme, /docs\/development\/release-process\.md/);
   });
 });

@@ -68,8 +68,7 @@ class LlamaCppModelProfilesTest {
         for (var profile : LlamaCppModelProfiles.profiles().values()) {
             assertFalse(profile.toolMode().isBlank(), profile.alias());
             assertTrue(profile.evidenceSummary().contains("evidence"), profile.alias());
-            assertTrue(profile.guidePath().startsWith("docs/user/model-profiles/"), profile.alias());
-            assertTrue(profile.guidePath().endsWith(".md"), profile.alias());
+            assertEquals("docs/reference/model-profiles.md", profile.guidePath(), profile.alias());
         }
     }
 }

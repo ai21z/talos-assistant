@@ -84,7 +84,7 @@ jobs:
           npm run build --prefix site
           npm run test:deploy-surface --prefix site
 
-      - name: Run T929 automated candidate gate
+      - name: Run automated candidate gate
         shell: pwsh
         run: |
           $dirty = git status --short
@@ -94,7 +94,6 @@ jobs:
           }
           git diff --check
           ./gradlew.bat clean check --no-daemon
-          ./gradlew.bat wikiEvidenceCloseGate --rerun-tasks --no-daemon
           ./gradlew.bat talosQualitySummaries --no-daemon
 
       - name: Build Windows staging artifacts

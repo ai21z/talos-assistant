@@ -111,25 +111,6 @@ class RetrievalGoldContextHarnessTest {
         }
     }
 
-    @Test
-    void trackedReportPinsHarnessScopeAndNonAuthorization() throws IOException {
-        Path report = Path.of("work-cycle-docs/reports/t847-retrieval-evidence-and-gold-context-harness.md");
-
-        assertTrue(Files.exists(report), "T847 report must be tracked with harness scope and measured baseline");
-        String text = Files.readString(report);
-        assertAll(
-                () -> assertTrue(text.contains("20 gold-context tasks"), text),
-                () -> assertTrue(text.contains("BM25-only"), text),
-                () -> assertTrue(text.contains("hybrid"), text),
-                () -> assertTrue(text.contains("file recall"), text),
-                () -> assertTrue(text.contains("junk context"), text),
-                () -> assertTrue(text.contains("missing-core-evidence"), text),
-                () -> assertTrue(text.contains("protected-path negative"), text),
-                () -> assertTrue(text.contains("private-mode negative"), text),
-                () -> assertTrue(text.contains("T847 does not change retrieval ranking"), text)
-        );
-    }
-
     private static RetrievalPipeline defaultPipeline(LuceneStore store) {
         return RetrievalPipeline.builder()
                 .addStage(new Bm25Stage(store))
@@ -392,11 +373,11 @@ class RetrievalGoldContextHarnessTest {
                     doc("src/test/java/dev/talos/core/retrieval/RetrievalQualityGoldenTest.java#0",
                             "RetrievalQualityGoldenTest provides BM25 golden queries and trace invariants for baseline retrieval quality.",
                             "java", 24, 122, "retrieval golden tests", vec(1, 1, 0)),
-                    doc("docs/user/retrieval-and-vectors.md#0",
-                            "Retrieval and vectors docs explain that RAG is local Lucene, BM25 works without embeddings, vectors require a local embedding endpoint, and hybrid falls back to BM25.",
+                    doc("docs/reference/config.md#0",
+                            "Config reference explains that RAG is local Lucene, BM25 works without embeddings, vectors require a local embedding endpoint, and hybrid falls back to BM25.",
                             "markdown", 1, 145, "retrieval docs", vec(0, 1, 1)),
-                    doc("docs/user/beta-best-practices.md#0",
-                            "Beta best practices advise starting Talos in a narrow project directory, indexing only acceptable workspaces, using RAG for discovery, and direct reads for exact facts.",
+                    doc("docs/user/privacy-and-artifacts.md#0",
+                            "Privacy docs advise starting Talos in a narrow project directory, indexing only acceptable workspaces, using RAG for discovery, and direct reads for exact facts.",
                             "markdown", 1, 96, "best practices", vec(1, 0, 1)),
                     doc("config/default-config.yaml#0",
                             "Default config ships BM25-only retrieval unless the user explicitly configures a local embedding endpoint.",
@@ -416,7 +397,7 @@ class RetrievalGoldContextHarnessTest {
                     doc("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java#0",
                             "LocalTurnTraceCapture records local turn trace events for approvals tools retrieval and evidence without making traces tamper-evident.",
                             "java", 18, 104, "local trace", vec(0, 1, 0)),
-                    doc("docs/architecture/03-local-turn-trace-model-v1.md#0",
+                    doc("docs/architecture/trust-boundaries.md#0",
                             "Local turn trace model documents durable local evidence, trace schema, event records, and the non tamper-evident limitation.",
                             "markdown", 1, 120, "trace docs", vec(0, 1, 0)),
                     doc("src/main/java/dev/talos/core/secret/FileSecretStore.java#0",
@@ -441,7 +422,7 @@ class RetrievalGoldContextHarnessTest {
                             set("DoctorCommand"), ranges(range("src/main/java/dev/talos/cli/doctor/DoctorCommand.java#0", 12, 72)),
                             set("src/test/java/dev/talos/cli/doctor/DoctorCommandTest.java#0"), false, NegativeCase.NONE, vec(1, 0, 0)),
                     task("bm25-fallback", "BM25-only fallback when embedding endpoint fails",
-                            set("src/main/java/dev/talos/core/rag/RagService.java#0", "docs/user/retrieval-and-vectors.md#0"),
+                            set("src/main/java/dev/talos/core/rag/RagService.java#0", "docs/reference/config.md#0"),
                             set("RagService"), ranges(range("src/main/java/dev/talos/core/rag/RagService.java#0", 41, 132)),
                             set("src/test/java/dev/talos/core/rag/RagServiceTest.java#0"), false, NegativeCase.NONE, vec(0, 1, 0)),
                     task("semantic-embedding-endpoint", "semantic fuzzy setup for local embeddings endpoint dimensions",
@@ -465,12 +446,12 @@ class RetrievalGoldContextHarnessTest {
                             set("RetrievalTrace"), ranges(range("src/main/java/dev/talos/core/retrieval/RetrievalPipeline.java#0", 16, 74)),
                             set("src/test/java/dev/talos/core/retrieval/RetrievalQualityGoldenTest.java#0"), false, NegativeCase.NONE, vec(1, 1, 0)),
                     task("retrieval-docs", "RAG local Lucene BM25 vectors require local embedding endpoint",
-                            set("docs/user/retrieval-and-vectors.md#0"),
-                            set(), ranges(range("docs/user/retrieval-and-vectors.md#0", 1, 145)),
+                            set("docs/reference/config.md#0"),
+                            set(), ranges(range("docs/reference/config.md#0", 1, 145)),
                             set("src/test/java/dev/talos/docs/TrustClaimsHonestyTest.java#0"), false, NegativeCase.NONE, vec(0, 1, 1)),
                     task("beta-best-practices", "start Talos in a narrow project directory use RAG for discovery direct reads exact facts",
-                            set("docs/user/beta-best-practices.md#0"),
-                            set(), ranges(range("docs/user/beta-best-practices.md#0", 1, 96)),
+                            set("docs/user/privacy-and-artifacts.md#0"),
+                            set(), ranges(range("docs/user/privacy-and-artifacts.md#0", 1, 96)),
                             set(), false, NegativeCase.NONE, vec(1, 0, 1)),
                     task("default-vector-config", "default config BM25-only embedding disabled",
                             set("config/default-config.yaml#0"),
@@ -489,7 +470,7 @@ class RetrievalGoldContextHarnessTest {
                             set("WriteFileTool"), ranges(range("src/main/java/dev/talos/tools/impl/WriteFileTool.java#0", 46, 124)),
                             set("src/test/java/dev/talos/tools/impl/WriteFileToolTest.java#0"), false, NegativeCase.NONE, vec(1, 0, 1)),
                     task("local-trace-capture", "local turn trace approvals tools retrieval evidence events",
-                            set("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java#0", "docs/architecture/03-local-turn-trace-model-v1.md#0"),
+                            set("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java#0", "docs/architecture/trust-boundaries.md#0"),
                             set("LocalTurnTraceCapture"), ranges(range("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java#0", 18, 104)),
                             set("src/test/java/dev/talos/runtime/trace/LocalTurnTraceCaptureTest.java#0"), false, NegativeCase.NONE, vec(0, 1, 0)),
                     task("secret-store-custody", "Windows DPAPI CurrentUser master key custody secret store",

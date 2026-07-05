@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  * explicitly excluded {@code .env} are removed).
  *
  * <p>Previously this logic lived inline in AssistantTurnExecutor and its
- * file detection was a hardcoded list of the AGENTS.md audit fixture's
+ * file detection was a hardcoded list of the old audit fixture's
  * filenames (.env, config.json, index.html, notes.md, report.docx,
  * script.js, styles.css) - teaching-to-the-test: audit answers were
  * checked, real-workspace answers were not. File detection is now

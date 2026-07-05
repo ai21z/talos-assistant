@@ -69,29 +69,40 @@
             <p class="docs-nav-group">Get Started</p>
             <ul>
               <li><a href="#/" data-doc-slug="">Overview</a></li>
-              <li><a href="#/quickstart" data-doc-slug="quickstart">Quickstart</a></li>
-              <li><a href="#/installation" data-doc-slug="installation">Installation</a></li>
-              <li><a href="#/model-setup" data-doc-slug="model-setup">Model Setup</a></li>
-              <li><a href="#/first-run" data-doc-slug="first-run">First Run</a></li>
-              <li><a href="#/beta-best-practices" data-doc-slug="beta-best-practices">Beta Best Practices</a></li>
+              <li><a href="#/getting-started/installation" data-doc-slug="getting-started/installation">Installation</a></li>
+              <li><a href="#/getting-started/quickstart" data-doc-slug="getting-started/quickstart">Quickstart</a></li>
+              <li><a href="#/getting-started/first-run" data-doc-slug="getting-started/first-run">First run</a></li>
+              <li><a href="#/getting-started/model-setup" data-doc-slug="getting-started/model-setup">Model setup</a></li>
             </ul>
-            <p class="docs-nav-group">Guides</p>
+            <p class="docs-nav-group">Using Talos</p>
             <ul>
-              <li><a href="#/workspaces-and-indexing" data-doc-slug="workspaces-and-indexing">Workspaces And Indexing</a></li>
-              <li><a href="#/retrieval-and-vectors" data-doc-slug="retrieval-and-vectors">Retrieval And Vectors</a></li>
-              <li><a href="#/approvals-and-permissions" data-doc-slug="approvals-and-permissions">Approvals And Permissions</a></li>
-              <li><a href="#/local-privacy-and-artifacts" data-doc-slug="local-privacy-and-artifacts">Local Privacy And Artifacts</a></li>
-              <li><a href="#/troubleshooting" data-doc-slug="troubleshooting">Troubleshooting</a></li>
+              <li><a href="#/user/commands" data-doc-slug="user/commands">Commands</a></li>
+              <li><a href="#/user/modes" data-doc-slug="user/modes">Modes</a></li>
+              <li><a href="#/user/permissions-and-approvals" data-doc-slug="user/permissions-and-approvals">Permissions and approvals</a></li>
+              <li><a href="#/user/privacy-and-artifacts" data-doc-slug="user/privacy-and-artifacts">Privacy and artifacts</a></li>
+              <li><a href="#/user/supported-files" data-doc-slug="user/supported-files">Supported files</a></li>
+              <li><a href="#/user/troubleshooting" data-doc-slug="user/troubleshooting">Troubleshooting</a></li>
             </ul>
             <p class="docs-nav-group">Reference</p>
             <ul>
-              <li><a href="#/commands" data-doc-slug="commands">Commands</a></li>
-              <li><a href="#/file-support" data-doc-slug="file-support">File Support</a></li>
-              <li><a href="#/release-channels" data-doc-slug="release-channels">Release Channels</a></li>
+              <li><a href="#/reference/cli" data-doc-slug="reference/cli">CLI</a></li>
+              <li><a href="#/reference/config" data-doc-slug="reference/config">Config</a></li>
+              <li><a href="#/reference/model-profiles" data-doc-slug="reference/model-profiles">Model profiles</a></li>
+              <li><a href="#/reference/release-channels" data-doc-slug="reference/release-channels">Release channels</a></li>
             </ul>
-            <p class="docs-nav-group">Concepts</p>
+            <p class="docs-nav-group">Architecture</p>
             <ul>
-              <li><a href="#/how-talos-works" data-doc-slug="how-talos-works">How Talos Works</a></li>
+              <li><a href="#/architecture/overview" data-doc-slug="architecture/overview">Overview</a></li>
+              <li><a href="#/architecture/execution-model" data-doc-slug="architecture/execution-model">Execution model</a></li>
+              <li><a href="#/architecture/trust-boundaries" data-doc-slug="architecture/trust-boundaries">Trust boundaries</a></li>
+              <li><a href="#/architecture/package-map" data-doc-slug="architecture/package-map">Package map</a></li>
+            </ul>
+            <p class="docs-nav-group">Development</p>
+            <ul>
+              <li><a href="#/development/build-and-test" data-doc-slug="development/build-and-test">Build and test</a></li>
+              <li><a href="#/development/ci-cd" data-doc-slug="development/ci-cd">CI/CD</a></li>
+              <li><a href="#/development/release-process" data-doc-slug="development/release-process">Release process</a></li>
+              <li><a href="#/development/runtime-artifacts" data-doc-slug="development/runtime-artifacts">Runtime artifacts</a></li>
             </ul>
           </nav>
         </aside>
@@ -102,7 +113,7 @@
               <h1>Talos documentation</h1>
               <p>
                 Loading bundled documentation. If this message remains, browse the
-                <a href="https://github.com/ai21z/talos-assistant/tree/v0.9.0-beta-dev/docs/user">source Markdown on GitHub</a>.
+                <a href="https://github.com/ai21z/talos-assistant/tree/v0.9.0-beta-dev/docs">source Markdown on GitHub</a>.
               </p>
             </div>
             <noscript>
@@ -110,7 +121,7 @@
               <p>
                 Talos is a local-first CLI workspace operator. The documentation pages
                 are rendered with JavaScript. Browse the
-                <a href="https://github.com/ai21z/talos-assistant/tree/v0.9.0-beta-dev/docs/user">source Markdown on GitHub</a>
+                <a href="https://github.com/ai21z/talos-assistant/tree/v0.9.0-beta-dev/docs">source Markdown on GitHub</a>
                 if scripts are disabled.
               </p>
             </noscript>
@@ -128,7 +139,7 @@
               <span>Talos</span>
             </a>
             <p class="footer-line">
-              Local-first CLI workspace operator. Java 21. Windows packaged beta; Linux source/developer beta.
+              Local-first CLI workspace operator. Java 21. Windows packaged beta; Linux source beta.
             </p>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">

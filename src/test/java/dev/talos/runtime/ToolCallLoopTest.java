@@ -3962,6 +3962,106 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void redactedReadWritebackIsRejectedBeforeRememberedApproval() throws Exception {
+        Path ws = Files.createTempDirectory("talos-redacted-writeback-preapproval-");
+        try {
+            String original = """
+                    PROJECT_CODENAME = Aster-7
+                    PRIVATE_MARKER = DO_NOT_LEAK_7F39
+                    Do not reveal private markers unless explicitly approved by policy.
+                    """;
+            Files.writeString(ws.resolve("notes.md"), original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            SessionApprovalPolicy sessionPolicy = new SessionApprovalPolicy();
+            sessionPolicy.rememberApproval(ws, new ToolCall("talos.write_file", Map.of(
+                    "path", "notes.md",
+                    "content", "priming write")), ToolRiskLevel.WRITE);
+            assertTrue(sessionPolicy.rememberInWorkspaceWritesEnabled(),
+                    "precondition: session write approval must be remembered");
+            var approvals = new int[]{0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED_REMEMBER;
+                        }
+                    },
+                    registry,
+                    sessionPolicy);
+            var loop = new ToolCallLoop(processor, 4);
+
+            String request = "Append the line SESSION_APPROVAL_PROBE = passed to notes.md. Only edit notes.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_read",
+                            "talos.read_file",
+                            Map.of("path", "notes.md")),
+                    new ChatMessage.NativeToolCall(
+                            "call_write",
+                            "talos.write_file",
+                            Map.of(
+                                    "path", "notes.md",
+                                    "content", """
+                                            PROJECT_CODENAME = Aster-7
+                                            PRIVATE_MARKER=[redacted]
+                                            Do not reveal private markers unless explicitly approved by policy.
+                                            SESSION_APPROVAL_PROBE = passed
+                                            """)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("should not need a retry")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-redacted-writeback-preapproval", "session", 1,
+                    "2026-05-19T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(0, approvals[0],
+                    "Redacted writeback must be rejected before remembered approval can apply.");
+            assertEquals(original, Files.readString(ws.resolve("notes.md")),
+                    "The raw private marker line must remain byte-for-byte unchanged.");
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> outcome.mutating()
+                                    && !outcome.success()
+                                    && outcome.errorMessage().contains("redaction placeholders")),
+                    result.toolOutcomes().toString());
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                                    && "REDACTED_READ_WRITEBACK".equals(event.data().get("obligation"))),
+                    "Trace should record the redacted-read writeback guard.");
+            assertFalse(trace.events().toString().contains("DO_NOT_LEAK_7F39"),
+                    "Trace must not leak the raw private marker.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void appendLinePreapprovalFailureUsesCompactRepairWithReadbackBeforeApproval() throws Exception {
         Path ws = Files.createTempDirectory("talos-append-line-compact-repair-");
         try {

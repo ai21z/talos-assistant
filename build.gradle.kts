@@ -694,7 +694,6 @@ val candidateTest by tasks.registering(Test::class) {
 tasks.test {
     filter {
         excludeTestsMatching("dev.talos.architecture.intelligence.*")
-        excludeTestsMatching("dev.talos.wiki.WikiEvidenceLivenessTest")
     }
 }
 
@@ -722,43 +721,6 @@ val architectureIntelligenceReport by tasks.registering(Test::class) {
     outputs.dir(layout.buildDirectory.dir("reports/talos/architecture-intelligence/current"))
     mustRunAfter(cleanArchitectureIntelligenceReport)
     shouldRunAfter(tasks.test)
-}
-
-val wikiLintStructural by tasks.registering(Test::class) {
-    description = "Runs the structural lint for the committed Talos living evidence wiki."
-    group = "verification"
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    inputs.dir(layout.projectDirectory.dir("work-cycle-docs/wiki"))
-    filter {
-        includeTestsMatching("dev.talos.wiki.WikiLintStructuralTest")
-    }
-    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/wikiLintStructural"))
-    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/wikiLintStructural"))
-    shouldRunAfter(tasks.test)
-}
-
-val wikiLintWithEvidence by tasks.registering(Test::class) {
-    description = "Runs living evidence wiki lint against generated Talos architecture report JSON."
-    group = "verification"
-    dependsOn(cleanArchitectureIntelligenceReport, architectureIntelligenceReport, wikiLintStructural)
-    mustRunAfter(architectureIntelligenceReport, wikiLintStructural)
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    inputs.dir(layout.projectDirectory.dir("work-cycle-docs/wiki"))
-    inputs.dir(layout.buildDirectory.dir("reports/talos/architecture-intelligence/current/data"))
-    outputs.file(layout.buildDirectory.file("reports/talos/wiki-lint/current/identity-freshness.json"))
-    filter {
-        includeTestsMatching("dev.talos.wiki.WikiEvidenceLivenessTest")
-    }
-    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/wikiLintWithEvidence"))
-    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/wikiLintWithEvidence"))
-}
-
-val wikiEvidenceCloseGate by tasks.registering {
-    description = "Runs the living evidence wiki close/candidate gate with generated-report liveness."
-    group = "verification"
-    dependsOn(wikiLintWithEvidence)
 }
 
 val candidateE2eTest by tasks.registering(Test::class) {

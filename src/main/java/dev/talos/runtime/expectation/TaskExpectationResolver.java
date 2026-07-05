@@ -288,11 +288,18 @@ public final class TaskExpectationResolver {
             return null;
         }
         String quoted = Pattern.quote(normalizedTarget);
-        Pattern exactAppendLine = Pattern.compile(
+        Pattern appendLineAfterTarget = Pattern.compile(
                 "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|line)"
                         + "\\s+to\\s+`?" + quoted + "`?\\s*:\\s*(.+)");
-        Matcher matcher = exactAppendLine.matcher(request);
-        if (!matcher.find()) return null;
+        Matcher matcher = appendLineAfterTarget.matcher(request);
+        if (!matcher.find()) {
+            Pattern appendLineBeforeTarget = Pattern.compile(
+                    "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|the\\s+line|line)"
+                            + "\\s+(.+?)\\s+to\\s+`?" + quoted + "`?"
+                            + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+            matcher = appendLineBeforeTarget.matcher(request);
+            if (!matcher.find()) return null;
+        }
         String line = normalizeAppendLine(matcher.group(1));
         if (line.isBlank()) return null;
         return new AppendLineExpectation(normalizedTarget, line, "append-line-exact");

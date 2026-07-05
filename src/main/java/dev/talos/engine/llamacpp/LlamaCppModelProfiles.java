@@ -17,6 +17,7 @@ import java.util.Optional;
  * depend on it without a package cycle.
  */
 public final class LlamaCppModelProfiles {
+    private static final String MODEL_PROFILES_GUIDE = "docs/reference/model-profiles.md";
 
     private LlamaCppModelProfiles() {}
 
@@ -56,31 +57,31 @@ public final class LlamaCppModelProfiles {
                 "qwen2.5-coder-14b-instruct-q4_k_m.gguf", true,
                 "native/default", SupportTier.ACCEPTED_BETA,
                 "accepted beta stability evidence; run talos doctor --start after configuration for machine-local smoke evidence",
-                "docs/user/model-profiles/qwen2.5-coder-14b.md"));
+                MODEL_PROFILES_GUIDE));
         out.put("gpt-oss-20b", new CannedProfile(
                 "gpt-oss-20b", "ggml-org/gpt-oss-20b-GGUF",
                 "gpt-oss-20b-mxfp4.gguf", true,
                 "native/default", SupportTier.ACCEPTED_BETA,
                 "accepted beta stability evidence; run talos doctor --start after configuration for machine-local smoke evidence",
-                "docs/user/model-profiles/gpt-oss-20b.md"));
+                MODEL_PROFILES_GUIDE));
         out.put("qwen36vf-q4km", new CannedProfile(
                 "qwen36vf-q4km", "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
                 "Qwen3.6-14B-A3B-VibeForged-v2-Q4_K_M.gguf", true,
                 "native/default", SupportTier.EXPERIMENTAL_SELECTABLE,
                 "experimental tool-call evidence; not beta stability evidence",
-                "docs/user/model-profiles/qwen36vf-q4km.md"));
+                MODEL_PROFILES_GUIDE));
         out.put("qwen36vf-q6k", new CannedProfile(
                 "qwen36vf-q6k", "tvall43/Qwen3.6-14B-A3B-VibeForged-v2-GGUF",
                 "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K.gguf", true,
                 "native/default", SupportTier.EXPERIMENTAL_SELECTABLE,
                 "experimental tool-call evidence; not beta stability evidence",
-                "docs/user/model-profiles/qwen36vf-q6k.md"));
+                MODEL_PROFILES_GUIDE));
         out.put("deepseek-v2lite-q4km", new CannedProfile(
                 "deepseek-v2lite-q4km", "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
                 "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf", false,
                 "text/tool-prompt", SupportTier.EXPERIMENTAL_SELECTABLE,
                 "experimental text/tool-prompt evidence; native/default produced zero executable tool calls",
-                "docs/user/model-profiles/deepseek-v2lite-q4km.md"));
+                MODEL_PROFILES_GUIDE));
         return Collections.unmodifiableMap(out);
     }
 

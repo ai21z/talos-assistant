@@ -5,10 +5,10 @@ import { escapeHtml, renderMarkdown } from "./docs-markdown.js";
 document.documentElement.classList.add("js");
 setupRitualMenu();
 
-// Import all user docs as raw strings at build time. The path is relative to
-// this file: site/src -> ../../docs/user. Vite resolves the glob and inlines
+// Import all maintained docs as raw strings at build time. The path is relative to
+// this file: site/src -> ../../docs. Vite resolves the glob and inlines
 // content into the bundle (no runtime fetch, no path traversal at runtime).
-const docModules = import.meta.glob("../../docs/user/**/*.md", {
+const docModules = import.meta.glob("../../docs/**/*.md", {
   query: "?raw",
   import: "default",
   eager: true,
@@ -16,7 +16,7 @@ const docModules = import.meta.glob("../../docs/user/**/*.md", {
 
 // Map slug -> raw markdown text. "index" becomes the docs landing page.
 const docsBySlug = {};
-const docsRootPrefix = "../../docs/user/";
+const docsRootPrefix = "../../docs/";
 for (const [path, raw] of Object.entries(docModules)) {
   const slug = path.startsWith(docsRootPrefix)
     ? path.slice(docsRootPrefix.length).replace(/\.md$/, "")
@@ -29,9 +29,9 @@ const article = document.getElementById("docs-article");
 const navLinks = Array.from(document.querySelectorAll("[data-doc-slug]"));
 const STATUS_NOTE_HTML = `
 <aside class="docs-callout docs-callout--beta" role="note">
-  <p><strong>Beta status.</strong> Talos has planned Windows x64 installer and
-  Ubuntu/WSL x64 tarball targets. These public paths are not live until GitHub
-  Release assets exist. Current reliable path is source/developer setup.</p>
+  <p><strong>Beta status.</strong> Public Windows and Ubuntu/WSL packages are staged
+  before release, but they are not live until GitHub Release assets exist. For now,
+  use source setup or a QA artifact built from this repository.</p>
 </aside>`;
 
 function currentRoute() {
@@ -100,41 +100,54 @@ function renderRoute() {
 }
 
 function renderLandingHtml() {
-  // The docs landing reuses content from docs/user/index.md but is laid out
+  // The docs landing reuses content from docs/index.md but is laid out
   // as a curated start surface rather than a raw rendering.
   const cards = [
     {
       group: "Start here",
       items: [
-        ["Quickstart", "quickstart", "Source/developer setup to first session."],
-        ["Installation", "installation", "Current install state and planned public beta."],
-        ["Model Setup", "model-setup", "Configure a local model engine."],
-        ["First Run", "first-run", "Understand the startup banner and prompt."],
-        ["Beta Best Practices", "beta-best-practices", "Use beta Talos safely and effectively."],
+        ["Installation", "getting-started/installation", "What is packaged now, and what is still staged."],
+        ["Quickstart", "getting-started/quickstart", "Install from source and start a first session."],
+        ["First run", "getting-started/first-run", "Read the banner, prompt, and status output."],
+        ["Model setup", "getting-started/model-setup", "Connect Talos to a local model engine."],
       ],
     },
     {
-      group: "Trust and safety",
+      group: "Using Talos",
       items: [
-        ["Approvals And Permissions", "approvals-and-permissions", "When Talos asks before acting."],
-        ["Local Privacy And Artifacts", "local-privacy-and-artifacts", "Private mode and local evidence."],
-        ["File Support", "file-support", "Which file types are safe to use."],
+        ["Commands", "user/commands", "Top-level CLI and REPL slash commands."],
+        ["Modes", "user/modes", "Ask, Plan, Agent, and Auto behavior."],
+        ["Permissions and approvals", "user/permissions-and-approvals", "When Talos asks before acting."],
+        ["Privacy and artifacts", "user/privacy-and-artifacts", "Private mode and local evidence."],
+        ["Supported files", "user/supported-files", "Which file types are in beta scope."],
+        ["Troubleshooting", "user/troubleshooting", "Diagnose install, model, and runtime issues."],
       ],
     },
     {
       group: "Reference",
       items: [
-        ["Commands", "commands", "Top-level CLI and REPL slash commands."],
-        ["Workspaces And Indexing", "workspaces-and-indexing", "Workspace boundary and index state."],
-        ["Retrieval And Vectors", "retrieval-and-vectors", "RAG, BM25, vectors, and disabled-vector behavior."],
-        ["Troubleshooting", "troubleshooting", "Diagnose install, model, and runtime issues."],
-        ["Release Channels", "release-channels", "Beta status and planned release artifacts."],
+        ["CLI", "reference/cli", "Installed command reference."],
+        ["Config", "reference/config", "Model, retrieval, host, and profile settings."],
+        ["Model profiles", "reference/model-profiles", "Accepted and experimental local model profiles."],
+        ["Release channels", "reference/release-channels", "Beta status and staged artifacts."],
       ],
     },
     {
-      group: "Concepts",
+      group: "Architecture",
       items: [
-        ["How Talos Works", "how-talos-works", "The execution contract behind every turn."],
+        ["Overview", "architecture/overview", "The main execution spine."],
+        ["Execution model", "architecture/execution-model", "Contract, posture, tools, approval, verification."],
+        ["Trust boundaries", "architecture/trust-boundaries", "Local safety and evidence boundaries."],
+        ["Package map", "architecture/package-map", "High-level Java package ownership."],
+      ],
+    },
+    {
+      group: "Development",
+      items: [
+        ["Build and test", "development/build-and-test", "Local build and verification commands."],
+        ["CI/CD", "development/ci-cd", "Current workflow and staging policy."],
+        ["Release process", "development/release-process", "Release QA and artifact boundaries."],
+        ["Runtime artifacts", "development/runtime-artifacts", "Local traces, logs, and evidence sinks."],
       ],
     },
   ];
@@ -164,19 +177,17 @@ function renderLandingHtml() {
   return `
 <header class="docs-hero">
   <p class="eyebrow">Talos documentation</p>
-  <h1>Local-first CLI workspace operator docs.</h1>
+  <h1>Start Talos on your machine.</h1>
   <p class="docs-lede">
-    Setup, commands, approvals, privacy, and troubleshooting for the current
-    source/developer setup plus planned Windows and Ubuntu/WSL x64 public
-    artifact targets. Source-backed, paired with concrete limits.
+    Use these docs to install Talos, connect a local model, learn the REPL,
+    and check the evidence behind a turn. They describe the current beta state
+    directly, including what is not packaged yet.
   </p>
   <p class="docs-start-path">
-    Start here:
-    <a href="#/quickstart">Quickstart</a>
-    <span aria-hidden="true">→</span>
-    <a href="#/model-setup">Model Setup</a>
-    <span aria-hidden="true">→</span>
-    <a href="#/first-run">First Run</a>.
+    Recommended order:
+    <a href="#/getting-started/quickstart">Quickstart</a>,
+    <a href="#/getting-started/model-setup">model setup</a>, then
+    <a href="#/getting-started/first-run">first run</a>.
   </p>
 </header>
 ${STATUS_NOTE_HTML}

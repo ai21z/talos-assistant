@@ -40,4 +40,70 @@ describe("Talos docs Markdown renderer", () => {
       /<li>Save the <code>talos doctor --start<\/code> output as evidence\.<\/li>/,
     );
   });
+
+  it("renders Mermaid fences as visual docs diagrams instead of raw copyable code", () => {
+    const html = renderMarkdown(
+      [
+        "```mermaid",
+        "flowchart LR",
+        '    Start["Classify request"] --> Tools["Narrow tools"]',
+        '    Tools --> Verify["Verify result"]',
+        "```",
+      ].join("\n"),
+    );
+
+    assert.match(html, /class="docs-diagram docs-diagram--flowchart"/);
+    assert.match(html, /Classify request/);
+    assert.match(html, /Narrow tools/);
+    assert.match(html, /Verify result/);
+    assert.doesNotMatch(html, /docs-code/);
+    assert.doesNotMatch(html, /docs-copy/);
+    assert.doesNotMatch(html, /flowchart LR/);
+  });
+
+  it("renders flowchart Mermaid edges as connected paths with arrow elements", () => {
+    const html = renderMarkdown(
+      [
+        "```mermaid",
+        "flowchart LR",
+        '    User["User request"] --> Contract["Task contract"]',
+        '    Contract -- read-only --> Posture["Capability posture"]',
+        '    Posture --> Tools["Visible tools"]',
+        "```",
+      ].join("\n"),
+    );
+
+    assert.match(html, /class="docs-flow-path"/);
+    assert.match(html, /class="docs-flow-node"/);
+    assert.match(html, /class="docs-flow-arrow"/);
+    assert.match(html, /aria-label="User request to Task contract"/);
+    assert.match(html, /read-only/);
+    assert.match(html, /Capability posture/);
+    assert.doesNotMatch(html, /docs-diagram-nodes/);
+  });
+
+  it("renders sequence Mermaid diagrams as lane-style message flows", () => {
+    const html = renderMarkdown(
+      [
+        "```mermaid",
+        "sequenceDiagram",
+        "    participant U as User",
+        "    participant R as REPL",
+        "    participant P as Policy",
+        "    U->>R: natural-language request",
+        "    R->>P: derive allowed tools",
+        "    P-->>U: ask for approval when required",
+        "```",
+      ].join("\n"),
+    );
+
+    assert.match(html, /class="docs-sequence-lanes"/);
+    assert.match(html, /class="docs-sequence-actor"/);
+    assert.match(html, /class="docs-sequence-arrow"/);
+    assert.match(html, /User/);
+    assert.match(html, /REPL/);
+    assert.match(html, /Policy/);
+    assert.match(html, /ask for approval when required/);
+    assert.doesNotMatch(html, /sequenceDiagram/);
+  });
 });
