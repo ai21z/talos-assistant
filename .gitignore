@@ -36,6 +36,7 @@
 hs_err_pid*
 replay_pid*
 /reports/
+/reports-disabled/
 
 # Qodana (JetBrains code quality) - keep config, ignore outputs
 .qodana/

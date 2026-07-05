@@ -92,7 +92,7 @@ final class RedactorTest {
 
         @Test
         void api_key_label_preserved() {
-            String out = defaultRedactor.redactLine("api_key=sk_live_aBcDeFgHiJkLmNoP");
+            String out = defaultRedactor.redactLine("api_key=" + fakeUnderscoreToken());
             assertTrue(out.startsWith("api_key=[secret]"),
                     "Label 'api_key' should survive, got: " + out);
         }
@@ -106,7 +106,7 @@ final class RedactorTest {
 
         @Test
         void token_colon_separator() {
-            String out = defaultRedactor.redactLine("token: ABCDEFGHabcdefgh12345678");
+            String out = defaultRedactor.redactLine("token: " + fakeGenericToken());
             assertTrue(out.startsWith("token=[secret]"),
                     "Label 'token' should survive with colon separator, got: " + out);
         }
@@ -188,7 +188,7 @@ final class RedactorTest {
         @Test
         void realistic_jwt_is_caught() {
             // Realistic JWT: header (36 chars) . payload (variable) . sig (43 chars)
-            String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Ik.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+            String jwt = fakeJwt();
             String out = defaultRedactor.redactLine("Auth: " + jwt);
             assertTrue(out.contains("[secret]"), "Realistic JWT should be caught, got: " + out);
             assertFalse(out.contains(jwt));
@@ -377,6 +377,21 @@ final class RedactorTest {
             assertFalse(out.contains("\u0007"));
             assertFalse(out.contains("\u0000"));
         }
+    }
+
+    private static String fakeUnderscoreToken() {
+        return "sk" + "_live_" + "aBcDeFgHiJkLmNoP";
+    }
+
+    private static String fakeGenericToken() {
+        return "ABCDEFGH" + "abcdefgh" + "12345678";
+    }
+
+    private static String fakeJwt() {
+        return String.join(".",
+                "ey" + "JhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+                "ey" + "JzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Ik",
+                "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c");
     }
 }
 

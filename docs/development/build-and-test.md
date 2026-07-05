@@ -36,3 +36,23 @@ Do not treat one successful model response as a test. Use traces, tool results, 
 6. Run `.\gradlew.bat check --no-daemon` before merging or staging release artifacts.
 
 For installed-product checks, verify which `talos` executable your shell resolves before judging behavior.
+
+## Reports
+
+The normal build does not generate reviewer Markdown reports. Generate them only when you need local review evidence:
+
+```powershell
+.\gradlew.bat writeQualityMarkdownReports --no-daemon
+```
+
+You can also ask `check` to write those snapshots after the automated gate:
+
+```powershell
+.\gradlew.bat check -PwithQualityReports=true --no-daemon
+```
+
+Before release staging or publication, use the maintainer packet instead:
+
+```powershell
+.\gradlew.bat releaseQualityPacket --no-daemon
+```

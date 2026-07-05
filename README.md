@@ -652,17 +652,27 @@ Talos is local-first:
 Talos can generate reviewer-friendly Markdown quality reports from the
 machine-readable summaries in `build/reports/talos/`.
 
-Use this command for local snapshots of coverage, E2E, Qodana, and build
-artifact provenance:
+The maintained guide is [Quality reports](docs/development/quality-reports.md).
+Generated report outputs stay local and are not committed.
+
+Use this command for local reviewer snapshots of coverage, E2E, Qodana, and
+build artifact provenance. This is diagnostic and can describe failed evidence:
 
 ```powershell
-./gradlew.bat writeQualityMarkdownReports
+.\gradlew.bat writeQualityMarkdownReports --no-daemon
 ```
 
-For a full fresh local quality run that refreshes native Qodana first:
+Use this command to validate generated JSON summaries as release-quality
+evidence:
 
 ```powershell
-./gradlew.bat talosQualityLocal
+.\gradlew.bat qualityReportGate --no-daemon
+```
+
+Use this maintainer lane before release staging or publication decisions:
+
+```powershell
+.\gradlew.bat releaseQualityPacket --no-daemon
 ```
 
 Reports are written to the repository-root `reports/` folder using this format:
@@ -677,9 +687,8 @@ Example:
 coverage-23042026-090.md
 ```
 
-The generated `reports/` folder is intentionally ignored by Git. The tracked
-`reports-disabled/README.md` explains how to use it. Gradle also creates
-`reports/` automatically when the report task runs.
+The generated `reports/` folder is intentionally ignored by Git. Gradle creates
+it automatically when the report task runs.
 
 Before writing new reports, the generator removes older generated report
 snapshots with the standard report filename pattern. Manual files with other
@@ -709,7 +718,6 @@ High-level layout:
 |-- scripts/             helper scripts
 |-- tools/               install and support tooling
 |-- local/               ignored local working space
-|-- reports-disabled/    tracked docs for ignored local reports
 |-- build/               generated outputs
 |-- CHANGELOG.md         human-readable version history
 `-- README.md            project overview
@@ -717,7 +725,7 @@ High-level layout:
 
 The `local/` folder is for personal workspace material on this machine,
 including manual-testing notes. It is intentionally ignored by Git. Generated
-`reports/` are also ignored; usage instructions are kept in `reports-disabled/`.
+`reports/` are also ignored.
 
 ## Summary
 
