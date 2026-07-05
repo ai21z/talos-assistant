@@ -1,6 +1,6 @@
 # [T963-open-high] GPT-OSS Setup Profile Must Produce Startable Config
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -218,6 +218,43 @@ Commands:
 ## Work-Test Cycle Notes
 
 - Behavior-changing closeout requires a CHANGELOG entry under `## [Unreleased]`.
+
+## Resolution
+
+Implemented on 2026-07-05 on `v0.9.0-beta-dev`.
+
+Runtime behavior now follows the setup truth boundary:
+
+- explicit `--model-path` remains honored and writes direct `model_path`;
+- `gpt-oss-20b` setup resolves an exact `gpt-oss-20b-mxfp4.gguf` from the
+  standard Hugging Face cache and writes that concrete `model_path`;
+- unresolved `gpt-oss-20b` setup refuses before writing config and points to
+  `--model-path`, the standard Hugging Face cache, or `talos setup wizard`;
+- setup help, README, public install docs, and user model docs no longer list
+  bare GPT-OSS remote-preset setup as the reliable path.
+
+Verification:
+
+- TDD red tests:
+  `SetupCmdTest.setupModelsWriteUsesStandardHuggingFaceCacheForGptOss`,
+  `SetupCmdTest.setupModelsWriteRefusesGptOssWithoutLocalModelSource`,
+  `SetupCmdTest.setupModelsWriteHonorsExplicitUserOwnedModelPath`, and the
+  README/docs honesty assertion failed before the implementation/docs updates.
+- Focused green:
+  `.\gradlew.bat test --tests "dev.talos.cli.launcher.SetupCmdTest" --tests "dev.talos.docs.TrustClaimsHonestyTest" --no-daemon`
+  passed.
+- Clean installed-product smoke:
+  `.\gradlew.bat clean installDist --no-daemon` passed, the global install was
+  refreshed from `build\install\talos`, then installed `talos setup models
+  --profile gpt-oss-20b --server-path <local llama-server.exe> --write --force`
+  resolved the standard Hugging Face cache file and `talos doctor --start`
+  passed `8 passed, 0 warning(s), 0 failed, 0 skipped`.
+- Installed evidence root:
+  `C:\Users\arisz\Desktop\testtalos\t963-gptoss-setup-20260705-085706`.
+- Whitespace gate:
+  `git diff --check` passed.
+- Full gate:
+  `.\gradlew.bat check --no-daemon` passed in 2m57s.
 - Release artifacts remain blocked until the GPT-OSS installed setup/doctor lane
   is clean or the public beta explicitly removes GPT-OSS from advertised setup.
 

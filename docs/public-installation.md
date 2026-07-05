@@ -361,8 +361,12 @@ and then run one of the setup commands:
 ```powershell
 talos setup models
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
-talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
 ```
+
+For `gpt-oss-20b`, `talos setup models` must write a concrete local
+`model_path`; it accepts `--model-path`, an exact `gpt-oss-20b-mxfp4.gguf` in
+the standard Hugging Face cache, or the wizard-downloaded pinned model.
 
 Talos writes configuration to:
 
@@ -414,6 +418,10 @@ talos setup models
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
 talos status --verbose
 ```
+
+For GPT-OSS direct setup, provide `--model-path` to
+`gpt-oss-20b-mxfp4.gguf` or use `talos setup wizard` so the installer path does
+not depend on llama.cpp remote preset resolution.
 
 On Ubuntu/WSL x64, the wizard should be validated with one accepted profile,
 config write, and `talos doctor --start`. On direct Linux setup, use the real

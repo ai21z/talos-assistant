@@ -14,10 +14,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 @CommandLine.Command(name = "setup", description = "Configure Talos local model engines")
@@ -94,13 +98,20 @@ public class SetupCmd implements Callable<Integer> {
                   4. talos doctor --start
                   5. Save the doctor output as evidence before calling that local setup verified.
 
-                Talos-managed download/cache:
+                Talos-managed download/cache for Qwen:
                   talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
-                  talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
                   talos setup models --profile qwen2.5-coder-14b --embed-profile bge-m3 --server-path C:/path/to/llama-server.exe --write
 
                 Talos sets HF_HOME to ~/.talos/models/huggingface for these profiles, so llama.cpp stores
                 Hugging Face downloads under .talos/models on first model start.
+
+                GPT-OSS reliable setup:
+                  talos setup wizard
+                  talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
+
+                If --model-path is omitted, gpt-oss-20b setup accepts an exact gpt-oss-20b-mxfp4.gguf
+                from the standard Hugging Face cache and writes model_path. Otherwise it refuses to write a config
+                instead of producing a managed server setup that times out in doctor --start.
 
                 User-owned GGUF path:
                   talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe --model-path D:/models/agent.gguf --write
@@ -297,10 +308,13 @@ public class SetupCmd implements Callable<Integer> {
                     + ". Re-run with --force to replace it after a backup.");
         }
 
+        String normalizedProfile = normalizeProfile(profile);
+        ModelPathSelection selectedModelPath = selectModelPath(normalizedProfile, modelPath, cacheDir);
+
         String yaml = renderManagedLlamaCppProfileConfig(
                 profile,
                 serverPath,
-                modelPath,
+                selectedModelPath.path(),
                 cacheDir == null ? defaultHfCacheDir() : cacheDir,
                 port,
                 embedProfile,
@@ -317,16 +331,121 @@ public class SetupCmd implements Callable<Integer> {
         }
         Files.writeString(target, yaml, StandardCharsets.UTF_8);
         System.out.println("Wrote Talos model config: " + target);
-        System.out.println("Profile: " + normalizeProfile(profile));
-        if (modelPath == null) {
+        System.out.println("Profile: " + normalizedProfile);
+        if (selectedModelPath.path() == null) {
             System.out.println("Model cache: " + (cacheDir == null ? defaultHfCacheDir() : cacheDir));
             System.out.println("The model downloads through managed llama.cpp on first start.");
         } else {
-            System.out.println("Model path: " + modelPath);
+            String source = selectedModelPath.resolvedFromCache()
+                    ? " (resolved from local Hugging Face cache)"
+                    : "";
+            System.out.println("Model path: " + selectedModelPath.path() + source);
         }
         if (embeddingProfile(embedProfile) != null) {
             System.out.println("Embedding profile: " + normalizeProfile(embedProfile));
             System.out.println("Embedding server: http://127.0.0.1:" + Math.max(1, embedPort));
+        }
+    }
+
+    private static ModelPathSelection selectModelPath(
+            String normalizedProfile,
+            Path explicitModelPath,
+            Path cacheDir) {
+        if (explicitModelPath != null) {
+            return new ModelPathSelection(explicitModelPath, false);
+        }
+        ModelProfile known = PROFILES.get(normalizedProfile);
+        if (known == null) {
+            return new ModelPathSelection(null, false);
+        }
+        Path cached = findCachedProfileModel(known, cacheDir == null ? defaultHfCacheDir() : cacheDir);
+        if (cached != null) {
+            return new ModelPathSelection(cached, true);
+        }
+        if (known.requiresLocalModelPath()) {
+            throw new IllegalArgumentException(known.alias()
+                    + " requires a local GGUF before setup can write a startable config. "
+                    + "Pass --model-path " + known.hfFile()
+                    + ", place " + known.hfFile() + " in the standard Hugging Face cache, "
+                    + "or run talos setup wizard to download the pinned model.");
+        }
+        return new ModelPathSelection(null, false);
+    }
+
+    private static Path findCachedProfileModel(ModelProfile profile, Path configuredCacheDir) {
+        for (Path root : candidateCacheRoots(configuredCacheDir)) {
+            Path found = findCachedProfileModel(root, profile);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static List<Path> candidateCacheRoots(Path configuredCacheDir) {
+        Set<Path> roots = new LinkedHashSet<>();
+        addRoot(roots, configuredCacheDir);
+        String hubCache = System.getenv("HUGGINGFACE_HUB_CACHE");
+        if (hubCache != null && !hubCache.isBlank()) {
+            try {
+                addRoot(roots, Path.of(hubCache.trim()));
+            } catch (RuntimeException ignored) {
+                // Ignore malformed environment paths; setup must stay deterministic.
+            }
+        }
+        String hfHome = System.getenv("HF_HOME");
+        if (hfHome != null && !hfHome.isBlank()) {
+            try {
+                Path home = Path.of(hfHome.trim());
+                addRoot(roots, home.resolve("hub"));
+                addRoot(roots, home);
+            } catch (RuntimeException ignored) {
+                // Ignore malformed environment paths; setup must stay deterministic.
+            }
+        }
+        Path userHome = Path.of(System.getProperty("user.home", "."));
+        addRoot(roots, userHome.resolve(Path.of(".cache", "huggingface", "hub")));
+        addRoot(roots, userHome.resolve(Path.of(".cache", "huggingface")));
+        return List.copyOf(roots);
+    }
+
+    private static void addRoot(Set<Path> roots, Path root) {
+        if (root == null) return;
+        try {
+            roots.add(root.toAbsolutePath().normalize());
+        } catch (RuntimeException ignored) {
+            // Ignore malformed configured paths; absence is handled by callers.
+        }
+    }
+
+    private static Path findCachedProfileModel(Path root, ModelProfile profile) {
+        if (root == null || !Files.isDirectory(root)) return null;
+        List<Path> bases = new ArrayList<>();
+        bases.add(root);
+        bases.add(root.resolve("hub"));
+        for (Path base : bases) {
+            Path flat = base.resolve(profile.hfFile());
+            if (Files.isRegularFile(flat)) return flat.toAbsolutePath().normalize();
+            Path snapshots = base
+                    .resolve("models--" + profile.hfRepo().replace("/", "--"))
+                    .resolve("snapshots");
+            Path found = findSnapshotFile(snapshots, profile.hfFile());
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static Path findSnapshotFile(Path snapshots, String fileName) {
+        if (!Files.isDirectory(snapshots)) return null;
+        try (var stream = Files.list(snapshots)) {
+            return stream
+                    .filter(Files::isDirectory)
+                    .map(snapshot -> snapshot.resolve(fileName))
+                    .filter(Files::isRegularFile)
+                    .map(path -> path.toAbsolutePath().normalize())
+                    .sorted()
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
@@ -335,7 +454,13 @@ public class SetupCmd implements Callable<Integer> {
         // canned profiles here and the /set model switch guidance never drift.
         Map<String, ModelProfile> out = new LinkedHashMap<>();
         for (var p : LlamaCppModelProfiles.profiles().values()) {
-            out.put(p.alias(), new ModelProfile(p.alias(), p.hfRepo(), p.hfFile(), p.nativeCalling()));
+            boolean requiresLocalModelPath = "gpt-oss-20b".equals(p.alias());
+            out.put(p.alias(), new ModelProfile(
+                    p.alias(),
+                    p.hfRepo(),
+                    p.hfFile(),
+                    p.nativeCalling(),
+                    requiresLocalModelPath));
         }
         return Map.copyOf(out);
     }
@@ -432,7 +557,14 @@ public class SetupCmd implements Callable<Integer> {
         return Instant.now().toString().replace(":", "").replace(".", "");
     }
 
-    private record ModelProfile(String alias, String hfRepo, String hfFile, boolean nativeCalling) {}
+    private record ModelProfile(
+            String alias,
+            String hfRepo,
+            String hfFile,
+            boolean nativeCalling,
+            boolean requiresLocalModelPath) {}
+
+    private record ModelPathSelection(Path path, boolean resolvedFromCache) {}
 
     private record EmbeddingSetupProfile(String alias, String hfRepo, String hfFile, int dimensions, String pooling) {}
 }

@@ -44,6 +44,10 @@ class TrustClaimsHonestyTest {
     private static final String EXPERIMENTAL_MODEL_BOUNDARY =
             "Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles, "
                     + "not beta stability baselines.";
+    private static final String GPT_OSS_LOCAL_GGUF_BOUNDARY =
+            "For `gpt-oss-20b`, `talos setup models` must write a concrete local `model_path`. "
+                    + "Pass `--model-path`, keep `gpt-oss-20b-mxfp4.gguf` in the standard Hugging Face cache, "
+                    + "or use `talos setup wizard` to download the pinned model.";
     private static final String RETRIEVAL_PERMISSION_BOUNDARY =
             "Retrieval is evidence, not permission to inspect everything.";
     private static final String COMMAND_OUTPUT_BOUNDARY =
@@ -217,12 +221,16 @@ class TrustClaimsHonestyTest {
     void modelSetupDocsBoundPerModelToolModeCompatibility() throws Exception {
         String modelSetup = read("docs/user/model-setup.md");
         String managedSetup = read("docs/setup-managed-models.md");
+        String readme = read("README.md");
         String publicDocs = read("README.md") + "\n" + read("AGENTS.md") + "\n" + readMarkdownTree("docs");
 
         assertContainsNormalized(modelSetup, ACCEPTED_MODEL_BOUNDARY);
         assertContainsNormalized(managedSetup, ACCEPTED_MODEL_BOUNDARY);
         assertContainsNormalized(modelSetup, EXPERIMENTAL_MODEL_BOUNDARY);
         assertContainsNormalized(managedSetup, EXPERIMENTAL_MODEL_BOUNDARY);
+        assertContainsNormalized(modelSetup, GPT_OSS_LOCAL_GGUF_BOUNDARY);
+        assertContainsNormalized(managedSetup, GPT_OSS_LOCAL_GGUF_BOUNDARY);
+        assertContainsNormalized(readme, GPT_OSS_LOCAL_GGUF_BOUNDARY);
         assertContainsNormalized(modelSetup, DEEPSEEK_TOOL_MODE_BOUNDARY);
         assertContainsNormalized(managedSetup, DEEPSEEK_TOOL_MODE_BOUNDARY);
         assertContains(modelSetup, "Qwen3.6-VibeForged Q4/Q6");

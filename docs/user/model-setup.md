@@ -116,9 +116,17 @@ embeddings.
 
 Configure GPT-OSS:
 
+For `gpt-oss-20b`, `talos setup models` must write a concrete local `model_path`.
+Pass `--model-path`, keep `gpt-oss-20b-mxfp4.gguf` in the standard Hugging Face
+cache, or use `talos setup wizard` to download the pinned model.
+
 ```powershell
-talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
 ```
+
+If `--model-path` is omitted and Talos finds the exact GGUF in the standard
+Hugging Face cache, it writes that path. If no local file is found, setup
+refuses before writing config instead of leaving `doctor --start` to time out.
 
 Configure a Qwen3.6-VibeForged profile:
 

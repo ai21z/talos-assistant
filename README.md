@@ -427,12 +427,20 @@ compatible `llama-server` binary and model path/source:
 ```powershell
 talos setup models
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
-talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
 ```
 
-Those profile commands configure Hugging Face model sources and set the managed
-llama.cpp process to use `~/.talos/models/huggingface` as `HF_HOME`, so model
-files are downloaded under the Talos home folder on first model start.
+For `gpt-oss-20b`, `talos setup models` must write a concrete local
+`model_path`. Pass `--model-path`, keep `gpt-oss-20b-mxfp4.gguf` in the
+standard Hugging Face cache, or use `talos setup wizard` to download the pinned
+model.
+
+```powershell
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
+```
+
+The Qwen profile command configures Hugging Face model sources and sets the
+managed llama.cpp process to use `~/.talos/models/huggingface` as `HF_HOME`, so
+model files are downloaded under the Talos home folder on first model start.
 
 Users who already keep GGUF files elsewhere can point Talos at that file:
 

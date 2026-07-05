@@ -40,18 +40,12 @@ Primary references:
 - GPT-OSS profile source: <https://huggingface.co/ggml-org/gpt-oss-20b-GGUF>
 - Hugging Face cache behavior: <https://huggingface.co/docs/hub/local-cache>
 
-## Talos-Owned Model Cache
+## Talos-Owned Model Cache For Qwen
 
 Run:
 
 ```powershell
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
-```
-
-or:
-
-```powershell
-talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
 ```
 
 For experimental selectable profiles:
@@ -60,6 +54,23 @@ For experimental selectable profiles:
 talos setup models --profile qwen36vf-q6k --server-path C:/path/to/llama-server.exe --write
 talos setup models --profile deepseek-v2lite-q4km --server-path C:/path/to/llama-server.exe --write
 ```
+
+## GPT-OSS Local GGUF Requirement
+
+For `gpt-oss-20b`, `talos setup models` must write a concrete local `model_path`.
+Pass `--model-path`, keep `gpt-oss-20b-mxfp4.gguf` in the standard Hugging Face
+cache, or use `talos setup wizard` to download the pinned model.
+
+Reliable direct setup:
+
+```powershell
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
+```
+
+If `--model-path` is omitted, Talos accepts an exact
+`gpt-oss-20b-mxfp4.gguf` already present in the standard Hugging Face cache and
+writes that path into config. If no local file is found, setup refuses before it
+writes config instead of producing a `doctor --start` timeout.
 
 ## Switching Managed GGUF Profiles
 
@@ -89,6 +100,8 @@ engines:
 
 At managed server launch, Talos sets `HF_HOME` to that `hf_cache_dir`. llama.cpp
 then downloads and caches Hugging Face model files under the Talos home folder.
+For `gpt-oss-20b`, the generated config instead writes `model_path` for the
+resolved local GGUF and leaves `hf_repo` / `hf_file` blank.
 
 ## User-Owned GGUF File
 

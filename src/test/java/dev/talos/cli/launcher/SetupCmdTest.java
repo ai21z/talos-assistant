@@ -51,6 +51,9 @@ class SetupCmdTest {
         assertTrue(help.contains("docs/user/model-profiles/qwen2.5-coder-14b.md"), help);
         assertTrue(help.contains("talos doctor --start"), help);
         assertTrue(help.contains("talos setup models --profile"));
+        assertTrue(help.contains("gpt-oss-20b-mxfp4.gguf"), help);
+        assertTrue(help.contains("--model-path"), help);
+        assertTrue(help.contains("refuses to write a config"), help);
         assertTrue(help.contains(".talos/models"));
         assertFalse(help.contains("Tested profiles:"), help);
     }
@@ -196,6 +199,96 @@ class SetupCmdTest {
     }
 
     @Test
+    void setupModelsWriteUsesStandardHuggingFaceCacheForGptOss() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        Path model = standardHuggingFaceSnapshot(
+                "ggml-org/gpt-oss-20b-GGUF",
+                "gpt-oss-20b-mxfp4.gguf");
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+
+        int exit = withUserHome(tempDir, () -> {
+            PrintStream previousOut = System.out;
+            try {
+                System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+                return new CommandLine(new SetupCmd()).execute(
+                        "models",
+                        "--profile", "gpt-oss-20b",
+                        "--server-path", server.toString(),
+                        "--write",
+                        "--config", config.toString());
+            } finally {
+                System.setOut(previousOut);
+            }
+        });
+
+        assertEquals(0, exit);
+        String yaml = Files.readString(config, StandardCharsets.UTF_8);
+        assertTrue(yaml.contains("model: \"gpt-oss-20b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Model path: " + model), text);
+        assertTrue(text.contains("resolved from local Hugging Face cache"), text);
+    }
+
+    @Test
+    void setupModelsWriteRefusesGptOssWithoutLocalModelSource() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+
+        int exit = withUserHome(tempDir, () -> {
+            PrintStream previousErr = System.err;
+            try {
+                System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+                return new CommandLine(new SetupCmd()).execute(
+                        "models",
+                        "--profile", "gpt-oss-20b",
+                        "--server-path", server.toString(),
+                        "--write",
+                        "--config", config.toString());
+            } finally {
+                System.setErr(previousErr);
+            }
+        });
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "unresolved GPT-OSS setup must not write a non-startable config");
+        String text = stderr.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("gpt-oss-20b requires a local GGUF"), text);
+        assertTrue(text.contains("--model-path"), text);
+        assertTrue(text.contains("talos setup wizard"), text);
+    }
+
+    @Test
+    void setupModelsWriteHonorsExplicitUserOwnedModelPath() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("gpt-oss-20b-mxfp4.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "fake model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+
+        int exit = new CommandLine(new SetupCmd()).execute(
+                "models",
+                "--profile", "gpt-oss-20b",
+                "--server-path", server.toString(),
+                "--model-path", model.toString(),
+                "--write",
+                "--config", config.toString());
+
+        assertEquals(0, exit);
+        String yaml = Files.readString(config, StandardCharsets.UTF_8);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+    }
+
+    @Test
     void generatedProfileConfigCanOptIntoManagedBgeM3Embeddings() {
         Path server = tempDir.resolve("engines").resolve("llama-cpp").resolve("llama-server.exe");
         Path cache = tempDir.resolve(".talos").resolve("models").resolve("huggingface");
@@ -247,7 +340,7 @@ class SetupCmdTest {
         try {
             SetupCmd cmd = new SetupCmd();
             cmd.topic = "models";
-            cmd.profile = "gpt-oss-20b";
+            cmd.profile = "qwen2.5-coder-14b";
             cmd.serverPath = server;
             cmd.write = true;
             cmd.configPath = config;
@@ -255,7 +348,7 @@ class SetupCmdTest {
             int exit = cmd.call();
 
             assertEquals(0, exit);
-            assertTrue(Files.readString(config, StandardCharsets.UTF_8).contains("model: \"gpt-oss-20b\""));
+            assertTrue(Files.readString(config, StandardCharsets.UTF_8).contains("model: \"qwen2.5-coder-14b\""));
         } finally {
             Files.deleteIfExists(config);
         }
@@ -269,16 +362,16 @@ class SetupCmdTest {
 
         int exit = new CommandLine(new SetupCmd()).execute(
                 "models",
-                "--profile", "gpt-oss-20b",
+                "--profile", "qwen2.5-coder-14b",
                 "--server-path", server.toString(),
                 "--write",
                 "--config", config.toString());
 
         assertEquals(0, exit);
         String yaml = Files.readString(config, StandardCharsets.UTF_8);
-        assertTrue(yaml.contains("model: \"gpt-oss-20b\""));
-        assertTrue(yaml.contains("hf_repo: \"ggml-org/gpt-oss-20b-GGUF\""));
-        assertTrue(yaml.contains("hf_cache_dir:"));
+        assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""));
+        assertTrue(yaml.contains("model_path: \"") || yaml.contains("hf_repo: \"Qwen/Qwen2.5-Coder-14B-Instruct-GGUF\""),
+                yaml);
     }
 
     @Test
@@ -325,5 +418,37 @@ class SetupCmdTest {
                     .orElseThrow();
             assertEquals("existing: true\n", Files.readString(backup, StandardCharsets.UTF_8));
         }
+    }
+
+    private Path standardHuggingFaceSnapshot(String repo, String fileName) throws Exception {
+        Path snapshot = tempDir.resolve(".cache")
+                .resolve("huggingface")
+                .resolve("hub")
+                .resolve("models--" + repo.replace("/", "--"))
+                .resolve("snapshots")
+                .resolve("abc123");
+        Files.createDirectories(snapshot);
+        Path model = snapshot.resolve(fileName);
+        Files.writeString(model, "fake model", StandardCharsets.UTF_8);
+        return model.toAbsolutePath().normalize();
+    }
+
+    private static int withUserHome(Path userHome, ThrowingIntSupplier action) throws Exception {
+        String previous = System.getProperty("user.home");
+        try {
+            System.setProperty("user.home", userHome.toString());
+            return action.getAsInt();
+        } finally {
+            if (previous == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previous);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingIntSupplier {
+        int getAsInt() throws Exception;
     }
 }

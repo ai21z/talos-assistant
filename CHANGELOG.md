@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T963] Made `talos setup models --profile gpt-oss-20b` fail truthfully unless
+  it can write a startable local GGUF config. The setup path now honors an
+  explicit `--model-path`, resolves an exact `gpt-oss-20b-mxfp4.gguf` from the
+  standard Hugging Face cache, writes `model_path` instead of remote preset
+  metadata when resolved, and refuses before writing config when no local
+  source is available. Help and public setup docs now point GPT-OSS users to
+  the wizard or an explicit local GGUF path.
 - [T961] Blocked redacted-read writeback corruption before approval:
   append-line requests such as `Append the line ... to notes.md` now derive an
   append expectation, and mutating payloads that try to write Talos redaction

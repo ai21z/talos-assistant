@@ -112,10 +112,11 @@ not. If you do not have one yet, use the acquisition notes in
 talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
 ```
 
-or:
+For GPT-OSS, prefer the wizard or provide the local GGUF path explicitly:
 
 ```powershell
-talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+talos setup wizard
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
 ```
 
 Talos writes user configuration to:

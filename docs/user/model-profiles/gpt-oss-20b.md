@@ -10,9 +10,22 @@ Tool mode: native/default (`tools.native_calling: true`)
 
 ## Configure
 
+Preferred guided path:
+
 ```powershell
-talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
+talos setup wizard
 ```
+
+Direct setup requires a local GGUF path:
+
+```powershell
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --model-path D:/models/gpt-oss-20b-mxfp4.gguf --write
+```
+
+If `--model-path` is omitted, Talos accepts an exact
+`gpt-oss-20b-mxfp4.gguf` already present in the standard Hugging Face cache and
+writes that path into config. If no local file is found, setup refuses before it
+writes config instead of relying on a managed remote preset.
 
 Use `--force` only after reviewing the existing `%USERPROFILE%\.talos\config.yaml`; Talos writes a backup before replacing it.
 
