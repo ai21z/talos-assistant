@@ -1,7 +1,43 @@
-# [T962-open-high] Approved Mutation Turn Must Not Hang After Write
+# [T962-done-high] Approved Mutation Turn Must Not Hang After Write
 
-Status: open
+Status: done
 Priority: high
+
+## Closure Summary
+
+Closed as current-head evidence closure, not a production-code change.
+
+Fresh installed-product rerun on `v0.9.0-beta-dev` at
+`ed490234153e0b03700991bc34242e8459114191` / `0.10.8` did not reproduce the
+old hang. The Qwen selector-edit lane applied the approved mutation, printed
+static verification, returned to the REPL prompt, accepted `/prompt-debug save`,
+accepted `/last trace`, and exited cleanly.
+
+Local evidence packet:
+
+- `C:\Users\arisz\Desktop\testtalos\t962-qwen-selector-rerun-20260705-075047\artifacts\T962-EVIDENCE.md`
+- Prompt-debug markdown and provider-body JSON copied into the same artifact
+  directory.
+- File comparison confirms `script.js` changed from `.missing-button` to
+  `.cta-button`, and sibling trap `scripts.js` stayed byte-for-byte unchanged.
+
+Deterministic guards rerun:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolRepromptSuccessfulMutationDecisionTest" --tests "dev.talos.core.llm.LlmCallBudgetTest" --no-daemon
+.\gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_can_run_single_static_web_selector_scenario" --no-daemon
+```
+
+Both passed. The relevant current runtime shape is:
+
+- all-success mutation turns with no remaining targets stop through
+  `ToolRepromptSuccessfulMutationDecision` before post-tool continuation;
+- the exact synchronized approval selector scenario is pinned in the E2E
+  harness;
+- legitimate continuation calls still route through `LlmClient.chatFull`, which
+  is bounded by the existing wall-clock and idle watchdogs.
+
+No CHANGELOG entry was added because no production behavior changed.
 
 ## Evidence Summary
 
@@ -58,7 +94,7 @@ Secondary buckets:
 
 Blocker level:
 
-- release blocker
+- resolved release blocker
 
 Why this level:
 
@@ -217,9 +253,10 @@ Commands:
 
 ## Work-Test Cycle Notes
 
-- Treat as release-blocking until a deterministic repro is either fixed or
-  disproven by a clean rerun with complete trace evidence.
-- Behavior-changing closeout requires a CHANGELOG entry under `## [Unreleased]`.
+- Clean rerun with trace evidence disproved the current-head failure for the
+  originally observed lane.
+- Behavior-changing closeout would have required a CHANGELOG entry under
+  `## [Unreleased]`; this closeout is evidence-only.
 
 ## Known Risks
 
