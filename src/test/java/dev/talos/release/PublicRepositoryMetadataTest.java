@@ -85,6 +85,32 @@ class PublicRepositoryMetadataTest {
         assertTrue(commands.contains("/doctor"), "REPL doctor command must be documented");
     }
 
+    @Test
+    @DisplayName("public quality tooling is local and community first")
+    void qualityToolingIsLocalAndCommunityFirst() throws Exception {
+        String qodana = read("qodana.yaml");
+        String buildAndTest = read("docs/development/build-and-test.md");
+        String developerSetup = read("docs/development/developer-setup.md");
+        String qualityReports = read("docs/development/quality-reports.md");
+
+        assertTrue(qodana.contains("jetbrains/qodana-jvm-community:2026.1"),
+                "public Qodana config must use the community linter");
+        assertFalse(qodana.contains("linter: jetbrains/qodana-jvm:2026.1"),
+                "public Qodana config must not point at the paid/full JVM linter");
+        assertFalse(qodana.contains("QODANA_TOKEN"),
+                "public Qodana config must not imply a cloud token is required");
+        assertFalse(Files.exists(ROOT.resolve("qodana_LOCAL-DISABLED.yaml")),
+                "local disabled Qodana config must not be tracked in the public repo");
+        assertFalse(Files.exists(ROOT.resolve("reports-disabled/README.md")),
+                "tracked reports-disabled docs must not duplicate the maintained quality reports page");
+
+        String publicDocs = buildAndTest + "\n" + developerSetup + "\n" + qualityReports;
+        assertTrue(publicDocs.contains("No private token is required for the normal build and test loop."));
+        assertTrue(publicDocs.contains("Qodana Community"));
+        assertTrue(publicDocs.contains("Generated report outputs stay local"));
+        assertTrue(publicDocs.contains("reports/"));
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(ROOT.resolve(relative), StandardCharsets.UTF_8);
     }

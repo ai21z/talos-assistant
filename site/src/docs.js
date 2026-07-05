@@ -144,8 +144,10 @@ function renderLandingHtml() {
     {
       group: "Development",
       items: [
+        ["Developer setup", "development/developer-setup", "Local tools for source contributors."],
         ["Build and test", "development/build-and-test", "Local build and verification commands."],
         ["CI/CD", "development/ci-cd", "Current workflow and staging policy."],
+        ["Quality reports", "development/quality-reports", "Local report outputs and review evidence."],
         ["Release process", "development/release-process", "Release QA and artifact boundaries."],
         ["Runtime artifacts", "development/runtime-artifacts", "Local traces, logs, and evidence sinks."],
       ],

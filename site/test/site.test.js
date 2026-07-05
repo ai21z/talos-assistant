@@ -743,8 +743,10 @@ describe("Talos in-site documentation contract", () => {
     "architecture/execution-model",
     "architecture/trust-boundaries",
     "architecture/package-map",
+    "development/developer-setup",
     "development/build-and-test",
     "development/ci-cd",
+    "development/quality-reports",
     "development/release-process",
     "development/runtime-artifacts",
   ];
@@ -771,6 +773,8 @@ describe("Talos in-site documentation contract", () => {
       "architecture/trust-boundaries",
       "development/build-and-test",
       "development/ci-cd",
+      "development/developer-setup",
+      "development/quality-reports",
       "development/release-process",
       "development/runtime-artifacts",
       "getting-started/first-run",
@@ -878,8 +882,10 @@ describe("Talos in-site documentation contract", () => {
       "architecture/execution-model",
       "architecture/trust-boundaries",
       "architecture/package-map",
+      "development/developer-setup",
       "development/build-and-test",
       "development/ci-cd",
+      "development/quality-reports",
       "development/release-process",
       "development/runtime-artifacts",
     ]) {
@@ -900,7 +906,9 @@ describe("Talos in-site documentation contract", () => {
     for (const label of [
       "Permissions and approvals",
       "Privacy and artifacts",
+      "Developer setup",
       "Build and test",
+      "Quality reports",
     ]) {
       assert.match(js, new RegExp(escapeRegExp(label)));
       assert.match(html, new RegExp(`>${escapeRegExp(label)}<`));
