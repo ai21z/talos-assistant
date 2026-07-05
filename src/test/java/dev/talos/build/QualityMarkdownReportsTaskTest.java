@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("Quality Markdown reports task")
 class QualityMarkdownReportsTaskTest {
 
+    private static final Path ROOT = Path.of("").toAbsolutePath().normalize();
+
     @TempDir
     Path tempDir;
 
@@ -153,6 +155,68 @@ class QualityMarkdownReportsTaskTest {
         assertTrue(version.contains("artifact is fresh for this packet"));
     }
 
+    @Test
+    @DisplayName("candidate coverage lane excludes report-only architecture intelligence tests")
+    void candidateCoverageLaneExcludesReportOnlyArchitectureIntelligenceTests() throws Exception {
+        String build = Files.readString(ROOT.resolve("build.gradle.kts"), StandardCharsets.UTF_8)
+                .replace("\r\n", "\n");
+
+        String candidateBlock = blockBetween(
+                build,
+                "val candidateTest by tasks.registering(Test::class) {",
+                "tasks.test {");
+        String reportBlock = blockBetween(
+                build,
+                "val architectureIntelligenceReport by tasks.registering(Test::class) {",
+                "val candidateE2eTest by tasks.registering(Test::class) {");
+
+        assertTrue(candidateBlock.contains("excludeTestsMatching(\"dev.talos.architecture.intelligence.*\")"),
+                "candidateTest must not run report-only architecture intelligence tests");
+        assertTrue(reportBlock.contains("includeTestsMatching(\"dev.talos.architecture.intelligence.*\")"),
+                "architectureIntelligenceReport remains the owner for report-only architecture tests");
+        assertTrue(reportBlock.contains("dependsOn(\"writeQodanaSummary\")"),
+                "architectureIntelligenceReport must keep the Qodana summary dependency that candidateTest does not own");
+    }
+
+    @Test
+    @DisplayName("qualityReportGate accepts passing release-quality summaries")
+    void qualityReportGateAcceptsPassingSummaries() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeQualityGateSummaries(projectDir, 85.5, "passed", 0, 0, "passed", "qodana-results-match-current-candidate");
+
+        BuildResult result = runQualityReportGate(projectDir, false);
+
+        assertTrue(result.getOutput().contains("Talos quality report gate passed"));
+    }
+
+    @Test
+    @DisplayName("qualityReportGate fails when candidate tests failed")
+    void qualityReportGateFailsWhenCandidateTestsFailed() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeQualityGateSummaries(projectDir, 85.5, "failed", 1, 0, "passed", "qodana-results-match-current-candidate");
+
+        BuildResult result = runQualityReportGate(projectDir, true);
+
+        assertTrue(result.getOutput().contains("coverage-summary tests must have zero failures and errors"));
+    }
+
+    @Test
+    @DisplayName("releaseQualityPacket is an explicit maintainer release-evidence lane")
+    void releaseQualityPacketIsExplicitMaintainerLane() throws Exception {
+        String build = Files.readString(ROOT.resolve("build.gradle.kts"), StandardCharsets.UTF_8)
+                .replace("\r\n", "\n");
+
+        String packetBlock = blockBetween(
+                build,
+                "tasks.register(\"releaseQualityPacket\") {",
+                "tasks.register(\"talosQualityLocal\") {");
+
+        assertTrue(packetBlock.contains("dependsOn(\"check\", \"talosQualityLocal\", \"qualityReportGate\")"),
+                "releaseQualityPacket must run the full gate, fresh local quality, and the summary gate");
+        assertTrue(packetBlock.contains("mustRunAfter(\"talosQualityLocal\")"),
+                "qualityReportGate must validate summaries after fresh local quality evidence is written");
+    }
+
     private Path createBuildFixture() throws IOException {
         Path projectDir = tempDir.resolve("fixture");
         Files.createDirectories(projectDir);
@@ -173,6 +237,99 @@ class QualityMarkdownReportsTaskTest {
                 .withArguments("writeQualityMarkdownReports", "-x", "talosQualitySummaries", "--stacktrace")
                 .forwardOutput()
                 .build();
+    }
+
+    private BuildResult runQualityReportGate(Path projectDir, boolean expectFailure) {
+        GradleRunner runner = GradleRunner.create()
+                .withProjectDir(projectDir.toFile())
+                .withArguments("qualityReportGate", "-x", "talosQualitySummaries", "--stacktrace")
+                .forwardOutput();
+        return expectFailure ? runner.buildAndFail() : runner.build();
+    }
+
+    private void writeQualityGateSummaries(
+            Path projectDir,
+            double instructionPercent,
+            String coverageStatus,
+            int coverageFailures,
+            int coverageErrors,
+            String e2eStatus,
+            String qodanaStatus) throws IOException {
+        Path summariesDir = Files.createDirectories(projectDir.resolve("build/reports/talos"));
+        int coveragePassed = 10 - coverageFailures - coverageErrors;
+        writeUtf8(summariesDir.resolve("coverage-summary.json"), """
+                {
+                  "version": "0.10.8",
+                  "coverageDataStatus": "jacoco-xml-present",
+                  "instructionCoverage": { "covered": 855, "missed": 145, "percent": %.1f },
+                  "branchCoverage": { "covered": 70, "missed": 30, "percent": 70.0 },
+                  "tests": {
+                    "total": 10,
+                    "passed": %d,
+                    "failures": %d,
+                    "errors": %d,
+                    "skipped": 0,
+                    "status": "%s"
+                  }
+                }
+                """.formatted(instructionPercent, coveragePassed, coverageFailures, coverageErrors, coverageStatus));
+        writeUtf8(summariesDir.resolve("e2e-summary.json"), """
+                {
+                  "version": "0.10.8",
+                  "testExecution": {
+                    "total": 2,
+                    "passed": 2,
+                    "failures": 0,
+                    "errors": 0,
+                    "skipped": 0,
+                    "status": "%s"
+                  },
+                  "jsonScenarioCoverage": {
+                    "resourceCount": 1,
+                    "executedResourceCount": 1,
+                    "passedResourceCount": 1,
+                    "coverageStatus": "complete"
+                  }
+                }
+                """.formatted(e2eStatus));
+        writeUtf8(summariesDir.resolve("qodana-summary.json"), """
+                {
+                  "version": "0.10.8",
+                  "summaryStatus": "%s",
+                  "requiredArtifacts": { "status": "all-required-artifacts-present" },
+                  "provenance": {
+                    "revisionStatus": "matches-current-revision",
+                    "branchStatus": "matches-current-branch"
+                  },
+                  "criticalIssues": 0,
+                  "criticalIssuesStatus": "derived-from-problem-severities",
+                  "highIssues": 0,
+                  "newIssues": 0
+                }
+                """.formatted(qodanaStatus));
+        writeUtf8(summariesDir.resolve("version-summary.json"), """
+                {
+                  "version": "0.10.8",
+                  "jarTaskStateInCurrentInvocation": {
+                    "jarExists": true,
+                    "status": "built-in-current-run"
+                  },
+                  "artifacts": [
+                    {
+                      "name": "talos.jar",
+                      "exists": true
+                    }
+                  ]
+                }
+                """);
+    }
+
+    private String blockBetween(String content, String start, String end) {
+        int startIndex = content.indexOf(start);
+        int endIndex = content.indexOf(end, startIndex + start.length());
+        assertTrue(startIndex >= 0, "missing build script block start: " + start);
+        assertTrue(endIndex > startIndex, "missing build script block end: " + end);
+        return content.substring(startIndex, endIndex);
     }
 
     private void writeUtf8(Path file, String content) throws IOException {

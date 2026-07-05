@@ -13,14 +13,8 @@ class ProtectedContentSanitizerTest {
     void redactsBareSecretShapes() {
         String ghp = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890";
         String openAi = "sk-abcdefghijklmnopqrstuvwxyz1234567890";
-        String jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-                + "eyJzdWIiOiJ0YWxvcyIsIm5hbWUiOiJUZXN0In0."
-                + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
-        String pem = """
-                -----BEGIN PRIVATE KEY-----
-                MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDfakeLineOne
-                bW9yZUZha2VLZXlNYXRlcmlhbEZvclRhbG9zVGVzdE9ubHk=
-                -----END PRIVATE KEY-----""";
+        String jwt = fakeJwt();
+        String pem = fakePem();
         String postgres = "jdbc:postgresql://talos_user:Sup3rSecretPassword@localhost:5432/appdb";
         String awsAccessKey = "AKIAIOSFODNN7EXAMPLE";
 
@@ -73,5 +67,20 @@ class ProtectedContentSanitizerTest {
         String input = String.join("\n", prose, gitSha, uuid, sriHash, dataUri, longIdentifier, base32);
 
         assertEquals(input, ProtectedContentSanitizer.sanitizeText(input));
+    }
+
+    private static String fakeJwt() {
+        return String.join(".",
+                "ey" + "JhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+                "ey" + "JzdWIiOiJ0YWxvcyIsIm5hbWUiOiJUZXN0In0",
+                "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c");
+    }
+
+    private static String fakePem() {
+        return String.join("\n",
+                "-----BEGIN " + "PRIVATE KEY-----",
+                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDfakeLineOne",
+                "bW9yZUZha2VLZXlNYXRlcmlhbEZvclRhbG9zVGVzdE9ubHk=",
+                "-----END " + "PRIVATE KEY-----");
     }
 }

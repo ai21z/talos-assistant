@@ -1,0 +1,7 @@
+4c674a548028bffe5968c94ae9aedbbe85c17ca8:src/test/java/dev/talos/runtime/command/ProcessCommandRunnerTest.java:private-key:192
+ca66bf28b0967f5d1c19fe595891724655fd250f:src/test/java/dev/talos/safety/ProtectedContentSanitizerTest.java:private-key:20
+fa11405f0b1f7d7592eb755ed37b83c9509acfe3:src/test/java/dev/talos/runtime/ApprovalDiffPreviewTest.java:generic-api-key:157
+740d169059f98e226cb0dcbb0b0cc81791cbe0c0:scripts/run-capability-live-audit.ps1:generic-api-key:614
+28e164199a63fba7546fe59c1d617f3ebc11084e:src/test/java/dev/talos/core/security/RedactorTest.java:generic-api-key:109
+28e164199a63fba7546fe59c1d617f3ebc11084e:src/test/java/dev/talos/core/security/RedactorTest.java:jwt:191
+28e164199a63fba7546fe59c1d617f3ebc11084e:src/test/java/dev/talos/core/security/RedactorTest.java:stripe-access-token:95

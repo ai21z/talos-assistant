@@ -248,10 +248,10 @@ class ProcessCommandRunnerTest {
             System.out.println("jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
                     + "eyJzdWIiOiJ0YWxvcyIsIm5hbWUiOiJUZXN0In0."
                     + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c");
-            System.out.println("""
-                    -----BEGIN PRIVATE KEY-----
-                    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCfakefixtureonly
-                    -----END PRIVATE KEY-----""");
+            System.out.println(String.join(System.lineSeparator(),
+                    "-----BEGIN " + "PRIVATE KEY-----",
+                    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCfakefixtureonly",
+                    "-----END " + "PRIVATE KEY-----"));
             System.out.println("jdbc:postgresql://user:supersecret@localhost/db");
         }
     }

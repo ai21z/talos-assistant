@@ -11,6 +11,7 @@ plugins {
 
 val talosReportsDir = layout.buildDirectory.dir("reports/talos")
 val qodanaCommunityImage = "jetbrains/qodana-jvm-community:2026.1"
+val gitleaksImage = "ghcr.io/gitleaks/gitleaks:v8.30.1"
 val qodanaDockerCacheVolume = "talos-qodana-cache"
 val qodanaDockerGradleVolume = "talos-qodana-gradle-cache"
 
@@ -106,6 +107,33 @@ fun mdBar(value: Int, max: Int, width: Int = 40): String {
 
 fun mdSafe(value: Any?): String {
     return value?.toString() ?: "n/a"
+}
+
+fun qualityDouble(value: Any?): Double? {
+    return when (value) {
+        is Number -> value.toDouble()
+        is String -> value.toDoubleOrNull()
+        else -> null
+    }
+}
+
+fun qualityBoolean(value: Any?): Boolean {
+    return when (value) {
+        is Boolean -> value
+        is String -> value.equals("true", ignoreCase = true)
+        else -> false
+    }
+}
+
+fun readQualitySummary(file: java.io.File, summaryName: String): Map<*, *> {
+    if (!file.isFile) {
+        throw org.gradle.api.GradleException("Missing quality summary: $summaryName at ${file.path}")
+    }
+    val parsed = groovy.json.JsonSlurper().parse(file)
+    if (parsed !is Map<*, *>) {
+        throw org.gradle.api.GradleException("Malformed quality summary: $summaryName must be a JSON object")
+    }
+    return parsed
 }
 
 fun mdBoxLine(text: String): String {
@@ -685,6 +713,9 @@ val candidateTest by tasks.registering(Test::class) {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     ignoreFailures = true
+    filter {
+        excludeTestsMatching("dev.talos.architecture.intelligence.*")
+    }
     binaryResultsDirectory.set(layout.buildDirectory.dir("test-results/candidateTest/binary"))
     reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/candidateTest"))
     reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/candidateTest"))
@@ -1614,16 +1645,30 @@ tasks.register<Exec>("qodanaNativeFreshLocal") {
 tasks.register<Exec>("gitleaksLocal") {
     description = "Runs optional local secret scanning with the Gitleaks Docker image."
     group = "verification"
+    doFirst {
+        talosReportsDir.get().asFile.mkdirs()
+    }
     commandLine(
         "docker",
         "run",
         "--rm",
         "-v",
         "${projectDir.absolutePath}:/repo",
-        "ghcr.io/gitleaks/gitleaks:latest",
+        gitleaksImage,
         "git",
+        "/repo",
+        "--no-banner",
+        "--no-color",
+        "--redact=100",
+        "--gitleaks-ignore-path",
+        "/repo/.gitleaksignore",
+        "--report-format",
+        "json",
+        "--report-path",
+        "/repo/build/reports/talos/gitleaks-history.json",
         "-v",
-        "/repo"
+        "--platform",
+        "github"
     )
 }
 
@@ -2362,7 +2407,6 @@ tasks.register("writeQualityMarkdownReports") {
 
         val e2eExecution = mdMap(e2e["testExecution"])
         val scenarioCoverage = mdMap(e2e["jsonScenarioCoverage"])
-        val scenarioResources = mdMap(e2e["scenarioResources"])
         val v1ScenarioPack = mdMap(e2e["v1ScenarioPack"])
         val e2eTotal = mdInt(e2eExecution["total"])
         val e2ePassed = mdInt(e2eExecution["passed"])
@@ -2370,7 +2414,6 @@ tasks.register("writeQualityMarkdownReports") {
         val e2eErrors = mdInt(e2eExecution["errors"])
         val e2eSkipped = mdInt(e2eExecution["skipped"])
         val resourceCount = mdInt(scenarioCoverage["resourceCount"])
-        val executedResourceCount = mdInt(scenarioCoverage["executedResourceCount"])
         val passedResourceCount = mdInt(scenarioCoverage["passedResourceCount"])
         val jsonBacked = mdInt(scenarioCoverage["executedTestCaseCount"])
         val untagged = mdInt(scenarioCoverage["untaggedExecutedTestCaseCount"])
@@ -2669,6 +2712,133 @@ ${indentedV1ScenarioLines}
             | Talos JSON summary | `build/reports/talos/version-summary.json` |
             | Jar artifact | `build/libs/talos.jar` |
         """)
+    }
+}
+
+tasks.register("qualityReportGate") {
+    description = "Validates generated Talos quality summaries for release-candidate review."
+    group = "verification"
+    dependsOn("talosQualitySummaries")
+
+    val coverageSummary = talosReportsDir.map { it.file("coverage-summary.json") }
+    val e2eSummary = talosReportsDir.map { it.file("e2e-summary.json") }
+    val qodanaSummary = talosReportsDir.map { it.file("qodana-summary.json") }
+    val versionSummary = talosReportsDir.map { it.file("version-summary.json") }
+    inputs.files(coverageSummary, e2eSummary, qodanaSummary, versionSummary)
+
+    doLast {
+        val failures = mutableListOf<String>()
+        fun requireQuality(condition: Boolean, message: String) {
+            if (!condition) failures += message
+        }
+
+        val coverage = readQualitySummary(coverageSummary.get().asFile, "coverage-summary")
+        val coverageTests = mdMap(coverage["tests"])
+        val instructionCoverage = mdMap(coverage["instructionCoverage"])
+        val coverageStatus = mdSafe(coverageTests["status"])
+        val coverageFailures = mdInt(coverageTests["failures"])
+        val coverageErrors = mdInt(coverageTests["errors"])
+        val coverageTotal = mdInt(coverageTests["total"])
+        val instructionPercent = qualityDouble(instructionCoverage["percent"])
+
+        requireQuality(
+            coverage["coverageDataStatus"] == "jacoco-xml-present",
+            "coverage-summary must be backed by JaCoCo XML"
+        )
+        requireQuality(
+            coverageStatus in setOf("passed", "passed-with-skips"),
+            "coverage-summary tests must be passed or passed-with-skips, was `$coverageStatus`"
+        )
+        requireQuality(
+            coverageFailures == 0 && coverageErrors == 0,
+            "coverage-summary tests must have zero failures and errors"
+        )
+        requireQuality(coverageTotal > 0, "coverage-summary must contain candidate test results")
+        requireQuality(
+            instructionPercent != null && instructionPercent >= 82.0,
+            "coverage-summary instruction coverage must be at least 82.00%, was `${mdPercent(instructionPercent)}`"
+        )
+
+        val e2e = readQualitySummary(e2eSummary.get().asFile, "e2e-summary")
+        val e2eExecution = mdMap(e2e["testExecution"])
+        val scenarioCoverage = mdMap(e2e["jsonScenarioCoverage"])
+        val e2eStatus = mdSafe(e2eExecution["status"])
+        val e2eFailures = mdInt(e2eExecution["failures"])
+        val e2eErrors = mdInt(e2eExecution["errors"])
+        val e2eSkipped = mdInt(e2eExecution["skipped"])
+        val e2eTotal = mdInt(e2eExecution["total"])
+        val resourceCount = mdInt(scenarioCoverage["resourceCount"])
+        val passedResourceCount = mdInt(scenarioCoverage["passedResourceCount"])
+
+        requireQuality(e2eStatus == "passed", "e2e-summary status must be passed, was `$e2eStatus`")
+        requireQuality(e2eFailures == 0 && e2eErrors == 0, "e2e-summary tests must have zero failures and errors")
+        requireQuality(e2eSkipped == 0, "e2e-summary tests must have zero skipped tests")
+        requireQuality(e2eTotal > 0, "e2e-summary must contain candidate E2E results")
+        requireQuality(resourceCount > 0, "e2e-summary must include JSON scenario resource coverage")
+        requireQuality(
+            passedResourceCount == resourceCount,
+            "e2e-summary JSON scenario resources must all pass, was `$passedResourceCount / $resourceCount`"
+        )
+
+        val qodana = readQualitySummary(qodanaSummary.get().asFile, "qodana-summary")
+        val qodanaStatus = mdSafe(qodana["summaryStatus"])
+        val qodanaCriticalStatus = mdSafe(qodana["criticalIssuesStatus"])
+        val qodanaCriticalIssues = mdInt(qodana["criticalIssues"])
+        val rejectedQodanaStatuses = setOf(
+            "summary-generation-failed",
+            "qodana-results-missing",
+            "qodana-results-incomplete",
+            "stale-qodana-provenance"
+        )
+
+        requireQuality(
+            qodanaStatus !in rejectedQodanaStatuses,
+            "qodana-summary status must be usable for release review, was `$qodanaStatus`"
+        )
+        requireQuality(
+            qodanaCriticalStatus != "unknown-problem-severities-missing",
+            "qodana-summary must expose critical-issue status"
+        )
+        requireQuality(qodanaCriticalIssues == 0, "qodana-summary must have zero critical issues")
+
+        val version = readQualitySummary(versionSummary.get().asFile, "version-summary")
+        val jarTaskState = mdMap(version["jarTaskStateInCurrentInvocation"])
+        val artifacts = mdList(version["artifacts"]).map { mdMap(it) }
+        val jarExists = qualityBoolean(jarTaskState["jarExists"])
+        val hasExistingArtifact = artifacts.any { qualityBoolean(it["exists"]) }
+
+        requireQuality(jarExists || hasExistingArtifact, "version-summary must point at an existing Talos artifact")
+        requireQuality(
+            mdSafe(jarTaskState["status"]) != "jar-missing",
+            "version-summary jar task status must not be jar-missing"
+        )
+
+        if (failures.isNotEmpty()) {
+            throw org.gradle.api.GradleException(
+                "Talos quality report gate failed:\n" + failures.joinToString("\n") { " - $it" }
+            )
+        }
+
+        logger.lifecycle("Talos quality report gate passed: coverage, e2e, qodana, and version summaries are release-acceptable.")
+        if (qodanaStatus == "qodana-provenance-incomplete") {
+            logger.warn("Qodana provenance is incomplete; keep the Markdown report attached to reviewer evidence.")
+        }
+    }
+}
+
+tasks.register("releaseQualityPacket") {
+    description = "Runs the full automated gate, fresh local quality lane, Markdown reports, and release-quality summary validation."
+    group = "verification"
+    dependsOn("check", "talosQualityLocal", "qualityReportGate")
+}
+
+tasks.named("qualityReportGate") {
+    mustRunAfter("talosQualityLocal")
+}
+
+if (providers.gradleProperty("withQualityReports").map { it.toBoolean() }.orElse(false).get()) {
+    tasks.named("check") {
+        finalizedBy("writeQualityMarkdownReports")
     }
 }
 

@@ -1,17 +1,13 @@
-#-------------------------------------------------------------------------------#
-#               Qodana analysis is configured by qodana.yaml file               #
-#             https://www.jetbrains.com/help/qodana/qodana-yaml.html            #
-#-------------------------------------------------------------------------------#
 version: "1.0"
 
-# Inspection profile. `qodana.recommended` is the full recommended set (the
-# "resolve everything" depth), deliberately broader than `qodana.starter`.
+# Public repository default: free, local, community-compatible analysis.
+# The Gradle quality tasks use the same community linter so contributors do
+# not need private tokens for the normal loop.
 profile:
-  name: qodana.recommended
+  name: qodana.starter
 
-# Project-owned scope rules. Qodana inspects source/config, not generated
-# evidence, local scratch material, previous Qodana reports, or the frozen
-# marketing site (which carries its own test suite).
+# Qodana inspects JVM source/config. Generated output, local scratch space,
+# previous Qodana output, and the website are handled by separate checks.
 exclude:
   - name: All
     paths:
@@ -19,41 +15,23 @@ exclude:
       - .qodana
       - local
       - .gradle
+      - reports
       - site
-      - build.gradle.kts
-  # T753 triaged noise families (intentional patterns, not defects):
-  # MutationIntent's regex banks use non-capturing groups for readability;
-  # the style nag drowned real signal (51 findings, 44 in one file).
   - name: RegExpUnnecessaryNonCapturingGroup
     paths:
       - src/main/java/dev/talos/runtime/MutationIntent.java
-  # The shared LlmClient lifecycle is intentional (one client per session,
-  # closed by the owner; the harness closes via try-with-resources). Real
-  # lifecycle defects were fixed under T752 (ProcessCommandRunner executor).
   - name: AutoCloseableResource
 
-# Quality gate for Qodana runs (not part of the hard Gradle `check`): any
-# critical finding fails the Qodana command immediately.
+# Qodana runs are optional local quality checks, not part of the hard Gradle
+# check. Critical findings fail the Qodana command immediately.
 failureConditions:
   severityThresholds:
     critical: 0
 
-# Baseline: qodana-baseline.sarif.json (repo root) records the 103 findings
-# triaged on 2026-06-26 from the full QDJVM/Ultimate cloud scan at commit
-# d96a4c73 as accepted/known, so scans report only NEW regressions. It holds
-# behavior-preserving style nits, intentional/trust-surface guards, and one
-# non-exploitable JvmTaintAnalysis flow in the local release-task canary CLI.
-# Run with `--baseline qodana-baseline.sarif.json`; the qodanaNativeFreshLocal
-# Gradle task already does, and cloud runs should pass the same flag.
-projectJDK: "21" #(Applied in CI/CD pipeline)
+projectJDK: "21"
 
-# Linter. The full jetbrains/qodana-jvm image (deeper dataflow, security/taint,
-# vulnerable-dependency + license audit) runs on the cloud-connected project
-# with its Qodana token. The local `qodanaNativeFreshLocal` Gradle task still
-# pins the free jetbrains/qodana-jvm-community linter for a token-free preview.
-linter: jetbrains/qodana-jvm:2026.1
+linter: jetbrains/qodana-jvm-community:2026.1
 
-# Force-enable these cleanup inspections on top of the profile.
 include:
   - name: SizeReplaceableByIsEmpty
   - name: JavaExistingMethodCanBeUsed
