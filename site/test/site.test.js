@@ -251,6 +251,9 @@ describe("Talos landing page static contract", () => {
       "curl -fsSL https://taloslocal.com/install.sh | sh",
       "Install commands go live when the first GitHub Release assets are published",
       "setup wizard then guides model and llama.cpp configuration",
+      "To upgrade, rerun the installer with",
+      "--force",
+      "pinned version",
     ]) {
       assert.match(hero, new RegExp(escapeRegExp(copy), "i"));
     }
@@ -412,6 +415,9 @@ describe("Talos landing page static contract", () => {
       "Ubuntu/WSL x64 tarball target",
       "Install commands go live when the first GitHub Release assets are published",
       "setup wizard then guides model and llama.cpp configuration",
+      "To upgrade, rerun the installer with",
+      "--force",
+      "pinned version",
       "installation docs",
     ]) {
       assert.match(text, new RegExp(escapeRegExp(required), "i"));

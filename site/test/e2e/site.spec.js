@@ -228,6 +228,7 @@ test("planned install surface has no fake copy affordance", async ({ page }) => 
   await setup.getByRole("tab", { name: "Linux" }).click();
   await expect(setup).toContainText("curl -fsSL https://taloslocal.com/install.sh | sh");
   await expect(setup).toContainText("Install commands go live when the first GitHub Release assets are published");
+  await expect(setup).toContainText("To upgrade, rerun the installer with --force and the pinned version");
   await expect(setup).toContainText("TalosLocal.Talos");
   await expect(page.locator("[data-copy]")).toHaveCount(0);
 });
