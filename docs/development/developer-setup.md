@@ -60,6 +60,14 @@ Optional quality checks:
 .\gradlew.bat writeQualityMarkdownReports --no-daemon
 ```
 
+Release-quality evidence packet:
+
+```powershell
+.\gradlew.bat releaseQualityPacket --no-daemon
+```
+
+Use `releaseQualityPacket` for maintainer release review, not for every edit. For normal work, run focused tests first, then `.\gradlew.bat check --no-daemon` before merging.
+
 ## What is not required
 
 Normal source development does not require cloud credentials, GitHub release secrets, code-signing credentials, WiX, Docker, or local model downloads.

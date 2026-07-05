@@ -29,9 +29,15 @@ flowchart TB
 2. Confirm branch, commit SHA, and candidate version.
 3. Confirm the worktree is clean.
 4. Run the full automated gate.
-5. Confirm site tests and deploy-surface leak checks pass when site content changed.
-6. Confirm no public docs claim an artifact exists before it is published.
-7. Confirm the release workflow is manual-only for publication.
+5. Run the maintainer quality packet:
+
+   ```powershell
+   .\gradlew.bat releaseQualityPacket --no-daemon
+   ```
+
+6. Confirm site tests and deploy-surface leak checks pass when site content changed.
+7. Confirm no public docs claim an artifact exists before it is published.
+8. Confirm the release workflow is manual-only for publication.
 
 ## Staging Verification
 
@@ -57,6 +63,8 @@ Run installed-product smoke before publication:
 - REPL `/last trace`
 
 Run the manual PTY transcript packet for at least one real mutation lane. If the release claim depends on model behavior, run the two-model large-scale live audit using the standard profiles.
+
+Generated Markdown quality reports under `reports/` are reviewer snapshots. They are useful, but the release decision should be anchored to the JSON summaries, `qualityReportGate`, staged artifacts, manual PTY evidence, and CI run IDs.
 
 ## Failure Rule
 

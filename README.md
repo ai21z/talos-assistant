@@ -644,17 +644,24 @@ machine-readable summaries in `build/reports/talos/`.
 The maintained guide is [Quality reports](docs/development/quality-reports.md).
 Generated report outputs stay local and are not committed.
 
-Use this command for local snapshots of coverage, E2E, Qodana, and build
-artifact provenance:
+Use this command for local reviewer snapshots of coverage, E2E, Qodana, and
+build artifact provenance. This is diagnostic and can describe failed evidence:
 
 ```powershell
-./gradlew.bat writeQualityMarkdownReports
+.\gradlew.bat writeQualityMarkdownReports --no-daemon
 ```
 
-For a full fresh local quality run that refreshes native Qodana first:
+Use this command to validate generated JSON summaries as release-quality
+evidence:
 
 ```powershell
-./gradlew.bat talosQualityLocal
+.\gradlew.bat qualityReportGate --no-daemon
+```
+
+Use this maintainer lane before release staging or publication decisions:
+
+```powershell
+.\gradlew.bat releaseQualityPacket --no-daemon
 ```
 
 Reports are written to the repository-root `reports/` folder using this format:

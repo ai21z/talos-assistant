@@ -56,6 +56,7 @@ Artifact taxonomy:
 Before publication, require:
 
 - full automated gates for the candidate
+- machine-readable quality summaries and `qualityReportGate`
 - clean installed-product smoke from the candidate artifact
 - manual PTY transcript for real terminal behavior
 - large-scale live audit when model behavior is part of the release claim
@@ -79,3 +80,5 @@ Evidence must name:
 - commands run and their result
 
 For live audits, save prompt-debug and trace evidence after natural-language turns. For mutation lanes, save final file state and workspace diff. For release staging, verify the staged manifest and artifact checksums before treating the artifact as release-ready.
+
+Generated Markdown quality reports are local reviewer snapshots. They help humans read the evidence, but they do not replace the underlying JSON summaries, test results, staged manifests, or manual audit packet.

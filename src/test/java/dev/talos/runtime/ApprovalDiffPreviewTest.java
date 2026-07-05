@@ -152,12 +152,13 @@ class ApprovalDiffPreviewTest {
     @Test
     void secretLikeAssignmentsAreRedactedInDiffLines() throws Exception {
         Files.writeString(workspace.resolve("conf.txt"), "plain=1\n");
+        String token = fakeDashToken();
 
         var p = ApprovalDiffPreview.forWrite(workspace, "conf.txt",
-                "plain=1\nAPI_TOKEN=sk-live-12345\n");
+                "plain=1\nAPI_TOKEN=" + token + "\n");
 
         assertTrue(p.text().contains("[redacted]"), p.text());
-        assertFalse(p.text().contains("sk-live-12345"), p.text());
+        assertFalse(p.text().contains(token), p.text());
     }
 
     @Test
@@ -205,5 +206,9 @@ class ApprovalDiffPreviewTest {
                 ApprovalDiffPreview.forWrite(workspace, "  ", "x\n").skippedReason());
         assertEquals("no-target-path",
                 ApprovalDiffPreview.forWrite(null, "f.txt", "x\n").skippedReason());
+    }
+
+    private static String fakeDashToken() {
+        return "sk" + "-live" + "-12345";
     }
 }
