@@ -384,6 +384,17 @@ This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
 `checksums.txt`, installs Talos under the user account, and then hands off to
 `talos setup wizard`. It is not live until GitHub Release assets exist.
 
+To upgrade an existing install, rerun the installer with `--force` and the pinned
+version. For beta releases, use the exact version instead of `latest`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force
+```
+
+```bash
+bash install-talos.sh --version 0.10.8 --force --no-wizard
+```
+
 Until the public release exists, use the source setup path below.
 
 Linux source/developer beta path:

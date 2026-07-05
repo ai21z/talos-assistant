@@ -31,7 +31,8 @@ const STATUS_NOTE_HTML = `
 <aside class="docs-callout docs-callout--beta" role="note">
   <p><strong>Beta status.</strong> Public Windows and Ubuntu/WSL packages are staged
   before release, but they are not live until GitHub Release assets exist. For now,
-  use source setup or a QA artifact built from this repository.</p>
+  use source setup or a QA artifact built from this repository. To upgrade a packaged
+  install later, rerun the installer with <code>--force</code> and the pinned version.</p>
 </aside>`;
 
 function currentRoute() {

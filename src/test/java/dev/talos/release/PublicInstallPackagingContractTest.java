@@ -440,6 +440,9 @@ class PublicInstallPackagingContractTest {
                 "site install preview must hand post-install model setup to the setup wizard");
         assertTrue(site.contains("Install commands go live when the first GitHub Release assets are published"),
                 "site install preview must not imply the package commands are live");
+        String normalizedSite = site.replaceAll("\\s+", " ");
+        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with <code>--force</code> and the pinned version"),
+                "site install preview must explain beta upgrades without implying an automatic updater");
         assertTrue(site.contains("Windows beta is signed-only; unsigned scripts stay local QA only"),
                 "site install preview must keep unsigned execution out of the public install path");
 
@@ -453,6 +456,8 @@ class PublicInstallPackagingContractTest {
                 "public installation doc must name the release artifact host");
         assertTrue(doc.contains("WiX"),
                 "public installation doc must record the Windows MSI builder prerequisite");
+        assertTrue(readme.contains("rerun the installer with `--force` and the pinned"),
+                "README must document explicit-version upgrade behavior");
     }
 
     private static String read(String relative) throws IOException {
