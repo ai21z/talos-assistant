@@ -221,13 +221,14 @@ test("the cold-boot awakening plays when forced, then clears to reveal the page"
 test("planned install surface has no fake copy affordance", async ({ page }) => {
   await gotoTalos(page);
   const setup = page.locator(".setup-strip");
-  await expect(setup).toContainText("planned public beta");
+  await expect(setup).toContainText("developer beta");
   await expect(setup.getByRole("tab", { name: "Windows" })).toBeVisible();
   await expect(setup.getByRole("tab", { name: "Linux" })).toBeVisible();
-  await expect(setup).toContainText("winget install --id TalosLocal.Talos -e");
+  await expect(setup).toContainText("install-talos.ps1");
+  await expect(setup).toContainText("-AllowUnsigned");
   await setup.getByRole("tab", { name: "Linux" }).click();
-  await expect(setup).toContainText("curl -fsSL https://taloslocal.com/install.sh | sh");
-  await expect(setup).toContainText("Install commands go live when the first GitHub Release assets are published");
+  await expect(setup).toContainText("github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh");
+  await expect(setup).toContainText("The 0.10.8 developer beta installs from GitHub Release assets");
   await expect(setup).toContainText("To upgrade, rerun the installer with --force and the pinned version");
   await expect(setup).toContainText("TalosLocal.Talos");
   await expect(page.locator("[data-copy]")).toHaveCount(0);

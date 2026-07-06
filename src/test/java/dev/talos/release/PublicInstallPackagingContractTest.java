@@ -402,8 +402,12 @@ class PublicInstallPackagingContractTest {
         String site = read("site/index.html");
 
         for (String text : new String[] { readme, doc }) {
-            assertTrue(text.contains("winget install --id TalosLocal.Talos -e"),
-                    "public install target must name the exact winget command");
+            assertTrue(text.contains("install-talos.ps1"),
+                    "public Windows install target must name the GitHub Release installer script");
+            assertTrue(text.contains("-AllowUnsigned"),
+                    "public Windows 0.10.8 install target must acknowledge the unsigned developer-beta artifact");
+            assertTrue(text.contains("Winget is not live yet"),
+                    "public docs must not imply winget works before the package is accepted and searchable");
             assertFalse(text.contains("TalosProject.TalosCLI"),
                     "public install identity must not keep the old planned winget package ID");
             assertTrue(text.contains("talos-cli"),
@@ -412,39 +416,41 @@ class PublicInstallPackagingContractTest {
                     "public install copy must name the winget publisher");
             assertTrue(text.contains("Windows x64"),
                     "public beta install copy must keep the packaged Windows x64 lane explicit");
-            assertTrue(text.contains("Linux source/developer"),
-                    "public beta install copy must describe the Linux source/developer lane explicitly");
+            assertTrue(text.contains("Ubuntu/WSL x64"),
+                    "public beta install copy must keep the published Linux lane explicit");
             assertTrue(text.contains("bundled Java runtime"),
                     "public users must not be told to install Java manually");
             assertTrue(text.contains("llama.cpp server or model weights"),
                     "installer must not claim to bundle llama.cpp or model weights");
             assertTrue(text.contains("talos setup models"),
                     "model setup must remain a post-install Talos command");
-            assertTrue(text.contains("Windows public beta is signed-only"),
-                    "public docs must make the Windows signing policy explicit");
-            assertTrue(text.contains("`-AllowUnsigned` is local development/manual QA only, not a public beta install path"),
-                    "public docs must not present unsigned bootstrap execution as a user install path");
+            assertFalse(text.contains("Windows public beta is signed-only"),
+                    "public docs must not claim signed-only while the published beta artifact is unsigned");
+            assertFalse(text.contains("`-AllowUnsigned` is local development/manual QA only, not a public beta install path"),
+                    "public docs must not contradict the current unsigned developer-beta install path");
         }
 
-        assertTrue(site.contains("winget install --id TalosLocal.Talos -e"),
-                "site install preview must name the exact planned winget command");
+        assertTrue(site.contains("install-talos.ps1"),
+                "site install preview must name the GitHub Release Windows installer script");
+        assertTrue(site.contains("-AllowUnsigned"),
+                "site install preview must acknowledge the unsigned Windows developer beta");
         assertTrue(site.contains("TalosLocal.Talos"),
-                "site install preview must name the exact planned winget package ID");
+                "site install preview must name the planned winget package ID without presenting it as live");
         assertFalse(site.contains("TalosProject.TalosCLI"),
                 "site install preview must not keep the old planned winget package ID");
         assertTrue(site.contains("Windows x64"),
                 "site install preview must keep the packaged Windows x64 lane explicit");
-        assertTrue(site.contains("Ubuntu/WSL x64 tarball target"),
+        assertTrue(site.contains("Ubuntu/WSL x64 tarball"),
                 "site install preview must keep the first Linux lane narrow");
-        assertTrue(site.contains("setup wizard then guides model and llama.cpp configuration"),
+        assertTrue(site.contains("Linux starts the"),
                 "site install preview must hand post-install model setup to the setup wizard");
-        assertTrue(site.contains("Install commands go live when the first GitHub Release assets are published"),
-                "site install preview must not imply the package commands are live");
+        assertTrue(site.contains("The 0.10.8 developer beta installs from GitHub Release assets"),
+                "site install preview must describe the live GitHub Release artifact path");
         String normalizedSite = site.replaceAll("\\s+", " ");
         assertTrue(normalizedSite.contains("To upgrade, rerun the installer with <code>--force</code> and the pinned version"),
                 "site install preview must explain beta upgrades without implying an automatic updater");
-        assertTrue(site.contains("Windows beta is signed-only; unsigned scripts stay local QA only"),
-                "site install preview must keep unsigned execution out of the public install path");
+        assertTrue(site.contains("Winget package"),
+                "site install preview must keep winget framed as not live yet");
 
         String normalizedReadme = readme.replaceAll("\\s+", " ");
 

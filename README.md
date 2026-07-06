@@ -350,45 +350,48 @@ runtime policy keeps each turn bounded.
 ### Public beta install targets
 
 The packaged public beta install targets are Windows x64 and Ubuntu/WSL x64.
-Neither public path is live until GitHub Release assets exist.
+The 0.10.8 developer beta is published as GitHub Release assets.
 
-Windows target:
+Windows x64:
 
 ```powershell
-winget install --id TalosLocal.Talos -e
+iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
+talos --version
 talos setup models
 talos status --verbose
 talos
 ```
 
-This Windows public path is not live until a signed GitHub Release asset and
-winget manifest are published. The winget package name and moniker should be
-`talos-cli`, with `TalosLocal.Talos` as the exact package ID and
-`Aris Zounarakis` as publisher. The public installer will include a
-bundled Java runtime, so public users should not need to install Java manually. It
+The Windows 0.10.8 developer-beta assets are unsigned, so the bootstrap script
+requires `-AllowUnsigned`. The script downloads the Windows app-image zip,
+verifies `checksums.txt`, installs Talos for the current user, and adds the
+Talos shim to the user PATH. The installer includes a bundled Java runtime. It
 installs Talos only; it does not bundle a llama.cpp server or model weights.
-Model setup remains an explicit post-install command through
-`talos setup models`.
+Model setup remains an explicit post-install command through `talos setup models`.
 
-Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
+Winget is not live yet. The planned Windows package ID is `TalosLocal.Talos`,
+with `talos-cli` as the searchable package name or moniker and
+`Aris Zounarakis` as publisher. Do not use
+`winget install --id TalosLocal.Talos -e` until `winget search --id
+TalosLocal.Talos -e` finds the package.
 
 The first Ubuntu/WSL x64 public artifact target is a
 runtime-bundled tarball:
 
 ```bash
-curl -fL -o install-talos.sh https://github.com/ai21z/talos-assistant/releases/download/v<version>/install-talos.sh
-bash install-talos.sh --version <version>
+curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force
 ```
 
 This path downloads `talos-<version>-linux-x64-app.tar.gz`, verifies
 `checksums.txt`, installs Talos under the user account, and then hands off to
-`talos setup wizard`. It is not live until GitHub Release assets exist.
+`talos setup wizard`.
 
 To upgrade an existing install, rerun the installer with `--force` and the pinned
 version. For beta releases, use the exact version instead of `latest`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 ```
 
 ```bash
@@ -618,10 +621,11 @@ Current practical setup:
 - `talos setup wizard` for the Ubuntu/WSL guided setup lane
 - Ollama as an optional legacy backend
 
-Planned public install targets:
+Public install targets:
 
 ```powershell
-winget install --id TalosLocal.Talos -e
+iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 ```
 
 ```text
@@ -629,10 +633,11 @@ talos-<version>-linux-x64-app.tar.gz
 install-talos.sh
 ```
 
-The Windows package ID is `TalosLocal.Talos`, the searchable package name or
-moniker is `talos-cli`, and the publisher is Aris Zounarakis. Windows public
-beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not
-a public beta install path.
+Winget is not live yet. The planned Windows package ID is `TalosLocal.Talos`,
+the searchable package name or moniker is `talos-cli`, and the publisher is
+Aris Zounarakis. The 0.10.8 Windows developer-beta assets are unsigned and
+require `-AllowUnsigned`; remove that flag only after signed Windows assets are
+published.
 
 The Linux tarball lane is Ubuntu/WSL x64, runtime-bundled, and has no
 DEB/RPM/Homebrew/SDKMAN package claim. Public installers include a bundled Java

@@ -1,24 +1,31 @@
 # Installation
 
-Talos currently supports source setup from this repository. Public packaged beta artifacts are staged before publication and become user-facing only after a GitHub Release exists.
+Talos currently supports source setup from this repository and packaged 0.10.8 developer-beta artifacts from GitHub Releases.
 
-Use this page to decide which install path applies to you. If you are checking the repository before a public beta, use the source setup. If you are testing a QA artifact, use the artifact instructions that came with that staging packet.
+Use this page to decide which install path applies to you. If you are contributing to Talos, use source setup. If you are installing the 0.10.8 developer beta, use the pinned GitHub Release commands below.
 
-## Planned public install commands
+## Public beta install commands
 
-Windows x64 package target:
+Windows x64:
 
 ```powershell
-winget install --id TalosLocal.Talos -e
+iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
+talos --version
 ```
 
-Ubuntu/WSL x64 tarball target:
+The Windows 0.10.8 developer-beta assets are unsigned, so `-AllowUnsigned` is required for this release. Winget is not live yet. The planned package ID is `TalosLocal.Talos`, the searchable package name or moniker is `talos-cli`, and the publisher is Aris Zounarakis. Do not use `winget install --id TalosLocal.Talos -e` until `winget search --id TalosLocal.Talos -e` finds the package.
+
+Ubuntu/WSL x64:
 
 ```bash
-curl -fsSL https://taloslocal.com/install.sh | sh
+curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force
+talos --version
 ```
 
-These commands are planned public paths. They go live only when release assets exist. The Windows package uses the `TalosLocal.Talos` package ID, the searchable package name or moniker is `talos-cli`, and the publisher is Aris Zounarakis.
+The Linux installer starts `talos setup wizard` by default after Talos is installed. Add `--no-wizard` when you only want to replace the installed app.
+
+The packaged beta artifacts include a bundled Java runtime. They install Talos only. They do not bundle a llama.cpp server or model weights.
 
 ## Upgrade an existing install
 
@@ -30,7 +37,7 @@ Windows beta example:
 
 ```powershell
 iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
-powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 talos --version
 ```
 

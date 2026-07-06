@@ -150,8 +150,8 @@
                 <li class="evidence-tag">local_trace</li>
               </ul>
               <div class="setup-strip" aria-label="Talos setup status">
-                <p class="setup-kicker"><span class="setup-pulse" aria-hidden="true"></span>planned public beta</p>
-                <div class="setup-tabs" role="tablist" aria-label="Planned Talos install commands">
+                <p class="setup-kicker"><span class="setup-pulse" aria-hidden="true"></span>developer beta</p>
+                <div class="setup-tabs" role="tablist" aria-label="Talos install commands">
                   <button
                     class="setup-tab"
                     type="button"
@@ -160,7 +160,7 @@
                     aria-controls="setup-command"
                     aria-selected="true"
                     data-setup-platform="windows"
-                    data-setup-command="winget install --id TalosLocal.Talos -e"
+                    data-setup-command="iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1&#10;powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned&#10;talos --version"
                   >Windows</button>
                   <button
                     class="setup-tab"
@@ -171,19 +171,21 @@
                     aria-selected="false"
                     tabindex="-1"
                     data-setup-platform="linux"
-                    data-setup-command="curl -fsSL https://taloslocal.com/install.sh | sh"
+                    data-setup-command="curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force"
                   >Linux</button>
                 </div>
-                <pre class="setup-command" id="setup-command" role="tabpanel" aria-labelledby="setup-tab-windows"><code>winget install --id TalosLocal.Talos -e</code></pre>
+                <pre class="setup-command" id="setup-command" role="tabpanel" aria-labelledby="setup-tab-windows"><code>iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
+talos --version</code></pre>
                 <p class="setup-note">
-                  Install commands go live when the first GitHub Release assets are published. The
-                  setup wizard then guides model and llama.cpp configuration. To upgrade, rerun
-                  the installer with <code>--force</code> and the pinned version.
+                  The 0.10.8 developer beta installs from GitHub Release assets. Linux starts the
+                  setup wizard after install. Windows prints the next setup commands after Talos is
+                  installed. To upgrade, rerun the installer with <code>--force</code> and the pinned version.
                 </p>
                 <p class="setup-meta">
-                  Planned packaged public beta support: Windows x64 and Ubuntu/WSL x64 tarball target.
-                  Exact future Windows ID: <code>TalosLocal.Talos</code>.
-                  Windows beta is signed-only; unsigned scripts stay local QA only.
+                  Current packaged beta support: Windows x64 app image and Ubuntu/WSL x64 tarball.
+                  Windows 0.10.8 is unsigned and requires <code>-AllowUnsigned</code>. Winget package
+                  ID <code>TalosLocal.Talos</code> is not live until the MSI is signed, submitted, and searchable.
                   <a class="inline-link" href="https://github.com/ai21z/talos-assistant/blob/v0.9.0-beta-dev/docs/development/release-process.md">
                     installation docs
                   </a>.

@@ -27,7 +27,7 @@ Talos does not currently have a `talos update` command. To upgrade, rerun the pl
 Examples:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 ```
 
 ```bash
