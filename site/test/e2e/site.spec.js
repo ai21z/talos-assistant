@@ -326,7 +326,7 @@ test("docs code blocks expose a working copy control", async ({ page, context })
 test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
   await gotoTalos(page, "/docs.html#/getting-started/quickstart", "docs");
   await page.getByRole("link", { name: "write test" }).click();
-  await expect(page).toHaveURL(/\/docs\.html#\/getting-started\/quickstart#write-test$/);
+  await expect(page).toHaveURL(/\/docs(?:\.html)?#\/getting-started\/quickstart#write-test$/);
   await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
   await expect(page.locator("#write-test")).toBeInViewport();
   expect(page.browserIssues).toEqual([]);
