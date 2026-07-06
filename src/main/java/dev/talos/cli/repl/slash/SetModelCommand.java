@@ -13,7 +13,7 @@ import java.util.Locale;
 public final class SetModelCommand implements Command {
 
     private static final String USAGE =
-            "Usage: /set model <name>\nRun /models to see installed model names.";
+            "Usage: /set model <name>\nRun /models to see configured/selectable model names.";
 
     @Override public CommandSpec spec() {
         return new CommandSpec("set", List.of(), "/set model <name>", "Switch active model.",

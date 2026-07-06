@@ -34,6 +34,8 @@ On Windows, configure model paths with:
 talos setup models
 ```
 
+For the shortest platform-specific path, use [Windows setup](windows-setup.md) or [Linux setup](linux-setup.md).
+
 ## Run the doctor smoke
 
 ```bash

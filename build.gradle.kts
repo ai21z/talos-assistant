@@ -1103,6 +1103,11 @@ tasks.register<Copy>("copyWindowsReleaseBootstrap") {
     into(windowsReleaseDir)
 }
 
+tasks.register<Copy>("copyWindowsReleaseUninstall") {
+    from("tools/uninstall-talos.ps1")
+    into(windowsReleaseDir)
+}
+
 tasks.register<Copy>("copyWindowsReleaseSbom") {
     dependsOn("validateReleaseSbom")
     from(releaseSbomFile)
@@ -1110,7 +1115,7 @@ tasks.register<Copy>("copyWindowsReleaseSbom") {
 }
 
 tasks.register("windowsReleaseChecksums") {
-    dependsOn("windowsReleaseMsi", "windowsReleaseAppZip", "copyWindowsReleaseBootstrap", "copyWindowsReleaseSbom")
+    dependsOn("windowsReleaseMsi", "windowsReleaseAppZip", "copyWindowsReleaseBootstrap", "copyWindowsReleaseUninstall", "copyWindowsReleaseSbom")
 
     val checksumFile = windowsReleaseDir.map { it.file("checksums.txt") }
     outputs.file(checksumFile)
@@ -1123,6 +1128,7 @@ tasks.register("windowsReleaseChecksums") {
             publicMsiArtifactName,
             publicAppZipArtifactName,
             "install-talos.ps1",
+            "uninstall-talos.ps1",
             publicReleaseSbomArtifactName
         )
         val lines = artifactNames.map { name ->
@@ -1205,6 +1211,11 @@ tasks.register<Copy>("copyLinuxReleaseBootstrap") {
     into(linuxReleaseDir)
 }
 
+tasks.register<Copy>("copyLinuxReleaseUninstall") {
+    from("tools/uninstall-talos.sh")
+    into(linuxReleaseDir)
+}
+
 tasks.register<Copy>("copyLinuxReleaseSbom") {
     dependsOn("validateReleaseSbom")
     from(releaseSbomFile)
@@ -1212,7 +1223,7 @@ tasks.register<Copy>("copyLinuxReleaseSbom") {
 }
 
 tasks.register("linuxReleaseChecksums") {
-    dependsOn("linuxReleaseAppTar", "copyLinuxReleaseBootstrap", "copyLinuxReleaseSbom")
+    dependsOn("linuxReleaseAppTar", "copyLinuxReleaseBootstrap", "copyLinuxReleaseUninstall", "copyLinuxReleaseSbom")
 
     val checksumFile = linuxReleaseDir.map { it.file("checksums.txt") }
     outputs.file(checksumFile)
@@ -1224,6 +1235,7 @@ tasks.register("linuxReleaseChecksums") {
         val artifactNames = listOf(
             publicLinuxAppTarArtifactName,
             "install-talos.sh",
+            "uninstall-talos.sh",
             publicReleaseSbomArtifactName
         )
         val lines = artifactNames.map { name ->

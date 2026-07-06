@@ -5,9 +5,10 @@ Talos is a local-first CLI workspace assistant for developer workspaces. It can 
 Start here:
 
 1. [Installation](getting-started/installation.md)
-2. [Quickstart](getting-started/quickstart.md)
-3. [First run](getting-started/first-run.md)
-4. [Model setup](getting-started/model-setup.md)
+2. [Windows setup](getting-started/windows-setup.md) or [Linux setup](getting-started/linux-setup.md)
+3. [Quickstart](getting-started/quickstart.md)
+4. [First run](getting-started/first-run.md)
+5. [Model setup](getting-started/model-setup.md)
 
 Main references:
 

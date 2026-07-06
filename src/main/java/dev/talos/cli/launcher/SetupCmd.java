@@ -92,11 +92,21 @@ public class SetupCmd implements Callable<Integer> {
         out.append("""
 
                 Repeatable configure -> test -> guide recipe:
-                  1. talos setup models --profile <name> --server-path C:/path/to/llama-server.exe --write
-                  2. Restart Talos after the config write.
-                  3. talos status --verbose
-                  4. talos doctor --start
-                  5. Save the doctor output as evidence before calling that local setup verified.
+                  1. Read the Windows setup guide: docs/getting-started/windows-setup.md
+                  2. Replace template paths with real local paths.
+                  3. talos setup models --profile <name> --server-path C:/path/to/llama-server.exe --write
+                  4. Restart Talos after the config write.
+                  5. talos status --verbose
+                  6. talos doctor --start
+                  7. Save the doctor output as evidence before calling that local setup verified.
+
+                Template only - replace C:/path/to/llama-server.exe with your real llama-server path.
+
+                Windows Setup Guide:
+                  docs/getting-started/windows-setup.md
+
+                Linux Setup Guide:
+                  docs/getting-started/linux-setup.md
 
                 Talos-managed download/cache for Qwen:
                   talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write

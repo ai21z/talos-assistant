@@ -27,6 +27,11 @@ The Linux installer starts `talos setup wizard` by default after Talos is instal
 
 The packaged beta artifacts include a bundled Java runtime. They install Talos only. They do not bundle a llama.cpp server or model weights.
 
+After install, use the platform setup guide:
+
+- [Windows setup](windows-setup.md)
+- [Linux setup](linux-setup.md)
+
 ## Upgrade an existing install
 
 To upgrade, rerun the installer with `--force` and the pinned version. "Pinned" means the exact release you want, for example `0.10.8` or `0.10.9`, not an open-ended latest channel.
@@ -86,6 +91,8 @@ On Windows, use:
 talos setup models
 ```
 
+For concrete llama.cpp and model download links, use [Windows setup](windows-setup.md) or [Linux setup](linux-setup.md).
+
 Then verify the model path:
 
 ```bash
@@ -93,3 +100,34 @@ talos doctor --start
 ```
 
 Talos does not bundle a llama.cpp server or model weights. The setup flow either guides installation of the pinned Ubuntu/WSL lane or asks you to provide concrete local paths.
+
+## Uninstall
+
+Normal uninstall removes the Talos app and command shim. It keeps your local Talos data at `~/.talos` or `%USERPROFILE%\.talos`.
+
+Purge removes both the app and Talos user data. Use purge only when you want to remove config, indices, logs, and Talos-owned caches too.
+
+Windows:
+
+```powershell
+iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/uninstall-talos.ps1 -OutFile uninstall-talos.ps1
+powershell -ExecutionPolicy Bypass -File .\uninstall-talos.ps1
+```
+
+Windows purge:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall-talos.ps1 -Purge
+```
+
+Linux or WSL:
+
+```bash
+curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/uninstall-talos.sh | bash
+```
+
+Linux or WSL purge:
+
+```bash
+curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/uninstall-talos.sh | bash -s -- --purge
+```

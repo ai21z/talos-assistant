@@ -198,6 +198,9 @@ try {
     Write-Host "  talos setup models"
     Write-Host "  talos status --verbose"
     Write-Host "  talos"
+    Write-Host ""
+    Write-Host "Windows Setup Guide:"
+    Write-Host "  https://taloslocal.com/docs.html#/getting-started/windows-setup"
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force

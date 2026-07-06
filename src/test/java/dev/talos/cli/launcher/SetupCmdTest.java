@@ -51,6 +51,9 @@ class SetupCmdTest {
         assertTrue(help.contains("docs/reference/model-profiles.md"), help);
         assertTrue(help.contains("talos doctor --start"), help);
         assertTrue(help.contains("talos setup models --profile"));
+        assertTrue(help.contains("Windows setup guide"), help);
+        assertTrue(help.contains("docs/getting-started/windows-setup.md"), help);
+        assertTrue(help.contains("Template only"), help);
         assertTrue(help.contains("gpt-oss-20b-mxfp4.gguf"), help);
         assertTrue(help.contains("--model-path"), help);
         assertTrue(help.contains("refuses to write a config"), help);

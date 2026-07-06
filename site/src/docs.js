@@ -108,6 +108,8 @@ function renderLandingHtml() {
       group: "Start here",
       items: [
         ["Installation", "getting-started/installation", "Windows, Ubuntu/WSL, upgrade, and source setup paths."],
+        ["Windows setup", "getting-started/windows-setup", "Install Talos, add llama.cpp, configure Qwen, and run doctor."],
+        ["Linux setup", "getting-started/linux-setup", "Use the installer wizard to add the pinned engine and model."],
         ["Quickstart", "getting-started/quickstart", "Check the command, configure a model, and start a first session."],
         ["First run", "getting-started/first-run", "Read the banner, prompt, and status output."],
         ["Model setup", "getting-started/model-setup", "Connect Talos to a local model engine."],
@@ -188,8 +190,9 @@ function renderLandingHtml() {
   </p>
   <p class="docs-start-path">
     Recommended order:
-    <a href="#/getting-started/quickstart">Quickstart</a>,
-    <a href="#/getting-started/model-setup">model setup</a>, then
+    <a href="#/getting-started/installation">Installation</a>,
+    <a href="#/getting-started/windows-setup">Windows setup</a> or
+    <a href="#/getting-started/linux-setup">Linux setup</a>, then
     <a href="#/getting-started/first-run">first run</a>.
   </p>
 </header>

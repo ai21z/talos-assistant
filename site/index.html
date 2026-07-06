@@ -177,6 +177,10 @@
 powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 talos --version</code></pre>
                 </div>
+                <div class="setup-guide-links" aria-label="Setup guides">
+                  <a href="./docs.html#/getting-started/windows-setup" target="_blank" rel="noopener">Windows Setup Guide</a>
+                  <a href="./docs.html#/getting-started/linux-setup" target="_blank" rel="noopener">Linux Setup Guide</a>
+                </div>
               </div>
               <p class="machine-note">
                 <span aria-hidden="true">&gt;_</span>
@@ -384,7 +388,7 @@ talos --version</code></pre>
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Good Fits</p>
-              <h2 id="good-fits-heading">What Talos handles now, and what is planned for v1.</h2>
+              <h2 id="good-fits-heading">What Talos handles now, what is coming on next beta, and what is planned for v1.</h2>
               <p class="section-lede">
                 A practical map of current support and planned work. Hover any
                 node for what it covers.
@@ -392,33 +396,35 @@ talos --version</code></pre>
             </div>
             <div class="scope-layout">
               <div class="scope-graph reveal">
-                <svg class="scope" viewBox="0 0 620 600" role="img" aria-label="An interactive force-directed graph of what Talos can do. Talos, a local workspace operator, links to four capabilities. Explore the workspace, available now: folders and files, search, changes. Summarize documents, available now: code and text, data files, and PDFs, Word and Excel. Scheduled for v1: PowerPoint and a sensitive-paperwork workflow. Edit code, available now: reviewed edits and edits across files. Run commands, available now: tests and builds. Drag a node to move it, click a node for details."></svg>
+                <svg class="scope" viewBox="0 0 620 600" role="img" aria-label="An interactive force-directed graph of what Talos can do. Talos links to five capabilities. Explore the workspace, available now: folders and files, search, changes. Work with files, available now: code and text, data files, PDF, Word, Excel text. Coming on next beta: LaTeX and a private-doc workflow. Coming on v1: images, OCR, and PowerPoint. Edit code, available now: reviewed edits and edits across files. Show its work, available now: local trace, approval record, checked outcome. Coming on v1: evidence receipt export. Local model profiles, available now: Qwen, GPT-OSS, and experimental profiles. Coming on next beta: more accepted profiles. Coming on v1: mobile profiles and Gemma-family mobile profiles. Drag a node to move it, click a node for details."></svg>
                 <noscript>
                   <ul class="scope-fallback">
                     <li>Explore the workspace (now): folders &amp; files, search, changes</li>
-                    <li>Summarize documents (now): code &amp; text, data files, PDFs, Word, Excel. v1: PowerPoint, sensitive-paperwork workflow</li>
+                    <li>Work with files (now): code &amp; text, data files, PDF, Word, Excel text. Coming on next beta: LaTeX, private-doc workflow. Coming on v1: images, OCR, PowerPoint</li>
                     <li>Edit code (now): reviewed edits, edits across files</li>
-                    <li>Run commands (now): tests, builds</li>
+                    <li>Show its work (now): local trace, approval record, checked outcome. Coming on v1: evidence receipt export</li>
+                    <li>Local model profiles (now): Qwen, GPT-OSS, experimental profiles. Coming on next beta: more accepted profiles. Coming on v1: mobile profiles, Gemma-family mobile profiles</li>
                   </ul>
                 </noscript>
               </div>
               <div class="scope-readout reveal">
                 <div class="scope-legend" aria-hidden="true">
                   <span><span class="dot dot--now"></span>available now</span>
-                  <span><span class="dot dot--v1"></span>scheduled for v1</span>
+                  <span><span class="dot dot--upcoming"></span>Coming on next beta</span>
+                  <span><span class="dot dot--v1"></span>Coming on v1</span>
                 </div>
                 <div class="scope-detail" data-scope-detail aria-live="polite">
                   <p class="scope-detail-kind">local operator</p>
                   <p class="scope-detail-name">Talos</p>
-                  <p class="scope-detail-text">A local-by-default operator for your workspace. It reads before acting, asks before writing, and keeps model turns on localhost unless remote endpoints are explicitly allowed.</p>
-                  <p class="scope-detail-meta">localhost-gated by default · workspace-bounded · approved writes · local trace</p>
+                  <p class="scope-detail-text">A local workspace assistant. It reads before acting, asks before writing, and keeps model turns on localhost unless you allow remote endpoints.</p>
+                  <p class="scope-detail-meta">localhost gated, workspace bounded, approved writes, local trace</p>
                 </div>
               </div>
             </div>
             <p class="use-case-caveat">
-              PDFs, Word, and Excel are read and summarized on your machine today.
-              PowerPoint, image OCR, and the guided sensitive-paperwork workflow are
-              on the v1 roadmap.
+              PDFs, Word, and Excel text are read on your machine today.
+              LaTeX, private-doc workflow, and more accepted profiles are coming on next beta.
+              Images, OCR, PowerPoint, mobile profiles, Gemma-family mobile profiles, and evidence receipt export are coming on v1.
             </p>
           </div>
         </section>

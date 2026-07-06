@@ -119,13 +119,13 @@ class PublicInstallPackagingContractTest {
                 "release SBOM validation must enforce GitHub's 16 MiB SBOM attestation limit");
         assertTrue(build.contains("GitHub SBOM attestation"),
                 "release SBOM validation must explicitly pin the GitHub attestation contract");
-        assertTrue(build.contains("dependsOn(\"windowsReleaseMsi\", \"windowsReleaseAppZip\", \"copyWindowsReleaseBootstrap\", \"copyWindowsReleaseSbom\")"),
+        assertTrue(build.contains("dependsOn(\"windowsReleaseMsi\", \"windowsReleaseAppZip\", \"copyWindowsReleaseBootstrap\", \"copyWindowsReleaseUninstall\", \"copyWindowsReleaseSbom\")"),
                 "Windows checksums must include the SBOM artifact");
         assertTrue(normalizedBuild.contains("tasks.register<Copy>(\"copyWindowsReleaseSbom\") {\n    dependsOn(\"validateReleaseSbom\")"),
                 "Windows SBOM staging must depend on local SBOM validation");
         assertTrue(build.contains("publicReleaseSbomArtifactName"),
                 "checksum manifests must include the SBOM filename");
-        assertTrue(build.contains("dependsOn(\"linuxReleaseAppTar\", \"copyLinuxReleaseBootstrap\", \"copyLinuxReleaseSbom\")"),
+        assertTrue(build.contains("dependsOn(\"linuxReleaseAppTar\", \"copyLinuxReleaseBootstrap\", \"copyLinuxReleaseUninstall\", \"copyLinuxReleaseSbom\")"),
                 "Linux checksums must include the SBOM artifact");
         assertTrue(normalizedBuild.contains("tasks.register<Copy>(\"copyLinuxReleaseSbom\") {\n    dependsOn(\"validateReleaseSbom\")"),
                 "Linux SBOM staging must depend on local SBOM validation");
@@ -208,6 +208,10 @@ class PublicInstallPackagingContractTest {
                 "public bootstrap must tell users how to verify the installed command");
         assertTrue(script.contains("talos setup models"),
                 "Windows public setup handoff must stay on the Windows-supported model setup path");
+        assertTrue(script.contains("Windows Setup Guide"),
+                "Windows public setup handoff must point fresh users at the setup guide");
+        assertTrue(script.contains("https://taloslocal.com/docs.html#/getting-started/windows-setup"),
+                "Windows public setup handoff must include the public setup guide URL");
         assertTrue(script.contains("talos status --verbose"),
                 "public bootstrap must point users at verbose status diagnostics");
         assertFalse(script.contains("talos setup wizard"),
@@ -216,6 +220,40 @@ class PublicInstallPackagingContractTest {
                 "public bootstrap must not advertise stale retrieval subcommands as first-run guidance");
         assertFalse(script.contains("rag-ask"),
                 "public bootstrap must not advertise stale retrieval subcommands as first-run guidance");
+    }
+
+    @Test
+    @DisplayName("public release artifacts include explicit uninstall scripts")
+    void publicReleaseArtifactsIncludeExplicitUninstallScripts() throws Exception {
+        String gradle = read("build.gradle.kts");
+        String windowsUninstall = read("tools/uninstall-talos.ps1");
+        String linuxUninstall = read("tools/uninstall-talos.sh");
+        String installDocs = read("docs/getting-started/installation.md");
+
+        assertTrue(gradle.contains("tools/uninstall-talos.ps1"),
+                "Windows release artifact task must copy the public uninstall script");
+        assertTrue(gradle.contains("tools/uninstall-talos.sh"),
+                "Linux release artifact task must copy the public uninstall script");
+        assertTrue(gradle.contains("\"uninstall-talos.ps1\""),
+                "Windows checksums must include uninstall-talos.ps1");
+        assertTrue(gradle.contains("\"uninstall-talos.sh\""),
+                "Linux checksums must include uninstall-talos.sh");
+
+        assertTrue(windowsUninstall.contains("RemoveUserData"),
+                "Windows uninstall must support an explicit user-data purge path");
+        assertTrue(windowsUninstall.contains("$env:LOCALAPPDATA"),
+                "Windows uninstall must remove the user-local app install by default");
+        assertTrue(linuxUninstall.contains("--purge"),
+                "Linux uninstall must support an explicit user-data purge path");
+        assertTrue(linuxUninstall.contains("$HOME/.local/share/talos"),
+                "Linux uninstall must remove the user-local app install by default");
+
+        assertTrue(installDocs.contains("uninstall-talos.ps1"),
+                "public docs must show the Windows uninstall path");
+        assertTrue(installDocs.contains("uninstall-talos.sh"),
+                "public docs must show the Linux uninstall path");
+        assertTrue(installDocs.contains("Purge"),
+                "public docs must explain app removal versus data purge");
     }
 
     @Test

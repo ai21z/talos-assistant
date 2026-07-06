@@ -73,9 +73,9 @@ public final class TerminalFirstRun {
 
     static boolean run(DoctorRunner doctor, PrintStream out, Path sentinel) {
         out.println();
-        out.println("  ╭──────────────────────────────────────╮");
-        out.println("  │       Talos - First Run Setup        │");
-        out.println("  ╰──────────────────────────────────────╯");
+        out.println("  +--------------------------------------+");
+        out.println("  |       Talos - First Run Setup        |");
+        out.println("  +--------------------------------------+");
         out.println();
 
         out.println(setupSummary());
@@ -104,6 +104,7 @@ public final class TerminalFirstRun {
                 out.println("  Setup incomplete - " + failed + " check(s) failed.");
                 out.println("  Fix the items above, then run 'talos doctor' to re-check.");
                 out.println("  Configure models with 'talos setup models'.");
+                out.println("  Setup guides: docs/getting-started/windows-setup.md or docs/getting-started/linux-setup.md");
             } else if (warned) {
                 out.println("  Setup complete with warnings. Starting Talos...");
             } else {
@@ -121,6 +122,7 @@ public final class TerminalFirstRun {
     public static String setupSummary() {
         return "  Talos uses local model engines. The default path is llama.cpp on Windows.\n"
                 + "  Run `talos setup models` to configure a tested managed llama.cpp profile.\n"
+                + "  Guides: docs/getting-started/windows-setup.md or docs/getting-started/linux-setup.md\n"
                 + "  Advanced users can set engines.llama_cpp.server_path and model_path in ~/.talos/config.yaml.\n"
                 + "  Ollama can still be selected explicitly as a legacy backend.";
     }

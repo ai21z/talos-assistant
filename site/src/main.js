@@ -696,48 +696,65 @@ function setupScope() {
 
   const root = {
     name: "Talos",
-    text: "A local-by-default operator for your workspace. It reads before acting, asks before writing, and keeps model turns on localhost unless remote endpoints are explicitly allowed.",
-    meta: "localhost-gated by default · workspace-bounded · approved writes · local trace",
+    text: "A local workspace assistant. It reads before acting, asks before writing, and keeps model turns on localhost unless you allow remote endpoints.",
+    meta: "localhost gated, workspace bounded, approved writes, local trace",
   };
   const branches = [
     {
       name: "Explore the workspace",
-      text: "Read-only grounding. Talos looks before it touches anything.",
-      meta: "boundary  allow (read)",
+      text: "Talos reads the project before it acts.",
+      meta: "read only",
       leaves: [
-        { name: "Folders & files", text: "List a project tree and open any text file.", meta: "list_dir · read_file" },
+        { name: "Folders & files", text: "List folders and open supported local files.", meta: "list_dir, read_file" },
         { name: "Search", text: "Find text and symbols across the workspace.", meta: "grep" },
-        { name: "Changes", text: "Review what the last turn touched.", meta: "/last trace · diffs" },
+        { name: "Changes", text: "Review what the latest turn touched.", meta: "/last trace, diffs" },
       ],
     },
     {
-      name: "Summarize documents",
-      text: "Explain what a file holds, in plain language.",
-      meta: "boundary  allow (read)",
+      name: "Work with files",
+      text: "Read supported project files and extract text from local documents.",
+      meta: "local file reading",
       leaves: [
-        { name: "Code & text", text: "Source code, Markdown, and plain text.", meta: "read_file" },
-        { name: "Data files", text: "JSON, YAML, TOML, and CSV.", meta: "read_file" },
-        { name: "PDF, Word, Excel", text: "PDFs, Word (.docx), and Excel (.xlsx), extracted entirely on your machine.", meta: "read_file · on-device extract" },
-        { name: "PowerPoint", v1: true, text: "Reading .pptx decks. On the v1 roadmap.", meta: "planned for v1" },
-        { name: "Sensitive docs", v1: true, text: "Private documents already stay on your machine today. A guided sensitive-paperwork workflow is on the v1 roadmap.", meta: "on-device today · workflow v1" },
+        { name: "Code & text", text: "Read source code, Markdown, and plain text.", meta: "read_file" },
+        { name: "Data", text: "Read data files like JSON, YAML, TOML, CSV, and TSV.", meta: "read_file" },
+        { name: "PDF / Office", text: "Extract PDF, Word, and Excel text on your machine.", meta: "local extraction" },
+        { name: "LaTeX", upcoming: true, text: "Read and reason over LaTeX project files. Coming on next beta.", meta: "Coming on next beta" },
+        { name: "Private docs", upcoming: true, text: "Use a guided private-doc workflow for sensitive files. Coming on next beta.", meta: "Coming on next beta" },
+        { name: "Images", v1: true, text: "Read image inputs with model support. Coming on v1.", meta: "Coming on v1" },
+        { name: "OCR", v1: true, text: "Extract text from scanned or image-only documents. Coming on v1.", meta: "Coming on v1" },
+        { name: "PowerPoint", v1: true, text: "Read PowerPoint decks as documents. Coming on v1.", meta: "Coming on v1" },
       ],
     },
     {
       name: "Edit code",
-      text: "Propose and preview, then write only what you approve.",
-      meta: "boundary  ask (write)",
+      text: "Preview changes, ask for approval, then write only what you approve.",
+      meta: "approved writes",
       leaves: [
-        { name: "Reviewed edits", text: "Single-file changes behind explicit approval.", meta: "read_file · write_file" },
-        { name: "Across files", text: "Coordinated edits spanning several files.", meta: "write_file" },
+        { name: "Reviewed edits", text: "Apply focused file changes after you approve them.", meta: "read_file, write_file" },
+        { name: "Across files", text: "Coordinate related edits across more than one file.", meta: "write_file" },
       ],
     },
     {
-      name: "Run commands",
-      text: "Run tests and builds through approved, configured profiles.",
-      meta: "boundary  ask",
+      name: "Show its work",
+      text: "Keep local evidence for what happened in the turn.",
+      meta: "trace evidence",
       leaves: [
-        { name: "Tests", text: "Run a test profile and read the real output.", meta: "run_command" },
-        { name: "Builds", text: "Run a build and confirm it before claiming success.", meta: "run_command" },
+        { name: "Local trace", text: "Review the last turn with local trace records.", meta: "/last trace" },
+        { name: "Approval record", text: "See when a write or private handoff needed approval.", meta: "approval gate" },
+        { name: "Checked outcome", text: "Compare final claims with tool results and verification evidence.", meta: "verification" },
+        { name: "Receipt", v1: true, text: "Export a clean evidence receipt for a completed turn. Coming on v1.", meta: "Coming on v1" },
+      ],
+    },
+    {
+      name: "Local model profiles",
+      text: "Use local model profiles with explicit setup and health checks.",
+      meta: "llama.cpp profiles",
+      leaves: [
+        { name: "Qwen / GPT-OSS", text: "Use accepted beta profiles after local setup.", meta: "accepted beta" },
+        { name: "Experiments", text: "Try experimental profiles that are not beta stability profiles.", meta: "experimental" },
+        { name: "More profiles", upcoming: true, text: "Promote more accepted profiles after testing. Coming on next beta.", meta: "Coming on next beta" },
+        { name: "Mobile", v1: true, text: "Use mobile profiles for smaller local workflows. Coming on v1.", meta: "Coming on v1" },
+        { name: "Gemma", v1: true, text: "Test Gemma-family mobile profiles for phone-scale use. Coming on v1.", meta: "Coming on v1" },
       ],
     },
   ];
@@ -746,14 +763,19 @@ function setupScope() {
   const nodes = [root];
   const links = [];
   root.idx = 0; root.type = "trunk"; root.r = 22; root.kindText = "local operator";
+  const statusText = (node) => {
+    if (node.v1) return "Coming on v1";
+    if (node.upcoming) return "Coming on next beta";
+    return "available now";
+  };
   branches.forEach((b) => {
-    b.type = "branch"; b.r = 12; b.kindText = "available now"; b.idx = nodes.length;
+    b.type = "branch"; b.r = 12; b.kindText = statusText(b); b.idx = nodes.length;
     nodes.push(b);
     links.push({ a: 0, b: b.idx, dist: 162 });
     b.leaves.forEach((lf) => {
-      lf.type = "leaf"; lf.r = 7; lf.kindText = lf.v1 ? "scheduled for v1" : "available now"; lf.idx = nodes.length;
+      lf.type = "leaf"; lf.r = 7; lf.kindText = statusText(lf); lf.idx = nodes.length;
       nodes.push(lf);
-      links.push({ a: b.idx, b: lf.idx, dist: 108, v1: lf.v1 });
+      links.push({ a: b.idx, b: lf.idx, dist: 108, v1: lf.v1, upcoming: lf.upcoming });
     });
   });
 
@@ -781,7 +803,7 @@ function setupScope() {
   };
   const edgeG = make("g", { class: "tree-edges" });
   links.forEach((l) => {
-    l.el = make("line", { class: `tree-link${l.v1 ? " tree-link--v1" : ""}` });
+    l.el = make("line", { class: `tree-link${l.v1 ? " tree-link--v1" : ""}${l.upcoming ? " tree-link--upcoming" : ""}` });
     edgeG.appendChild(l.el);
   });
   svg.appendChild(edgeG);
@@ -791,7 +813,11 @@ function setupScope() {
     if (d === active) return;
     active = d;
     nodes.forEach((n) => n.g.classList.toggle("is-active", n === d));
-    if (kindEl) { kindEl.textContent = d.kindText; kindEl.classList.toggle("is-v1", !!d.v1); }
+    if (kindEl) {
+      kindEl.textContent = d.kindText;
+      kindEl.classList.toggle("is-v1", !!d.v1);
+      kindEl.classList.toggle("is-upcoming", !!d.upcoming);
+    }
     if (nameEl) nameEl.textContent = d.name;
     if (textEl) textEl.textContent = d.text;
     if (metaEl) metaEl.textContent = d.meta;
@@ -799,7 +825,7 @@ function setupScope() {
 
   nodes.forEach((n) => {
     const g = make("g", {
-      class: `tree-node tree-node--${n.type}${n.v1 ? " is-v1" : ""}`,
+      class: `tree-node tree-node--${n.type}${n.v1 ? " is-v1" : ""}${n.upcoming ? " is-upcoming" : ""}`,
       tabindex: "0",
       role: "button",
       "aria-label": `${n.name}, ${n.kindText}`,

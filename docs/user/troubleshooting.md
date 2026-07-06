@@ -21,6 +21,10 @@ For the pinned Ubuntu/WSL x64 CPU lane, use:
 
 For Windows x64 (CPU), choose the matching Windows x64 CPU artifact from the same llama.cpp release and configure it with `talos setup models`.
 
+- Windows x64 (CPU): `llama-b9860-bin-win-cpu-x64.zip`
+- First accepted model to try: https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
+- GGUF file: `qwen2.5-coder-14b-instruct-q4_k_m.gguf`
+
 Talos does not claim arbitrary latest upstream builds are verified. Prefer the pinned lane for release evidence.
 
 If a prompt says work was not completed, inspect `/last trace` and the final files before retrying. A refusal or partial result is often the correct outcome when evidence is missing.
