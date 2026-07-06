@@ -54,7 +54,7 @@ When Talos has a stable non-prerelease channel, `latest` can be used for the new
 
 ## Source setup
 
-Source setup builds the app from the checkout and installs a local distribution under `build/install/talos`. It is the right path for contributors, local QA, and anyone reading the repo before the first public release assets exist.
+Source setup builds the app from the checkout and installs a local distribution under `build/install/talos`. It is the right path for contributors, local QA, and anyone who wants to run the current checkout instead of a published release asset.
 
 Windows:
 

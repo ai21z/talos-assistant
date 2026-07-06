@@ -398,7 +398,7 @@ powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Fo
 bash install-talos.sh --version 0.10.8 --force --no-wizard
 ```
 
-Until the public release exists, use the source setup path below.
+Source setup remains available for contributors and local QA.
 
 Linux source/developer beta path:
 
@@ -612,8 +612,8 @@ Practical guidance:
 
 Current practical setup:
 
-- Windows x64 packaged target after release assets exist
-- Ubuntu/WSL x64 runtime-bundled tarball target after release assets exist
+- Windows x64 packaged target through GitHub Release assets
+- Ubuntu/WSL x64 runtime-bundled tarball target through GitHub Release assets
 - Linux source/developer beta path from a checkout
 - Java 21+
 - managed llama.cpp for the primary local model path
@@ -706,11 +706,11 @@ and evidence-oriented developer workflows. The beta line is still being hardened
 around model reliability, command profiles, semantic verification, binary file
 support, and broader capability growth.
 
-The strongest current path is Windows packaged or source setup, or Linux
-source/developer setup plus managed llama.cpp with explicit local model
-configuration. File and workspace operations are gated and traceable. Command
-execution is bounded to approved profiles. Unsupported or unverified results
-are reported as such.
+The strongest current paths are Windows packaged setup, Ubuntu/WSL x64 packaged
+setup, or source setup for contributors and local QA. Managed llama.cpp still
+requires explicit local model configuration. File and workspace operations are
+gated and traceable. Command execution is bounded to approved profiles.
+Unsupported or unverified results are reported as such.
 
 ## Repo Layout
 

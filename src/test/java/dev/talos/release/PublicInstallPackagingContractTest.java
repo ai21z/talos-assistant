@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -434,28 +435,40 @@ class PublicInstallPackagingContractTest {
                 "site install preview must name the GitHub Release Windows installer script");
         assertTrue(site.contains("-AllowUnsigned"),
                 "site install preview must acknowledge the unsigned Windows developer beta");
-        assertTrue(site.contains("TalosLocal.Talos"),
-                "site install preview must name the planned winget package ID without presenting it as live");
+        assertFalse(site.contains("TalosLocal.Talos"),
+                "site homepage must not advertise the planned winget package before it is accepted and searchable");
         assertFalse(site.contains("TalosProject.TalosCLI"),
                 "site install preview must not keep the old planned winget package ID");
-        assertTrue(site.contains("Windows x64"),
+        assertTrue(site.contains("Windows"),
                 "site install preview must keep the packaged Windows x64 lane explicit");
-        assertTrue(site.contains("Ubuntu/WSL x64 tarball"),
+        assertTrue(site.contains("Linux"),
                 "site install preview must keep the first Linux lane narrow");
         assertTrue(site.contains("Linux starts the"),
                 "site install preview must hand post-install model setup to the setup wizard");
-        assertTrue(site.contains("The 0.10.8 developer beta installs from GitHub Release assets"),
+        assertTrue(site.contains("Installs from GitHub Release assets"),
                 "site install preview must describe the live GitHub Release artifact path");
         String normalizedSite = site.replaceAll("\\s+", " ");
-        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with <code>--force</code> and the pinned version"),
+        assertTrue(normalizedSite.contains("To upgrade, rerun the installer with --force and the pinned version"),
                 "site install preview must explain beta upgrades without implying an automatic updater");
-        assertTrue(site.contains("Winget package"),
-                "site install preview must keep winget framed as not live yet");
+        assertFalse(site.toLowerCase(Locale.ROOT).contains("winget"),
+                "site homepage must stay off winget until that lane is real");
+        assertFalse(site.contains("not live until GitHub Release assets exist"),
+                "site docs must not describe the published 0.10.8 assets as unavailable");
+        assertFalse(site.contains("source setup or a QA artifact built from this repository"),
+                "site docs must not send public beta users to QA artifacts after release publication");
+        assertFalse(site.contains("what is still staged"),
+                "site docs landing must not frame published install assets as staged");
+        assertFalse(site.contains("what is not packaged yet"),
+                "site docs landing must not imply the published beta has no package lane");
 
         String normalizedReadme = readme.replaceAll("\\s+", " ");
 
         assertTrue(readme.contains("Linux source/developer beta path"),
                 "README must name Linux as source/developer beta support, not package-manager support");
+        assertFalse(readme.contains("Until the public release exists"),
+                "README must not retain pre-release install gating after 0.10.8 publication");
+        assertFalse(readme.contains("after release assets exist"),
+                "README must not describe published release assets as future-only");
         assertTrue(normalizedReadme.contains("no DEB/RPM/Homebrew/SDKMAN package claim"),
                 "README must not imply native Linux package-manager support");
         assertTrue(doc.contains("GitHub Release is the canonical artifact host"),

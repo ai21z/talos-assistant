@@ -58,7 +58,7 @@ iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-t
 powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 ```
 
-The Windows 0.10.8 developer-beta assets are unsigned, so `-AllowUnsigned` is required for this release. Winget is not live yet. The planned Windows package ID is `TalosLocal.Talos`, the searchable package name or moniker is `talos-cli`, and the publisher is Aris Zounarakis. Do not advertise winget until the MSI is signed, the manifest is accepted, and `winget search --id TalosLocal.Talos -e` finds the package.
+The Windows 0.10.8 developer-beta assets are unsigned, so `-AllowUnsigned` is required for this release. Winget is not live yet. The planned Windows package ID is `TalosLocal.Talos`, the searchable package name or moniker is `talos-cli`, and the publisher is Aris Zounarakis. Do not advertise winget until the manifest is accepted and `winget search --id TalosLocal.Talos -e` finds the package.
 
 The packaged beta artifacts include a bundled Java runtime. They install Talos only. They do not bundle a llama.cpp server or model weights. Model setup remains an explicit post-install command through `talos setup models`.
 
