@@ -25,7 +25,12 @@ The current pinned Ubuntu/WSL x64 CPU lane uses the llama.cpp `b9860` release:
 
 - Release: https://github.com/ggml-org/llama.cpp/releases/tag/b9860
 - Ubuntu x64 (CPU): `llama-b9860-bin-ubuntu-x64.tar.gz`
-- Windows x64 (CPU): use the matching Windows x64 CPU artifact from that release when configuring manually.
+- Windows x64 (CPU): `llama-b9860-bin-win-cpu-x64.zip`
+
+The first accepted model to try is Qwen:
+
+- Model page: https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
+- GGUF file: `qwen2.5-coder-14b-instruct-q4_k_m.gguf`
 
 Talos does not claim arbitrary latest upstream builds are verified. Use the pinned lane when you need reproducible setup evidence.
 

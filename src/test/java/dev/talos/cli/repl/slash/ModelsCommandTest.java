@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelsCommandTest {
@@ -23,15 +24,16 @@ class ModelsCommandTest {
         int other = text.indexOf("Other configured backends");
         int compat = text.indexOf("compat/custom-chat");
 
+        assertTrue(text.contains("Configured/selectable models"), text);
+        assertFalse(text.contains("Installed models"), text);
+        assertFalse(text.contains("ready now"), text);
+        assertTrue(text.contains("verify with talos doctor --start"), text);
         assertTrue(recommended >= 0, text);
         assertTrue(llama > recommended, text);
         assertTrue(legacy > llama, text);
         assertTrue(ollama > legacy, text);
         assertTrue(other > ollama, text);
         assertTrue(compat > other, text);
-        // T883: the tip is now explicit in two tiers so the user knows what is
-        // directly switchable vs what must be configured first.
-        assertTrue(text.contains("ready now"), text);                       // tier 1: backend/model entries
         assertTrue(text.contains("/set model <backend/model>"), text);      // how to switch them
         assertTrue(text.contains("not selectable yet"), text);              // tier 2: downloaded-not-configured
         assertTrue(text.contains("talos setup models --profile <name> --write --force"), text);

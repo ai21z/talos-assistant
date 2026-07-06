@@ -251,6 +251,8 @@ describe("Talos landing page static contract", () => {
       "Windows",
       "Linux",
       "Copy Windows install command",
+      "Windows Setup Guide",
+      "Linux Setup Guide",
       "install-talos.ps1",
       "-AllowUnsigned",
       "curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force",
@@ -267,6 +269,8 @@ describe("Talos landing page static contract", () => {
     assert.equal(setupTabs.length, 2, "hero install preview should expose exactly two platform tabs");
     assert.match(hero, /class="setup-command-box"/);
     assert.match(hero, /data-setup-copy/);
+    assert.match(hero, /href="\.\/docs\.html#\/getting-started\/windows-setup"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*Windows Setup Guide\s*<\/a>/);
+    assert.match(hero, /href="\.\/docs\.html#\/getting-started\/linux-setup"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*Linux Setup Guide\s*<\/a>/);
     assert.doesNotMatch(hero, /class="hero-actions"/);
     assert.doesNotMatch(hero, /class="evidence-row"/);
     assert.doesNotMatch(hero, /java_21|ubuntu_wsl_tarball|approved_writes|local_trace/);
@@ -818,8 +822,10 @@ describe("Talos in-site documentation contract", () => {
       "development/runtime-artifacts",
       "getting-started/first-run",
       "getting-started/installation",
+      "getting-started/linux-setup",
       "getting-started/model-setup",
       "getting-started/quickstart",
+      "getting-started/windows-setup",
       "index",
       "reference/cli",
       "reference/config",
@@ -870,6 +876,8 @@ describe("Talos in-site documentation contract", () => {
     assert.match(html, /<title>Talos documentation/);
     assert.match(html, /<main id="main" class="docs-main">/);
     assert.match(html, /id="docs-article"/);
+    assert.doesNotMatch(html, /id="primary-navigation"/);
+    assert.doesNotMatch(html, /class="site-nav"/);
     assert.match(html, /data-docs-fallback/);
     assert.match(html, /Loading bundled documentation/);
     assert.match(html, /source Markdown on GitHub/);
@@ -904,6 +912,8 @@ describe("Talos in-site documentation contract", () => {
     const js = read("src/docs.js");
     for (const slug of [
       "getting-started/installation",
+      "getting-started/windows-setup",
+      "getting-started/linux-setup",
       "getting-started/quickstart",
       "getting-started/first-run",
       "getting-started/model-setup",
@@ -999,9 +1009,12 @@ describe("Talos in-site documentation contract", () => {
     for (const required of [
       "Where to get `llama-server`",
       "https://github.com/ggml-org/llama.cpp/releases/tag/b9860",
+      "llama-b9860-bin-win-cpu-x64.zip",
       "llama-b9860-bin-ubuntu-x64.tar.gz",
       "Ubuntu x64 (CPU)",
       "Windows x64 (CPU)",
+      "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
+      "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
       "talos setup wizard",
       "talos setup models",
       "Talos does not claim arbitrary latest upstream builds are verified",

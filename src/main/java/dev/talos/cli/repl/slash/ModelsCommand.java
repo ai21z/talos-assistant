@@ -11,7 +11,7 @@ import java.util.List;
 
 public final class ModelsCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("models", List.of("model"), "/models", "List installed models.", CommandGroup.MODELS);
+        return new CommandSpec("models", List.of("model"), "/models", "List configured/selectable models.", CommandGroup.MODELS);
     }
 
     @Override public Result execute(String args, Context ctx) throws Exception {
@@ -24,7 +24,7 @@ public final class ModelsCommand implements Command {
                 // scan of the HF cache so a user can SEE what they have on disk.
                 var downloaded = GgufCacheScanner.downloadedNotConfigured(ctx.cfg());
                 if (list.isEmpty() && downloaded.isEmpty()) {
-                    return new Result.Info("No models found. Run `talos setup models` to configure managed llama.cpp, or select a configured legacy backend.");
+                    return new Result.Info("No configured or downloaded models found. Run `talos setup models` to configure managed llama.cpp, or select a configured legacy backend.");
                 }
                 return new Result.Ok(renderInstalledModels(list, downloaded));
             }
@@ -49,7 +49,7 @@ public final class ModelsCommand implements Command {
             }
         }
 
-        StringBuilder sb = new StringBuilder("\nInstalled models:\n\n");
+        StringBuilder sb = new StringBuilder("\nConfigured/selectable models:\n\n");
         appendGroup(sb, "Recommended managed llama.cpp", managed);
         appendGroup(sb, "Legacy/optional Ollama", ollama);
         appendGroup(sb, "Other configured backends", other);
@@ -57,7 +57,8 @@ public final class ModelsCommand implements Command {
         sb.append("""
 
 Switching models:
-  - Entries shown as backend/model are ready now. Switch with: /set model <backend/model>
+  - Entries shown as backend/model are selectable. Switch with: /set model <backend/model>
+  - Selectable does not prove the local engine is ready; verify with talos doctor --start.
   - "Downloaded GGUFs (not configured)" are on disk but not selectable yet.
     Configure one with: talos setup models --profile <name> --write --force
     then restart Talos.

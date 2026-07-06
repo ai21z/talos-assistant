@@ -38,6 +38,9 @@ class TerminalFirstRunTest {
                     ProbeResult.pass("engine-files", "present")));
 
             assertTrue(out.text.contains("Talos - First Run Setup"));
+            assertFalse(out.text.contains("╭"), "first-run header must be safe on non-UTF Windows consoles");
+            assertFalse(out.text.contains("│"), "first-run header must be safe on non-UTF Windows consoles");
+            assertFalse(out.text.contains("╰"), "first-run header must be safe on non-UTF Windows consoles");
             assertTrue(out.text.contains("PASS  config"));
             assertTrue(out.text.contains("Setup verified. Starting Talos..."));
             assertFalse(out.text.contains("✓ Setup complete"),
@@ -133,6 +136,7 @@ class TerminalFirstRunTest {
             String summary = TerminalFirstRun.setupSummary();
             assertTrue(summary.contains("llama.cpp"));
             assertTrue(summary.contains("talos setup models"));
+            assertTrue(summary.contains("docs/getting-started/windows-setup.md"));
             assertFalse(summary.contains("requires Ollama"));
         }
     }

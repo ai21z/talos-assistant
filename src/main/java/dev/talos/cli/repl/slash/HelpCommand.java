@@ -85,10 +85,10 @@ public final class HelpCommand implements Command {
                             "/grep searches workspace text directly.")));
             case "models", "model" -> new Result.Ok(topicHelp(
                     "Model Help",
-                    "List installed models and switch the active chat model.",
+                    "List configured/selectable models and switch the active chat model.",
                     CommandGroup.MODELS,
                     List.of(
-                            "/models lists installed models. /model is an alias.",
+                            "/models lists configured/selectable models. /model is an alias.",
                             "/set model <backend/model> switches the active model.",
                             "Use `talos setup models` outside the REPL to configure tested managed llama.cpp profiles.",
                             "Tested profiles: qwen2.5-coder-14b and gpt-oss-20b.",
@@ -110,7 +110,7 @@ public final class HelpCommand implements Command {
 
         appendIfRegistered(sb, "status", "workspace, model, index, policy");
         appendIfRegistered(sb, "mode", null);
-        appendIfRegistered(sb, "models", "list installed models; switch with /set model <backend/model>");
+        appendIfRegistered(sb, "models", "list configured/selectable models; switch with /set model <backend/model>");
         appendIfRegistered(sb, "reindex", "refresh local index");
         appendIfRegistered(sb, "files", "list indexed files");
         appendIfRegistered(sb, "k", "set retrieval depth");
@@ -121,7 +121,7 @@ public final class HelpCommand implements Command {
         sb.append('\n');
         sb.append("  ").append(AnsiColor.grey("More help")).append('\n');
         sb.append("    ").append(AnsiColor.blue("/help all")).append("       all commands").append('\n');
-        sb.append("    ").append(AnsiColor.blue("/help models")).append("    installed models and switching").append('\n');
+        sb.append("    ").append(AnsiColor.blue("/help models")).append("    configured/selectable models and switching").append('\n');
         sb.append("    ").append(AnsiColor.blue("/help rag")).append("       retrieval and workspace context").append('\n');
         sb.append("    ").append(AnsiColor.blue("/help security")).append("  approvals, audit, secrets").append('\n');
         sb.append("    ").append(AnsiColor.blue("/help debug")).append("     diagnostics and traces").append('\n');
