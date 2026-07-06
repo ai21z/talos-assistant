@@ -227,17 +227,52 @@ function setupTurnTabs() {
 }
 
 // ---- Planned install command tabs ------------------------------------------
+function activeSetupCommand() {
+  return document.querySelector("#setup-command code")?.textContent ?? "";
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("copy command failed");
+}
+
+function setSetupCopyState(copied) {
+  const copy = document.querySelector("[data-setup-copy]");
+  if (!copy) return;
+  copy.dataset.copied = String(copied);
+  copy.title = copied ? "Copied" : "Copy command";
+}
+
 function setSetupPlatform(nextPlatform) {
   const panel = document.querySelector("#setup-command");
   const code = panel?.querySelector("code");
   const tabs = Array.from(document.querySelectorAll("[data-setup-platform]"));
   const activeTab = tabs.find((tab) => tab.dataset.setupPlatform === nextPlatform);
   const command = activeTab?.dataset.setupCommand;
+  const copy = document.querySelector("[data-setup-copy]");
 
   if (!panel || !code || !activeTab || !command) return;
 
   code.textContent = command;
   panel.setAttribute("aria-labelledby", activeTab.id);
+  if (copy) {
+    copy.setAttribute("aria-label", `Copy ${activeTab.textContent.trim()} install command`);
+    setSetupCopyState(false);
+  }
 
   tabs.forEach((tab) => {
     const selected = tab === activeTab;
@@ -266,10 +301,24 @@ function handleSetupTabKey(event, tabs) {
 function setupInstallTabs() {
   const tabs = Array.from(document.querySelectorAll("[data-setup-platform]"));
   if (!tabs.length) return;
+  const copy = document.querySelector("[data-setup-copy]");
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => setSetupPlatform(tab.dataset.setupPlatform));
     tab.addEventListener("keydown", (event) => handleSetupTabKey(event, tabs));
   });
+  if (copy) {
+    let resetTimer = 0;
+    copy.addEventListener("click", async () => {
+      window.clearTimeout(resetTimer);
+      try {
+        await copyTextToClipboard(activeSetupCommand());
+        setSetupCopyState(true);
+        resetTimer = window.setTimeout(() => setSetupCopyState(false), 1600);
+      } catch {
+        setSetupCopyState(false);
+      }
+    });
+  }
   setSetupPlatform("windows");
 }
 

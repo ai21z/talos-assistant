@@ -54,10 +54,13 @@ The Release QA Gate owns behavioral readiness. It requires automated checks, ins
 Windows x64:
 
 ```powershell
-winget install --id TalosLocal.Talos -e
+iwr https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.ps1 -OutFile install-talos.ps1
+powershell -ExecutionPolicy Bypass -File .\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned
 ```
 
-The planned Windows package ID is `TalosLocal.Talos`, the searchable package name or moniker is `talos-cli`, and the publisher is Aris Zounarakis. Windows public beta is signed-only. `-AllowUnsigned` is local development/manual QA only, not a public beta install path.
+The Windows 0.10.8 developer-beta assets are unsigned, so `-AllowUnsigned` is required for this release. Winget is not live yet. The planned Windows package ID is `TalosLocal.Talos`, the searchable package name or moniker is `talos-cli`, and the publisher is Aris Zounarakis. Do not advertise winget until the manifest is accepted and `winget search --id TalosLocal.Talos -e` finds the package.
+
+The packaged beta artifacts include a bundled Java runtime. They install Talos only. They do not bundle a llama.cpp server or model weights. Model setup remains an explicit post-install command through `talos setup models`.
 
 Ubuntu/WSL x64:
 
