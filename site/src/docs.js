@@ -29,10 +29,10 @@ const article = document.getElementById("docs-article");
 const navLinks = Array.from(document.querySelectorAll("[data-doc-slug]"));
 const STATUS_NOTE_HTML = `
 <aside class="docs-callout docs-callout--beta" role="note">
-  <p><strong>Beta status.</strong> Public Windows and Ubuntu/WSL packages are staged
-  before release, but they are not live until GitHub Release assets exist. For now,
-  use source setup or a QA artifact built from this repository. To upgrade a packaged
-  install later, rerun the installer with <code>--force</code> and the pinned version.</p>
+  <p><strong>Beta status.</strong> Talos 0.10.8 installs from GitHub Release assets.
+  Windows x64 is unsigned and requires <code>-AllowUnsigned</code>. Ubuntu/WSL x64
+  uses the runtime-bundled installer and starts <code>talos setup wizard</code>.
+  To upgrade, rerun the installer with <code>--force</code> and the pinned version.</p>
 </aside>`;
 
 function currentRoute() {
@@ -107,8 +107,8 @@ function renderLandingHtml() {
     {
       group: "Start here",
       items: [
-        ["Installation", "getting-started/installation", "What is packaged now, and what is still staged."],
-        ["Quickstart", "getting-started/quickstart", "Install from source and start a first session."],
+        ["Installation", "getting-started/installation", "Windows, Ubuntu/WSL, upgrade, and source setup paths."],
+        ["Quickstart", "getting-started/quickstart", "Check the command, configure a model, and start a first session."],
         ["First run", "getting-started/first-run", "Read the banner, prompt, and status output."],
         ["Model setup", "getting-started/model-setup", "Connect Talos to a local model engine."],
       ],
@@ -130,7 +130,7 @@ function renderLandingHtml() {
         ["CLI", "reference/cli", "Installed command reference."],
         ["Config", "reference/config", "Model, retrieval, host, and profile settings."],
         ["Model profiles", "reference/model-profiles", "Accepted and experimental local model profiles."],
-        ["Release channels", "reference/release-channels", "Beta status and staged artifacts."],
+        ["Release channels", "reference/release-channels", "Public release assets, QA staging, and upgrades."],
       ],
     },
     {
@@ -184,7 +184,7 @@ function renderLandingHtml() {
   <p class="docs-lede">
     Use these docs to install Talos, connect a local model, learn the REPL,
     and check the evidence behind a turn. They describe the current beta state
-    directly, including what is not packaged yet.
+    directly, including what is packaged and what remains a manual setup step.
   </p>
   <p class="docs-start-path">
     Recommended order:

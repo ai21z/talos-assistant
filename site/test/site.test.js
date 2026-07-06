@@ -199,15 +199,19 @@ describe("Talos landing page static contract", () => {
     assert.match(cssRule(css, ".t-rail"), /color:\s*var\(--bronze\)/);
   });
 
-  it("uses the six-section map with reduced navigation labels", () => {
+  it("uses the vein and compact menu as the six-section navigation surfaces", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
-    const navMatch = html.match(/<nav\b[^>]*id="primary-navigation"[\s\S]*?<\/nav>/);
-    assert.ok(navMatch, "missing #primary-navigation nav");
-    const nav = navMatch[0];
+    const veinMatch = html.match(/<nav\b[^>]*class="vein-rail"[\s\S]*?<\/nav>/);
+    const ritualMatch = html.match(/<nav\b[^>]*class="ritual-nav"[\s\S]*?<\/nav>/);
+    assert.ok(veinMatch, "missing desktop vein section navigation");
+    assert.ok(ritualMatch, "missing compact menu section navigation");
+    const sectionNav = `${veinMatch[0]}\n${ritualMatch[0]}`;
     const main = html.slice(html.indexOf('id="main"'));
     const sections = Array.from(main.matchAll(/<section\b[^>]*\bid="([^"]+)"/g), (m) => m[1]);
 
+    assert.doesNotMatch(html, /id="primary-navigation"/);
+    assert.doesNotMatch(html, /class="site-nav"/);
     assert.deepEqual(sections, [
       "overview",
       "execution",
@@ -218,11 +222,11 @@ describe("Talos landing page static contract", () => {
     ]);
 
     for (const label of ["Overview", "Execution", "Turn UI", "Local Boundaries", "Good Fits", "Docs"]) {
-      assert.match(nav, new RegExp(`>${escapeRegExp(label)}<`));
+      assert.match(sectionNav, new RegExp(`>${escapeRegExp(label)}<`));
     }
 
     for (const removed of ["Product", "Contract", ">CLI<", "Use cases", "Install"]) {
-      assert.doesNotMatch(nav, new RegExp(escapeRegExp(removed), "i"));
+      assert.doesNotMatch(sectionNav, new RegExp(escapeRegExp(removed), "i"));
     }
 
     assert.doesNotMatch(html, /\sid="install"/);
@@ -242,15 +246,17 @@ describe("Talos landing page static contract", () => {
       "Approved writes only",
       "Interactive turns leave local trace evidence",
       "No hosted workspace handoff",
-      "View on GitHub",
-      "Read docs",
-      "planned public beta",
-      "TalosLocal.Talos",
+      "public beta",
+      "Public beta details",
       "Windows",
       "Linux",
-      "curl -fsSL https://taloslocal.com/install.sh | sh",
-      "Install commands go live when the first GitHub Release assets are published",
-      "setup wizard then guides model and llama.cpp configuration",
+      "Copy Windows install command",
+      "install-talos.ps1",
+      "-AllowUnsigned",
+      "curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force",
+      "Installs from GitHub Release assets",
+      "Windows 0.10.8 is unsigned",
+      "Linux starts the setup wizard after install",
       "To upgrade, rerun the installer with",
       "--force",
       "pinned version",
@@ -259,12 +265,37 @@ describe("Talos landing page static contract", () => {
     }
 
     assert.equal(setupTabs.length, 2, "hero install preview should expose exactly two platform tabs");
+    assert.match(hero, /class="setup-command-box"/);
+    assert.match(hero, /data-setup-copy/);
+    assert.doesNotMatch(hero, /class="hero-actions"/);
+    assert.doesNotMatch(hero, /class="evidence-row"/);
+    assert.doesNotMatch(hero, /java_21|ubuntu_wsl_tarball|approved_writes|local_trace/);
     assert.doesNotMatch(hero, /Get beta build/i);
     assert.doesNotMatch(hero, /data-beta-placeholder/i);
     assert.doesNotMatch(hero, /data-copy=/i);
     assert.doesNotMatch(hero, /talos setup models/i);
     assert.doesNotMatch(hero, /talos status --verbose/i);
     assert.doesNotMatch(hero, /TalosProject\.TalosCLI/i);
+  });
+
+  it("keeps primary GitHub and docs actions in the sticky header", () => {
+    const html = read("index.html");
+    const headerMatch = html.match(/<header\b[^>]*class="site-header"[\s\S]*?<\/header>/);
+    assert.ok(headerMatch, "missing site header");
+    const header = headerMatch[0];
+    const ritual = sectionSlice(html, "ritual-menu", "main");
+    const hero = sectionSlice(html, "overview", "execution");
+
+    assert.doesNotMatch(header, /class="site-nav"/);
+    assert.doesNotMatch(header, /data-section-nav/);
+    assert.match(header, /class="header-actions"/);
+    assert.match(header, /class="button button--primary header-cta"\s+href="\.\/docs\.html"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*Read docs\s*<\/a>/);
+    assert.match(header, /href="https:\/\/github\.com\/ai21z\/talos-assistant"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*View on GitHub\s*<\/a>/);
+    assert.match(ritual, /class="ritual-actions"/);
+    assert.match(ritual, /class="button button--primary ritual-cta"\s+href="\.\/docs\.html"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*Read docs\s*<\/a>/);
+    assert.match(ritual, /href="https:\/\/github\.com\/ai21z\/talos-assistant"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*View on GitHub\s*<\/a>/);
+    assert.doesNotMatch(hero, /class="hero-actions"/);
+    assert.doesNotMatch(hero, /href="#docs"[\s\S]*?>\s*Read docs\s*<\/a>/);
   });
 
   it("renders the real Talos shield icon as the brand mark", () => {
@@ -409,16 +440,17 @@ describe("Talos landing page static contract", () => {
       "Interactive turns leave local trace evidence",
       "One ordered flow for local workspace work",
       "Runtime policy controls approvals, tool access, result checks, protected reads, and unsupported-file handling",
-      "planned public beta",
-      "TalosLocal.Talos",
-      "curl -fsSL https://taloslocal.com/install.sh | sh",
-      "Ubuntu/WSL x64 tarball target",
-      "Install commands go live when the first GitHub Release assets are published",
-      "setup wizard then guides model and llama.cpp configuration",
+      "public beta",
+      "install-talos.ps1",
+      "-AllowUnsigned",
+      "curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force",
+      "Ubuntu/WSL x64 tarball",
+      "Installs from GitHub Release assets",
+      "Windows 0.10.8 is unsigned",
+      "Linux starts the setup wizard after install",
       "To upgrade, rerun the installer with",
       "--force",
       "pinned version",
-      "installation docs",
     ]) {
       assert.match(text, new RegExp(escapeRegExp(required), "i"));
     }
@@ -431,6 +463,7 @@ describe("Talos landing page static contract", () => {
       "keeps every turn on your machine",
       "The model cannot bypass them by rewording the request",
       "install now with winget",
+      "winget install --id TalosLocal.Talos -e",
       "Linux public beta",
       "macOS public beta",
       "bundled models",
@@ -628,7 +661,7 @@ describe("Talos landing page static contract", () => {
     assert.match(main, /setProperty\("--ichor"/);
   });
 
-  it("keeps desktop vein section labels hidden until scroll and unavailable on mobile", () => {
+  it("keeps desktop vein section labels hidden until scroll and unavailable on small screens", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const main = read("src/main.js");
@@ -643,7 +676,7 @@ describe("Talos landing page static contract", () => {
     assert.match(main, /VEIN_LABEL_REVEAL_Y/);
     assert.match(css, /\.vein-rail\.has-scrolled\s+\.vein-stop-label/);
     assert.match(css, /\.vein-rail\.has-scrolled\s+\.vein-stop(?:\.is-active|\[aria-current="page"\])\s+\.vein-stop-label/);
-    assert.match(css, /@media\s*\(max-width:\s*920px\)\s*\{[\s\S]*?\.vein-rail\s*\{\s*display:\s*none/);
+    assert.match(css, /@media\s*\(max-width:\s*1120px\)\s*\{[\s\S]*?\.vein-rail\s*\{\s*display:\s*none/);
   });
 
   it("stages a skippable, fail-safe cold-boot awakening", () => {
@@ -937,14 +970,16 @@ describe("Talos in-site documentation contract", () => {
   it("links the landing docs cards into the in-site docs experience", () => {
     const html = read("index.html");
     const docs = sectionSlice(html, "docs", null);
-    assert.match(docs, /href="\.\/docs\.html"/);
+    assert.match(docs, /href="\.\/docs\.html"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*Open documentation\s*<\/a>/);
+    assert.match(docs, /href="https:\/\/github\.com\/ai21z\/talos-assistant\/blob\/main\/docs\/architecture\/execution-model\.md"\s+target="_blank"\s+rel="noopener"[\s\S]*?>\s*GitHub Docs\s*<\/a>/);
+    assert.doesNotMatch(docs, /Jump to Quickstart/);
     for (const route of [
       "./docs.html#/getting-started/quickstart",
       "./docs.html#/getting-started/model-setup",
       "./docs.html#/user/permissions-and-approvals",
       "./docs.html#/architecture/execution-model",
     ]) {
-      assert.match(docs, new RegExp(`href="${escapeRegExp(route)}"`));
+      assert.match(docs, new RegExp(`href="${escapeRegExp(route)}"\\s+target="_blank"\\s+rel="noopener"`));
     }
     assert.doesNotMatch(docs, /github\.com\/ai21z\/talos-cli\/blob\/v0\.9\.0-beta-dev\/docs\/architecture/);
   });
