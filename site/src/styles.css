@@ -1557,6 +1557,7 @@ html.menu-open, html.menu-open body { overflow: hidden; }
 .scope { display: block; width: 100%; max-width: 600px; margin: 0 auto; height: auto; overflow: visible; }
 /* the capability graph: a draggable, force-directed Obsidian-style network */
 .tree-link { fill: none; stroke: rgba(135, 160, 132, 0.32); stroke-width: 1.2; }
+.tree-link--upcoming { stroke-dasharray: 3 5; }
 .tree-link--v1 { stroke: rgba(184, 114, 66, 0.42); stroke-dasharray: 3 5; }
 .tree-node { cursor: grab; touch-action: none; }
 .tree-node.is-dragging { cursor: grabbing; }
@@ -1569,6 +1570,7 @@ html.menu-open, html.menu-open body { overflow: hidden; }
   transition: stroke 200ms var(--ease), fill 200ms var(--ease), transform 180ms var(--ease);
 }
 .tree-node--trunk circle { fill: rgba(135, 160, 132, 0.12); stroke: var(--green-bright); stroke-width: 1.6; }
+.tree-node.is-upcoming circle { stroke-dasharray: 2.6 3; }
 /* not-yet-grown buds: warm ember and dashed, never the red of refusal */
 .tree-node.is-v1 circle { stroke: var(--ember); fill: rgba(184, 114, 66, 0.08); stroke-dasharray: 2.6 3; }
 .tree-trunk-label { fill: var(--bone-bright); font-family: var(--display); font-size: 15px; }
@@ -1591,9 +1593,11 @@ html.menu-open, html.menu-open body { overflow: hidden; }
 .scope-legend { display: flex; flex-direction: column; gap: 0.5rem; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.05em; color: var(--muted); white-space: nowrap; }
 .scope-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.5rem; vertical-align: middle; }
 .scope-legend .dot--now { background: var(--green); }
+.scope-legend .dot--upcoming { background: transparent; border: 1.4px dashed var(--green); }
 .scope-legend .dot--v1 { background: transparent; border: 1.4px dashed var(--ember); }
 .scope-detail { min-width: 0; border-left: 1px solid var(--line-strong); padding-left: 1rem; min-height: 6rem; }
 .scope-detail-kind { margin: 0; font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--green); }
+.scope-detail-kind.is-upcoming { color: var(--green-bright); }
 .scope-detail-kind.is-v1 { color: var(--ember); }
 .scope-detail-name { margin: 0.3rem 0 0; font-family: var(--display); font-size: 1.4rem; color: var(--bone-bright); }
 .scope-detail-text { margin: 0.4rem 0 0; color: var(--body); }

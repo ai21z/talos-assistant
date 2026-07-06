@@ -475,7 +475,7 @@ describe("Talos landing page static contract", () => {
     ]) {
       assert.doesNotMatch(text, new RegExp(escapeRegExp(tooAbsolute), "i"));
     }
-    assert.match(text, /localhost-gated by default/i);
+    assert.match(text, /localhost gated, workspace bounded, approved writes, local trace/i);
     assert.doesNotMatch(text, /TalosProject\.TalosCLI/i);
   });
 
@@ -511,6 +511,47 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(text, /--server-path\s+C:\/path\/to\/llama-server\.exe/i);
     assert.doesNotMatch(text, /\/prompt-debug/i);
     assert.doesNotMatch(text, /data-copy="[^"]*(?:winget|curl|irm|iwr)[^"]*"/i);
+  });
+
+  it("presents the capability graph with truthful current and planned labels", () => {
+    const graphSurface = [
+      read("index.html"),
+      read("src/main.js"),
+    ].join("\n");
+
+    for (const required of [
+      "Explore the workspace",
+      "Work with files",
+      "PDF, Word, and Excel text",
+      "Show its work",
+      "Local trace",
+      "Approval record",
+      "Checked outcome",
+      "Local model profiles",
+      "Qwen / GPT-OSS",
+      "Experimental profiles",
+      "LaTeX",
+      "Private-doc workflow",
+      "More accepted profiles",
+      "Images",
+      "OCR",
+      "Mobile profiles",
+      "Gemma-family mobile",
+      "Evidence receipt export",
+      "Coming on next beta",
+      "Coming on v1",
+    ]) {
+      assert.match(graphSurface, new RegExp(escapeRegExp(required), "i"));
+    }
+
+    for (const misleading of [
+      "Run commands",
+      "Summarize documents",
+      "Sensitive-paperwork",
+      "PDF, Word, Excel, extracted",
+    ]) {
+      assert.doesNotMatch(graphSurface, new RegExp(escapeRegExp(misleading), "i"));
+    }
   });
 
   it("does not introduce fake downloads or unsupported claims", () => {
