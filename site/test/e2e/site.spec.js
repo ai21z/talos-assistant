@@ -218,30 +218,80 @@ test("the cold-boot awakening plays when forced, then clears to reveal the page"
   expect(page.browserIssues).toEqual([]);
 });
 
-test("planned install surface has no fake copy affordance", async ({ page }) => {
+test("public beta install commands copy the active platform command", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await gotoTalos(page);
   const setup = page.locator(".setup-strip");
-  await expect(setup).toContainText("developer beta");
+  await expect(setup).toContainText("public beta");
   await expect(setup.getByRole("tab", { name: "Windows" })).toBeVisible();
   await expect(setup.getByRole("tab", { name: "Linux" })).toBeVisible();
   await expect(setup).toContainText("install-talos.ps1");
   await expect(setup).toContainText("-AllowUnsigned");
+  const copy = setup.locator("[data-setup-copy]");
+  await expect(copy).toBeVisible();
+  await expect(copy).toHaveAttribute("aria-label", "Copy Windows install command");
+  await copy.click();
+  await expect(copy).toHaveAttribute("data-copied", "true");
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("powershell -ExecutionPolicy Bypass -File .\\install-talos.ps1 -Version 0.10.8 -Force -AllowUnsigned");
+
   await setup.getByRole("tab", { name: "Linux" }).click();
   await expect(setup).toContainText("github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh");
-  await expect(setup).toContainText("The 0.10.8 developer beta installs from GitHub Release assets");
-  await expect(setup).toContainText("To upgrade, rerun the installer with --force and the pinned version");
-  await expect(setup).toContainText("TalosLocal.Talos");
-  await expect(page.locator("[data-copy]")).toHaveCount(0);
+  await expect(copy).toHaveAttribute("aria-label", "Copy Linux install command");
+  await copy.click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("curl -fsSL https://github.com/ai21z/talos-assistant/releases/download/v0.10.8/install-talos.sh | bash -s -- --version 0.10.8 --force");
+  await setup.getByLabel("Public beta details").focus();
+  await expect(setup.getByRole("tooltip")).toContainText("Installs from GitHub Release assets");
+  await expect(setup.getByRole("tooltip")).toContainText("Windows 0.10.8 is unsigned");
+  await expect(setup.getByRole("tooltip")).toContainText("To upgrade, rerun the installer with --force and the pinned version");
 });
 
-test("hero CTAs are real links, not placeholder beta actions", async ({ page }) => {
+test("header CTAs are real links, not placeholder beta actions", async ({ page }) => {
   await gotoTalos(page);
-  await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
+  const header = page.locator(".site-header");
+  await expect(header.locator("[data-section-nav]")).toHaveCount(0);
+  await expect(page.locator(".site-nav")).toHaveCount(0);
+  await expect(header.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
     "href",
     "https://github.com/ai21z/talos-assistant",
   );
-  await expect(page.getByRole("link", { name: "Read docs" }).first()).toHaveAttribute("href", "#docs");
+  await expect(header.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
+  await expect(header.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
+  await expect(header.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
+  await expect(header.getByRole("link", { name: "Read docs" })).toHaveClass(/button--primary/);
+  await expect(page.locator(".hero-actions")).toHaveCount(0);
+  await expect(page.locator(".evidence-row")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Get beta build" })).toHaveCount(0);
+});
+
+test("landing documentation actions open the correct destinations in new tabs", async ({ page }) => {
+  await gotoTalos(page);
+  const docs = page.locator("#docs");
+  await expect(docs.getByRole("link", { name: "Open documentation" })).toHaveAttribute("href", "./docs.html");
+  await expect(docs.getByRole("link", { name: "Open documentation" })).toHaveAttribute("target", "_blank");
+  await expect(docs.getByRole("link", { name: "GitHub Docs" })).toHaveAttribute(
+    "href",
+    "https://github.com/ai21z/talos-assistant/blob/main/docs/architecture/execution-model.md",
+  );
+  await expect(docs.getByRole("link", { name: "GitHub Docs" })).toHaveAttribute("target", "_blank");
+  await expect(docs.getByRole("link", { name: "Jump to Quickstart" })).toHaveCount(0);
+
+  const cards = await docs.locator(".doc-card").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      href: node.getAttribute("href"),
+      rel: node.getAttribute("rel"),
+      target: node.getAttribute("target"),
+    })),
+  );
+  expect(cards).toEqual([
+    { href: "./docs.html#/getting-started/quickstart", rel: "noopener", target: "_blank" },
+    { href: "./docs.html#/getting-started/model-setup", rel: "noopener", target: "_blank" },
+    { href: "./docs.html#/user/permissions-and-approvals", rel: "noopener", target: "_blank" },
+    { href: "./docs.html#/architecture/execution-model", rel: "noopener", target: "_blank" },
+  ]);
 });
 
 test("docs page routes render without hiding content under the sticky header", async ({ page }) => {
@@ -358,12 +408,33 @@ test("mobile header and nav remain usable", async ({ page }) => {
 
   const menu = page.getByRole("dialog", { name: "Talos sections" });
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("link", { name: /Overview/ })).toBeVisible();
-  await expect(menu.getByRole("link", { name: /Docs/ })).toBeVisible();
+  await expect(menu.locator('a[href="#overview"]')).toBeVisible();
+  await expect(menu.locator('a[href="#docs"]')).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
+  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
+  await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
 
-  await menu.getByRole("link", { name: /Docs/ }).click();
+  await menu.locator('a[href="#docs"]').click();
   await expect(page.locator("#docs")).toBeInViewport();
   await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+});
+
+test("small tablet header uses the compact menu instead of an empty top bar", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await gotoTalos(page);
+  await expect(page.locator(".header-actions")).toBeHidden();
+  await expect(page.locator(".site-nav")).toHaveCount(0);
+  const menuTrigger = page.getByRole("button", { name: "Open menu" });
+  await expect(menuTrigger).toBeVisible();
+  await menuTrigger.click();
+  const menu = page.getByRole("dialog", { name: "Talos sections" });
+  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("href", "./docs.html");
+  await expect(menu.getByRole("link", { name: "Read docs" })).toHaveAttribute("target", "_blank");
+  await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
+    "href",
+    "https://github.com/ai21z/talos-assistant",
+  );
+  await expect(menu.getByRole("link", { name: "View on GitHub" })).toHaveAttribute("target", "_blank");
 });
 
 test("mobile hero content fits without horizontal clipping", async ({ page }) => {
@@ -374,8 +445,6 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
 
   for (const selector of [
     "h1",
-    ".hero-actions",
-    ".evidence-row",
     ".setup-strip",
     ".machine-note",
     ".hero-visual",
@@ -388,6 +457,30 @@ test("mobile hero content fits without horizontal clipping", async ({ page }) =>
     expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390 + 1);
   }
 });
+
+test("mobile public beta tooltip stays inside the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 780 });
+  await gotoTalos(page);
+  await page.locator(".setup-info").focus();
+  const tooltip = await page.locator(".setup-tooltip").boundingBox();
+  expect(tooltip, "setup tooltip should render").not.toBeNull();
+  expect(tooltip.x, "tooltip left edge").toBeGreaterThanOrEqual(0);
+  expect(tooltip.x + tooltip.width, "tooltip right edge").toBeLessThanOrEqual(320 + 1);
+});
+
+for (const width of [320, 390, 768, 1024, 1440]) {
+  test(`install command wraps without an internal horizontal scrollbar at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoTalos(page);
+    const metrics = await page.locator(".setup-command").evaluate((el) => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      overflowX: getComputedStyle(el).overflowX,
+    }));
+    expect(metrics.overflowX).toBe("hidden");
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+  });
+}
 
 for (const width of [320, 375, 390]) {
   test(`mobile live terminal fits after answer renders at ${width}px`, async ({ page }) => {
