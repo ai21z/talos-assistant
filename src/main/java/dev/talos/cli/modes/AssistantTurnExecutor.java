@@ -427,7 +427,8 @@ public final class AssistantTurnExecutor {
         if (result == null || !result.outputLimitReached()) {
             return safeAnswer;
         }
-        String notice = "\n\n[Model output limit reached: provider reported finish_reason=length; the answer may be incomplete.]";
+        String notice = "\n\n" + UiChrome.OUTPUT_LIMIT_PREFIX
+                + ": provider reported finish_reason=length; the answer may be incomplete.]";
         if (alreadyStreamed && ctx != null && ctx.streamSink() != null) {
             ctx.streamSink().accept(notice);
             if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {

@@ -79,6 +79,12 @@ class UiChromeContractTest {
     }
 
     @Test
+    void outputLimitNoticeIsStripped() {
+        // pins AssistantTurnExecutor.withOutputLimitNotice
+        assertStripped("[Model output limit reached: provider reported finish_reason=length; the answer may be incomplete.]");
+    }
+
+    @Test
     void engineErrorWrappersAreStripped() {
         // pins ToolRepromptChatExecutor / ToolRepromptOverlayContinuation /
         // AssistantTurnExecutor engine-failure appends

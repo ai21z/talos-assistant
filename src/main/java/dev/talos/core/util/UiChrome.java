@@ -41,6 +41,9 @@ public final class UiChrome {
     /** Tool-call budget notice: {@code [Tool-call limit reached. ...]}. */
     public static final String TOOL_CALL_LIMIT_PREFIX = "[Tool-call limit reached";
 
+    /** Provider output budget notice: {@code [Model output limit reached: ...]}. */
+    public static final String OUTPUT_LIMIT_PREFIX = "[Model output limit reached";
+
     /** LLM wall-clock/idle/repetition/interrupt abort sentinel. */
     public static final String TURN_ABORTED_PREFIX = "[turn aborted";
 
