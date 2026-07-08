@@ -84,6 +84,18 @@ public final class ToolProtocolText {
     }
 
     /**
+     * Returns true when {@code text} contains a complete Talos tool-call protocol
+     * fragment. This is non-executing and is safe for core stream-control code.
+     */
+    public static boolean containsToolCalls(String text) {
+        if (text == null || text.isBlank()) return false;
+        if (STRIP_PATTERN.matcher(text).find()) return true;
+        if (CODE_FENCE_PATTERN.matcher(text).find()) return true;
+        if (BARE_JSON_PATTERN.matcher(text).find()) return true;
+        return looksLikeStandaloneToolJson(text);
+    }
+
+    /**
      * Returns true when {@code text} is exactly one standalone JSON object that
      * names a recognized Talos tool or accepted alias.
      */

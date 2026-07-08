@@ -59,6 +59,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         ChatRequest request = firstRequest(recorded);
         assertEquals(List.of("talos.write_file"), request.tools.stream().map(ToolSpec::name).toList());
         assertEquals(ToolChoiceMode.REQUIRED, request.controls.toolChoice());
+        assertEquals(1024, request.controls.maxOutputTokens());
     }
 
     @Test
@@ -158,7 +159,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                 .build();
 
         AssistantTurnExecutor.execute(
-                messages("Please perform the selected diagnostic action."),
+                messages("Read notes.txt and summarize it."),
                 workspace,
                 ctx,
                 new AssistantTurnExecutor.Options());
@@ -167,6 +168,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         assertEquals(1, toolExecutions.get(), "native tool call should enter the tool loop");
         assertEquals(1, completionCountAtToolExecution.get(),
                 "stream completion should happen before tool execution starts");
+        assertEquals(512, firstRequest(recorded).controls.maxOutputTokens());
     }
 
     private static List<ChatMessage> messages(String request) {

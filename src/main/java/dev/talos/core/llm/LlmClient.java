@@ -4,6 +4,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.util.UiChrome;
 import dev.talos.spi.EngineException;
@@ -957,6 +958,9 @@ public final class LlmClient implements AutoCloseable {
                         onChunk.accept(emit);
                         visibleOutputEmitted = true;
                     }
+                    if (ToolProtocolText.containsToolCalls(acc.toString())) {
+                        break;
+                    }
                     if (acc.length() >= safeCap()) break;
                 }
                 return new StreamResult(acc.toString(), toolCalls);
@@ -1022,7 +1026,8 @@ public final class LlmClient implements AutoCloseable {
                 safe.responseFormat(),
                 safe.jsonSchema(),
                 tags,
-                safe.sampling());
+                safe.sampling(),
+                safe.maxOutputTokens());
     }
 
     /** Layers llm.sampling config values under turn-level sampling decisions (set fields win). */

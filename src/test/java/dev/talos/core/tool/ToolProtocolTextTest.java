@@ -72,4 +72,20 @@ class ToolProtocolTextTest {
         assertFalse(ToolProtocolText.looksLikeStandaloneToolJson(
                 "{\"name\": \"ordinary\", \"arguments\": {\"path\": \"index.html\"}}"));
     }
+
+    @Test
+    void containsToolCallsDetectsCompleteProtocolButNotOrdinaryJson() {
+        assertTrue(ToolProtocolText.containsToolCalls("""
+                ```json
+                {"name":"talos.write_file","arguments":{"path":"index.html","content":"ok"}}
+                ```
+                """));
+        assertTrue(ToolProtocolText.containsToolCalls(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}"));
+        assertTrue(ToolProtocolText.containsToolCalls(
+                "<tool>{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}</tool>"));
+
+        assertFalse(ToolProtocolText.containsToolCalls("{\"name\":\"ordinary\"}"));
+        assertFalse(ToolProtocolText.containsToolCalls("```java\nSystem.out.println(\"talos.write_file\");\n```"));
+    }
 }

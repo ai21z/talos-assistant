@@ -20,6 +20,7 @@ class ChatRequestControlsTest {
         assertEquals("", controls.jsonSchema());
         assertTrue(controls.debugTags().isEmpty());
         assertEquals(SamplingControls.none(), controls.sampling());
+        assertEquals(0, controls.maxOutputTokens());
     }
 
     @Test
@@ -41,7 +42,7 @@ class ChatRequestControlsTest {
                 "talos.read_file",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("repair"));
+                List.of("repair")).withMaxOutputTokens(384);
 
         ChatRequestControls sampled = base.withSampling(SamplingControls.NEAR_GREEDY);
 
@@ -49,6 +50,22 @@ class ChatRequestControlsTest {
         assertEquals("talos.read_file", sampled.namedTool());
         assertEquals(List.of("repair"), sampled.debugTags());
         assertEquals(SamplingControls.NEAR_GREEDY, sampled.sampling());
+        assertEquals(384, sampled.maxOutputTokens());
+    }
+
+    @Test
+    void maxOutputTokensDropsNonPositiveValuesAndIsPreservedBySampling() {
+        ChatRequestControls capped = new ChatRequestControls(
+                ToolChoiceMode.REQUIRED,
+                "",
+                ResponseFormatMode.TEXT,
+                "",
+                List.of("bounded-first-request")).withMaxOutputTokens(384);
+
+        assertEquals(384, capped.maxOutputTokens());
+        assertEquals(384, capped.withSampling(SamplingControls.NEAR_GREEDY).maxOutputTokens());
+        assertEquals(0, capped.withMaxOutputTokens(0).maxOutputTokens());
+        assertEquals(0, capped.withMaxOutputTokens(-1).maxOutputTokens());
     }
 
     @Test

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T989] Added provider-neutral per-request output-token caps and mapped them
+  to llama.cpp/OpenAI-compatible `max_tokens` on the compat transport. Initial
+  inspection and command tool-obligation requests now cap at 512 tokens, while
+  initial mutation and workspace-operation requests cap at 1024 tokens instead
+  of burning the managed server `--predict 2048` backstop. Prompt-debug renders
+  the cap when present, and streamed text-form tool calls now close generation
+  once a complete Talos tool payload is detected.
 - [T991] Made managed llama.cpp setup choose the context window through a
   bounded selector instead of a hard-coded `8192`: the Qwen 14B profile can
   select `16384` when measured CUDA VRAM or system RAM meets the documented

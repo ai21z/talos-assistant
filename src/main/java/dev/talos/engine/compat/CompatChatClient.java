@@ -165,6 +165,10 @@ public final class CompatChatClient {
             body.put("response_format", responseFormat);
         }
 
+        if (req.controls != null && req.controls.maxOutputTokens() > 0) {
+            body.put("max_tokens", req.controls.maxOutputTokens());
+        }
+
         SamplingControls sampling = req.controls == null ? null : req.controls.sampling();
         if (sampling != null) {
             if (sampling.temperature() != null) body.put("temperature", sampling.temperature());

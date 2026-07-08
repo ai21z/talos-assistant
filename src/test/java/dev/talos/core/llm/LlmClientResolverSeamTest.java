@@ -120,6 +120,24 @@ final class LlmClientResolverSeamTest {
         assertFalse(result.text().contains("retry-output"), result.text());
     }
 
+    @Test
+    void streaming_text_tool_call_closes_generation_before_trailing_ramble() {
+        TextToolCallThenRambleResolver resolver = new TextToolCallThenRambleResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("create the file")),
+                null,
+                5_000L,
+                List.of());
+
+        assertEquals(2, resolver.chunksConsumed.get(),
+                "generation should stop after the complete text-form tool call");
+        assertTrue(resolver.streamClosed.get(), "breaking after the tool call should close the provider stream");
+        assertTrue(result.text().contains("\"name\":\"talos.write_file\""), result.text());
+        assertFalse(result.text().contains("trailing ramble"), result.text());
+    }
+
     private static Config engineConfig() {
         return engineConfigWithTimeout(null);
     }
@@ -292,6 +310,50 @@ final class LlmClientResolverSeamTest {
                 }
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class TextToolCallThenRambleResolver implements LlmEngineResolver {
+        private final AtomicInteger chunksConsumed = new AtomicInteger();
+        private final AtomicBoolean streamClosed = new AtomicBoolean();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private final List<String> chunks = List.of(
+                        "I will write it now.\n",
+                        """
+                                ```json
+                                {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Hello</h1>"}}
+                                ```
+                                """,
+                        "trailing ramble that should not be consumed");
+                private int index;
+
+                @Override
+                public boolean hasNext() {
+                    return index < chunks.size();
+                }
+
+                @Override
+                public TokenChunk next() {
+                    if (!hasNext()) throw new java.util.NoSuchElementException();
+                    chunksConsumed.incrementAndGet();
+                    return TokenChunk.of(chunks.get(index++));
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
+                    .onClose(() -> streamClosed.set(true));
         }
 
         @Override
