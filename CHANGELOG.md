@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T991] Made managed llama.cpp setup choose the context window through a
+  bounded selector instead of a hard-coded `8192`: the Qwen 14B profile can
+  select `16384` when measured CUDA VRAM or system RAM meets the documented
+  headroom floor, while unverified or under-measured lanes stay at `8192`.
+  Setup writes the selected value and estimate reason into config, and
+  `talos status --verbose` now displays both.
 - [T992] Made `talos doctor` report read-only GPU facts from `nvidia-smi`
   when available, including adapter name, VRAM totals, free VRAM, driver
   version, probe source, and the configured llama.cpp server lane. CUDA lanes

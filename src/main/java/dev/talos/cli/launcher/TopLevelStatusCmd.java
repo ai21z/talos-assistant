@@ -135,6 +135,7 @@ public class TopLevelStatusCmd implements Runnable {
         if (!runtime.modelSourceLabel().isBlank()) {
             out.append("  Model file  : ").append(runtime.modelSourceLabel()).append("\n");
         }
+        appendLlamaCppContext(out, cfg, runtime.backend());
         out.append("  Embeddings  : ").append(runtime.embeddingLabel()).append("\n");
 
         try (EngineRegistry registry = new EngineRegistry(cfg)) {
@@ -155,6 +156,29 @@ public class TopLevelStatusCmd implements Runnable {
             out.append("  Health      : DOWN - ").append(e.getMessage()).append("\n");
         }
         return out.toString();
+    }
+
+    private static void appendLlamaCppContext(StringBuilder out, Config cfg, String backend) {
+        if (!"llama_cpp".equals(backend)) return;
+        Map<String, Object> engines = CfgUtil.map(cfg == null ? null : cfg.data.get("engines"));
+        Map<String, Object> llama = CfgUtil.map(engines.get("llama_cpp"));
+        int context = CfgUtil.intAt(llama, "context", 8192);
+        String reason = safeReason(llama.get("context_reason"));
+        out.append("  Context     : ").append(context);
+        if (!reason.isBlank()) {
+            out.append(" - ").append(reason);
+        }
+        out.append("\n");
+    }
+
+    private static String safeReason(Object raw) {
+        String value = raw == null ? "" : String.valueOf(raw).trim();
+        if (value.isBlank()) return "";
+        value = value.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
+        while (value.contains("  ")) {
+            value = value.replace("  ", " ");
+        }
+        return value.length() <= 200 ? value : value.substring(0, 197) + "...";
     }
 
     private int getDocCount(Path indexDir) {

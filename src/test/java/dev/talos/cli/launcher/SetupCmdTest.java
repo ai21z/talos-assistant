@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import dev.talos.engine.llamacpp.ManagedContextSelector;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStreamWriter;
@@ -169,6 +171,27 @@ class SetupCmdTest {
         assertFalse(yaml.contains("managed:"), yaml);
         assertTrue(yaml.contains("vectors:\n    enabled: false"), yaml);
         assertFalse(yaml.contains("C:\\"));
+    }
+
+    @Test
+    void generatedProfileConfigIncludesSelectedContextAndReason() {
+        Path server = tempDir.resolve("llama-server.exe");
+        ManagedContextSelector.Decision context = new ManagedContextSelector.Decision(
+                16_384,
+                "estimated 16k context from 1536 MiB at 8192 on CUDA lane");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen2.5-coder-14b",
+                server,
+                null,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115,
+                "",
+                18116,
+                context);
+
+        assertTrue(yaml.contains("context: 16384"), yaml);
+        assertTrue(yaml.contains("context_reason: \"estimated 16k context from 1536 MiB at 8192 on CUDA lane\""), yaml);
     }
 
     @Test
@@ -422,17 +445,28 @@ class SetupCmdTest {
         Path server = tempDir.resolve("llama-server.exe");
         Files.writeString(server, "fake", StandardCharsets.UTF_8);
         Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 
-        int exit = new CommandLine(new SetupCmd()).execute(
-                "models",
-                "--profile", "qwen2.5-coder-14b",
-                "--server-path", server.toString(),
-                "--write",
-                "--config", config.toString());
+        int exit;
+        PrintStream previousOut = System.out;
+        try {
+            System.setOut(new PrintStream(stdout, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen2.5-coder-14b",
+                    "--server-path", server.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setOut(previousOut);
+        }
 
         assertEquals(0, exit);
         String yaml = Files.readString(config, StandardCharsets.UTF_8);
         assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""));
+        String text = stdout.toString(StandardCharsets.UTF_8);
+        assertTrue(text.contains("Context: "), text);
+        assertTrue(text.contains("selected:"), text);
         assertTrue(yaml.contains("model_path: \"") || yaml.contains("hf_repo: \"Qwen/Qwen2.5-Coder-14B-Instruct-GGUF\""),
                 yaml);
     }

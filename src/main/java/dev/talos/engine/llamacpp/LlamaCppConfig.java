@@ -27,8 +27,8 @@ record LlamaCppConfig(
         String chatTemplateFile,
         List<String> serverArgs
 ) {
-    static final int DEFAULT_CONTEXT = 8192;
-    static final int MIN_MANAGED_AGENT_CONTEXT = 8192;
+    static final int DEFAULT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
+    static final int MIN_MANAGED_AGENT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
 
     enum Mode {
         MANAGED,

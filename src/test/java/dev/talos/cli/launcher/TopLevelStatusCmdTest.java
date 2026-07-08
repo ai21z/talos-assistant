@@ -54,6 +54,24 @@ class TopLevelStatusCmdTest {
     }
 
     @Test
+    void verboseEngineStatusShowsLlamaCppContextSelectionReason() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "context", 16_384,
+                        "context_reason", "estimated 16k context from 1536 MiB at 8192 on CUDA lane")))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 16384"), output);
+        assertTrue(output.contains("estimated 16k context from 1536 MiB at 8192 on CUDA lane"), output);
+    }
+
+    @Test
     void verboseEngineStatusDoesNotExposeMalformedConfiguredModelPath() {
         Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of(
