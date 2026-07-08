@@ -6,6 +6,8 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Health;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -118,6 +120,7 @@ class LlamaCppServerManagerTest {
             List<String> command = launcher.commands.get(0);
             assertContainsPair(command, "--parallel", "1");
             assertContainsPair(command, "--predict", "2048");
+            assertContainsPair(command, "-lv", "4");
         } finally {
             server.stop(0);
         }
@@ -148,6 +151,40 @@ class LlamaCppServerManagerTest {
             assertContainsPair(command, "-n", "512");
             assertFalse(command.contains("--parallel"), "must not add default --parallel when -np is configured: " + command);
             assertFalse(command.contains("--predict"), "must not add default --predict when -n is configured: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-lv", "--verbosity", "--log-verbosity", "--verbosity=2", "--log-verbosity=2"})
+    void managedModeHonorsVerbosityOverrideAliasesFromServerArgs(String verbosityArg) throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            List<String> serverArgs = verbosityArg.contains("=") ? List.of(verbosityArg) : List.of(verbosityArg, "2");
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "server_args", serverArgs));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertTrue(command.contains(verbosityArg), command::toString);
+            assertFalse(containsPair(command, "-lv", "4"),
+                    "must not add default -lv 4 when verbosity is configured: " + command);
+            if (!"-lv".equals(verbosityArg)) {
+                assertFalse(command.contains("-lv"), "must not add default -lv when another alias is configured: " + command);
+            }
         } finally {
             server.stop(0);
         }
@@ -619,6 +656,11 @@ class LlamaCppServerManagerTest {
         assertTrue(index >= 0, "missing flag " + flag + " in " + command);
         assertTrue(index + 1 < command.size(), "missing value for " + flag + " in " + command);
         assertEquals(value, command.get(index + 1));
+    }
+
+    private static boolean containsPair(List<String> command, String flag, String value) {
+        int index = command.indexOf(flag);
+        return index >= 0 && index + 1 < command.size() && value.equals(command.get(index + 1));
     }
 
     private static HttpServer startHealthServer(int status, String body) throws IOException {

@@ -29,8 +29,10 @@ final class LlamaCppServerManager implements AutoCloseable {
     private static final int LOG_EXCERPT_BYTES = 1600;
     private static final String DEFAULT_AGENT_PARALLEL = "1";
     private static final String DEFAULT_AGENT_PREDICT = "2048";
+    private static final String DEFAULT_LOG_VERBOSITY = "4";
     private static final List<String> PARALLEL_FLAGS = List.of("--parallel", "-np");
     private static final List<String> PREDICT_FLAGS = List.of("--predict", "--n-predict", "-n");
+    private static final List<String> VERBOSITY_FLAGS = List.of("-lv", "--verbosity", "--log-verbosity");
 
     private final LlamaCppConfig config;
     private final LlamaCppProcessLauncher launcher;
@@ -147,6 +149,7 @@ final class LlamaCppServerManager implements AutoCloseable {
         }
         appendManagedAgentDefault(command, config.serverArgs(), PARALLEL_FLAGS, "--parallel", DEFAULT_AGENT_PARALLEL);
         appendManagedAgentDefault(command, config.serverArgs(), PREDICT_FLAGS, "--predict", DEFAULT_AGENT_PREDICT);
+        appendManagedAgentDefault(command, config.serverArgs(), VERBOSITY_FLAGS, "-lv", DEFAULT_LOG_VERBOSITY);
         command.addAll(config.serverArgs());
         return command;
     }
