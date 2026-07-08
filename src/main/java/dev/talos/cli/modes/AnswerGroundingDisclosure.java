@@ -106,8 +106,8 @@ final class AnswerGroundingDisclosure {
     ) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
         addTopLevelFiles(out, workspace);
-        addEnumeratedFiles(out, loopResult, messages);
-        addPromptNamedFiles(out, plan);
+        addEnumeratedFiles(out, workspace, loopResult, messages);
+        addPromptNamedFiles(out, workspace, plan);
         return out;
     }
 
@@ -117,7 +117,7 @@ final class AnswerGroundingDisclosure {
             stream
                     .filter(Files::isRegularFile)
                     .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
-                    .forEach(path -> addCandidate(out, path.getFileName().toString()));
+                    .forEach(path -> addCandidate(out, workspace, path.getFileName().toString()));
         } catch (IOException | RuntimeException ignored) {
             // Disclosure is best-effort UI chrome. Failure to enumerate must not block the turn.
         }
@@ -125,6 +125,7 @@ final class AnswerGroundingDisclosure {
 
     private static void addEnumeratedFiles(
             Map<String, String> out,
+            Path workspace,
             ToolCallLoop.LoopResult loopResult,
             List<ChatMessage> messages
     ) {
@@ -148,7 +149,7 @@ final class AnswerGroundingDisclosure {
                         || "(empty directory)".equalsIgnoreCase(entry)) {
                     continue;
                 }
-                addCandidate(out, joinPath(base, entry));
+                addCandidate(out, workspace, joinPath(base, entry));
             }
         }
     }
@@ -176,13 +177,13 @@ final class AnswerGroundingDisclosure {
         return out;
     }
 
-    private static void addPromptNamedFiles(Map<String, String> out, CurrentTurnPlan plan) {
+    private static void addPromptNamedFiles(Map<String, String> out, Path workspace, CurrentTurnPlan plan) {
         if (plan == null || plan.taskContract() == null || out.size() >= CANDIDATE_CAP) return;
         String request = plan.taskContract().originalUserRequest();
         if (request == null || request.isBlank()) return;
         var matcher = FILE_TOKEN.matcher(request);
         while (matcher.find() && out.size() < CANDIDATE_CAP) {
-            addCandidate(out, matcher.group(1));
+            addCandidate(out, workspace, matcher.group(1));
         }
     }
 
@@ -198,11 +199,23 @@ final class AnswerGroundingDisclosure {
         return Set.copyOf(out);
     }
 
-    private static void addCandidate(Map<String, String> out, String path) {
+    private static void addCandidate(Map<String, String> out, Path workspace, String path) {
         if (out.size() >= CANDIDATE_CAP) return;
         String normalized = normalizePath(path);
         if (normalized.isBlank() || hasHiddenSegment(normalized)) return;
+        if (!regularFileCandidateExists(workspace, normalized)) return;
         out.putIfAbsent(normalized.toLowerCase(Locale.ROOT), normalized);
+    }
+
+    private static boolean regularFileCandidateExists(Path workspace, String normalized) {
+        if (workspace == null || normalized == null || normalized.isBlank()) return false;
+        try {
+            Path root = workspace.toAbsolutePath().normalize();
+            Path resolved = root.resolve(normalized).normalize();
+            return resolved.startsWith(root) && Files.isRegularFile(resolved);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static String joinPath(String base, String entry) {
