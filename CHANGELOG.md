@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- [T993] Made `talos doctor --start` report measured llama.cpp prompt and
+  generation rates when managed timing evidence is available, project a stated
+  reference turn against `limits.llm_timeout_ms`, and warn when a profile is
+  likely too slow for practical edit work. Missing or too-small timing samples
+  now stay honest as unmeasured, and connect-only checks no longer claim a
+  managed server was released.
+- [T996] Made managed llama.cpp launches capture GPU/offload ground truth by
+  default with `-lv 4`, while respecting user verbosity overrides. Added a
+  shared b9918 log parser for offload, fit, buffer, and timing evidence used by
+  doctor/tuning follow-up work.
 - [T963] Made `talos setup models --profile gpt-oss-20b` fail truthfully unless
   it can write a startable local GGUF config. The setup path now honors an
   explicit `--model-path`, resolves an exact `gpt-oss-20b-mxfp4.gguf` from the

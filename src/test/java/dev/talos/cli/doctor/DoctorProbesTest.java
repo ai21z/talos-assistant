@@ -214,7 +214,8 @@ class DoctorProbesTest {
 
     @Test
     void startModePassesWhenSuccessfulModelSmokeIsFast() throws IOException {
-        HttpServer server = startChatServer(MODEL_SMOKE_REPLY);
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls);
         try {
             Config cfg = llamaCppConfig(Map.of(
                     "mode", "connect_only",
@@ -228,6 +229,9 @@ class DoctorProbesTest {
             assertTrue(result.detail().contains("end-to-end model smoke verified"), result.detail());
             assertTrue(result.detail().contains("rates unmeasured"), result.detail());
             assertFalse(result.detail().contains("slow"), result.detail());
+            assertTrue(result.detail().contains("external server left running"), result.detail());
+            assertFalse(result.detail().contains("managed server released again"), result.detail());
+            assertEquals(1, chatCalls.get(), "connect-only doctor must not run a managed-log rate sample");
         } finally {
             server.stop(0);
         }
@@ -262,6 +266,70 @@ class DoctorProbesTest {
             assertTrue(result.detail().contains("50% of limits.llm_timeout_ms"), result.detail());
             assertTrue(result.detail().contains("GPU acceleration"), result.detail());
             assertTrue(result.detail().contains("smaller profile"), result.detail());
+            assertTrue(result.detail().contains("external server left running"), result.detail());
+            assertFalse(result.detail().contains("managed server released again"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeIgnoresTinyPromptTimingSamplesInsteadOfProjectingFromThem() throws IOException {
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY);
+        LlamaCppLogEvidence tinyPromptOnly = LlamaCppLogEvidence.parse("""
+                0.01.000.000 I slot print_timing: id  0 | task 7 | prompt eval time =    4000.00 ms /    40 tokens (  100.00 ms per token,    10.00 tokens per second)
+                0.08.000.000 I slot print_timing: id  0 | task 7 |        eval time =    7000.00 ms /   700 tokens (   10.00 ms per token,   100.00 tokens per second)
+                """);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    (ctx, preflight) -> tinyPromptOnly).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertTrue(result.detail().contains("rates unmeasured"), result.detail());
+            assertFalse(result.detail().contains("prompt eval 10.0 tok/s"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeWarnsWhenManagedRateSampleStillCannotMeasureRates() throws IOException {
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    new ServerProbe.TimingEvidenceSource() {
+                        @Override
+                        public LlamaCppLogEvidence read(DoctorContext ctx, dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return LlamaCppLogEvidence.parse("");
+                        }
+
+                        @Override
+                        public boolean canImproveAfterSample(DoctorContext ctx, dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return true;
+                        }
+                    }).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("rate sample could not be measured within 60s"), result.detail());
+            assertTrue(result.detail().contains("smaller profile"), result.detail());
+            assertTrue(chatCalls.get() >= 2, "probe must attempt the bounded rate sample before warning");
         } finally {
             server.stop(0);
         }

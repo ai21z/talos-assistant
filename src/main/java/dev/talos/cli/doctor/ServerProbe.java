@@ -41,9 +41,32 @@ public final class ServerProbe implements DoctorProbe {
     private static final long DEFAULT_LLM_TIMEOUT_MS = 300_000L;
     private static final int REFERENCE_PROMPT_TOKENS = 4_000;
     private static final int REFERENCE_GENERATED_TOKENS = 700;
+    private static final int MIN_PROMPT_RATE_SAMPLE_TOKENS = 256;
     private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
     private static final double SLOW_PROJECTION_TIMEOUT_FRACTION = 0.50d;
-    private static final String RATE_SAMPLE_PROMPT = "Reply with the word talos repeated exactly 80 times, separated by spaces. No numbering, no punctuation.";
+    private static final String RATE_SAMPLE_PROMPT = """
+            This diagnostic prompt exists only to measure local llama.cpp throughput with a representative prompt size.
+            Read the repeated neutral context below, do not summarize it, and then reply with the word talos repeated
+            exactly 80 times, separated by spaces. No numbering, no punctuation.
+
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            Local workspace assistant measurement context. Local workspace assistant measurement context.
+            """;
 
     private final boolean startServer;
     private final Duration slowSmokeWarningThreshold;
@@ -147,16 +170,26 @@ public final class ServerProbe implements DoctorProbe {
                         "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
                                 + preflight.port() + ".log");
             }
+            String completion = completionSuffix(preflight);
             RateAssessment rates = assessRates(ctx, preflight);
+            boolean sampleAttempted = false;
             if (!rates.measured() && timingEvidenceSource.canImproveAfterSample(ctx, preflight)) {
                 runBoundedRateSample(chatEngine, runtime);
+                sampleAttempted = true;
                 rates = assessRates(ctx, preflight);
             }
             if (rates.warn()) {
                 return ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but measured rates are slow: "
                                 + rates.summary()
-                                + "; managed server released again. This profile may be too slow for practical edit work on this machine;"
+                                + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
+                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it.");
+            }
+            if (sampleAttempted && !rates.measured()) {
+                return ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but rate sample could not be measured within 60s;"
+                                + " " + completion
+                                + ". This profile may be too slow or the llama.cpp timing log may be incomplete;"
                                 + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it.");
             }
             if (elapsed.compareTo(slowSmokeWarningThreshold) > 0) {
@@ -165,13 +198,13 @@ public final class ServerProbe implements DoctorProbe {
                                 + elapsedSeconds(elapsed)
                                 + " for startup/smoke on "
                                 + runtime.model()
-                                + "; managed server released again. This profile may be too slow for practical edit work on this machine;"
+                                + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
                                 + " use GPU acceleration or stronger hardware before relying on it.");
             }
             return ProbeResult.pass(id(),
                     "end-to-end model smoke verified (" + replyChars + " reply chars);"
                             + " " + rates.summary()
-                            + "; managed server released again");
+                            + "; " + completion);
         } catch (Exception e) {
             return ProbeResult.fail(id(),
                     "end-to-end server start failed: " + e.getMessage(),
@@ -195,7 +228,8 @@ public final class ServerProbe implements DoctorProbe {
         if (evidence == null) {
             return RateAssessment.unmeasured();
         }
-        Optional<LlamaCppLogEvidence.Timing> prompt = latestTiming(evidence, "prompt_eval", 1);
+        Optional<LlamaCppLogEvidence.Timing> prompt =
+                latestTiming(evidence, "prompt_eval", MIN_PROMPT_RATE_SAMPLE_TOKENS);
         Optional<LlamaCppLogEvidence.Timing> generation =
                 latestTiming(evidence, "eval", MIN_GENERATION_RATE_SAMPLE_TOKENS);
         if (prompt.isEmpty() || generation.isEmpty()) {
@@ -258,6 +292,12 @@ public final class ServerProbe implements DoctorProbe {
         } catch (Exception ignored) {
             return LlamaCppLogEvidence.parse("");
         }
+    }
+
+    private static String completionSuffix(LlamaCppPreflight.Report preflight) {
+        return preflight != null && preflight.managed()
+                ? "managed server released again"
+                : "external server left running";
     }
 
     private static String elapsedSeconds(Duration elapsed) {
