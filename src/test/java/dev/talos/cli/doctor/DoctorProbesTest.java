@@ -11,6 +11,7 @@ import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -209,6 +210,28 @@ class DoctorProbesTest {
         }
     }
 
+    @Test
+    void startModeWarnsWhenSuccessfulModelSmokeIsSlow() throws IOException {
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ofMillis(60));
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+
+            ProbeResult result = new ServerProbe(true, Duration.ofMillis(10)).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("model smoke verified"), result.detail());
+            assertTrue(result.detail().contains("slow"), result.detail());
+            assertTrue(result.detail().contains("qwen2.5-coder-14b"), result.detail());
+            assertTrue(result.detail().contains("smaller or GPU-accelerated model"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
     // ── index-writable / home-writable ───────────────────────────────────
 
     @Test
@@ -378,9 +401,22 @@ class DoctorProbesTest {
         return server;
     }
 
+    private static final String MODEL_SMOKE_REPLY = "TALOS_MODEL_SMOKE_OK";
+
     private static HttpServer startChatServer(String reply) throws IOException {
+        return startChatServer(reply, Duration.ZERO);
+    }
+
+    private static HttpServer startChatServer(String reply, Duration responseDelay) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
+            if (responseDelay != null && !responseDelay.isZero() && !responseDelay.isNegative()) {
+                try {
+                    Thread.sleep(responseDelay.toMillis());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             byte[] bytes = ("""
                     {"choices":[{"message":{"role":"assistant","content":"%s"}}]}
                     """.formatted(reply)).getBytes(StandardCharsets.UTF_8);

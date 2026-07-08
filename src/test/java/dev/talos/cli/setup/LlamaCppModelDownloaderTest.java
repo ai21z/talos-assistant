@@ -102,7 +102,7 @@ class LlamaCppModelDownloaderTest {
                 sha256,
                 123L,
                 "accepted beta",
-                "16 GB RAM minimum; 24 GB+ comfortable for CPU-only");
+                "16 GB RAM minimum; 24 GB+ for CPU-only; large CPU model, not the low-resource lane");
     }
 
     private static Path part(Path target) {

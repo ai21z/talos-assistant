@@ -29,11 +29,20 @@ import java.util.Locale;
  */
 public final class ServerProbe implements DoctorProbe {
     static final String MODEL_SMOKE_TOKEN = "TALOS_MODEL_SMOKE_OK";
+    private static final Duration DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD = Duration.ofSeconds(60);
 
     private final boolean startServer;
+    private final Duration slowSmokeWarningThreshold;
 
     public ServerProbe(boolean startServer) {
+        this(startServer, DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD);
+    }
+
+    ServerProbe(boolean startServer, Duration slowSmokeWarningThreshold) {
         this.startServer = startServer;
+        this.slowSmokeWarningThreshold = slowSmokeWarningThreshold == null
+                ? DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD
+                : slowSmokeWarningThreshold;
     }
 
     @Override
@@ -100,9 +109,11 @@ public final class ServerProbe implements DoctorProbe {
             if (!(registry.engine() instanceof ChatModelEngine chatEngine)) {
                 return ProbeResult.skip(id(), "engine does not expose a chat interface");
             }
+            long startNanos = System.nanoTime();
             String reply = chatEngine.chat(new ChatRequest(
                     runtime.backend(), runtime.model(), "",
                     "Reply exactly " + MODEL_SMOKE_TOKEN + " and no other text.", List.of(), null));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
             String normalized = reply == null ? "" : reply.strip();
             int replyChars = normalized.length();
             if (!normalized.toUpperCase(Locale.ROOT).contains(MODEL_SMOKE_TOKEN)) {
@@ -111,6 +122,14 @@ public final class ServerProbe implements DoctorProbe {
                                 + " (" + replyChars + " reply chars)",
                         "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
                                 + preflight.port() + ".log");
+            }
+            if (elapsed.compareTo(slowSmokeWarningThreshold) > 0) {
+                return ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but slow: "
+                                + elapsed.toSeconds()
+                                + "s for startup/smoke on "
+                                + runtime.model()
+                                + "; managed server released again. For practical CPU-only use, try a smaller or GPU-accelerated model.");
             }
             return ProbeResult.pass(id(),
                     "end-to-end model smoke verified (" + replyChars + " reply chars);"

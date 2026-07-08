@@ -31,7 +31,7 @@ The server path should point to `llama-server.exe` inside the extracted folder.
 
 ## 3. Download Qwen
 
-Use the accepted beta coding profile first:
+Use the accepted beta coding profile first. It is a large CPU model, not a low-resource default:
 
 - Model page: https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
 - GGUF file: `qwen2.5-coder-14b-instruct-q4_k_m.gguf`
@@ -59,4 +59,4 @@ talos status --verbose
 talos doctor --start
 ```
 
-Do not treat the model as ready until `talos doctor --start` completes the end-to-end model smoke.
+Do not treat the model as ready until `talos doctor --start` completes the end-to-end model smoke. If doctor reports a slow smoke warning, Talos is configured, but normal edit turns may be too slow on that machine.

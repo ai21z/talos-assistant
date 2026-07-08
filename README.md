@@ -604,7 +604,8 @@ time.
 
 Practical guidance:
 
-- small local models are comfortable on typical developer machines
+- the accepted beta profiles are large local-model lanes, not weak-PC defaults
+- CPU-only turns can be slow even when `talos doctor --start` passes
 - larger local models benefit from more RAM and faster CPUs/GPUs
 - SSD storage is strongly recommended for smoother indexing and model work
 

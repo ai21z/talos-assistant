@@ -33,6 +33,8 @@ class TrustClaimsHonestyTest {
             "Vector retrieval requires a local embedding endpoint";
     private static final String ACCEPTED_MODEL_BOUNDARY =
             "Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b";
+    private static final String LARGE_MODEL_BOUNDARY =
+            "The accepted beta profiles are large local-model lanes";
     private static final String EXPERIMENTAL_MODEL_BOUNDARY =
             "Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles";
     private static final String GPT_OSS_LOCAL_GGUF_BOUNDARY =
@@ -92,6 +94,7 @@ class TrustClaimsHonestyTest {
                 RAG_LOCAL_BOUNDARY,
                 VECTOR_OPTIONAL_BOUNDARY,
                 ACCEPTED_MODEL_BOUNDARY,
+                LARGE_MODEL_BOUNDARY,
                 EXPERIMENTAL_MODEL_BOUNDARY,
                 GPT_OSS_LOCAL_GGUF_BOUNDARY,
                 DEEPSEEK_TOOL_MODE_BOUNDARY)) {
@@ -133,6 +136,7 @@ class TrustClaimsHonestyTest {
         String modelProfiles = read("docs/reference/model-profiles.md");
 
         assertContainsNormalized(modelProfiles, ACCEPTED_MODEL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, LARGE_MODEL_BOUNDARY);
         assertContainsNormalized(modelProfiles, EXPERIMENTAL_MODEL_BOUNDARY);
         assertContainsNormalized(modelProfiles, GPT_OSS_LOCAL_GGUF_BOUNDARY);
         assertContainsNormalized(modelProfiles, DEEPSEEK_TOOL_MODE_BOUNDARY);

@@ -27,7 +27,7 @@ The current pinned Ubuntu/WSL x64 CPU lane uses the llama.cpp `b9860` release:
 - Ubuntu x64 (CPU): `llama-b9860-bin-ubuntu-x64.tar.gz`
 - Windows x64 (CPU): `llama-b9860-bin-win-cpu-x64.zip`
 
-The first accepted model to try is Qwen:
+The first accepted model to try is Qwen. It is a large CPU model, not a low-resource default:
 
 - Model page: https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
 - GGUF file: `qwen2.5-coder-14b-instruct-q4_k_m.gguf`
@@ -36,7 +36,7 @@ Talos does not claim arbitrary latest upstream builds are verified. Use the pinn
 
 ## Profiles
 
-Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. See [Model Profiles](../reference/model-profiles.md) for exact guidance.
+Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. Both are large local-model lanes. See [Model Profiles](../reference/model-profiles.md) for exact guidance.
 
 After any setup change, run:
 
@@ -44,4 +44,4 @@ After any setup change, run:
 talos doctor --start
 ```
 
-Do not treat a profile as ready until doctor completes the end-to-end model smoke.
+Do not treat a profile as ready until doctor completes the end-to-end model smoke. If doctor reports a slow smoke warning, the setup is functional but may be too slow for normal editing work on that machine.

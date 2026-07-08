@@ -20,7 +20,7 @@ public final class LlamaCppModelManifest {
                     "c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940",
                     8_988_110_272L,
                     "accepted beta",
-                    "16 GB RAM minimum; 24 GB+ comfortable for CPU-only"),
+                    "16 GB RAM minimum; 24 GB+ for CPU-only; large CPU model, not the low-resource lane"),
             new Entry(
                     "gpt-oss-20b",
                     "ggml-org/gpt-oss-20b-GGUF",
@@ -28,7 +28,7 @@ public final class LlamaCppModelManifest {
                     "be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935",
                     12_109_566_560L,
                     "accepted beta",
-                    "24 GB RAM minimum; 32 GB+ comfortable for CPU-only"));
+                    "24 GB RAM minimum; 32 GB+ for CPU-only; large CPU model, not the low-resource lane"));
 
     private static final Map<String, Entry> BY_ALIAS = ACCEPTED_BETA.stream()
             .collect(Collectors.toUnmodifiableMap(
