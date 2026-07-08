@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T992] Made `talos doctor` report read-only GPU facts from `nvidia-smi`
+  when available, including adapter name, VRAM totals, free VRAM, driver
+  version, probe source, and the configured llama.cpp server lane. CUDA lanes
+  now warn before server startup when the detected driver is below the
+  path-derived floor, while CPU-lane configs with a visible GPU point users
+  toward `talos tune` instead of claiming GPU/VRAM is unprobed.
 - [T993] Made `talos doctor --start` report measured llama.cpp prompt and
   generation rates when managed timing evidence is available, project a stated
   reference turn against `limits.llm_timeout_ms`, and warn when a profile is

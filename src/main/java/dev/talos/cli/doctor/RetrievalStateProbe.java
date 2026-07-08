@@ -54,7 +54,7 @@ public final class RetrievalStateProbe implements DoctorProbe {
                 + " locality=" + locality
                 + " mode=" + mode
                 + " embedding dimension not probed by doctor"
-                + " GPU/VRAM not probed by Talos";
+                + " GPU facts reported by runtime-env probe";
 
         return "remote-rejected".equals(locality)
                 ? ProbeResult.warn(id(), detail)

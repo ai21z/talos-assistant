@@ -65,8 +65,12 @@ class DoctorProbesTest {
     // ── runtime environment ─────────────────────────────────────────────
 
     @Test
-    void runtimeEnvironmentReportsBoundedHardwareFactsWithoutGpuClaim() {
-        ProbeResult result = new RuntimeEnvironmentProbe().run(ctx(new Config()));
+    void runtimeEnvironmentReportsBoundedHardwareFactsAndExplicitGpuProbeFailure() {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", "C:/talos/engines/llama-cpp/cpu/llama-server.exe"));
+
+        ProbeResult result = new RuntimeEnvironmentProbe(failingGpuQuery()).run(ctx(cfg));
 
         assertEquals(ProbeResult.Status.PASS, result.status());
         assertTrue(result.detail().contains("os="), result.detail());
@@ -75,7 +79,42 @@ class DoctorProbesTest {
         assertTrue(result.detail().contains("cpu="), result.detail());
         assertTrue(result.detail().contains("jvmMaxMemoryMb="), result.detail());
         assertTrue(result.detail().contains("talosHomeFreeMb="), result.detail());
-        assertTrue(result.detail().contains("GPU/VRAM not probed by Talos"), result.detail());
+        assertTrue(result.detail().contains("gpuProbe=nvidia-smi failed; assuming no GPU"), result.detail());
+        assertFalse(result.detail().contains("GPU/VRAM not probed by Talos"), result.detail());
+    }
+
+    @Test
+    void runtimeEnvironmentReportsNvidiaSmiGpuFactsAndCpuLanePointer() {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", "C:/Users/AI21Z/AppData/Local/Programs/talos/engines/llama-cpp/cpu/llama-server.exe"));
+
+        ProbeResult result = new RuntimeEnvironmentProbe(successfulGpuQuery(
+                "NVIDIA GeForce RTX 5070 Ti, 16303 MiB, 15037 MiB, 576.88")).run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.PASS, result.status());
+        assertTrue(result.detail().contains("gpu=nvidia-smi:NVIDIA GeForce RTX 5070 Ti"), result.detail());
+        assertTrue(result.detail().contains("vramTotalMb=16303"), result.detail());
+        assertTrue(result.detail().contains("vramFreeMb=15037"), result.detail());
+        assertTrue(result.detail().contains("driver=576.88"), result.detail());
+        assertTrue(result.detail().contains("serverLane=cpu (configured path)"), result.detail());
+        assertTrue(result.detail().contains("GPU present but configured llama.cpp server appears CPU-only"), result.detail());
+        assertTrue(result.detail().contains("talos tune"), result.detail());
+    }
+
+    @Test
+    void runtimeEnvironmentWarnsBeforeServerStartWhenCudaLaneDriverIsBelowFloor() {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", "C:/talos/engines/llama-cpp/cuda-13.3/bin/llama-server.exe"));
+
+        ProbeResult result = new RuntimeEnvironmentProbe(successfulGpuQuery(
+                "NVIDIA GeForce RTX 4090, 24564 MiB, 22000 MiB, 555.85")).run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.WARN, result.status());
+        assertTrue(result.detail().contains("serverLane=cuda-13.3 (configured path)"), result.detail());
+        assertTrue(result.detail().contains("driver 555.85 below required 580.00"), result.detail());
+        assertTrue(result.detail().contains("source=nvidia-smi"), result.detail());
     }
 
     // ── engine-files ─────────────────────────────────────────────────────
@@ -508,7 +547,8 @@ class DoctorProbesTest {
         assertTrue(result.detail().contains("BM25-only"), result.detail());
         assertTrue(result.detail().contains("embedding=disabled/none"), result.detail());
         assertTrue(result.detail().contains("embedding dimension not probed by doctor"), result.detail());
-        assertTrue(result.detail().contains("GPU/VRAM not probed by Talos"), result.detail());
+        assertTrue(result.detail().contains("GPU facts reported by runtime-env probe"), result.detail());
+        assertFalse(result.detail().contains("GPU/VRAM not probed by Talos"), result.detail());
     }
 
     @Test
@@ -593,6 +633,14 @@ class DoctorProbesTest {
         llm.put("default_backend", "llama_cpp");
         cfg.data.put("llm", llm);
         return cfg;
+    }
+
+    private static RuntimeEnvironmentProbe.GpuQueryRunner successfulGpuQuery(String output) {
+        return () -> new RuntimeEnvironmentProbe.GpuQueryResult(0, output, "");
+    }
+
+    private static RuntimeEnvironmentProbe.GpuQueryRunner failingGpuQuery() {
+        return () -> new RuntimeEnvironmentProbe.GpuQueryResult(9, "", "driver not loaded");
     }
 
     private static HttpServer startHealthServer(int status) throws IOException {
