@@ -45,11 +45,16 @@ class SetupCmdTest {
         CommandLine command = new CommandLine(new SetupCmd());
         command.setOut(new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8), true));
         command.setErr(new PrintWriter(new OutputStreamWriter(stderr, StandardCharsets.UTF_8), true));
+        // Keep help assertions independent of caller terminal ANSI settings. This mirrors
+        // the T865 root-help fix and prevents styled "Usage: setup" from breaking substrings.
+        command.setColorScheme(CommandLine.Help.defaultColorScheme(CommandLine.Help.Ansi.OFF));
 
         int exit = command.execute("--help");
 
+        String text = stdout.toString(StandardCharsets.UTF_8);
         assertEquals(0, exit);
-        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("Usage: setup"), stdout.toString(StandardCharsets.UTF_8));
+        assertTrue(text.contains("Usage: setup"), text);
+        assertFalse(text.contains("\u001B["), text);
         assertFalse(stderr.toString(StandardCharsets.UTF_8).contains("Unknown option"), stderr.toString(StandardCharsets.UTF_8));
     }
 
