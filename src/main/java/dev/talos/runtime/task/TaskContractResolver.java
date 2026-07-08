@@ -29,6 +29,12 @@ public final class TaskContractResolver {
                     + "exe|dll|so|dylib|class|jar|war|ear|bin|dat)"
                     + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+    private static final Pattern INLINE_EXAMPLE_ARTIFACT_BEFORE = Pattern.compile(
+            "(?is).*\\b(?:example|sample|template)\\s+$");
+    private static final Pattern INLINE_EXAMPLE_ARTIFACT_AFTER = Pattern.compile(
+            "(?is)^\\s*(?:example|sample|template)\\b.*");
+    private static final Pattern EXPLICIT_TARGET_ACTION_BEFORE = Pattern.compile(
+            "(?i)\\b(?:read|open|inspect|summarize|create|write|edit|update|fix|delete|remove|use)\\b");
 
     private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
@@ -598,12 +604,21 @@ public final class TaskContractResolver {
         Set<String> out = new LinkedHashSet<>();
         while (matcher.find()) {
             String target = normalizeTarget(matcher.group(1));
-            if (!target.isBlank()) out.add(target);
+            if (!target.isBlank()
+                    && !inlineExampleArtifactMention(userRequest, matcher.start(1), matcher.end(1))) {
+                out.add(target);
+            }
         }
         Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(userRequest);
         while (extensionlessMatcher.find()) {
             String target = normalizeTarget(extensionlessMatcher.group(1));
-            if (!target.isBlank()) out.add(target);
+            if (!target.isBlank()
+                    && !inlineExampleArtifactMention(
+                    userRequest,
+                    extensionlessMatcher.start(1),
+                    extensionlessMatcher.end(1))) {
+                out.add(target);
+            }
         }
         Matcher directoryMatcher = SINGLE_DIRECTORY_CREATION_TARGET.matcher(userRequest);
         while (directoryMatcher.find()) {
@@ -611,6 +626,30 @@ public final class TaskContractResolver {
             if (looksLikeDirectoryTarget(target)) out.add(target);
         }
         return Set.copyOf(out);
+    }
+
+    private static boolean inlineExampleArtifactMention(String userRequest, int start, int end) {
+        if (userRequest == null || userRequest.isBlank() || start < 0 || end < start) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        int beforeStart = Math.max(0, start - 80);
+        int afterEnd = Math.min(lower.length(), end + 40);
+        String before = lower.substring(beforeStart, start);
+        String after = lower.substring(end, afterEnd);
+        if (explicitTargetActionNear(before)) return false;
+        return INLINE_EXAMPLE_ARTIFACT_BEFORE.matcher(before).matches()
+                || INLINE_EXAMPLE_ARTIFACT_AFTER.matcher(after).matches();
+    }
+
+    private static boolean explicitTargetActionNear(String beforeTarget) {
+        if (beforeTarget == null || beforeTarget.isBlank()) return false;
+        String tail = beforeTarget.replaceAll("\\s+", " ");
+        int boundary = Math.max(
+                Math.max(tail.lastIndexOf('.'), tail.lastIndexOf('?')),
+                Math.max(tail.lastIndexOf('!'), tail.lastIndexOf(';')));
+        if (boundary >= 0) {
+            tail = tail.substring(boundary + 1);
+        }
+        return EXPLICIT_TARGET_ACTION_BEFORE.matcher(tail).find();
     }
 
     private static Set<String> extractLexicalSourceEvidenceTargets(String userRequest) {

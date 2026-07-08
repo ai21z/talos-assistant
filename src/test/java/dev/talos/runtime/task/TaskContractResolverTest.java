@@ -1615,6 +1615,44 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void exampleArtifactFilenamesDoNotBecomeRequiredReadTargets() {
+        for (String input : List.of(
+                "Show me an example package.json for a demo app.",
+                "Give me a sample package.json for a small Node project.",
+                "What would a template package.json look like?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.expectedTargets().isEmpty(), input + " -> " + contract.expectedTargets());
+        }
+    }
+
+    @Test
+    void explicitPackageJsonReadAndMutationTargetsStillBind() {
+        for (String input : List.of(
+                "Read package.json and summarize it.",
+                "Open package.json and tell me the scripts.",
+                "Inspect package.json for broken scripts.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals(Set.of("package.json"), contract.expectedTargets(), input);
+        }
+
+        TaskContract create = TaskContractResolver.fromUserRequest("Create package.json for this Node project.");
+
+        assertTrue(create.mutationAllowed());
+        assertEquals(Set.of("package.json"), create.expectedTargets());
+
+        TaskContract createSample = TaskContractResolver.fromUserRequest(
+                "Create a sample package.json for this Node project.");
+
+        assertTrue(createSample.mutationAllowed());
+        assertEquals(Set.of("package.json"), createSample.expectedTargets());
+    }
+
+    @Test
     void imageReadQuestionsCaptureExpectedTargetsWithoutMutationIntent() {
         for (String input : List.of(
                 "Summarize image.png using OCR text only.",
