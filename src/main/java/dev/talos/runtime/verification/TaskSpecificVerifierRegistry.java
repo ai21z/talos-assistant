@@ -106,6 +106,7 @@ final class TaskSpecificVerifierRegistry {
         public Result verify(Context context) {
             String profileFact = StaticWebCapabilityProfile.profileFact(context.profile());
             if (!profileFact.isBlank()) context.facts().add(profileFact);
+            int staticWebFactStart = context.facts().size();
             if (StaticWebCapabilityProfile.requiresSeparateAssetMutations(context.profile())) {
                 StaticTaskVerifier.verifyPrimaryWebMutationCoverage(
                         context.mutatedPaths(),
@@ -121,7 +122,11 @@ final class TaskSpecificVerifierRegistry {
                     context.problems(),
                     context.readFileBodies(),
                     context.renderRunner());
-            return new Result(true, SourceDerivedArtifactVerifier.Result.notRequired(), report);
+            boolean webCoherenceRequired =
+                    !StaticTaskVerifier.addedStaticWebCoherenceNotApplicableFact(
+                            context.facts(),
+                            staticWebFactStart);
+            return new Result(webCoherenceRequired, SourceDerivedArtifactVerifier.Result.notRequired(), report);
         }
     }
 }

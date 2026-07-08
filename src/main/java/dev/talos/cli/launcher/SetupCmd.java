@@ -24,7 +24,10 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
-@CommandLine.Command(name = "setup", description = "Configure Talos local model engines")
+@CommandLine.Command(
+        name = "setup",
+        description = "Configure Talos local model engines",
+        mixinStandardHelpOptions = true)
 public class SetupCmd implements Callable<Integer> {
     @CommandLine.Option(names="--install-ollama", description="Legacy: install Ollama via winget")
     boolean install;

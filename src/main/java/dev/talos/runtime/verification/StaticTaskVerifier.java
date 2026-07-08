@@ -32,6 +32,9 @@ public final class StaticTaskVerifier {
 
     private StaticTaskVerifier() {}
 
+    private static final String STATIC_WEB_COHERENCE_NOT_APPLICABLE =
+            "Static web coherence was not checked because ";
+
     public record WebDiagnostics(
             String htmlFile,
             String cssFile,
@@ -358,6 +361,11 @@ public final class StaticTaskVerifier {
                         + String.join(", ", primary) + ".");
                 return VerificationReport.empty();
             }
+            if (staticWebCoherenceNotApplicableIsSafe(profile, primary, mutatedPaths)) {
+                facts.add(STATIC_WEB_COHERENCE_NOT_APPLICABLE
+                        + "the workspace does not expose a small HTML/CSS/JS surface.");
+                return VerificationReport.empty();
+            }
             problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
             return VerificationReport.empty();
         }
@@ -388,6 +396,11 @@ public final class StaticTaskVerifier {
                 if (!problems.isEmpty()) return VerificationReport.empty();
                 facts.add("Self-contained functional web checks passed for "
                         + String.join(", ", primary) + ".");
+                return VerificationReport.empty();
+            }
+            if (staticWebCoherenceNotApplicableIsSafe(profile, primary, mutatedPaths)) {
+                facts.add(STATIC_WEB_COHERENCE_NOT_APPLICABLE
+                        + "HTML, CSS, and JavaScript primary files were not all present.");
                 return VerificationReport.empty();
             }
             problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
@@ -1270,6 +1283,34 @@ public final class StaticTaskVerifier {
         return values.stream()
                 .map(value -> "`" + value + "`")
                 .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    static boolean addedStaticWebCoherenceNotApplicableFact(List<String> facts, int fromIndex) {
+        if (facts == null || facts.isEmpty()) return false;
+        int start = Math.max(0, fromIndex);
+        for (int i = start; i < facts.size(); i++) {
+            String fact = facts.get(i);
+            if (fact != null && fact.startsWith(STATIC_WEB_COHERENCE_NOT_APPLICABLE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean staticWebCoherenceNotApplicableIsSafe(
+            CapabilityProfile profile,
+            List<String> primary,
+            Set<String> mutatedPaths
+    ) {
+        if (profile == null || !profile.targetSurface().allowsFunctionalPartial()) return false;
+        if (primary != null && !primary.isEmpty()) return true;
+        return singleHtmlMutation(mutatedPaths);
+    }
+
+    private static boolean singleHtmlMutation(Set<String> mutatedPaths) {
+        if (mutatedPaths == null || mutatedPaths.size() != 1) return false;
+        String only = mutatedPaths.iterator().next();
+        return hasExtension(only, ".html", ".htm");
     }
 
     private static boolean hasPrimaryWebSurface(List<String> files) {

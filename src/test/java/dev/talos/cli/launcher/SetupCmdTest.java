@@ -6,7 +6,9 @@ import picocli.CommandLine;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,6 +36,21 @@ class SetupCmdTest {
 
         assertTrue(summary.contains("llama.cpp"));
         assertFalse(summary.contains("requires Ollama"));
+    }
+
+    @Test
+    void setupHelpPrintsUsageWithoutUnknownOptionError() {
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        CommandLine command = new CommandLine(new SetupCmd());
+        command.setOut(new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8), true));
+        command.setErr(new PrintWriter(new OutputStreamWriter(stderr, StandardCharsets.UTF_8), true));
+
+        int exit = command.execute("--help");
+
+        assertEquals(0, exit);
+        assertTrue(stdout.toString(StandardCharsets.UTF_8).contains("Usage: setup"), stdout.toString(StandardCharsets.UTF_8));
+        assertFalse(stderr.toString(StandardCharsets.UTF_8).contains("Unknown option"), stderr.toString(StandardCharsets.UTF_8));
     }
 
     @Test

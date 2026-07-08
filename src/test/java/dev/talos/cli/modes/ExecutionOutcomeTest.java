@@ -2682,6 +2682,75 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void singleHtmlPolishEditWithoutFullWebSurfaceIsReadbackOnlyNotFailed() throws Exception {
+        Path ws = Files.createTempDirectory("talos-single-html-polish-readback-");
+        try {
+            Files.createDirectories(ws.resolve("site"));
+            Files.writeString(ws.resolve("site/index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                        <title>RoastRadar</title>
+                    </head>
+                    <body>
+                        <h1>Welcome to RoastRadar</h1>
+                        <p>Track coffee roast experiments.</p>
+                    </body>
+                    </html>
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("make the page a little more polished but keep it simple."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Edited site/index.html.",
+                    2,
+                    2,
+                    List.of("talos.read_file", "talos.edit_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    1,
+                    List.of("site/index.html"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file",
+                            "site/index.html",
+                            true,
+                            true,
+                            false,
+                            "Edited site/index.html: replaced 5 line(s) with 6 line(s)",
+                            "",
+                            dev.talos.tools.VerificationStatus.PASS)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Edited site/index.html.",
+                    messages,
+                    loopResult,
+                    ws,
+                    0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus(), outcome.finalAnswer());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus(), outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertFalse(outcome.finalAnswer().contains("Task incomplete"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("readback passed"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMismatchAfterSuccessfulWriteIsIncompleteNotReadbackOnly() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-mismatch-");
         try {

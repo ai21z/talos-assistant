@@ -133,7 +133,7 @@ if ($binDir -notin $pathEntries) {
 }
 
 Write-Host ""
-Write-Host "✅ Talos installed successfully!"
+Write-Host "Talos installed successfully!"
 Write-Host ""
 Write-Host "To verify installation:"
 Write-Host "  1. Open a new PowerShell/Command Prompt window"

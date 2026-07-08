@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 class TalosBannerTest {
     private final Config cfg = new Config();
@@ -16,9 +17,12 @@ class TalosBannerTest {
         return baos.toString(StandardCharsets.UTF_8);
     }
     private String captureCompact(Path workspace, String mode) {
+        return captureCompact(workspace, cfg, mode);
+    }
+    private String captureCompact(Path workspace, Config config, String mode) {
         var baos = new ByteArrayOutputStream();
         var ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
-        TalosBanner.printCompact(workspace, cfg, mode, ps);
+        TalosBanner.printCompact(workspace, config, mode, ps);
         return baos.toString(StandardCharsets.UTF_8);
     }
     @Test
@@ -80,7 +84,14 @@ class TalosBannerTest {
 
     @Test
     void printCompact_reports_setup_incomplete_when_managed_engine_files_are_missing() {
-        String output = captureCompact(Path.of("."), "auto");
+        Config missingFiles = new Config();
+        missingFiles.data.put("llm", Map.of("default_backend", "llama_cpp"));
+        missingFiles.data.put("engines", Map.of("llama_cpp", Map.of(
+                "model", "qwen2.5-coder-14b",
+                "server_path", "Z:/definitely-missing/llama-server.exe",
+                "model_path", "Z:/definitely-missing/qwen2.5-coder-14b.gguf")));
+
+        String output = captureCompact(Path.of("."), missingFiles, "auto");
 
         assertTrue(output.contains("setup incomplete"), output);
         assertTrue(output.contains("talos setup models"), output);

@@ -280,6 +280,10 @@ class PublicInstallPackagingContractTest {
                 "developer installer must point Windows users at the supported model setup path");
         assertTrue(script.contains("talos status --verbose"),
                 "developer installer must point users at verbose status diagnostics");
+        assertTrue(script.contains("Talos installed successfully!"),
+                "developer installer success line must be ASCII-safe in default PowerShell output");
+        assertFalse(script.contains("✅"),
+                "developer installer must not use Unicode glyphs that mojibake in default PowerShell output");
         assertFalse(script.contains("talos setup wizard"),
                 "developer Windows installer must not advertise the Ubuntu/WSL-only setup wizard");
         assertFalse(script.contains("rag-index"),
