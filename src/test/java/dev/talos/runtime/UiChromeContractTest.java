@@ -49,6 +49,12 @@ class UiChromeContractTest {
     }
 
     @Test
+    void groundingDisclosureLineIsStripped() {
+        // pins AnswerGroundingDisclosure.zeroReadWorkspaceNote via UiChrome.GROUNDING_NOTE_PREFIX.
+        assertStripped("[Grounding: answered without reading workspace files]");
+    }
+
+    @Test
     void iterationLimitNoticeIsStripped() {
         // pins ToolLoopFinalAnswerFinalizer.ITERATION_LIMIT
         String withNotice = ToolLoopFinalAnswerFinalizer.withIterationLimitNotice("Partial answer.");

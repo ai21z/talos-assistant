@@ -4537,11 +4537,79 @@ class AssistantTurnExecutorTest {
 
             assertEquals(1, countOccurrences(out.text(), "[Used "), out.text());
             assertTrue(out.text().contains(
-                    "[Used 4 tool(s): talos.list_dir, talos.read_file | 2 iteration(s)]"),
+                    "[Used 4 tool(s): talos.list_dir, talos.read_file | 2 iteration(s)"),
                     out.text());
+            assertTrue(out.text().contains("read: index.html, script.js, style.css"), out.text());
             assertTrue(out.text().contains("Night Drive landing page"), out.text());
             assertTrue(out.text().contains("style.css styles it"), out.text());
             assertFalse(out.text().contains("basic website"), out.text());
+        }
+
+        @Test
+        void workspaceExplainDisclosesUnreadRootCandidateAfterSubdirectoryOnlyReads(@TempDir Path workspace)
+                throws Exception {
+            Files.createDirectories(workspace.resolve("notes"));
+            Files.writeString(workspace.resolve("notes/project-notes.md"), """
+                    Project is preparing a public beta.
+                    Next action: clean the release notes.
+                    """);
+            Files.writeString(workspace.resolve("notes/meeting-notes.md"), """
+                    Meeting decision: smoke the installer.
+                    Next action: verify download commands.
+                    """);
+            Files.writeString(workspace.resolve("todos.md"), """
+                    HIGH PRIORITY: write the rollback runbook.
+                    HIGH PRIORITY: verify checksums.
+                    HIGH PRIORITY: publish install guide.
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"notes\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes/project-notes.md\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes/meeting-notes.md\"}}",
+                            """
+                            The top three next actions are clean the release notes, smoke the installer, and verify download commands.
+                            """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "What are the top three next actions for this project based on this workspace?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals(1, countOccurrences(out.text(), "[Used "), out.text());
+            assertTrue(out.text().contains(
+                    "read: notes/meeting-notes.md, notes/project-notes.md"), out.text());
+            assertTrue(out.text().contains(
+                    "2 of 3 workspace candidate files read, unread: todos.md"), out.text());
+            assertTrue(out.text().contains("clean the release notes"), out.text());
+        }
+
+        @Test
+        void workspaceExplainWithoutReadToolsDisclosesNoWorkspaceReads(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "Talos fixture workspace.\n");
+            var ctx = scriptedContext("This workspace appears to be a local CLI project.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("What is this project?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("answered without reading workspace files"), out.text());
         }
 
         @Test
@@ -7812,8 +7880,9 @@ class AssistantTurnExecutorTest {
                 assertTrue(out.text().contains("script.js"), out.text());
                 assertTrue(out.text().contains("does not assign visible result text"), out.text());
                 assertEquals(1, countOccurrences(out.text(), "[Used "), out.text());
-                assertTrue(out.text().contains("[Used 2 tool(s): talos.read_file | 2 iteration(s)]"),
+                assertTrue(out.text().contains("[Used 2 tool(s): talos.read_file | 2 iteration(s)"),
                         out.text());
+                assertTrue(out.text().contains("read: index.html, script.js"), out.text());
                 long tracedReadCalls = trace.events().stream()
                         .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
                         .filter(event -> "talos.read_file".equals(event.toolName()))

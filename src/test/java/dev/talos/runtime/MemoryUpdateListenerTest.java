@@ -108,6 +108,12 @@ class MemoryUpdateListenerTest {
                 MemoryUpdateListener.stripUiChromeForHistory(in));
     }
 
+    @Test void stripUiChromeRemovesGroundingDisclosureLine() {
+        String in = "Here is your answer.\n[Grounding: answered without reading workspace files]";
+        assertEquals("Here is your answer.",
+                MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
     @Test void stripUiChromeRemovesEditedAndWroteMarkers() {
         String in = "Done.\n✓ Edited foo.txt: replaced 1 line(s)\n✓ Wrote bar.txt\n✓ Created baz/";
         assertEquals("Done.", MemoryUpdateListener.stripUiChromeForHistory(in));

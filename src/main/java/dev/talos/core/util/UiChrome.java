@@ -32,6 +32,12 @@ public final class UiChrome {
     /** Second anchor for the tool summary (guards against bare "[Used" prose). */
     public static final String TOOL_SUMMARY_MARKER = "tool(s)";
 
+    /** Read-set suffix inside the tool summary line. */
+    public static final String TOOL_SUMMARY_READ_PREFIX = " | read: ";
+
+    /** Workspace grounding note line for no-tool workspace answers. */
+    public static final String GROUNDING_NOTE_PREFIX = "[Grounding: ";
+
     /** Tool-call budget notice: {@code [Tool-call limit reached. ...]}. */
     public static final String TOOL_CALL_LIMIT_PREFIX = "[Tool-call limit reached";
 

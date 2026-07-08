@@ -97,8 +97,9 @@ class InspectCompletenessRetryTest {
         assertEquals(2, result.loopResult().toolsInvoked());
         assertEquals(2, result.loopResult().iterations());
         assertEquals(1, countOccurrences(result.extraSummary(), "[Used "));
-        assertTrue(result.extraSummary().contains("[Used 2 tool(s): talos.read_file | 2 iteration(s)]"),
+        assertTrue(result.extraSummary().contains("[Used 2 tool(s): talos.read_file | 2 iteration(s)"),
                 result.extraSummary());
+        assertTrue(result.extraSummary().contains("read: index.html, script.js"), result.extraSummary());
         String prompt = retryMessages.get().get(3).content();
         assertTrue(prompt.contains("You started diagnosing the workspace"), prompt);
         assertTrue(prompt.contains("Read these files now before answering: script.js"), prompt);

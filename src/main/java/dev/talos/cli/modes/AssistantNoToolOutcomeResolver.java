@@ -119,7 +119,8 @@ final class AssistantNoToolOutcomeResolver {
                             readEvidenceHandoff.loopResult(),
                             0,
                             false),
-                    readEvidenceHandoff.extraSummary());
+                    AnswerGroundingDisclosure.toolLoopSummary(
+                            readEvidenceHandoff.loopResult(), safePlan, workspace, messages));
         }
 
         ReadOnlyInspectionRetry.Result inspectionRetry = ReadOnlyInspectionRetry.retryIfNeeded(
@@ -139,14 +140,15 @@ final class AssistantNoToolOutcomeResolver {
                             inspectionRetry.loopResult(),
                             0,
                             false),
-                    inspectionRetry.extraSummary());
+                    AnswerGroundingDisclosure.toolLoopSummary(
+                            inspectionRetry.loopResult(), safePlan, workspace, messages));
         }
 
         return new Resolution(
                 noToolAnswerShaper.shape(
                         inspectionRetry.answer(),
                         mutationRetry.actionObligationFailed()),
-                null);
+                AnswerGroundingDisclosure.zeroReadWorkspaceNote(safePlan));
     }
 
     private static CurrentTurnPlan safePlan(

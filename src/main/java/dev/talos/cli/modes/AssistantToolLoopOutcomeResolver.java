@@ -105,19 +105,26 @@ final class AssistantToolLoopOutcomeResolver {
         return new Resolution(
                 finalAnswer,
                 joinExtraSummaries(
-                        visibleToolLoopSummary(loopResult, mutationRetry, inspectRetry),
+                        visibleToolLoopSummary(loopResult, mutationRetry, inspectRetry, safePlan, workspace, messages),
                         evidenceRecovery.extraSummary()));
     }
 
     private static String visibleToolLoopSummary(
             ToolCallLoop.LoopResult loopResult,
             MissingMutationRetry.Result mutationRetry,
-            InspectCompletenessRetry.Result inspectRetry
+            InspectCompletenessRetry.Result inspectRetry,
+            CurrentTurnPlan plan,
+            Path workspace,
+            List<ChatMessage> messages
     ) {
-        String baseSummary = loopResult == null ? null : loopResult.summary();
+        String baseSummary = loopResult == null
+                ? null
+                : AnswerGroundingDisclosure.toolLoopSummary(loopResult, plan, workspace, messages);
         String mutationRetrySummary = mutationRetry == null ? null : mutationRetry.extraSummary();
         if (inspectRetry != null && inspectRetry.loopResult() != null) {
-            return joinExtraSummaries(mutationRetrySummary, inspectRetry.extraSummary());
+            String inspectSummary = AnswerGroundingDisclosure.toolLoopSummary(
+                    inspectRetry.loopResult(), plan, workspace, messages);
+            return joinExtraSummaries(mutationRetrySummary, inspectSummary);
         }
         String withMutationRetry = joinExtraSummaries(baseSummary, mutationRetrySummary);
         return joinExtraSummaries(withMutationRetry, inspectRetry == null ? null : inspectRetry.extraSummary());
