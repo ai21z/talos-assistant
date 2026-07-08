@@ -2,6 +2,7 @@ package dev.talos.cli.doctor;
 
 import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
+import dev.talos.engine.llamacpp.LlamaCppLogEvidence;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +16,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -224,7 +226,84 @@ class DoctorProbesTest {
 
             assertEquals(ProbeResult.Status.PASS, result.status());
             assertTrue(result.detail().contains("end-to-end model smoke verified"), result.detail());
+            assertTrue(result.detail().contains("rates unmeasured"), result.detail());
             assertFalse(result.detail().contains("slow"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeWarnsWhenMeasuredRatesProjectSlowAgentTurnEvenIfSmokeIsFast() throws IOException {
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+            cfg.data.put("limits", Map.of("llm_timeout_ms", 300_000L));
+            LlamaCppLogEvidence rates = LlamaCppLogEvidence.parse("""
+                    0.40.000.000 I slot print_timing: id  0 | task 7 | prompt eval time =   50000.00 ms /  4000 tokens (   12.50 ms per token,    80.00 tokens per second)
+                    3.17.254.000 I slot print_timing: id  0 | task 7 |        eval time =  137254.90 ms /   700 tokens (  196.08 ms per token,     5.10 tokens per second)
+                    """);
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    (ctx, preflight) -> rates).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("prompt eval 80.0 tok/s"), result.detail());
+            assertTrue(result.detail().contains("generation 5.1 tok/s"), result.detail());
+            assertTrue(result.detail().contains("reference turn"), result.detail());
+            assertTrue(result.detail().contains("4,000 prompt"), result.detail());
+            assertTrue(result.detail().contains("700 generated"), result.detail());
+            assertTrue(result.detail().contains("50% of limits.llm_timeout_ms"), result.detail());
+            assertTrue(result.detail().contains("GPU acceleration"), result.detail());
+            assertTrue(result.detail().contains("smaller profile"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeRunsBoundedRateSampleWhenInitialSmokeLogHasNoUsableGenerationRate() throws IOException {
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls);
+        AtomicInteger evidenceReads = new AtomicInteger();
+        LlamaCppLogEvidence rates = LlamaCppLogEvidence.parse("""
+                0.40.000.000 I slot print_timing: id  0 | task 7 | prompt eval time =   50000.00 ms /  4000 tokens (   12.50 ms per token,    80.00 tokens per second)
+                3.17.254.000 I slot print_timing: id  0 | task 7 |        eval time =  137254.90 ms /   700 tokens (  196.08 ms per token,     5.10 tokens per second)
+                """);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    new ServerProbe.TimingEvidenceSource() {
+                        @Override
+                        public LlamaCppLogEvidence read(DoctorContext ctx, dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return evidenceReads.incrementAndGet() == 1
+                                    ? LlamaCppLogEvidence.parse("")
+                                    : rates;
+                        }
+
+                        @Override
+                        public boolean canImproveAfterSample(DoctorContext ctx, dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return true;
+                        }
+                    }).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("prompt eval 80.0 tok/s"), result.detail());
+            assertTrue(chatCalls.get() >= 2, "doctor --start should run a second bounded sample when rates are absent");
+            assertTrue(evidenceReads.get() >= 2, "doctor should re-read timing evidence after the bounded sample");
         } finally {
             server.stop(0);
         }
@@ -428,8 +507,15 @@ class DoctorProbesTest {
     }
 
     private static HttpServer startChatServer(String reply, Duration responseDelay) throws IOException {
+        return startChatServer(reply, responseDelay, null);
+    }
+
+    private static HttpServer startChatServer(String reply, Duration responseDelay, AtomicInteger calls) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
+            if (calls != null) {
+                calls.incrementAndGet();
+            }
             if (responseDelay != null && !responseDelay.isZero() && !responseDelay.isNegative()) {
                 try {
                     Thread.sleep(responseDelay.toMillis());
