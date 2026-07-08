@@ -44,29 +44,15 @@ public final class ServerProbe implements DoctorProbe {
     private static final int MIN_PROMPT_RATE_SAMPLE_TOKENS = 256;
     private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
     private static final double SLOW_PROJECTION_TIMEOUT_FRACTION = 0.50d;
+    private static final int RATE_SAMPLE_CONTEXT_REPETITIONS = 96;
+    private static final String RATE_SAMPLE_CONTEXT_SENTENCE = "Local workspace assistant measurement context. ";
     private static final String RATE_SAMPLE_PROMPT = """
             This diagnostic prompt exists only to measure local llama.cpp throughput with a representative prompt size.
             Read the repeated neutral context below, do not summarize it, and then reply with the word talos repeated
             exactly 80 times, separated by spaces. No numbering, no punctuation.
 
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            Local workspace assistant measurement context. Local workspace assistant measurement context.
-            """;
+            %s
+            """.formatted(RATE_SAMPLE_CONTEXT_SENTENCE.repeat(RATE_SAMPLE_CONTEXT_REPETITIONS));
 
     private final boolean startServer;
     private final Duration slowSmokeWarningThreshold;

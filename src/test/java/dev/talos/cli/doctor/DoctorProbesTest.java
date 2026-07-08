@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -378,6 +379,44 @@ class DoctorProbesTest {
     }
 
     @Test
+    void boundedRateSamplePromptHasWideNeutralContextMargin() throws IOException {
+        AtomicInteger chatCalls = new AtomicInteger();
+        List<String> requestBodies = new CopyOnWriteArrayList<>();
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls, requestBodies);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+
+            new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    new ServerProbe.TimingEvidenceSource() {
+                        @Override
+                        public LlamaCppLogEvidence read(DoctorContext ctx, dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return LlamaCppLogEvidence.parse("");
+                        }
+
+                        @Override
+                        public boolean canImproveAfterSample(DoctorContext ctx, dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return true;
+                        }
+                    }).run(ctx(cfg));
+
+            assertTrue(requestBodies.size() >= 2, "doctor --start should send smoke plus bounded rate sample");
+            long neutralContextRepeats = countOccurrences(
+                    requestBodies.get(1),
+                    "Local workspace assistant measurement context.");
+            assertTrue(neutralContextRepeats >= 80,
+                    "rate sample prompt needs broad tokenization margin, repeats=" + neutralContextRepeats);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void startModeWarnsWhenSuccessfulModelSmokeIsSlow() throws IOException {
         HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ofMillis(60));
         try {
@@ -579,10 +618,21 @@ class DoctorProbesTest {
     }
 
     private static HttpServer startChatServer(String reply, Duration responseDelay, AtomicInteger calls) throws IOException {
+        return startChatServer(reply, responseDelay, calls, null);
+    }
+
+    private static HttpServer startChatServer(
+            String reply,
+            Duration responseDelay,
+            AtomicInteger calls,
+            List<String> requestBodies) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
             if (calls != null) {
                 calls.incrementAndGet();
+            }
+            if (requestBodies != null) {
+                requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             }
             if (responseDelay != null && !responseDelay.isZero() && !responseDelay.isNegative()) {
                 try {
@@ -600,6 +650,16 @@ class DoctorProbesTest {
         });
         server.start();
         return server;
+    }
+
+    private static long countOccurrences(String text, String needle) {
+        long count = 0;
+        int index = 0;
+        while ((index = text.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 
     private static int freePort() throws IOException {
