@@ -35,4 +35,39 @@ class TopLevelStatusCmdTest {
         assertTrue(output.contains("Backend     : ollama"));
         assertTrue(output.contains("Ollama host : http://127.0.0.1:11434"));
     }
+
+    @Test
+    void verboseEngineStatusShowsConfiguredLlamaCppModelPathFilename() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "custom-agent")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "custom-agent",
+                        "model_path", "D:/models/qwen2.5-coder-7b-instruct-q4_k_m.gguf")))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Chat model  : custom-agent"), output);
+        assertTrue(output.contains("Model file  : qwen2.5-coder-7b-instruct-q4_k_m.gguf"), output);
+    }
+
+    @Test
+    void verboseEngineStatusDoesNotExposeMalformedConfiguredModelPath() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "custom-agent")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "custom-agent",
+                        "model_path", "C:/Users/arisz/private-secret\u0000/model.gguf")))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Chat model  : custom-agent"), output);
+        assertFalse(output.contains("Model file"), output);
+        assertFalse(output.contains("private-secret"), output);
+    }
 }

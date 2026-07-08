@@ -78,6 +78,19 @@ class PendingActionObligationBreachGuardTest {
     }
 
     @Test
+    void compactTargetRepairAcceptsWriteFileAliasForPendingTarget() {
+        PendingActionObligation obligation =
+                PendingActionObligation.oldStringMissTargets(List.of("README.md"));
+        PendingActionObligationBreachGuard.Decision decision =
+                PendingActionObligationBreachGuard.assess(
+                        obligation,
+                        List.of(call("file_utils:write_file", "README.md")));
+
+        assertFalse(decision.breach(), decision.detail());
+        assertFalse(decision.deferToPolicy());
+    }
+
+    @Test
     void loopStateDelegatesInvalidToolClassificationToGuard() throws Exception {
         String loopState = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/LoopState.java"));

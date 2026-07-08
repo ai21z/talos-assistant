@@ -94,7 +94,7 @@ public final class MutationFailureAnswerRenderer {
 
     public static boolean containsMutationClaim(String answer) {
         if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase();
+        String lower = answer.toLowerCase(Locale.ROOT);
         for (String marker : MUTATION_CLAIM_MARKERS) {
             int start = lower.indexOf(marker);
             while (start >= 0) {

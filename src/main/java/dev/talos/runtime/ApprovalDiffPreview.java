@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import com.github.difflib.DiffUtils;
 import com.github.difflib.UnifiedDiffUtils;
 import com.github.difflib.patch.Patch;
+import dev.talos.core.util.TextReplacement;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 
@@ -124,14 +125,14 @@ public final class ApprovalDiffPreview {
                 return Preview.skippedBecause("missing-old-string");
             }
             String existing = readDiffableContent(target);
-            int idx = existing.indexOf(oldString);
-            if (idx < 0) return Preview.skippedBecause("old-string-not-found");
-            if (existing.indexOf(oldString, idx + 1) >= 0) {
+            TextReplacement.Match match = TextReplacement.findUniqueMatch(existing, oldString, newString);
+            if (match.count() == 0) return Preview.skippedBecause("old-string-not-found");
+            if (match.count() > 1) {
                 return Preview.skippedBecause("ambiguous-old-string");
             }
-            String updated = existing.substring(0, idx)
-                    + (newString == null ? "" : newString)
-                    + existing.substring(idx + oldString.length());
+            String updated = existing.substring(0, match.startRaw())
+                    + match.replacement()
+                    + existing.substring(match.endRaw());
             return render(existing, updated);
         } catch (SkipException e) {
             return Preview.skippedBecause(e.reason);

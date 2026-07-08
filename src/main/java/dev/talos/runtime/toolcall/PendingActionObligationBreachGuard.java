@@ -166,7 +166,7 @@ final class PendingActionObligationBreachGuard {
         if (normalizedTargets.isEmpty()) return false;
         for (ToolCall call : calls) {
             if (call == null) continue;
-            String toolName = call.toolName();
+            String toolName = call.canonicalToolName();
             if (!"talos.write_file".equals(toolName) && !"talos.edit_file".equals(toolName)) continue;
             String path = ToolCallSupport.normalizePath(call.param("path", ""));
             if (!path.isBlank() && normalizedTargets.contains(path)) {
@@ -211,7 +211,7 @@ final class PendingActionObligationBreachGuard {
         Set<String> normalizedTargets = normalizedTargets(targets);
         if (normalizedTargets.isEmpty()) return false;
         for (ToolCall call : calls) {
-            if (call == null || !"talos.write_file".equals(call.toolName())) continue;
+            if (call == null || !"talos.write_file".equals(call.canonicalToolName())) continue;
             String path = ToolCallSupport.normalizePath(call.param("path", ""));
             if (!path.isBlank() && normalizedTargets.contains(path)) {
                 return true;

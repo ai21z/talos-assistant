@@ -259,6 +259,18 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void modelSourceNoteDoesNotExposeMalformedConfiguredModelPath() {
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "model", "custom-agent",
+                "model_path", "C:/Users/arisz/private-secret\u0000/model.gguf"));
+
+        LlamaCppConfig config = LlamaCppConfig.from(cfg);
+
+        assertEquals("", config.modelSourceNote());
+    }
+
+    @Test
     void connectOnlyKeepsConfiguredContextWindowForExternalServer() {
         Config cfg = config(Map.of(
                 "mode", "connect_only",

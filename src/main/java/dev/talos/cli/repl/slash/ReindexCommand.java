@@ -2,17 +2,21 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
-import dev.talos.cli.ui.AnsiColor;
+import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.TerminalCapabilities;
 import dev.talos.core.cache.CacheDb;
 import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.index.IndexingStats;
 
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.List;
 
 public final class ReindexCommand implements Command {
     private final Path workspace;
     private final Runnable postReindexHook;
+    private final PrintStream progressOut;
+    private final TerminalCapabilities terminalCapabilities;
 
     public ReindexCommand(Path workspace) { this(workspace, null); }
 
@@ -22,8 +26,17 @@ public final class ReindexCommand implements Command {
      *                         (e.g. to invalidate the workspace symbol cache)
      */
     public ReindexCommand(Path workspace, Runnable postReindexHook) {
+        this(workspace, postReindexHook, System.out, TerminalCapabilities.detectDefault());
+    }
+
+    public ReindexCommand(Path workspace, Runnable postReindexHook, PrintStream progressOut,
+                          TerminalCapabilities terminalCapabilities) {
         this.workspace = workspace;
         this.postReindexHook = postReindexHook;
+        this.progressOut = progressOut == null ? System.out : progressOut;
+        this.terminalCapabilities = terminalCapabilities == null
+                ? TerminalCapabilities.detectDefault()
+                : terminalCapabilities;
     }
 
     @Override public CommandSpec spec() {
@@ -85,19 +98,17 @@ public final class ReindexCommand implements Command {
             // Handle --full flag or regular reindex
             boolean forceFullReindex = args.equals("--full");
 
-            // Build a progress listener for live terminal feedback
-            boolean interactive = System.console() != null;
+            // Build a progress listener for live terminal feedback. Interactivity
+            // follows the REPL-selected terminal stream, not System.console(),
+            // so JLine-owned sessions keep one output owner.
+            boolean interactive = terminalCapabilities.interactive();
+            CliTheme progressTheme = CliTheme.forCapabilities(terminalCapabilities);
             IndexProgressListener progress = interactive ? (completed, total, file) -> {
-                int pct = total > 0 ? (completed * 100) / total : 0;
-                String display = file.length() > 40
-                        ? "…" + file.substring(file.length() - 39) : file;
-                System.out.print("\r  " + AnsiColor.DIM + "Indexing: "
-                        + completed + "/" + total + " (" + pct + "%)  " + display
-                        + AnsiColor.RESET + "          ");
-                System.out.flush();
+                progressOut.print(ReindexProgressRenderer.progressLine(completed, total, file, progressTheme));
+                progressOut.flush();
                 if (completed >= total) {
-                    System.out.print("\r" + " ".repeat(80) + "\r");
-                    System.out.flush();
+                    progressOut.print(ReindexProgressRenderer.clearLine());
+                    progressOut.flush();
                 }
             } : IndexProgressListener.NOOP;
 

@@ -122,6 +122,72 @@ class FileEditToolTest {
     }
 
     @Test
+    void replaceMultiLineBlockCopiedFromReadFileOnCrLfFile() throws IOException {
+        Files.writeString(workspace.resolve("windows.txt"),
+                "alpha\r\nbeta\r\ngamma\r\n");
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "windows.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), "CRLF file should accept LF text shown by read_file: " + r.errorMessage());
+        assertEquals("alpha\r\nBETA\r\ngamma\r\n", Files.readString(workspace.resolve("windows.txt")));
+    }
+
+    @Test
+    void normalizedCrLfMatchRejectsByteIdenticalReplacement() throws IOException {
+        Path file = workspace.resolve("windows-noop.txt");
+        String original = "alpha\r\nbeta\r\ngamma\r\n";
+        Files.writeString(file, original);
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "windows-noop.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\r\nbeta"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.INVALID_PARAMS, r.error().code());
+        assertTrue(r.errorMessage().contains("no change"), r.errorMessage());
+        assertEquals(original, Files.readString(file));
+    }
+
+    @Test
+    void normalizedCrLfMatchesStillRejectAmbiguousOldString() throws IOException {
+        Path file = workspace.resolve("windows-dupes.txt");
+        String original = "alpha\r\nbeta\r\nalpha\r\nbeta\r\n";
+        Files.writeString(file, original);
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "windows-dupes.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.INVALID_PARAMS, r.error().code());
+        assertTrue(r.errorMessage().contains("2 times"), r.errorMessage());
+        assertEquals(original, Files.readString(file));
+    }
+
+    @Test
+    void replaceMultiLineBlockCopiedFromReadFileOnCrOnlyFile() throws IOException {
+        Files.writeString(workspace.resolve("classic.txt"),
+                "alpha\rbeta\rgamma\r");
+
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "classic.txt",
+                "old_string", "alpha\nbeta",
+                "new_string", "alpha\nBETA"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), "CR-only file should preserve CR line endings: " + r.errorMessage());
+        assertEquals("alpha\rBETA\rgamma\r", Files.readString(workspace.resolve("classic.txt")));
+    }
+
+    @Test
     void deleteByReplacingWithEmpty() throws IOException {
         ToolCall call = new ToolCall("talos.edit_file", Map.of(
                 "path", "config.yaml",

@@ -5,6 +5,7 @@ import dev.talos.runtime.ApprovalDiffPreview;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ApprovalResponse;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.checkpoint.CheckpointCaptureResult;
 import dev.talos.runtime.checkpoint.CheckpointDetail;
 import dev.talos.runtime.checkpoint.CheckpointRestoreResult;
 import dev.talos.runtime.checkpoint.CheckpointService;
@@ -76,13 +77,31 @@ public final class CheckpointCommand implements Command {
             return new Result.Info("Checkpoint restore cancelled. No file changed.");
         }
 
+        CheckpointDetail detail = checkpointService.describe(workspace, checkpointId).orElse(null);
+        if (detail == null || detail.entries().isEmpty()) {
+            return new Result.Error("Checkpoint restore aborted - checkpoint details are unavailable. "
+                    + "No file changed.", 500);
+        }
+        List<String> affectedPaths = detail.entries().stream()
+                .map(CheckpointDetail.Entry::relativePath)
+                .filter(path -> !path.isBlank())
+                .toList();
+        CheckpointCaptureResult safety = checkpointService.captureBeforeRestore(
+                workspace, ctx.cfg(), affectedPaths, "restore of " + checkpointId, "", 0);
+        if (!safety.success() || safety.skipped()) {
+            return new Result.Error("Checkpoint restore aborted - the pre-restore safety checkpoint failed: "
+                    + safety.message() + " No file changed.", 500);
+        }
+
         CheckpointRestoreResult restore = checkpointService.restore(workspace, checkpointId);
         if (!restore.success()) {
-            return new Result.Error("Checkpoint restore failed: " + restore.message(), 500);
+            return new Result.Error("Checkpoint restore failed: " + restore.message()
+                    + " The pre-restore state is saved as " + safety.checkpointId() + ".", 500);
         }
         return new Result.Ok("Checkpoint restored: " + checkpointId
                 + " (" + restore.restoredFiles() + " restored, "
-                + restore.deletedFiles() + " deleted)");
+                + restore.deletedFiles() + " deleted)."
+                + " Pre-restore state saved as " + safety.checkpointId() + ".");
     }
 
     /** T794: the timeline - newest first, with time, turn, trigger, and size. */

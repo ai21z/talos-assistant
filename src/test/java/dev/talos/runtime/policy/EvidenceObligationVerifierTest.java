@@ -38,13 +38,29 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
-    void readTargetExplicitFailureSatisfiesRequiredTarget() {
+    void readTargetExplicitFailureDoesNotSatisfyRequiredTarget() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.READ_TARGET_REQUIRED,
                 Set.of("README.md"),
                 List.of(new ToolCallLoop.ToolOutcome(
                         "talos.read_file", "README.md", false, false, false,
                         "", "README.md was not found.", null, ToolError.NOT_FOUND)));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void readTargetAcceptsSuccessfulTextFallbackForUnsupportedSameStemDocument() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                Set.of("report.docx", "report.txt"),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "report.docx", false, false, false,
+                                "", "Unsupported binary document format.", null, ToolError.UNSUPPORTED_FORMAT),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "report.txt", true, false, false,
+                                "Converted report text fixture.", "")));
 
         assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
     }
@@ -230,6 +246,54 @@ class EvidenceObligationVerifierTest {
                         "index.html\nscripts.js\nstyles.css\n", "")));
 
         assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void pathExistenceRejectsParentDirectoryListingThatDoesNotNameTarget() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("docs/target.md"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", "docs", true, false, false,
+                        "README.md\nnotes.md\n", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void pathExistenceAcceptsDirectTargetNotFoundReadAsNegativeEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("docs/target.md"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "docs/target.md", false, false, false,
+                        "", "docs/target.md was not found.", null, ToolError.NOT_FOUND)));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void pathExistenceRejectsGenericFailedDirectTargetRead() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("docs/target.md"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "docs/target.md", false, false, false,
+                        "", "Read failed.", null, ToolError.INTERNAL_ERROR)));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void pathExistenceBlocksDeniedDirectTargetRead() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("docs/target.md"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "docs/target.md", false, false, true,
+                        "", "User denied read.", null, ToolError.DENIED)));
+
+        assertEquals(EvidenceObligationVerifier.Status.BLOCKED, result.status());
     }
 
     @Test

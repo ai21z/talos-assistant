@@ -6,13 +6,23 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Spliterators;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.StreamSupport;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class LlmClientResolverSeamTest {
 
@@ -41,7 +51,80 @@ final class LlmClientResolverSeamTest {
         assertEquals(1, resolver.chatCalls.get());
     }
 
+    @Test
+    void configured_llm_timeout_reaches_engine_chat_requests() {
+        RecordingResolver resolver = new RecordingResolver();
+        LlmClient client = new LlmClient(engineConfigWithTimeout(240_000L), resolver);
+        List<ChatMessage> messages = List.of(ChatMessage.user("what is this workspace?"));
+
+        client.chatStreamFull(messages, null);
+        assertEquals(Duration.ofMillis(240_000L), resolver.requests.get(0).timeout);
+
+        client.chatFull(messages);
+        assertEquals(Duration.ofMillis(240_000L), resolver.requests.get(1).timeout);
+    }
+
+    @Test
+    void locally_closed_stream_read_abort_does_not_start_retry_generation() throws Exception {
+        LocallyClosedStreamResolver resolver = new LocallyClosedStreamResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        StringBuilder emitted = new StringBuilder();
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("slow local generation")),
+                emitted::append,
+                150L,
+                List.of());
+
+        assertNotNull(result);
+        assertEquals(1, resolver.chatCalls.get(), "local stream close must not retry immediately");
+        assertFalse(resolver.retryStarted.await(900, TimeUnit.MILLISECONDS),
+                "Talos-initiated stream close must not start a second generation");
+        assertEquals("partial", emitted.toString(),
+                "retry output must not be emitted after the local abort");
+    }
+
+    @Test
+    void external_stream_transient_still_retries_generation() {
+        ExternalTransientThenSuccessResolver resolver = new ExternalTransientThenSuccessResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("temporary backend fault")),
+                null,
+                5_000L,
+                List.of());
+
+        assertEquals("retry-ok", result.text());
+        assertEquals(2, resolver.chatCalls.get(),
+                "external transient failure should still use the retry policy");
+    }
+
+    @Test
+    void external_stream_transient_after_visible_output_does_not_retry_or_duplicate() {
+        ExternalTransientAfterVisibleOutputResolver resolver =
+                new ExternalTransientAfterVisibleOutputResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        StringBuilder emitted = new StringBuilder();
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("stream then drop")),
+                emitted::append,
+                5_000L,
+                List.of());
+
+        assertEquals(1, resolver.chatCalls.get(),
+                "retry after visible output would duplicate the streamed prefix");
+        assertEquals("prefix", emitted.toString());
+        assertTrue(result.text().contains("[turn aborted"), result.text());
+        assertFalse(result.text().contains("retry-output"), result.text());
+    }
+
     private static Config engineConfig() {
+        return engineConfigWithTimeout(null);
+    }
+
+    private static Config engineConfigWithTimeout(Long timeoutMs) {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
         llm.put("transport", "engine");
@@ -51,6 +134,11 @@ final class LlmClientResolverSeamTest {
         LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
         ollama.put("model", "qwen2.5-coder:14b");
         cfg.data.put("ollama", ollama);
+        if (timeoutMs != null) {
+            LinkedHashMap<String, Object> limits = new LinkedHashMap<>();
+            limits.put("llm_timeout_ms", timeoutMs);
+            cfg.data.put("limits", limits);
+        }
         return cfg;
     }
 
@@ -59,6 +147,7 @@ final class LlmClientResolverSeamTest {
         private volatile String selectedBackend;
         private volatile String selectedModel;
         private volatile ChatRequest lastRequest;
+        private final List<ChatRequest> requests = new ArrayList<>();
 
         @Override
         public void select(String backend, String model) {
@@ -69,8 +158,140 @@ final class LlmClientResolverSeamTest {
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             this.lastRequest = request;
+            this.requests.add(request);
             chatCalls.incrementAndGet();
             return Stream.of(TokenChunk.of("reply"), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class LocallyClosedStreamResolver implements LlmEngineResolver {
+        private final AtomicInteger chatCalls = new AtomicInteger();
+        private final CountDownLatch retryStarted = new CountDownLatch(1);
+        private final AtomicBoolean firstStreamClosed = new AtomicBoolean();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            int call = chatCalls.incrementAndGet();
+            if (call > 1) {
+                retryStarted.countDown();
+                return Stream.of(TokenChunk.of("retry-output"), TokenChunk.eos());
+            }
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    while (!firstStreamClosed.get()) {
+                        try {
+                            Thread.sleep(10L);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                    throw new dev.talos.spi.EngineException.Transient(
+                            "Stream read aborted during generation",
+                            new java.io.IOException("stream closed by Talos"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    return TokenChunk.of("partial");
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
+                    .onClose(() -> firstStreamClosed.set(true));
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class ExternalTransientThenSuccessResolver implements LlmEngineResolver {
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            int call = chatCalls.incrementAndGet();
+            if (call == 1) {
+                Iterator<TokenChunk> iterator = new Iterator<>() {
+                    @Override
+                    public boolean hasNext() {
+                        throw new dev.talos.spi.EngineException.Transient(
+                                "temporary stream transport failure",
+                                new java.io.IOException("external socket timeout"),
+                                408);
+                    }
+
+                    @Override
+                    public TokenChunk next() {
+                        throw new java.util.NoSuchElementException();
+                    }
+                };
+                return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+            }
+            return Stream.of(TokenChunk.of("retry-ok"), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class ExternalTransientAfterVisibleOutputResolver implements LlmEngineResolver {
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            int call = chatCalls.incrementAndGet();
+            if (call > 1) {
+                return Stream.of(TokenChunk.of("retry-output"), TokenChunk.eos());
+            }
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    throw new dev.talos.spi.EngineException.Transient(
+                            "external stream dropped after visible output",
+                            new java.io.IOException("connection reset after prefix"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    return TokenChunk.of("prefix");
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
         }
 
         @Override

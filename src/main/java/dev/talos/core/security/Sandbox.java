@@ -23,9 +23,15 @@ public final class Sandbox {
     private final boolean enabled;
     private final List<String> allow;
     private final List<String> deny;
+    private final PathResolver existingPathResolver;
 
     @SuppressWarnings("unchecked")
     public Sandbox(Path workspace, Map<String,Object> cfg) {
+        this(workspace, cfg, Sandbox::resolveExistingPath);
+    }
+
+    @SuppressWarnings("unchecked")
+    Sandbox(Path workspace, Map<String,Object> cfg, PathResolver existingPathResolver) {
         Path resolvedWorkspace;
         try {
             resolvedWorkspace = (workspace == null ? Path.of(".") : workspace)
@@ -49,6 +55,9 @@ public final class Sandbox {
         }
         this.allow = a;
         this.deny  = d;
+        this.existingPathResolver = existingPathResolver == null
+                ? Sandbox::resolveExistingPath
+                : existingPathResolver;
     }
 
     /** Quick on/off for callers. */
@@ -79,14 +88,12 @@ public final class Sandbox {
         Path real;
         try {
             if (Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
-                // first, avoid link trickery; then resolve fully
-                p.toRealPath(LinkOption.NOFOLLOW_LINKS);
-                real = p.toRealPath();
+                real = existingPathResolver.resolve(p);
             } else {
                 real = resolveMissingPath(p);
             }
         } catch (Exception e) {
-            real = p.toAbsolutePath().normalize();
+            return Decision.deny("path cannot be safely resolved");
         }
 
         // 1) must live under workspace
@@ -144,6 +151,12 @@ public final class Sandbox {
         return existsOrSelf(cursor).resolve(suffix).normalize();
     }
 
+    private static Path resolveExistingPath(Path p) throws Exception {
+        // first, avoid link trickery; then resolve fully
+        p.toRealPath(LinkOption.NOFOLLOW_LINKS);
+        return p.toRealPath();
+    }
+
     private static Path existsOrSelf(Path p) {
         try { return Files.exists(p, LinkOption.NOFOLLOW_LINKS) ? p.toRealPath() : p.toAbsolutePath().normalize(); }
         catch (Exception e) { return p.toAbsolutePath().normalize(); }
@@ -160,5 +173,10 @@ public final class Sandbox {
     private record Decision(boolean allowed, String reason) {
         static Decision allow() { return new Decision(true, ""); }
         static Decision deny(String why) { return new Decision(false, why == null ? "denied" : why); }
+    }
+
+    @FunctionalInterface
+    interface PathResolver {
+        Path resolve(Path path) throws Exception;
     }
 }

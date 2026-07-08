@@ -17,12 +17,28 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.Authenticator;
+import java.net.CookieHandler;
 import java.net.InetSocketAddress;
+import java.net.ProxySelector;
+import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -319,6 +335,23 @@ class CompatChatClientTest {
     }
 
     @Test
+    void chatStreamReadAbortThrowsTransientNotMalformedResponse() {
+        CompatChatClient client = new CompatChatClient(
+                "http://127.0.0.1:18115",
+                "agent.gguf",
+                new ReadAbortHttpClient(),
+                MAPPER);
+
+        EngineException.Transient error = assertThrows(
+                EngineException.Transient.class,
+                () -> client.chatStream(requestForStream()).toList());
+
+        assertEquals(408, error.httpStatus());
+        assertTrue(error.getMessage().contains("Stream read aborted"), error.getMessage());
+        assertTrue(error.guidance().contains("smaller model"), error.guidance());
+    }
+
+    @Test
     void chatStreamNonStreamingParsesToolCallsFromNonStreamResponse() throws Exception {
         AtomicReference<String> bodyRef = new AtomicReference<>("");
         HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
@@ -419,6 +452,120 @@ class CompatChatClientTest {
     private static CompatChatClient client(HttpServer server) {
         String host = "http://127.0.0.1:" + server.getAddress().getPort();
         return new CompatChatClient(host, "agent.gguf", HttpClient.newHttpClient(), MAPPER);
+    }
+
+    private static final class ReadAbortHttpClient extends HttpClient {
+        @Override
+        public Optional<CookieHandler> cookieHandler() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<Duration> connectTimeout() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Redirect followRedirects() {
+            return Redirect.NEVER;
+        }
+
+        @Override
+        public Optional<ProxySelector> proxy() {
+            return Optional.empty();
+        }
+
+        @Override
+        public SSLContext sslContext() {
+            return null;
+        }
+
+        @Override
+        public SSLParameters sslParameters() {
+            return new SSLParameters();
+        }
+
+        @Override
+        public Optional<Authenticator> authenticator() {
+            return Optional.empty();
+        }
+
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
+        }
+
+        @Override
+        public Optional<Executor> executor() {
+            return Optional.empty();
+        }
+
+        @Override
+        public <T> HttpResponse<T> send(
+                HttpRequest request,
+                HttpResponse.BodyHandler<T> responseBodyHandler) {
+            @SuppressWarnings("unchecked")
+            T body = (T) new ReadAbortInputStream();
+            return new StaticHttpResponse<>(request, 200, body);
+        }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+                HttpRequest request,
+                HttpResponse.BodyHandler<T> responseBodyHandler) {
+            throw new UnsupportedOperationException("not used");
+        }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+                HttpRequest request,
+                HttpResponse.BodyHandler<T> responseBodyHandler,
+                HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+            throw new UnsupportedOperationException("not used");
+        }
+    }
+
+    private static final class ReadAbortInputStream extends InputStream {
+        @Override
+        public int read() throws IOException {
+            throw new SocketTimeoutException("Read timed out");
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            throw new SocketTimeoutException("Read timed out");
+        }
+    }
+
+    private record StaticHttpResponse<T>(
+            HttpRequest request,
+            int statusCode,
+            T body) implements HttpResponse<T> {
+
+        @Override
+        public Optional<HttpResponse<T>> previousResponse() {
+            return Optional.empty();
+        }
+
+        @Override
+        public HttpHeaders headers() {
+            return HttpHeaders.of(java.util.Map.of(), (name, value) -> true);
+        }
+
+        @Override
+        public URI uri() {
+            return request.uri();
+        }
+
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
+        }
+
+        @Override
+        public Optional<SSLSession> sslSession() {
+            return Optional.empty();
+        }
     }
 
     private static HttpServer startServer(

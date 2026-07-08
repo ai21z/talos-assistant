@@ -30,7 +30,7 @@ final class EditFilePreApprovalGuard {
             Set<String> staleRereadRequiredAtStart,
             Set<String> fullRewriteRepairTargets
     ) {
-        if (call == null || strict || !"talos.edit_file".equals(call.toolName())) return null;
+        if (call == null || strict || !"talos.edit_file".equals(call.canonicalToolName())) return null;
         String normalizedPath = normalizePath(pathHint);
         if (fullRewriteRepairTargets != null && fullRewriteRepairTargets.contains(normalizedPath)) {
             return new Decision(

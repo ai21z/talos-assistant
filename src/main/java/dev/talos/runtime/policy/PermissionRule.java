@@ -1,6 +1,7 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolRiskLevel;
 
 import java.util.List;
@@ -19,7 +20,7 @@ public record PermissionRule(
         String reason
 ) {
     public PermissionRule {
-        tools = normalizeList(tools);
+        tools = normalizeToolList(tools);
         risks = normalizeList(risks);
         phases = normalizeList(phases);
         paths = paths == null ? List.of() : paths.stream()
@@ -50,7 +51,7 @@ public record PermissionRule(
     }
 
     public boolean matches(PermissionRequest request, ResourceDecision resource) {
-        String tool = normalize(request.call() == null ? "" : request.call().toolName());
+        String tool = normalize(request.call() == null ? "" : request.call().canonicalToolName());
         ToolRiskLevel risk = request.effectiveRisk();
         ExecutionPhase phase = request.effectivePhase();
 
@@ -112,12 +113,31 @@ public record PermissionRule(
         return Pattern.compile(regex.toString(), Pattern.CASE_INSENSITIVE);
     }
 
+    private static List<String> normalizeToolList(List<String> input) {
+        if (input == null) return List.of();
+        return input.stream()
+                .filter(s -> s != null && !s.isBlank())
+                .map(PermissionRule::normalizeTool)
+                .toList();
+    }
+
     private static List<String> normalizeList(List<String> input) {
         if (input == null) return List.of();
         return input.stream()
                 .filter(s -> s != null && !s.isBlank())
                 .map(PermissionRule::normalize)
                 .toList();
+    }
+
+    private static String normalizeTool(String value) {
+        String normalized = normalize(value);
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(normalized);
+        if (decision.accepted()
+                && decision.canonicalToolName() != null
+                && !decision.canonicalToolName().isBlank()) {
+            return normalize(decision.canonicalToolName());
+        }
+        return normalized;
     }
 
     private static String normalize(String value) {

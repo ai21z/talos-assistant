@@ -47,6 +47,28 @@ class UnsupportedDocumentAnswerGuardTest {
     }
 
     @Test
+    void unsupportedDocumentReadAliasRemovesContentClaims() {
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(),
+                readOutcome(
+                        "file_utils:read_file",
+                        "brief.pdf",
+                        false,
+                        "",
+                        "Unsupported binary document format: brief.pdf (PDF).",
+                        ToolError.UNSUPPORTED_FORMAT));
+
+        String answer = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
+                "brief.pdf is empty and does not contain any readable text.",
+                loopResult);
+
+        assertTrue(answer.startsWith("[Document capability note:"), answer);
+        assertTrue(answer.contains("brief.pdf"), answer);
+        assertFalse(answer.contains("brief.pdf is empty"), answer);
+        assertFalse(answer.contains("does not contain any readable text"), answer);
+    }
+
+    @Test
     void unsupportedSearchNoMatchesClaimGetsCapabilityNote() {
         ToolCallLoop.LoopResult loopResult = loopResult(
                 List.of(ChatMessage.assistant("[tool_result: talos.grep]\nSearch was limited: skipped unsupported files.")),
@@ -68,8 +90,19 @@ class UnsupportedDocumentAnswerGuardTest {
             String errorMessage,
             String errorCode
     ) {
+        return readOutcome("talos.read_file", path, success, summary, errorMessage, errorCode);
+    }
+
+    private static ToolCallLoop.ToolOutcome readOutcome(
+            String toolName,
+            String path,
+            boolean success,
+            String summary,
+            String errorMessage,
+            String errorCode
+    ) {
         return new ToolCallLoop.ToolOutcome(
-                "talos.read_file", path, success, false, false,
+                toolName, path, success, false, false,
                 summary, errorMessage, null, errorCode);
     }
 

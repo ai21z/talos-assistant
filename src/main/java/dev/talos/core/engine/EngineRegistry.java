@@ -46,17 +46,19 @@ public final class EngineRegistry implements AutoCloseable {
         this.activeModel = runtime.model();
     }
 
-    /** Switch backend and/or model. Engine will be recreated lazily on next engine() call if backend changed. */
+    /** Switch backend and/or model. Engine will be recreated lazily on next engine() call if identity changed. */
     public synchronized void select(String backend, String model) {
         boolean backendChanged = backend != null && !backend.isBlank() && !Objects.equals(activeBackend, backend);
         boolean modelChanged   = model   != null && !model.isBlank()   && !Objects.equals(activeModel,   model);
 
         if (backendChanged) {
             activeBackend = backend;
-            closeEngine();
         }
         if (modelChanged) {
             activeModel = model;
+        }
+        if (backendChanged || modelChanged) {
+            closeEngine();
         }
     }
 

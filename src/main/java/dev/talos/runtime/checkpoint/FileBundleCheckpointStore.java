@@ -9,8 +9,10 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -216,44 +218,39 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
 
         int restored = 0;
         int deleted = 0;
-        int failed = 0;
         try {
             Map<String, Object> manifest = MAPPER.readValue(
                     Files.readString(manifestFile),
                     new TypeReference<>() {});
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> files = (List<Map<String, Object>>) manifest.getOrDefault("files", List.of());
-            for (Map<String, Object> entry : files) {
-                String rel = String.valueOf(entry.getOrDefault("relativePath", ""));
-                if (rel.isBlank()) {
-                    failed++;
-                    continue;
-                }
-                Path target = ws.resolve(rel).normalize();
-                if (!WorkspaceContainment.contains(ws, target)) {
-                    failed++;
-                    continue;
-                }
-                boolean existedBefore = Boolean.TRUE.equals(entry.get("existedBefore"));
-                if (existedBefore) {
-                    String entryType = String.valueOf(entry.getOrDefault("entryType", "FILE"));
-                    if ("DIRECTORY".equals(entryType)) {
-                        Files.createDirectories(target);
+            RestorePreflight preflight = preflightRestoreEntries(ws, dir, files);
+            if (preflight.failed() > 0) {
+                String message = preflight.failureReasons().isEmpty()
+                        ? "Checkpoint restore preflight failed."
+                        : "Checkpoint restore preflight failed: "
+                                + String.join("; ", preflight.failureReasons());
+                return CheckpointRestoreResult.partial(
+                        checkpointId,
+                        message,
+                        0,
+                        0,
+                        preflight.failed());
+            }
+            for (RestoreEntry entry : preflight.entries()) {
+                if (entry.existedBefore()) {
+                    if ("DIRECTORY".equals(entry.entryType())) {
+                        restoreDirectoryState(entry.target());
+                        Files.createDirectories(entry.target());
                         restored++;
                         continue;
                     }
-                    String blobSha = String.valueOf(entry.getOrDefault("blobSha256", ""));
-                    if (blobSha.isBlank()) {
-                        failed++;
-                        continue;
-                    }
-                    byte[] bytes = Files.readAllBytes(dir.resolve("blobs").resolve(blobSha));
-                    Path parent = target.getParent();
+                    Path parent = entry.target().getParent();
                     if (parent != null) Files.createDirectories(parent);
-                    Files.write(target, bytes);
+                    Files.write(entry.target(), entry.bytes());
                     restored++;
                 } else {
-                    deletePathIfExists(target);
+                    deletePathIfExists(entry.target());
                     deleted++;
                 }
             }
@@ -263,17 +260,70 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                     "Checkpoint restore failed: " + e.getMessage(),
                     restored,
                     deleted,
-                    failed + 1);
-        }
-        if (failed > 0) {
-            return CheckpointRestoreResult.partial(
-                    checkpointId,
-                    "Checkpoint restore partially failed.",
-                    restored,
-                    deleted,
-                    failed);
+                    1);
         }
         return CheckpointRestoreResult.success(checkpointId, restored, deleted);
+    }
+
+    private static RestorePreflight preflightRestoreEntries(
+            Path workspace,
+            Path checkpointDir,
+            List<Map<String, Object>> files
+    ) throws Exception {
+        List<RestoreEntry> entries = new ArrayList<>();
+        List<String> failureReasons = new ArrayList<>();
+        int failed = 0;
+        for (Map<String, Object> entry : files) {
+            String rel = String.valueOf(entry.getOrDefault("relativePath", ""));
+            if (rel.isBlank()) {
+                failed++;
+                failureReasons.add("blank manifest path");
+                continue;
+            }
+            Path target = workspace.resolve(rel).normalize();
+            if (!WorkspaceContainment.contains(workspace, target)) {
+                failed++;
+                failureReasons.add("manifest path escapes workspace: " + rel);
+                continue;
+            }
+            boolean existedBefore = Boolean.TRUE.equals(entry.get("existedBefore"));
+            String entryType = String.valueOf(entry.getOrDefault("entryType", "FILE"));
+            if (!existedBefore || "DIRECTORY".equals(entryType)) {
+                entries.add(new RestoreEntry(rel, target, existedBefore, entryType, null));
+                continue;
+            }
+            String blobSha = String.valueOf(entry.getOrDefault("blobSha256", ""));
+            if (blobSha.isBlank()) {
+                failed++;
+                failureReasons.add("missing blob hash for " + rel);
+                continue;
+            }
+            if (!isSha256Hex(blobSha)) {
+                failed++;
+                failureReasons.add("invalid blob sha256 for " + rel);
+                continue;
+            }
+            Path blob = checkpointDir.resolve("blobs").resolve(blobSha);
+            if (!Files.isRegularFile(blob)) {
+                failed++;
+                failureReasons.add("missing blob for " + rel);
+                continue;
+            }
+            byte[] bytes = Files.readAllBytes(blob);
+            String actualSha = sha256(bytes);
+            if (!blobSha.equalsIgnoreCase(actualSha)) {
+                failed++;
+                failureReasons.add("blob integrity mismatch for " + rel);
+                continue;
+            }
+            entries.add(new RestoreEntry(rel, target, true, entryType, bytes));
+        }
+        return new RestorePreflight(List.copyOf(entries), failed, List.copyOf(failureReasons));
+    }
+
+    private static void restoreDirectoryState(Path target) throws IOException {
+        deletePathIfExists(target);
+        Files.createDirectories(target);
     }
 
     private static void deletePathIfExists(Path target) throws IOException {
@@ -429,8 +479,21 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             return new CaptureStats(0);
         }
         if (Files.isDirectory(target)) {
-            files.add(fileEntry(rel, "DIRECTORY", true, "", 0, "DIRECTORY_RECORDED"));
             long bytes = 0;
+            try (var stream = Files.walk(target)) {
+                for (Path directory : stream
+                        .filter(Files::isDirectory)
+                        .sorted()
+                        .toList()) {
+                    files.add(fileEntry(
+                            normalizeRelative(workspace.relativize(directory)),
+                            "DIRECTORY",
+                            true,
+                            "",
+                            0,
+                            "DIRECTORY_RECORDED"));
+                }
+            }
             try (var stream = Files.walk(target)) {
                 for (Path file : stream
                         .filter(Files::isRegularFile)
@@ -458,9 +521,31 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             throw new IOException("Checkpoint target exceeds max_file_bytes: " + rel);
         }
         String blobSha = sha256(bytes);
-        Files.write(blobs.resolve(blobSha), bytes);
+        writeBlobAtomically(blobs.resolve(blobSha), bytes);
         files.add(fileEntry(rel, "FILE", true, blobSha, bytes.length, "CAPTURED"));
         return new CaptureStats(bytes.length);
+    }
+
+    private static void writeBlobAtomically(Path blob, byte[] bytes) throws Exception {
+        Path parent = blob.getParent();
+        if (parent != null) Files.createDirectories(parent);
+        if (Files.isRegularFile(blob)) {
+            byte[] existing = Files.readAllBytes(blob);
+            if (sha256(existing).equalsIgnoreCase(blob.getFileName().toString())) {
+                return;
+            }
+        }
+        Path tmp = Files.createTempFile(parent, blob.getFileName().toString(), ".tmp");
+        try {
+            Files.write(tmp, bytes);
+            try {
+                Files.move(tmp, blob, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, blob, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     private static Map<String, Object> fileEntry(
@@ -502,10 +587,28 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return relative.toString().replace('\\', '/');
     }
 
+    private static boolean isSha256Hex(String value) {
+        return value != null && value.matches("(?i)[0-9a-f]{64}");
+    }
+
     private static String sha256(byte[] bytes) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         return HexFormat.of().formatHex(digest.digest(bytes));
     }
+
+    private record RestoreEntry(
+            String relativePath,
+            Path target,
+            boolean existedBefore,
+            String entryType,
+            byte[] bytes
+    ) {}
+
+    private record RestorePreflight(
+            List<RestoreEntry> entries,
+            int failed,
+            List<String> failureReasons
+    ) {}
 
     private record CaptureStats(long byteCount) {}
 }

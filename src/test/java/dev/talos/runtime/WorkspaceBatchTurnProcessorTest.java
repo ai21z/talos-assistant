@@ -7,6 +7,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.checkpoint.CheckpointRestoreResult;
 import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.runtime.checkpoint.FileBundleCheckpointStore;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
@@ -21,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -167,6 +170,80 @@ class WorkspaceBatchTurnProcessorTest {
         assertEquals(0, approvals.get(), "protected batch mutation must be denied before approval");
         assertTrue(Files.exists(workspace.resolve("public.txt")));
         assertFalse(Files.exists(workspace.resolve(".env")));
+    }
+
+    @Test
+    void batchExtraNestedMutationOutsideExpectedTargetsIsRejectedBeforeApproval(@TempDir Path workspace) throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        TurnProcessor processor = processor(gateApproves(approvals),
+                new CheckpointService(new FileBundleCheckpointStore(workspace.resolve(".checkpoints"))));
+        Config config = config(true);
+
+        TurnUserRequestCapture.set("Create batch-one.");
+        TurnTaskContractCapture.set(new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("batch-one"),
+                Set.of(),
+                "Create batch-one.",
+                "test"));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"batch-one"},
+                          {"op":"mkdir","path":"extra"}
+                        ]
+                        """)),
+                context(workspace, config));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("extra"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertFalse(Files.exists(workspace.resolve("batch-one")));
+        assertFalse(Files.exists(workspace.resolve("extra")));
+    }
+
+    @Test
+    void batchMentioningOperationsJsonWithoutWorkspaceOperationIntentStillValidatesExpectedTargets(
+            @TempDir Path workspace
+    ) throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        TurnProcessor processor = processor(gateApproves(approvals),
+                new CheckpointService(new FileBundleCheckpointStore(workspace.resolve(".checkpoints"))));
+        Config config = config(true);
+
+        TurnUserRequestCapture.set("Create batch-one. Mention operations_json in the notes if useful.");
+        TurnTaskContractCapture.set(new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("batch-one"),
+                Set.of(),
+                "Create batch-one. Mention operations_json in the notes if useful.",
+                "test"));
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"batch-one"},
+                          {"op":"mkdir","path":"extra"}
+                        ]
+                        """)),
+                context(workspace, config));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("extra"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertFalse(Files.exists(workspace.resolve("batch-one")));
+        assertFalse(Files.exists(workspace.resolve("extra")));
     }
 
     @Test

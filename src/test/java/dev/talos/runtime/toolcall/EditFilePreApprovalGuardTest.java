@@ -48,6 +48,26 @@ class EditFilePreApprovalGuardTest {
     }
 
     @Test
+    void fullRewriteRepairTargetRecognizesEditFileAlias() {
+        LoopState state = loopState();
+        ToolCall edit = new ToolCall("file_utils:edit_file", Map.of(
+                "path", "script.js",
+                "old_string", "old",
+                "new_string", "new"));
+
+        EditFilePreApprovalGuard.Decision decision = EditFilePreApprovalGuard.decision(
+                edit,
+                state,
+                "script.js",
+                false,
+                Set.of(),
+                Set.of("script.js"));
+
+        assertNotNull(decision);
+        assertEquals(EditFilePreApprovalGuard.Kind.FULL_REWRITE_REPAIR_REQUIRED, decision.kind());
+    }
+
+    @Test
     void staleRereadRequiredPathReturnsExactDiagnostic() {
         LoopState state = loopState();
         ToolCall edit = editFile("index.html", "beta\n", "beta-fixed\n");

@@ -2,10 +2,13 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
+import dev.talos.cli.ui.ColorPolicy;
+import dev.talos.cli.ui.TerminalCapabilities;
 import dev.talos.runtime.Result;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.rag.RagService;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.XmlCompatTelemetry;
@@ -22,7 +25,10 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -44,6 +50,11 @@ class InfraCommandsTest {
 
     @TempDir
     Path ws;
+
+    private static final TerminalCapabilities INTERACTIVE_UNICODE =
+            new TerminalCapabilities(ColorPolicy.NEVER, true, false, true, false);
+    private static final TerminalCapabilities INTERACTIVE_ASCII =
+            new TerminalCapabilities(ColorPolicy.NEVER, true, false, false, true);
 
     private final Context ctx = Context.builder(new Config()).build();
 
@@ -569,6 +580,53 @@ class InfraCommandsTest {
             assertTrue(Files.exists(new RagService(cfg).getIndexer().indexDirFor(ws)));
         }
 
+        @Test void interactive_progress_preserves_unicode_filename_when_terminal_supports_it() {
+            ByteArrayOutputStream progressBytes = new ByteArrayOutputStream();
+            var progressOut = new PrintStream(progressBytes, true, StandardCharsets.UTF_8);
+            var cmd = new ReindexCommand(ws, null, progressOut, INTERACTIVE_UNICODE);
+
+            Result r = cmd.execute("", Context.builder(new Config())
+                    .rag(progressRag("docs/αρχείο.docx"))
+                    .build());
+
+            assertInstanceOf(Result.Ok.class, r);
+            String output = progressBytes.toString(StandardCharsets.UTF_8);
+            assertTrue(output.contains("docs/αρχείο.docx"), output);
+            assertFalse(output.contains("╬"), "UTF-8-capable progress output must not mojibake Greek bytes: " + output);
+            assertFalse(output.contains(System.lineSeparator()),
+                    "live progress should stay a carriage-return line, not a durable transcript line");
+        }
+
+        @Test void interactive_progress_degrades_unicode_filename_on_ascii_terminal() {
+            ByteArrayOutputStream progressBytes = new ByteArrayOutputStream();
+            var progressOut = new PrintStream(progressBytes, true, StandardCharsets.UTF_8);
+            var cmd = new ReindexCommand(ws, null, progressOut, INTERACTIVE_ASCII);
+
+            Result r = cmd.execute("", Context.builder(new Config())
+                    .rag(progressRag("docs/αρχείο.docx"))
+                    .build());
+
+            assertInstanceOf(Result.Ok.class, r);
+            String output = progressBytes.toString(StandardCharsets.UTF_8);
+            assertFalse(output.contains("αρχείο"), output);
+            assertTrue(output.contains(".docx"), output);
+            assertTrue(output.codePoints().allMatch(cp -> cp == '\r' || (cp >= 0x20 && cp <= 0x7E)),
+                    "ASCII fallback progress output must be terminal-safe: " + output);
+        }
+
+        @Test void interactive_progress_uses_injected_output_stream() {
+            ByteArrayOutputStream progressBytes = new ByteArrayOutputStream();
+            var progressOut = new PrintStream(progressBytes, true, StandardCharsets.UTF_8);
+            var cmd = new ReindexCommand(ws, null, progressOut, INTERACTIVE_UNICODE);
+
+            cmd.execute("", Context.builder(new Config())
+                    .rag(progressRag("docs/αρχείο.docx"))
+                    .build());
+
+            assertTrue(progressBytes.toString(StandardCharsets.UTF_8).contains("Indexing: 1/1"),
+                    "progress must be written to the REPL-owned terminal stream, not hardcoded System.out");
+        }
+
         private Config configWithVectorsDisabled() {
             Config cfg = new Config(null);
             Map<String, Object> rag = new LinkedHashMap<>();
@@ -581,6 +639,16 @@ class InfraCommandsTest {
         private Map<String, Object> privacyRag(Config cfg) {
             Map<String, Object> privacy = (Map<String, Object>) cfg.data.computeIfAbsent("privacy", ignored -> new LinkedHashMap<>());
             return (Map<String, Object>) privacy.computeIfAbsent("rag", ignored -> new LinkedHashMap<>());
+        }
+
+        private RagService progressRag(String file) {
+            return new RagService(new Config()) {
+                @Override
+                public ReindexOutcome reindex(Path root, boolean forceFullReindex, IndexProgressListener listener) {
+                    listener.onFileComplete(1, 1, file);
+                    return new ReindexOutcome(true, "Reindexed.");
+                }
+            };
         }
     }
 

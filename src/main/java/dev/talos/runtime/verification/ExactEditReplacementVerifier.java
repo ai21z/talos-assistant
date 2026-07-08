@@ -49,14 +49,12 @@ final class ExactEditReplacementVerifier {
             ToolMutationEvidence evidence = outcome.mutationEvidence();
             String oldString = evidence.oldString();
             String newString = evidence.newString();
-            if (!newString.isEmpty() && !content.contains(newString)) {
+            if (!newString.isEmpty() && !ReplacementTextPresence.replacementTextObserved(content, newString)) {
                 problems.add(pathHint + ": exact edit replacement text was not observed after apply.");
                 hasProblem = true;
                 continue;
             }
-            if (!oldString.isEmpty()
-                    && (newString.isEmpty() || !newString.contains(oldString))
-                    && content.contains(oldString)) {
+            if (ReplacementTextPresence.oldTextRemainsOutsideReplacement(content, oldString, newString)) {
                 problems.add(pathHint + ": exact edit replacement old text remained after apply.");
                 hasProblem = true;
                 continue;

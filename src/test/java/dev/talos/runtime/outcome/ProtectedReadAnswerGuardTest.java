@@ -142,6 +142,17 @@ class ProtectedReadAnswerGuardTest {
     }
 
     @Test
+    void deniedProtectedReadAliasSummaryReplacesModelContent() {
+        String answer = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                "The file says SECRET=original.",
+                loopResult(deniedReadOutcome("file_utils:read_file", ".env")));
+
+        assertTrue(answer.startsWith("[Approval blocked: protected content was not read]"), answer);
+        assertTrue(answer.contains("- .env: approval denied"), answer);
+        assertFalse(answer.contains("SECRET=original"), answer);
+    }
+
+    @Test
     void deniedProtectedReadSummaryPassesThroughWhenNoDeniedProtectedReadExists() {
         String answer = "No protected read was requested.";
 
@@ -271,8 +282,12 @@ class ProtectedReadAnswerGuardTest {
     }
 
     private static ToolCallLoop.ToolOutcome deniedReadOutcome(String pathHint) {
+        return deniedReadOutcome("talos.read_file", pathHint);
+    }
+
+    private static ToolCallLoop.ToolOutcome deniedReadOutcome(String toolName, String pathHint) {
         return new ToolCallLoop.ToolOutcome(
-                "talos.read_file",
+                toolName,
                 pathHint,
                 false,
                 false,

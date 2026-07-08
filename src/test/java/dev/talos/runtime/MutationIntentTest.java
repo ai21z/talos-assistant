@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Locale;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -165,6 +166,19 @@ class MutationIntentTest {
     }
 
     @Test
+    void turkishDefaultLocaleDoesNotBreakAsciiMutationIntent() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            assertTrue(MutationIntent.looksExplicitMutationRequest("FIX index.html."),
+                    MutationIntent.classificationReason("FIX index.html."));
+        } finally {
+            Locale.setDefault(previous);
+        }
+    }
+
+    @Test
     void namedFileScopedNegationDoesNotCancelMutationIntent() {
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Fix only styles.css. Do not change index.html or scripts.js."));
@@ -174,6 +188,18 @@ class MutationIntentTest {
                 "Summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files."));
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Summarize long-notes.txt into ideas/summary.md. do not touch protected files."));
+    }
+
+    @Test
+    void scopedDesignConstraintDoesNotCancelMutationIntent() {
+        for (String input : java.util.List.of(
+                "Restyle the page but do not change the color scheme.",
+                "Make the hero bigger, do not touch the footer.")) {
+            assertTrue(MutationIntent.looksExplicitMutationRequest(input),
+                    MutationIntent.classificationReason(input));
+            assertFalse(MutationIntent.classificationReason(input)
+                    .contains("global-read-only-negation"), input);
+        }
     }
 
     @Test

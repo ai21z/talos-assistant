@@ -98,6 +98,19 @@ class ApprovalDiffPreviewTest {
     }
 
     @Test
+    void editDiffUsesNormalizedCrLfMatchLikeApplyPath() throws Exception {
+        Files.writeString(workspace.resolve("windows.txt"), "alpha\r\nbeta\r\ngamma\r\n");
+
+        var p = ApprovalDiffPreview.forEdit(workspace, "windows.txt", "alpha\nbeta", "alpha\nBETA");
+
+        assertFalse(p.skipped(), p.skippedReason());
+        assertEquals(1, p.added());
+        assertEquals(1, p.removed());
+        assertTrue(p.text().contains("-beta"), p.text());
+        assertTrue(p.text().contains("+BETA"), p.text());
+    }
+
+    @Test
     void editSkipsWhenOldStringNotFoundOrAmbiguous() throws Exception {
         Files.writeString(workspace.resolve("dup.txt"), "x\nx\n");
 

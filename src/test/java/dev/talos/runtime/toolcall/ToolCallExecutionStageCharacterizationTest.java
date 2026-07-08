@@ -278,6 +278,40 @@ class ToolCallExecutionStageCharacterizationTest {
                 () -> assertTrue(result.content().contains("old_string not found"), result.content()));
     }
 
+    @Test
+    void failedEditAliasRecordsEditRepairAccountingAndPreservesRawToolName() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "missing\n");
+        ToolRegistry registry = registry(new StubTool(
+                "talos.edit_file",
+                ToolRiskLevel.WRITE,
+                call -> ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
+                        "old_string not found"))));
+        StageHarness harness = harness(
+                textToolCall(
+                        "file_utils:edit_file",
+                        "\"path\":\"README.md\",\"old_string\":\"missing\",\"new_string\":\"replacement\""),
+                List.of(),
+                registry,
+                fixedApprovalGate(ApprovalResponse.APPROVED),
+                new Config(null));
+
+        ToolCallExecutionStage.IterationOutcome outcome = execute(harness);
+
+        ToolCallLoop.ToolOutcome toolOutcome = harness.state().toolOutcomes.get(0);
+        ChatMessage result = harness.state().messages.get(harness.state().messages.size() - 1);
+        assertAll(
+                () -> assertEquals(1, outcome.failuresThisIteration()),
+                () -> assertEquals(0, outcome.successesThisIteration()),
+                () -> assertEquals(1, harness.state().editFailuresByPath.get("README.md")),
+                () -> assertFalse(harness.state().failedCallSignatures.isEmpty()),
+                () -> assertEquals("file_utils:edit_file", toolOutcome.toolName()),
+                () -> assertEquals("talos.edit_file", toolOutcome.canonicalToolName()),
+                () -> assertTrue(toolOutcome.mutating()),
+                () -> assertFalse(toolOutcome.success()),
+                () -> assertTrue(result.content().contains("old_string not found"), result.content()));
+    }
+
     private ToolCallExecutionStage.IterationOutcome execute(StageHarness harness) {
         ToolCallParseStage.ParsedCalls parsed = new ToolCallParseStage().parse(
                 harness.state().currentText,

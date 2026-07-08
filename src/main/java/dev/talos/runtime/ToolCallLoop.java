@@ -8,6 +8,7 @@ import dev.talos.runtime.toolcall.ToolOutcomeFailureShape;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
@@ -278,6 +279,22 @@ public final class ToolCallLoop {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
                     mutationEvidence, reason);
+        }
+
+        /** Canonical Talos tool name for policy, evidence, and guard decisions. */
+        public String canonicalToolName() {
+            ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
+            if (decision.accepted()
+                    && decision.canonicalToolName() != null
+                    && !decision.canonicalToolName().isBlank()) {
+                return decision.canonicalToolName();
+            }
+            return toolName;
+        }
+
+        /** Local canonical name without the {@code talos.} prefix, for compact comparisons. */
+        public String localCanonicalToolName() {
+            return ToolAliasPolicy.localCanonicalName(toolName);
         }
 
         public boolean invalidEmptyEditArguments() {

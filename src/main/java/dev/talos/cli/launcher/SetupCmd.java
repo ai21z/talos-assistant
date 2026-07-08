@@ -169,12 +169,20 @@ public class SetupCmd implements Callable<Integer> {
         if (!userOwnedModel && known == null) {
             throw new IllegalArgumentException("Unknown model profile: " + Objects.toString(profileName, ""));
         }
+        if (userOwnedModel && known != null && !ggufFileMatchesProfile(modelPath, known)) {
+            throw new IllegalArgumentException("Model path " + modelPath.getFileName()
+                    + " does not match profile " + known.alias()
+                    + ". Expected GGUF file " + known.hfFile()
+                    + "; use the matching file or use a custom profile name for an unverified local GGUF.");
+        }
         String alias = userOwnedModel ? normalizedProfile : known.alias();
         String hfRepo = userOwnedModel ? "" : known.hfRepo();
         String hfFile = userOwnedModel ? "" : known.hfFile();
         String modelPathValue = userOwnedModel ? yamlPath(modelPath) : "";
         String hfCacheDir = userOwnedModel ? "" : yamlPath(cacheDir == null ? defaultHfCacheDir() : cacheDir);
-        boolean nativeCalling = userOwnedModel || known.nativeCalling();
+        boolean nativeCalling = userOwnedModel
+                ? known != null && known.nativeCalling()
+                : known.nativeCalling();
         EmbeddingSetupProfile embedding = embeddingProfile(embedProfile);
         String embeddingYaml = renderEmbeddingYaml(
                 embedding,
@@ -544,6 +552,21 @@ public class SetupCmd implements Callable<Integer> {
             throw new IllegalArgumentException("model profile must contain at least one letter, number, dot, underscore, or dash");
         }
         return normalized;
+    }
+
+    private static boolean ggufFileMatchesProfile(Path modelPath, ModelProfile profile) {
+        if (modelPath == null || profile == null) return false;
+        Path fileName = modelPath.getFileName();
+        if (fileName == null) return false;
+        return ggufStem(fileName.toString()).equals(ggufStem(profile.hfFile()));
+    }
+
+    private static String ggufStem(String value) {
+        String text = Objects.toString(value, "").trim().toLowerCase(Locale.ROOT);
+        if (text.endsWith(".gguf")) {
+            text = text.substring(0, text.length() - 5);
+        }
+        return text;
     }
 
     private static Path defaultConfigPath() {

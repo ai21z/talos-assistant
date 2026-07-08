@@ -34,7 +34,7 @@ public final class StaticSelectorRepairGuard {
     }
 
     public static Optional<Violation> violationForWrite(List<ChatMessage> messages, ToolCall call) {
-        if (call == null || !"talos.write_file".equals(call.toolName())) return Optional.empty();
+        if (call == null || !"talos.write_file".equals(call.canonicalToolName())) return Optional.empty();
         String target = ToolCallSupport.normalizePath(call.param("path", ""));
         if (target.isBlank()) return Optional.empty();
 

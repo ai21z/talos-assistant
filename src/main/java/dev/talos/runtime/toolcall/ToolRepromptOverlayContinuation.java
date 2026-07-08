@@ -45,9 +45,9 @@ final class ToolRepromptOverlayContinuation {
         } catch (EngineException.ContextBudgetExceeded budget) {
             return ToolRepromptContextBudgetHandler.handle(state, budget, "tool-call loop continuation");
         } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}",
+            LOG.warn("Model engine not reachable during tool-call loop iteration {}: {}",
                     state.iterations, SafeLogFormatter.throwableMessage(cf));
-            state.finishWithAnswer("[Ollama not reachable - tool loop aborted. " + cf.guidance() + "]");
+            state.finishWithAnswer(ToolRepromptChatExecutor.connectionFailedAnswer(cf));
             return false;
         } catch (EngineException.ModelNotFound mnf) {
             LOG.warn("Model not found during tool-call loop iteration {}: {}",

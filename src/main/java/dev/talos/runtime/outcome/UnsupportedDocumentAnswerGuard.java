@@ -58,7 +58,7 @@ public final class UnsupportedDocumentAnswerGuard {
         List<String> paths = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(outcome.canonicalToolName())) continue;
             if (outcome.success()) continue;
             if (!ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) continue;
             String path = outcome.pathHint();
@@ -193,7 +193,7 @@ public final class UnsupportedDocumentAnswerGuard {
         List<String> paths = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(outcome.canonicalToolName())) continue;
             if (!outcome.success()) continue;
             String path = outcome.pathHint();
             if (path == null || path.isBlank()) continue;

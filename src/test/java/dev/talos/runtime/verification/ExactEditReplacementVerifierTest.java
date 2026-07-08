@@ -52,6 +52,70 @@ class ExactEditReplacementVerifierTest {
     }
 
     @Test
+    void exactEditReplacementFailsWhenShrinkEditDidNotLand() throws Exception {
+        Files.writeString(workspace.resolve("code.java"), "    return x;\n");
+
+        ExactEditReplacementVerifier.Result result = ExactEditReplacementVerifier.verify(
+                workspace,
+                List.of(successfulExactEdit("code.java", "    return x;", "  return x;", VerificationStatus.PASS)));
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.coversAllSuccessfulMutations());
+        assertTrue(result.hasProblem(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("code.java: exact edit replacement old text remained")),
+                result.problems().toString());
+    }
+
+    @Test
+    void exactEditReplacementVerifiesLfVisibleReplacementOnCrLfFile() throws Exception {
+        Files.writeString(workspace.resolve("windows.txt"), "alpha\r\nBETA\r\ngamma\r\n");
+
+        ExactEditReplacementVerifier.Result result = ExactEditReplacementVerifier.verify(
+                workspace,
+                List.of(successfulExactEdit("windows.txt", "alpha\nbeta", "alpha\nBETA", VerificationStatus.PASS)));
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.coversAllSuccessfulMutations());
+        assertFalse(result.hasProblem(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("windows.txt: exact edit replacement observed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void exactEditReplacementPassesWhenNewStringContainsOldStringAndOldStringOnlyAppearsInsideReplacement()
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Release 2023-2024\n");
+
+        ExactEditReplacementVerifier.Result result = ExactEditReplacementVerifier.verify(
+                workspace,
+                List.of(successfulExactEdit("notes.md", "2023", "2023-2024", VerificationStatus.PASS)));
+
+        assertTrue(result.verifiedAny());
+        assertFalse(result.hasProblem(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("notes.md: exact edit replacement observed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void exactEditReplacementFailsWhenNewStringContainsOldStringButOldStringAlsoRemainsOutsideReplacement()
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Release 2023\nRelease 2023-2024\n");
+
+        ExactEditReplacementVerifier.Result result = ExactEditReplacementVerifier.verify(
+                workspace,
+                List.of(successfulExactEdit("notes.md", "2023", "2023-2024", VerificationStatus.PASS)));
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.hasProblem());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("notes.md: exact edit replacement old text remained")),
+                result.problems().toString());
+    }
+
+    @Test
     void mixedExactEditAndReadbackOnlyMutationDoesNotCoverAllSuccessfulMutations() throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "status=new\n");
         Files.writeString(workspace.resolve("README.md"), "# Talos\n");

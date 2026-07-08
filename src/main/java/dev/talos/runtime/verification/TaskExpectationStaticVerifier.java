@@ -182,8 +182,12 @@ final class TaskExpectationStaticVerifier {
         }
 
         String observed = target.content();
-        boolean oldPresent = !expectation.oldText().isEmpty() && observed.contains(expectation.oldText());
-        boolean newPresent = !expectation.newText().isEmpty() && observed.contains(expectation.newText());
+        boolean oldPresent = ReplacementTextPresence.oldTextRemainsOutsideReplacement(
+                observed,
+                expectation.oldText(),
+                expectation.newText());
+        boolean newPresent = !expectation.newText().isEmpty()
+                && ReplacementTextPresence.replacementTextObserved(observed, expectation.newText());
         boolean matched = !oldPresent && newPresent;
         if (matched && expectation.preserveRest()) {
             matched = TaskExpectationMutationEvidenceVerifier.verifyReplacementPreservation(

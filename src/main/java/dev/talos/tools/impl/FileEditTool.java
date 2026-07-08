@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.util.TextReplacement;
 import dev.talos.tools.*;
 
 import java.io.IOException;
@@ -130,8 +131,8 @@ public final class FileEditTool implements TalosTool {
         try {
             String content = Files.readString(resolved);
 
-            int count = countOccurrences(content, oldString);
-            if (count == 0) {
+            TextReplacement.Match match = TextReplacement.findUniqueMatch(content, oldString, newString);
+            if (match.count() == 0) {
                 String snippet = buildFileSnippet(content, 20);
                 return ToolResult.fail(ToolError.invalidParams(
                         ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND,
@@ -140,15 +141,22 @@ public final class FileEditTool implements TalosTool {
                         + "Call talos.read_file to see the current content, then copy the exact text into old_string.\n"
                         + "File begins with:\n" + snippet));
             }
-            if (count > 1) {
+            if (match.count() > 1) {
                 return ToolResult.fail(ToolError.invalidParams(
                         ToolFailureReason.EDIT_OLD_STRING_AMBIGUOUS,
-                        "old_string found " + count + " times in " + pathParam +
+                        "old_string found " + match.count() + " times in " + pathParam +
                         ". Provide more context to make the match unique."));
             }
 
             // Exactly one match - safe to replace
-            String updated = content.replace(oldString, newString);
+            String updated = content.substring(0, match.startRaw())
+                    + match.replacement()
+                    + content.substring(match.endRaw());
+            if (updated.equals(content)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Replacement would make no change in " + pathParam + ". "
+                        + "Verify the intended edit and provide replacement text that changes the file."));
+            }
 
             // Undo snapshots moved to the governed checkpoint machinery
             // (T795/T796) - captured pre-approval by the runtime, not here.
@@ -191,14 +199,7 @@ public final class FileEditTool implements TalosTool {
      * Count non-overlapping occurrences of {@code needle} in {@code haystack}.
      */
     static int countOccurrences(String haystack, String needle) {
-        if (haystack.isEmpty() || needle.isEmpty()) return 0;
-        int count = 0;
-        int idx = 0;
-        while ((idx = haystack.indexOf(needle, idx)) != -1) {
-            count++;
-            idx += needle.length();
-        }
-        return count;
+        return TextReplacement.countOccurrences(haystack, needle);
     }
 
     /**

@@ -107,6 +107,9 @@ public final class StatusCommand implements Command {
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
         sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");
+        if (!activeRuntime.modelSourceLabel().isBlank()) {
+            sb.append(AnsiColor.grey("  ModelFile ")).append(activeRuntime.modelSourceLabel()).append("\n");
+        }
         sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
         sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");
 

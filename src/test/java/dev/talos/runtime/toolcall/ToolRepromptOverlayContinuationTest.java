@@ -4,11 +4,13 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
 
+import java.net.ConnectException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -58,6 +60,27 @@ class ToolRepromptOverlayContinuationTest {
                         .anyMatch(content -> content.startsWith("[Expected target progress]")
                                 || content.startsWith("[Current task")),
                 "temporary overlay messages must be removed from durable loop history");
+    }
+
+    @Test
+    void connectionFailureUsesGenericEngineWordingNotOllama() {
+        EngineException.ConnectionFailed failure = new EngineException.ConnectionFailed(
+                "http://127.0.0.1:18115",
+                new ConnectException("connection refused"));
+        LoopState state = state(LlmClient.scriptedFailure(failure));
+
+        boolean continueLoop = ToolRepromptOverlayContinuation.execute(
+                state,
+                List.of(),
+                List.of("scripts.js"),
+                "Create index.html, styles.css, and scripts.js.",
+                false,
+                tools());
+
+        assertFalse(continueLoop);
+        assertEquals("[Model engine not reachable - tool loop aborted. "
+                + failure.guidance() + "]", state.currentText);
+        assertFalse(state.currentText.contains("Ollama"), state.currentText);
     }
 
     private static LoopState state(LlmClient llm) {

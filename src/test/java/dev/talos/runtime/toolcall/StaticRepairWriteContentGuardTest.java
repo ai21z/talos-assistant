@@ -65,6 +65,31 @@ class StaticRepairWriteContentGuardTest {
     }
 
     @Test
+    void missingContentFailsForWriteFileAlias() {
+        var failure = StaticRepairWriteContentGuard.evaluate(
+                repairMessages(),
+                List.of(new ToolCall("file_utils:write_file", Map.of("path", "styles.css"))));
+
+        assertTrue(failure.isPresent());
+        assertEquals(
+                "STATIC_REPAIR_INVALID_WRITE_CONTENT: Static web repair rejected "
+                        + "talos.write_file(styles.css) before apply because missing required "
+                        + "`content` argument. No approval was requested and no file was changed.",
+                failure.get().reason());
+    }
+
+    @Test
+    void validWriteFileAliasContentDoesNotFail() {
+        var failure = StaticRepairWriteContentGuard.evaluate(
+                repairMessages(),
+                List.of(new ToolCall("file_utils:write_file", Map.of(
+                        "path", "styles.css",
+                        "content", "body { color: red; }\n"))));
+
+        assertFalse(failure.isPresent());
+    }
+
+    @Test
     void blankContentFailsWithExistingReasonAndAnswer() {
         var failure = StaticRepairWriteContentGuard.evaluate(
                 repairMessages(),

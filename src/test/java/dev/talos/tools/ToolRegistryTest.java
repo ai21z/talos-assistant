@@ -106,6 +106,15 @@ class ToolRegistryTest {
         assertEquals("default", call.param("missing", "default"));
     }
 
+    @Test
+    void toolCall_preservesRawNameAndExposesCanonicalName() {
+        ToolCall call = new ToolCall("file_utils:write_file", Map.of("path", "README.md"));
+
+        assertEquals("file_utils:write_file", call.toolName());
+        assertEquals("talos.write_file", call.canonicalToolName());
+        assertEquals("write_file", call.localCanonicalToolName());
+    }
+
     // --- ToolResult tests ---
 
     @Test

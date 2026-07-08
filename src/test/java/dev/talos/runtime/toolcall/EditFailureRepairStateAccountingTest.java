@@ -78,6 +78,32 @@ class EditFailureRepairStateAccountingTest {
     }
 
     @Test
+    void failedEditAliasRecordsSignatureAndEmptyEditFailure() {
+        LoopState state = loopState();
+        ToolCall edit = new ToolCall("file_utils:edit_file", Map.of(
+                "path", "README.md",
+                "old_string", "",
+                "new_string", "new"));
+        ToolResult failure = ToolResult.fail(ToolError.invalidParams("old_string must be present"));
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(edit, failure, "README.md");
+
+        EditFailureRepairStateAccounting.Result result =
+                EditFailureRepairStateAccounting.recordFailedEditResult(
+                        state,
+                        edit,
+                        classification,
+                        "README.md",
+                        failure,
+                        false);
+
+        assertEquals(failure, result.toolResult());
+        assertTrue(state.failedCallSignatures.contains(ToolCallSupport.buildCallSignature(edit)));
+        assertEquals(1, state.emptyEditArgumentFailuresByPath.get("README.md"));
+        assertEquals(1, state.editFailuresByPath.get("README.md"));
+    }
+
+    @Test
     void oldStringMissAfterSameTurnMutationRecordsStaleEditFailure() {
         LoopState state = loopState();
         state.pathsMutatedSinceRead.add("src/app.js");

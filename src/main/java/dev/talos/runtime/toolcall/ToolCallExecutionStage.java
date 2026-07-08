@@ -138,7 +138,7 @@ public final class ToolCallExecutionStage {
                     effective.toolName(),
                     SafeLogFormatter.parameters(effective.parameters()));
 
-            boolean isEditFile = "talos.edit_file".equals(effective.toolName());
+            boolean isEditFile = "talos.edit_file".equals(effective.canonicalToolName());
             ToolCallPreExecutionGuardChain.Result guardResult = preExecutionGuards.evaluate(
                     state,
                     effective,
@@ -159,9 +159,10 @@ public final class ToolCallExecutionStage {
             pathContext = guardResult.pathContext();
             workspaceOperationPlan = pathContext.workspaceOperationPlan();
             pathHint = pathContext.pathHint();
+            isEditFile = "talos.edit_file".equals(effective.canonicalToolName());
 
             String readBeforeWriteNudge = null;
-            if (!strict && "talos.edit_file".equals(effective.toolName()) && pathHint != null) {
+            if (!strict && isEditFile && pathHint != null) {
                 if (!state.pathsReadThisTurn.contains(ToolCallSupport.normalizePath(pathHint))) {
                     readBeforeWriteNudge = "\nHint: You did not read this file before editing. "
                             + "Call talos.read_file first to see the current content, "

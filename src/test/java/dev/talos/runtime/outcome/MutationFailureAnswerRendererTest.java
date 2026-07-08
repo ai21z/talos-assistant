@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -71,6 +72,24 @@ class MutationFailureAnswerRendererTest {
                     loopResult(List.of(readOnlyOutcome())),
                     0);
             assertTrue(out.startsWith(MutationFailureAnswerRenderer.FALSE_MUTATION_ANNOTATION), answer);
+        }
+    }
+
+    @Test
+    void turkishDefaultLocaleDoesNotHideFalseMutationClaims() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            String answer = "I modified index.html.";
+            assertTrue(MutationFailureAnswerRenderer.containsMutationClaim(answer), answer);
+            String out = MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
+                    answer,
+                    loopResult(List.of(readOnlyOutcome())),
+                    0);
+            assertTrue(out.startsWith(MutationFailureAnswerRenderer.FALSE_MUTATION_ANNOTATION), out);
+        } finally {
+            Locale.setDefault(previous);
         }
     }
 

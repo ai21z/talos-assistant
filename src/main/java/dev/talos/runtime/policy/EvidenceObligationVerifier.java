@@ -77,7 +77,7 @@ public final class EvidenceObligationVerifier {
         return switch (safeObligation) {
             case NONE -> Result.satisfied("No workspace evidence was required.");
             case LIST_DIRECTORY_ONLY -> verifyListDirectoryOnly(safeOutcomes);
-            case READ_TARGET_REQUIRED -> verifyReadTargets(targets, safeOutcomes, false);
+            case READ_TARGET_REQUIRED -> verifyReadTargets(targets, safeOutcomes, true);
             case PATH_EXISTENCE_EVIDENCE_REQUIRED -> verifyPathExistenceTargets(targets, safeOutcomes);
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
             case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosis(targets, safeOutcomes, workspace);
@@ -177,10 +177,80 @@ public final class EvidenceObligationVerifier {
         if (outcomes.isEmpty()) {
             return Result.unsatisfied("No tool evidence was gathered.");
         }
+        Set<String> effectiveTargets = requireSuccess
+                ? withoutUnsupportedTargetsCoveredByTextFallback(expectedTargets, outcomes)
+                : expectedTargets;
         return aggregateTargetResults(
-                expectedTargets,
+                effectiveTargets,
                 target -> verifyReadTarget(target, outcomes, requireSuccess),
                 "Required read evidence was gathered.");
+    }
+
+    private static Set<String> withoutUnsupportedTargetsCoveredByTextFallback(
+            Set<String> expectedTargets,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        if (expectedTargets == null || expectedTargets.isEmpty() || outcomes == null || outcomes.isEmpty()) {
+            return expectedTargets == null ? Set.of() : expectedTargets;
+        }
+        Set<String> normalizedExpected = new LinkedHashSet<>();
+        for (String target : expectedTargets) {
+            normalizedExpected.add(normalizePath(target));
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String target : expectedTargets) {
+            String normalized = normalizePath(target);
+            if (unsupportedReadFailed(normalized, outcomes)
+                    && successfulNamedTextFallbackRead(normalized, normalizedExpected, outcomes)) {
+                continue;
+            }
+            out.add(target);
+        }
+        return out;
+    }
+
+    private static boolean unsupportedReadFailed(String normalizedTarget, List<ToolCallLoop.ToolOutcome> outcomes) {
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!normalizedTarget.equals(normalizePath(outcome.pathHint()))) continue;
+            if (ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) return true;
+        }
+        return false;
+    }
+
+    private static boolean successfulNamedTextFallbackRead(
+            String unsupportedTarget,
+            Set<String> expectedTargets,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        Set<String> candidates = sameStemTextFallbacks(unsupportedTarget);
+        candidates.retainAll(expectedTargets);
+        if (candidates.isEmpty()) return false;
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!outcome.success() || outcome.denied()) continue;
+            if (candidates.contains(normalizePath(outcome.pathHint()))) return true;
+        }
+        return false;
+    }
+
+    private static Set<String> sameStemTextFallbacks(String unsupportedTarget) {
+        String normalized = normalizePath(unsupportedTarget);
+        String parent = parentDirectory(normalized);
+        String stem = childStem(normalized);
+        if (stem.isBlank()) return Set.of();
+        Set<String> out = new LinkedHashSet<>();
+        addFallback(out, parent, stem + ".txt");
+        addFallback(out, parent, "extracted_" + stem + ".txt");
+        return out;
+    }
+
+    private static void addFallback(Set<String> out, String parent, String child) {
+        if (".".equals(parent) || parent.isBlank()) {
+            out.add(child);
+        } else {
+            out.add(parent + "/" + child);
+        }
     }
 
     private static Result verifyProtectedRead(Set<String> expectedTargets, List<ToolCallLoop.ToolOutcome> outcomes) {
@@ -198,10 +268,22 @@ public final class EvidenceObligationVerifier {
         if (outcomes.isEmpty()) {
             return Result.unsatisfied("Path existence evidence was not gathered.");
         }
-        return aggregateTargetResults(
-                expectedTargets,
-                target -> verifyPathExistenceTarget(target, outcomes),
-                "Path existence evidence was gathered.");
+        Result firstBlocked = null;
+        Result firstUnsatisfied = null;
+        for (String target : expectedTargets) {
+            Result result = verifyPathExistenceTarget(target, outcomes);
+            if (result.status() == Status.SATISFIED) {
+                return Result.satisfied("Path existence evidence was gathered.");
+            }
+            if (result.status() == Status.BLOCKED && firstBlocked == null) {
+                firstBlocked = result;
+            } else if (result.status() == Status.UNSATISFIED && firstUnsatisfied == null) {
+                firstUnsatisfied = result;
+            }
+        }
+        if (firstBlocked != null) return firstBlocked;
+        if (firstUnsatisfied != null) return firstUnsatisfied;
+        return Result.unsatisfied("Path existence evidence was not gathered.");
     }
 
     private static Result verifyPathExistenceTarget(
@@ -215,7 +297,13 @@ public final class EvidenceObligationVerifier {
             if (outcome.denied()) {
                 return Result.blocked("Path existence read was blocked by approval.");
             }
-            return Result.satisfied("Path existence evidence was gathered.");
+            if (outcome.success()) {
+                return Result.satisfied("Path existence evidence was gathered.");
+            }
+            if (ToolError.NOT_FOUND.equals(outcome.errorCode())) {
+                return Result.satisfied("Path existence evidence was gathered.");
+            }
+            return Result.unsatisfied("Path existence read did not succeed for " + expectedTarget + ".");
         }
         String expectedParent = parentDirectory(expected);
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
@@ -224,11 +312,27 @@ public final class EvidenceObligationVerifier {
                 return Result.blocked("Path existence directory listing was blocked by approval.");
             }
             if (!outcome.success()) continue;
-            if (expectedParent.equals(normalizeDirectory(outcome.pathHint()))) {
+            if (expectedParent.equals(normalizeDirectory(outcome.pathHint()))
+                    && directoryListingShowsTarget(outcome.summary(), expected)) {
                 return Result.satisfied("Path existence evidence was gathered.");
             }
         }
         return Result.unsatisfied("Path existence evidence was not gathered for " + expectedTarget + ".");
+    }
+
+    private static boolean directoryListingShowsTarget(String listing, String expectedTarget) {
+        String child = childName(expectedTarget);
+        if (child.isBlank()) return false;
+        String expected = normalizePath(expectedTarget);
+        String safeListing = listing == null ? "" : listing;
+        for (String rawLine : safeListing.split("\\R")) {
+            String line = normalizeDirectoryListingLine(rawLine);
+            if (line.isBlank()) continue;
+            if (child.equals(line) || expected.equals(line)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Result verifyReadTarget(
@@ -542,6 +646,32 @@ public final class EvidenceObligationVerifier {
         if (slash < 0) return ".";
         String parent = normalized.substring(0, slash);
         return parent.isBlank() ? "." : parent;
+    }
+
+    private static String childName(String normalizedPath) {
+        String normalized = normalizePath(normalizedPath);
+        int slash = normalized.lastIndexOf('/');
+        return slash < 0 ? normalized : normalized.substring(slash + 1);
+    }
+
+    private static String childStem(String normalizedPath) {
+        String child = childName(normalizedPath);
+        int dot = child.lastIndexOf('.');
+        return dot > 0 ? child.substring(0, dot) : child;
+    }
+
+    private static String normalizeDirectoryListingLine(String line) {
+        String normalized = normalizePath(line == null ? "" : line.strip());
+        while (normalized.startsWith("- ")) {
+            normalized = normalized.substring(2).strip();
+        }
+        while (normalized.startsWith("* ")) {
+            normalized = normalized.substring(2).strip();
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static String canonicalToolName(String toolName) {

@@ -132,6 +132,9 @@ public class TopLevelStatusCmd implements Runnable {
             out.append("  Engine host : ").append(runtime.hostLabel()).append("\n");
         }
         out.append("  Chat model  : ").append(runtime.model()).append("\n");
+        if (!runtime.modelSourceLabel().isBlank()) {
+            out.append("  Model file  : ").append(runtime.modelSourceLabel()).append("\n");
+        }
         out.append("  Embeddings  : ").append(runtime.embeddingLabel()).append("\n");
 
         try (EngineRegistry registry = new EngineRegistry(cfg)) {

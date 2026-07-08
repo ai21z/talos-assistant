@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ConnectException;
 import java.net.URI;
@@ -488,8 +489,13 @@ public final class CompatChatClient {
                 String line;
                 try {
                     line = reader.readLine();
-                } catch (Exception e) {
-                    throw new EngineException.MalformedResponse("compat chat stream", "", e);
+                } catch (IOException e) {
+                    throw new EngineException.Transient(
+                            "Stream read aborted during generation",
+                            e,
+                            408,
+                            "Local model generation stopped before Talos received a complete stream. "
+                                    + "Try a smaller model, shorten the prompt, or raise limits.llm_timeout_ms in config.");
                 }
 
                 if (line == null) {

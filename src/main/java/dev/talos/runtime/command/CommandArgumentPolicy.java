@@ -92,20 +92,37 @@ public final class CommandArgumentPolicy {
                 }
             }
             for (String marker : NETWORK_TOKENS) {
-                if (lower.equals(marker) || lower.contains(marker)) {
+                if (containsRiskToken(lower, marker)) {
                     throw new CommandPlanRejectedException(
                             "Argument has network command risk for profile "
                                     + profile.id() + ": " + arg);
                 }
             }
             for (String marker : DESTRUCTIVE_TOKENS) {
-                if (lower.equals(marker) || lower.contains(marker)) {
+                if (containsRiskToken(lower, marker)) {
                     throw new CommandPlanRejectedException(
                             "Argument has destructive command risk for profile "
                                     + profile.id() + ": " + arg);
                 }
             }
         }
+    }
+
+    private static boolean containsRiskToken(String lower, String marker) {
+        if (lower.equals(marker)) return true;
+        int index = lower.indexOf(marker);
+        while (index >= 0) {
+            int end = index + marker.length();
+            boolean before = index == 0 || !isRiskTokenChar(lower.charAt(index - 1));
+            boolean after = end == lower.length() || !isRiskTokenChar(lower.charAt(end));
+            if (before && after) return true;
+            index = lower.indexOf(marker, index + 1);
+        }
+        return false;
+    }
+
+    private static boolean isRiskTokenChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
     }
 
     private static void ensurePathInsideWorkspace(String value, Path workspace, Path cwd) {

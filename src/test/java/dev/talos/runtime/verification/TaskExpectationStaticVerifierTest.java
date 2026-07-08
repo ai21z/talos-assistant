@@ -146,6 +146,63 @@ class TaskExpectationStaticVerifierTest {
         }
     }
 
+    @Test
+    void replacementExpectationPassesWhenNewTextContainsOldTextAndOldTextOnlyAppearsInsideReplacement()
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Release 2023-2024\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Replace 2023 with 2023-2024 in notes.md."),
+                workspace,
+                List.of(successfulWrite("notes.md", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.replacementRequired());
+        assertTrue(result.problems().isEmpty(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(fact -> fact.contains("notes.md: replacement text observed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void replacementExpectationFailsWhenNewTextContainsOldTextButOldTextAlsoRemainsOutsideReplacement()
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Release 2023\nRelease 2023-2024\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Replace 2023 with 2023-2024 in notes.md."),
+                workspace,
+                List.of(successfulWrite("notes.md", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.replacementRequired());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("notes.md: replacement old text remained")),
+                result.problems().toString());
+    }
+
+    @Test
+    void replacementExpectationFailsWhenTrimEditDidNotLand() throws Exception {
+        Files.writeString(workspace.resolve("code.java"), "final int x\n");
+
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(
+                        "Replace final int x with int x in code.java."),
+                workspace,
+                List.of(successfulWrite("code.java", VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.verifiedAny());
+        assertTrue(result.replacementRequired());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("code.java: replacement old text remained")),
+                result.problems().toString());
+    }
+
     private void assertProblem(String request, String expectedProblem) {
         TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
                 TaskContractResolver.fromUserRequest(request),

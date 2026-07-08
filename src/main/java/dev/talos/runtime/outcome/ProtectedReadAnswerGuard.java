@@ -4,7 +4,6 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
-import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolError;
 
 import java.nio.file.Path;
@@ -154,7 +153,7 @@ public final class ProtectedReadAnswerGuard {
         List<ToolCallLoop.ToolOutcome> out = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!"talos.read_file".equals(outcome.canonicalToolName())) continue;
             if (!outcome.success() || outcome.denied()) continue;
             if (ProtectedPathPolicy.classify(workspace, outcome.pathHint()).protectedPath()
                     || looksProtectedPathHint(outcome.pathHint())
@@ -289,7 +288,7 @@ public final class ProtectedReadAnswerGuard {
         if (outcome == null || outcome.mutating() || outcome.success() || !outcome.denied()) {
             return false;
         }
-        if (!"talos.read_file".equals(outcome.toolName())) return false;
+        if (!"talos.read_file".equals(outcome.canonicalToolName())) return false;
         if (!ToolError.DENIED.equals(outcome.errorCode())) return false;
         return isUserApprovalDeniedOutcome(outcome);
     }
@@ -452,11 +451,4 @@ public final class ProtectedReadAnswerGuard {
         return line.length() <= 240 ? line : line.substring(0, 237) + "...";
     }
 
-    private static String canonicalToolName(String toolName) {
-        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
-        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
-            return decision.canonicalToolName();
-        }
-        return toolName == null ? "" : toolName;
-    }
 }

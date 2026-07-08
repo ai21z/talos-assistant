@@ -76,7 +76,11 @@ The /profiles command is unrelated: it manages workspace verification profiles, 
         }
         sb.append(title).append(":\n");
         for (ModelRef model : models) {
-            sb.append("  ").append(model.backend()).append("/").append(model.name()).append("\n");
+            sb.append("  ").append(model.backend()).append("/").append(model.name());
+            if (model.note() != null && !model.note().isBlank()) {
+                sb.append("  (").append(model.note()).append(")");
+            }
+            sb.append("\n");
         }
         sb.append('\n');
     }

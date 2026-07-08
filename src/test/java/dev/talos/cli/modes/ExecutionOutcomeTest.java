@@ -1466,6 +1466,63 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void completedMutationWithFileVerificationWarningIsNotRenderedAsVerifiedSuccess() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-warn-static-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Talos\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create README.md with a short project headline."));
+            var plan = new dev.talos.runtime.turn.CurrentTurnPlan(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    null,
+                    dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                    null,
+                    null,
+                    null,
+                    List.of("talos.write_file"),
+                    List.of("talos.write_file"),
+                    List.of(),
+                    "NONE",
+                    null,
+                    null,
+                    null,
+                    null);
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "[ok] Wrote README.md", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "README.md", true, true, false,
+                            "Wrote README.md", "", dev.talos.tools.VerificationStatus.WARN)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Done. I updated README.md and verified it.", plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("file-level verification reported warning"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("[Static verification: passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void partialInvalidStaticWebRepairRunsStaticVerificationForChangedWorkspace() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-partial-invalid-static-");
         try {
@@ -3461,7 +3518,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void toolLoopReadTargetNotFoundCountsAsEvidenceAndReadOnlyAnswered() {
+    void toolLoopReadTargetNotFoundDoesNotCountAsGatheredEvidence() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read README.md and summarize it."));
@@ -3478,10 +3535,10 @@ class ExecutionOutcomeTest {
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 "README.md was not found.", messages, loopResult, null, 0);
 
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
-        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
-        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertTrue(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
     }
 
     @Test
@@ -3694,6 +3751,61 @@ class ExecutionOutcomeTest {
                     outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("scripts.js: exists"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("script.js: not found"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void pathExistenceAnswerWithDirectNotFoundEvidencePrependsDeterministicNegativeStatus() throws Exception {
+        Path ws = Files.createTempDirectory("talos-path-existence-not-found-");
+        try {
+            Files.createDirectories(ws.resolve("docs"));
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Check whether docs/target.md exists. Do not change anything."));
+
+            var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of());
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "docs/target.md does not exist.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    0,
+                    List.of("docs/target.md"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "docs/target.md", false, false, false,
+                            "", "docs/target.md was not found.", null, ToolError.NOT_FOUND)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Path existence verified]"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("docs/target.md: not found"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
             assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
         } finally {

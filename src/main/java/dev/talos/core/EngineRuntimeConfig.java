@@ -9,6 +9,7 @@ public record EngineRuntimeConfig(
         String backend,
         String model,
         String displayModel,
+        String modelSourceLabel,
         String hostLabel,
         String embeddingProvider,
         String embeddingModel,
@@ -32,6 +33,7 @@ public record EngineRuntimeConfig(
                     "unknown",
                     "unknown",
                     "unknown",
+                    "",
                     "unknown",
                     "disabled",
                     "unknown",
@@ -89,6 +91,7 @@ public record EngineRuntimeConfig(
                 backend,
                 model,
                 "unknown".equals(model) ? "unknown" : backend + "/" + model,
+                modelSourceLabel(safeCfg, backend),
                 hostForBackend(safeCfg, backend),
                 embedProvider,
                 embedModel,
@@ -147,6 +150,24 @@ public record EngineRuntimeConfig(
             return withPort(host, port);
         }
         return "unknown";
+    }
+
+    private static String modelSourceLabel(Config cfg, String backend) {
+        if (!"llama_cpp".equals(backend)) {
+            return "";
+        }
+        Map<String, Object> engines = CfgUtil.map(cfg.data.get("engines"));
+        Map<String, Object> llama = CfgUtil.map(engines.get("llama_cpp"));
+        String modelPath = stringAt(llama, "model_path", "");
+        if (!modelPath.isBlank()) {
+            try {
+                Path filename = Path.of(modelPath).getFileName();
+                if (filename != null) return filename.toString();
+            } catch (Exception ignored) {
+                return "";
+            }
+        }
+        return stringAt(llama, "hf_file", "");
     }
 
     private static String withPort(String host, int port) {

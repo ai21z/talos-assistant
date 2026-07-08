@@ -7,6 +7,7 @@ import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Audit;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.cli.ui.TerminalCapabilities;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.index.IndexedWorkspaceSymbolChecker;
@@ -226,6 +227,14 @@ public final class TalosBootstrap {
         final LineReader lineReaderRef = lineReader;
         final java.util.function.IntSupplier terminalWidth =
                 lineReader != null ? () -> lineReaderRef.getTerminal().getWidth() : null;
+        final TerminalCapabilities terminalCapabilities = lineReader != null
+                ? TerminalCapabilities.detect(
+                        System.getenv(),
+                        true,
+                        System.getProperty("os.name", ""),
+                        lineReader.getTerminal().outputEncoding(),
+                        null)
+                : TerminalCapabilities.detectDefault();
         RenderEngine render = new RenderEngine(cfg, redactor, out,
                 lineReader != null,
                 terminalWidth,
@@ -387,7 +396,8 @@ public final class TalosBootstrap {
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit,
-                sessionStore, checkpointService, runtimeSession.startedAt(), terminalWidth,
+                sessionStore, checkpointService, runtimeSession.startedAt(), out,
+                terminalCapabilities, terminalWidth,
                 sessionId, assistModeCompaction);
         // T806: workspace template commands load AFTER registration so the
         // collision guard sees every built-in name and alias (builtin-wins;
@@ -437,6 +447,8 @@ public final class TalosBootstrap {
                                           SessionStore sessionStore,
                                           CheckpointService checkpointService,
                                           java.time.Instant activeSessionStartedAt,
+                                          PrintStream out,
+                                          TerminalCapabilities terminalCapabilities,
                                           java.util.function.IntSupplier terminalWidth,
                                           String activeSessionId,
                                           boolean assistModeCompaction) {
@@ -468,7 +480,7 @@ public final class TalosBootstrap {
         registry.register(new PromptCommand(modes, workspace));
         registry.register(new PromptDebugCommand());
         registry.register(new WorkspaceCommand(workspace));
-        registry.register(new ReindexCommand(workspace, modes::invalidateSymbolCache));
+        registry.register(new ReindexCommand(workspace, modes::invalidateSymbolCache, out, terminalCapabilities));
         registry.register(new MemoryCommand());
         registry.register(new ClearCommand());
         // DX commands

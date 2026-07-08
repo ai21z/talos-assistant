@@ -4,6 +4,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -279,7 +280,7 @@ public final class MutationIntent {
     public static String classificationReason(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return "empty-user-request";
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return "synthetic-tool-result";
-        String lower = userRequest.toLowerCase().trim();
+        String lower = userRequest.toLowerCase(Locale.ROOT).trim();
         if (containsGlobalReadOnlyNegation(lower)) return "global-read-only-negation";
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
@@ -324,7 +325,7 @@ public final class MutationIntent {
     public static boolean looksPriorChangeStatusQuestion(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
-        String lower = userRequest.toLowerCase().trim();
+        String lower = userRequest.toLowerCase(Locale.ROOT).trim();
         if (containsConditionalApplyClause(lower)) return false;
         for (Pattern pattern : PRIOR_CHANGE_STATUS_PATTERNS) {
             if (pattern.matcher(lower).find()) return true;
@@ -556,6 +557,7 @@ public final class MutationIntent {
                 || tail.startsWith("else")
                 || startsWithNamedFileTarget(tail)
                 || startsWithQualifiedNamedFileTarget(tail)
+                || startsWithScopedDesignTarget(tail)
                 || startsWithTailwindArtifactReference(tail);
     }
 
@@ -582,6 +584,23 @@ public final class MutationIntent {
     private static String stripLeadingArticle(String value) {
         if (value == null || value.isBlank()) return "";
         return value.replaceFirst("^(?:a|an|the)\\s+", "");
+    }
+
+    private static boolean startsWithScopedDesignTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        String candidate = stripLeadingArticle(tail.stripLeading());
+        return candidate.startsWith("color scheme")
+                || candidate.startsWith("colour scheme")
+                || candidate.startsWith("palette")
+                || candidate.startsWith("colors")
+                || candidate.startsWith("colours")
+                || candidate.startsWith("footer")
+                || candidate.startsWith("header")
+                || candidate.startsWith("hero")
+                || candidate.startsWith("navbar")
+                || candidate.startsWith("nav ")
+                || candidate.startsWith("navigation")
+                || candidate.startsWith("sidebar");
     }
 
     private static boolean startsWithTailwindArtifactReference(String tail) {

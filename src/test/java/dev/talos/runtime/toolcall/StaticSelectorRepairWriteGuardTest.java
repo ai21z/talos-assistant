@@ -58,6 +58,20 @@ class StaticSelectorRepairWriteGuardTest {
     }
 
     @Test
+    void cssSelectorViolationFailsForWriteFileAlias() {
+        var failure = StaticSelectorRepairWriteGuard.evaluate(
+                cssRepairMessages(),
+                List.of(new ToolCall("file_utils:write_file", Map.of(
+                        "path", "styles.css",
+                        "content", ".button { color: red; }\nbody { margin: 0; }\n"))));
+
+        assertTrue(failure.isPresent());
+        assertTrue(failure.get().reason().contains("talos.write_file(styles.css)"),
+                failure.get().reason());
+        assertTrue(failure.get().reason().contains(".button"), failure.get().reason());
+    }
+
+    @Test
     void javascriptSelectorViolationFailsWithTargetAndSelector() {
         var failure = StaticSelectorRepairWriteGuard.evaluate(
                 jsRepairMessages(),

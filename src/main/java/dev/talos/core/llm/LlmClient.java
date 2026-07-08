@@ -5,6 +5,7 @@ import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.util.Sanitize;
+import dev.talos.core.util.UiChrome;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ChatMessage;
@@ -722,9 +723,10 @@ public final class LlmClient implements AutoCloseable {
             if (onChunk != null) onChunk.accept(chunk);
         };
         Supplier<Boolean> cancel = this.externalCancel;
+        Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
-                        messages, trackingSink, Duration.ofSeconds(90), cancel,
+                        messages, trackingSink, engineRequestTimeout, cancel,
                         lastChunkAt, activeStream, requestToolSpecs, controls, true),
                 wallClockMs,
                 lastChunkAt,
@@ -794,9 +796,10 @@ public final class LlmClient implements AutoCloseable {
             breaker.onChunk(chunk);
         };
         Supplier<Boolean> cancel = this.externalCancel;
+        Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
-                        messages, trackingSink, Duration.ofSeconds(90), cancel,
+                        messages, trackingSink, engineRequestTimeout, cancel,
                         lastChunkAt, activeStream, requestToolSpecs, controls, false),
                 wallClockMs,
                 lastChunkAt,
@@ -908,6 +911,11 @@ public final class LlmClient implements AutoCloseable {
         });
     }
 
+    private Duration engineRequestTimeout(long wallClockMs) {
+        long timeoutMs = wallClockMs > 0 ? wallClockMs : defaultWallClockBudgetMs;
+        return Duration.ofMillis(Math.max(1000L, timeoutMs));
+    }
+
     private StreamResult consumeEngineStream(java.util.stream.Stream<TokenChunk> stream,
                                              AtomicReference<AutoCloseable> activeStream,
                                              Supplier<Boolean> cancelled,
@@ -918,11 +926,11 @@ public final class LlmClient implements AutoCloseable {
         // the worker blocks in a synchronous socket read.
         try (stream) {
             if (activeStream != null) activeStream.set(stream);
+            StringBuilder acc = new StringBuilder();
+            List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
+            int alreadyEmittedLen = 0;
+            boolean visibleOutputEmitted = false;
             try {
-                StringBuilder acc = new StringBuilder();
-                List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
-                int alreadyEmittedLen = 0;
-
                 for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
                     if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
                     if (ch == null || Boolean.TRUE.equals(ch.done())) break;
@@ -945,14 +953,44 @@ public final class LlmClient implements AutoCloseable {
                     acc.append(cleaned);
                     alreadyEmittedLen = cleaned.length();
 
-                    if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
+                    if (onChunk != null && !emit.isEmpty()) {
+                        onChunk.accept(emit);
+                        visibleOutputEmitted = true;
+                    }
                     if (acc.length() >= safeCap()) break;
                 }
                 return new StreamResult(acc.toString(), toolCalls);
+            } catch (EngineException.Transient transientFailure) {
+                if (streamWasLocallyClosed(activeStream, stream)) {
+                    return abortedStreamResult(
+                            acc.toString(),
+                            "local stream closed before generation completed");
+                }
+                if (visibleOutputEmitted) {
+                    return abortedStreamResult(
+                            acc.toString(),
+                            "stream transport failed after partial output, retry skipped to avoid duplicate output");
+                }
+                throw transientFailure;
             } finally {
                 if (activeStream != null) activeStream.compareAndSet(stream, null);
             }
         }
+    }
+
+    private static StreamResult abortedStreamResult(String partialText, String reason) {
+        String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + Objects.toString(reason, "generation aborted") + "]";
+        String partial = Objects.toString(partialText, "");
+        if (partial.isBlank()) {
+            return new StreamResult(marker, List.of());
+        }
+        return new StreamResult(partial + System.lineSeparator() + marker, List.of());
+    }
+
+    private static boolean streamWasLocallyClosed(
+            AtomicReference<AutoCloseable> activeStream,
+            AutoCloseable stream) {
+        return activeStream != null && activeStream.get() != stream;
     }
 
     private static boolean shouldRetryCompatToolArgumentsNonStreaming(

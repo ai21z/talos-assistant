@@ -71,6 +71,10 @@ public sealed class EngineException extends RuntimeException
                     "Temporary error - please try again.");
         }
 
+        public Transient(String message, Throwable cause, int httpStatus, String guidance) {
+            super(message, cause, httpStatus, guidance);
+        }
+
         public Transient(String message, int httpStatus) {
             this(message, null, httpStatus);
         }

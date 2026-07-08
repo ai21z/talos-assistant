@@ -63,4 +63,18 @@ class ModelsCommandTest {
         // the configured/running model still renders in the managed section as backend/name
         assertTrue(text.contains("llama_cpp/qwen3.6-35b-a3b-q4km"), text);
     }
+
+    @Test
+    void renderShowsConfiguredModelSourceNoteWhenPresent() {
+        String text = ModelsCommand.renderInstalledModels(
+                List.of(new ModelRef(
+                        "llama_cpp",
+                        "custom-agent",
+                        null,
+                        "GGUF file: qwen2.5-coder-7b-instruct-q4_k_m.gguf")),
+                List.of());
+
+        assertTrue(text.contains("llama_cpp/custom-agent"), text);
+        assertTrue(text.contains("GGUF file: qwen2.5-coder-7b-instruct-q4_k_m.gguf"), text);
+    }
 }

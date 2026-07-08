@@ -1,8 +1,12 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.ApprovalPolicy;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolRiskLevel;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Objects;
 
 /** Config-backed allow/ask/deny permission policy with session-approval compatibility. */
@@ -44,7 +48,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         }
 
         PermissionConfig config = PermissionConfig.from(request.config());
-        PermissionDecision explicit = explicitDecision(config, request, resource, PermissionAction.DENY);
+        PermissionDecision explicit = explicitDecision(config, request, resources, PermissionAction.DENY);
         if (explicit != null) return explicit;
 
         if (!risk.requiresApproval() && protectedResource != null && isSpecificReadTool(request.call().toolName())) {
@@ -55,9 +59,9 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     false);
         }
 
-        explicit = explicitDecision(config, request, resource, PermissionAction.ASK);
+        explicit = explicitDecision(config, request, resources, PermissionAction.ASK);
         if (explicit != null) return explicit;
-        explicit = explicitDecision(config, request, resource, PermissionAction.ALLOW);
+        explicit = explicitAllowDecision(config, request, resources);
         if (explicit != null) return explicit;
 
         if (!risk.requiresApproval()) {
@@ -123,28 +127,96 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
     private static PermissionDecision explicitDecision(
             PermissionConfig config,
             PermissionRequest request,
-            ResourceDecision resource,
+            java.util.List<ResourceDecision> resources,
             PermissionAction action
     ) {
+        java.util.List<ResourceDecision> candidates =
+                resources == null || resources.isEmpty()
+                        ? java.util.List.of(ResourceDecision.noPath())
+                        : resources;
         for (PermissionRule rule : config.rules()) {
-            if (rule.action() == action && rule.matches(request, resource)) {
-                return switch (action) {
-                    case DENY -> PermissionDecision.deny("CONFIG_DENY",
-                            "Permission policy denied the tool call: " + rule.reason(), resource);
-                    case ASK -> PermissionDecision.ask("CONFIG_ASK",
-                            "Permission policy requires approval: " + rule.reason(), resource, false);
-                    case ALLOW -> PermissionDecision.allow("CONFIG_ALLOW", resource);
-                };
+            if (rule.action() != action) continue;
+            for (ResourceDecision resource : candidates) {
+                if (rule.matches(request, resource)) {
+                    return switch (action) {
+                        case DENY -> PermissionDecision.deny("CONFIG_DENY",
+                                "Permission policy denied the tool call: " + rule.reason(), resource);
+                        case ASK -> PermissionDecision.ask("CONFIG_ASK",
+                                "Permission policy requires approval: " + rule.reason(), resource, false);
+                        case ALLOW -> PermissionDecision.allow("CONFIG_ALLOW", resource);
+                    };
+                }
             }
         }
         return null;
     }
 
+    private static PermissionDecision explicitAllowDecision(
+            PermissionConfig config,
+            PermissionRequest request,
+            java.util.List<ResourceDecision> resources
+    ) {
+        java.util.List<ResourceDecision> candidates = allowCoverageCandidates(request, resources);
+        if (candidates.isEmpty()) {
+            candidates = resources == null || resources.isEmpty()
+                    ? java.util.List.of(ResourceDecision.noPath())
+                    : resources;
+        }
+        ResourceDecision firstCovered = null;
+        for (ResourceDecision resource : candidates) {
+            boolean covered = false;
+            for (PermissionRule rule : config.rules()) {
+                if (rule.action() != PermissionAction.ALLOW) continue;
+                if (rule.matches(request, resource)) {
+                    if (firstCovered == null) firstCovered = resource;
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered) return null;
+        }
+        return PermissionDecision.allow(
+                "CONFIG_ALLOW",
+                firstCovered == null ? ResourceDecision.noPath() : firstCovered);
+    }
+
+    private static java.util.List<ResourceDecision> allowCoverageCandidates(
+            PermissionRequest request,
+            java.util.List<ResourceDecision> fallbackResources
+    ) {
+        if (request == null || !request.effectiveRisk().requiresApproval()) {
+            return fallbackResources == null ? java.util.List.of() : fallbackResources;
+        }
+        if (request.call() != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(request.call().toolName())) {
+            try {
+                return WorkspaceOperationPlanner.checkpointPlan(request.call())
+                        .map(plan -> classifyUnique(request, plan.checkpointPaths()))
+                        .filter(list -> !list.isEmpty())
+                        .orElseGet(() -> fallbackResources == null ? java.util.List.of() : fallbackResources);
+            } catch (IllegalArgumentException ignored) {
+                return fallbackResources == null ? java.util.List.of() : fallbackResources;
+            }
+        }
+        return fallbackResources == null ? java.util.List.of() : fallbackResources;
+    }
+
+    private static java.util.List<ResourceDecision> classifyUnique(
+            PermissionRequest request,
+            java.util.List<String> paths
+    ) {
+        if (paths == null || paths.isEmpty()) return java.util.List.of();
+        LinkedHashMap<String, ResourceDecision> out = new LinkedHashMap<>();
+        for (String path : paths) {
+            if (path == null || path.isBlank()) continue;
+            ResourceDecision resource = ProtectedPathPolicy.classify(request.workspace(), path);
+            String key = resource.relativePath().isBlank() ? resource.rawPath() : resource.relativePath();
+            out.putIfAbsent(key, resource);
+        }
+        return List.copyOf(out.values());
+    }
+
     private static boolean isSpecificReadTool(String toolName) {
         if (toolName == null) return false;
-        String normalized = toolName.strip().toLowerCase(java.util.Locale.ROOT);
-        return "talos.read_file".equals(normalized)
-                || "read_file".equals(normalized)
-                || "readfile".equals(normalized);
+        return "read_file".equals(ToolAliasPolicy.localCanonicalName(toolName));
     }
 }

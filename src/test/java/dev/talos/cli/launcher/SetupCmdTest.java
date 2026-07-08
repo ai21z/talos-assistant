@@ -198,7 +198,45 @@ class SetupCmdTest {
         assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""));
         assertTrue(yaml.contains("hf_repo: \"\""));
         assertTrue(yaml.contains("hf_file: \"\""));
-        assertTrue(yaml.contains("native_calling: true"));
+        assertTrue(yaml.contains("native_calling: false"));
+    }
+
+    @Test
+    void knownProfileRejectsMismatchedExplicitGgufPath() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("qwen2.5-coder-7b-instruct-q4_k_m.gguf");
+
+        IllegalArgumentException error = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> SetupCmd.renderManagedLlamaCppProfileConfig(
+                        "qwen2.5-coder-14b",
+                        server,
+                        model,
+                        tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                        18115));
+
+        assertTrue(error.getMessage().contains("does not match profile qwen2.5-coder-14b"), error.getMessage());
+        assertTrue(error.getMessage().contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"), error.getMessage());
+        assertTrue(error.getMessage().contains("use a custom profile name"), error.getMessage());
+    }
+
+    @Test
+    void knownProfileAcceptsMatchingExplicitGgufPathAndKeepsProfileToolMode() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("qwen2.5-coder-14b-instruct-q4_k_m.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen2.5-coder-14b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen2.5-coder-14b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
     }
 
     @Test

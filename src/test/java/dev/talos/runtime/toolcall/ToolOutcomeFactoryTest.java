@@ -94,6 +94,24 @@ class ToolOutcomeFactoryTest {
     }
 
     @Test
+    void executedAliasOutcomePreservesRawNameAndExposesCanonicalName() {
+        ToolCall writeAlias = new ToolCall("file_utils:write_file", Map.of(
+                "path", "README.md",
+                "content", "new"));
+        ToolResult result = ToolResult.ok("Wrote README.md successfully.", VerificationStatus.PASS);
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(writeAlias, result, "README.md");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(writeAlias, "README.md", result, classification, null, null);
+
+        assertEquals("file_utils:write_file", outcome.toolName());
+        assertEquals("talos.write_file", outcome.canonicalToolName());
+        assertEquals("write_file", outcome.localCanonicalToolName());
+        assertTrue(outcome.mutating());
+    }
+
+    @Test
     void executedFailurePreservesDeniedAndErrorDetails() {
         ToolCall write = new ToolCall("talos.write_file", Map.of(
                 "path", "README.md",

@@ -2,20 +2,29 @@ package dev.talos.release;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("Public install packaging contract")
 class PublicInstallPackagingContractTest {
 
     private static final Path ROOT = Path.of("").toAbsolutePath().normalize();
+
+    @TempDir
+    Path tempDir;
 
     @Test
     @DisplayName("jpackage uses a Windows console, per-user install, and publisher identity")
@@ -412,6 +421,186 @@ class PublicInstallPackagingContractTest {
     }
 
     @Test
+    @DisplayName("Linux public bootstrap preserves release-input failures")
+    void linuxPublicBootstrapPreservesReleaseInputFailures() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.writeString(artifact, "not a real tarball\n", StandardCharsets.UTF_8);
+        Files.writeString(checksums,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  other-file.tar.gz\n",
+                StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(1, process.exitValue(), output);
+        assertTrue(output.contains("No SHA256 entry for talos-0.10.8-linux-x64-app.tar.gz in checksums.txt"),
+                output);
+        assertFalse(output.contains("release_inputs[0]"),
+                "installer must preserve the release-input failure, not mask it with array indexing: " + output);
+        assertFalse(Files.exists(installRoot.resolve("app")),
+                "installer must not install after release-input preparation fails");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap preserves checksum mismatch failures")
+    void linuxPublicBootstrapPreservesChecksumMismatchFailures() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.writeString(artifact, "not the expected release bytes\n", StandardCharsets.UTF_8);
+        Files.writeString(checksums,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                        + artifact.getFileName() + "\n",
+                StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(1, process.exitValue(), output);
+        assertTrue(output.contains("Checksum mismatch for"),
+                "installer must preserve checksum mismatch diagnostics: " + output);
+        assertFalse(output.contains("release_inputs[0]"),
+                "installer must not mask checksum mismatch with array indexing: " + output);
+        assertFalse(Files.exists(installRoot.resolve("app")),
+                "installer must not install after checksum mismatch");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap preserves missing artifact failures")
+    void linuxPublicBootstrapPreservesMissingArtifactFailures() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.writeString(checksums,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                        + artifact.getFileName() + "\n",
+                StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(1, process.exitValue(), output);
+        assertTrue(output.contains("Artifact file not found: " + bashPath(artifact)),
+                "installer must preserve missing artifact diagnostics: " + output);
+        assertFalse(output.contains("release_inputs[0]"),
+                "installer must not mask missing artifact with array indexing: " + output);
+        assertFalse(Files.exists(installRoot.resolve("app")),
+                "installer must not install after missing artifact failure");
+    }
+
+    @Test
+    @DisplayName("Linux public bootstrap accepts CRLF release checksums")
+    void linuxPublicBootstrapAcceptsCrlfReleaseChecksums() throws Exception {
+        assumeTrue(linuxBashAvailable(), "requires Linux bash");
+
+        Path payloadRoot = tempDir.resolve("payload");
+        Path appHome = payloadRoot.resolve("talos-0.10.8");
+        Path launcher = appHome.resolve("bin").resolve("talos");
+        Path artifact = tempDir.resolve("talos-0.10.8-linux-x64-app.tar.gz");
+        Path checksums = tempDir.resolve("checksums.txt");
+        Path installRoot = tempDir.resolve("install");
+        Path binDir = tempDir.resolve("bin");
+        Path profile = tempDir.resolve("profile");
+
+        Files.createDirectories(launcher.getParent());
+        Files.writeString(launcher, "#!/usr/bin/env bash\nprintf 'talos 0.10.8\\n'\n", StandardCharsets.UTF_8);
+        runBash("chmod +x " + shQuote(bashPath(launcher))
+                + " && tar -czf " + shQuote(bashPath(artifact))
+                + " -C " + shQuote(bashPath(payloadRoot)) + " .");
+
+        String digest = sha256Hex(artifact);
+        Files.writeString(checksums, digest + "  " + artifact.getFileName() + "\r\n", StandardCharsets.UTF_8);
+
+        Process process = new ProcessBuilder(
+                "bash",
+                "tools/install-talos.sh",
+                "--artifact-file", bashPath(artifact),
+                "--checksums-file", bashPath(checksums),
+                "--install-root", bashPath(installRoot),
+                "--bin-dir", bashPath(binDir),
+                "--profile-file", bashPath(profile),
+                "--force",
+                "--no-wizard")
+                .directory(ROOT.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        assertTrue(exited, "installer process did not exit");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertEquals(0, process.exitValue(), output);
+        assertTrue(output.contains("Installed Talos from talos-0.10.8-linux-x64-app.tar.gz"),
+                output);
+        assertFalse(output.contains("No SHA256 entry"),
+                "installer must parse CRLF checksum manifests: " + output);
+        assertTrue(Files.exists(installRoot.resolve("app").resolve("bin").resolve("talos")),
+                "installer should copy the release app image");
+    }
+
+    @Test
     @DisplayName("public docs describe Linux tarball lane without package-manager overclaim")
     void publicDocsDescribeLinuxTarballLane() throws Exception {
         String doc = read("docs/development/release-process.md");
@@ -519,6 +708,58 @@ class PublicInstallPackagingContractTest {
 
     private static String read(String relative) throws IOException {
         return Files.readString(ROOT.resolve(relative), StandardCharsets.UTF_8);
+    }
+
+    private static String bashPath(Path path) {
+        String absolute = path.toAbsolutePath().normalize().toString();
+        if (absolute.length() >= 3
+                && Character.isLetter(absolute.charAt(0))
+                && absolute.charAt(1) == ':'
+                && (absolute.charAt(2) == '\\' || absolute.charAt(2) == '/')) {
+            char drive = Character.toLowerCase(absolute.charAt(0));
+            String rest = absolute.substring(2).replace('\\', '/');
+            return "/mnt/" + drive + rest;
+        }
+        return absolute.replace('\\', '/');
+    }
+
+    private static void runBash(String script) throws Exception {
+        ProcessBuilder builder = new ProcessBuilder("bash", "-lc", script);
+        builder.directory(ROOT.toFile());
+        builder.redirectErrorStream(true);
+        Process process = builder.start();
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(exited, "bash helper did not exit: " + output);
+        assertEquals(0, process.exitValue(), output);
+    }
+
+    private static String shQuote(String value) {
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private static boolean linuxBashAvailable() {
+        try {
+            Process process = new ProcessBuilder("bash", "-lc", "uname -s")
+                    .redirectErrorStream(true)
+                    .start();
+            boolean exited = process.waitFor(5, TimeUnit.SECONDS);
+            if (!exited || process.exitValue() != 0) {
+                return false;
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            return "Linux".equals(output);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    private static String sha256Hex(Path path) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
     }
 
     private static int countOccurrences(String haystack, String needle) {

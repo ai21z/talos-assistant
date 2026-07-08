@@ -1062,27 +1062,62 @@ public final class TurnProcessor {
                 || !mutatingTool) {
             return null;
         }
-        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename", "target");
-        if (path == null || path.isBlank()) {
+        if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())
+                && workspaceOperationRequestOwnsTargetShape(taskContract)) {
             return null;
         }
-        for (String expected : taskContract.expectedTargets()) {
-            if (sameExpectedTarget(call.toolName(), path, expected)) {
-                return null;
+        List<String> paths = expectedTargetValidationPaths(call);
+        if (paths.isEmpty()) {
+            return null;
+        }
+        for (String path : paths) {
+            boolean matched = false;
+            for (String expected : taskContract.expectedTargets()) {
+                if (sameExpectedTarget(call.toolName(), path, expected)) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                for (String optional : optionalMutationTargets(taskContract)) {
+                    if (sameExpectedTarget(call.toolName(), path, optional)) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if (!matched) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
+                        "Target outside expected targets before approval: `" + path
+                                + "` is outside the current expected target set: "
+                                + String.join(", ", orderedExpectedTargets(taskContract))
+                                + ". Similar filenames are not substitutes for required target paths. "
+                                + "No approval was requested and no file was changed."));
             }
         }
-        for (String optional : optionalMutationTargets(taskContract)) {
-            if (sameExpectedTarget(call.toolName(), path, optional)) {
-                return null;
+        return null;
+    }
+
+    private static List<String> expectedTargetValidationPaths(ToolCall call) {
+        var paths = new LinkedHashSet<String>();
+        if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            try {
+                WorkspaceOperationPlanner.checkpointPlan(call)
+                        .ifPresent(plan -> paths.addAll(plan.changedPaths()));
+            } catch (IllegalArgumentException ignored) {
+                // Invalid operation payloads are handled by normal pre-approval validation.
             }
         }
-        return ToolResult.fail(ToolError.invalidParams(
-                ToolFailureReason.PRE_APPROVAL_TARGET_OUTSIDE_EXPECTED,
-                "Target outside expected targets before approval: `" + path
-                        + "` is outside the current expected target set: "
-                        + String.join(", ", orderedExpectedTargets(taskContract))
-                        + ". Similar filenames are not substitutes for required target paths. "
-                        + "No approval was requested and no file was changed."));
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename", "target");
+        if (path != null && !path.isBlank()) {
+            paths.add(path);
+        }
+        return List.copyOf(paths);
+    }
+
+    private static boolean workspaceOperationRequestOwnsTargetShape(TaskContract taskContract) {
+        return WorkspaceOperationIntent.detect(taskContract).isPresent();
     }
 
     private static Set<String> optionalMutationTargets(TaskContract taskContract) {

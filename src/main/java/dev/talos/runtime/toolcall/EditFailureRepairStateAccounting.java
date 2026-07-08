@@ -42,7 +42,7 @@ final class EditFailureRepairStateAccounting {
         if (state == null || call == null || result == null || result.success()) {
             return new Result(result);
         }
-        if (!"talos.edit_file".equals(call.toolName())) {
+        if (!"talos.edit_file".equals(call.canonicalToolName())) {
             return new Result(result);
         }
 

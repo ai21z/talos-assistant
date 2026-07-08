@@ -134,7 +134,7 @@ assert_supported_linux_x64() {
 require_command() {
     local name="$1"
     if ! command -v "$name" >/dev/null 2>&1; then
-        echo "Required command not found: $name"
+        echo "Required command not found: $name" >&2
         exit 2
     fi
 }
@@ -145,7 +145,7 @@ resolve_latest_version() {
     local tag
     tag="$(printf '%s\n' "$metadata" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
     if [[ -z "$tag" ]]; then
-        echo "Could not resolve latest Talos release version from GitHub."
+        echo "Could not resolve latest Talos release version from GitHub." >&2
         exit 1
     fi
     echo "${tag#v}"
@@ -165,14 +165,16 @@ read_expected_sha256() {
     local file_name="$2"
     local expected
     expected="$(awk -v name="$file_name" '{
-        if ($2 == name || $2 == "*" name) {
+        candidate = $2
+        sub(/\r$/, "", candidate)
+        if (candidate == name || candidate == "*" name) {
             print tolower($1)
             found = 1
             exit
         }
     } END { if (!found) exit 1 }' "$checksum_file" || true)"
     if [[ -z "$expected" ]]; then
-        echo "No SHA256 entry for $file_name in checksums.txt"
+        echo "No SHA256 entry for $file_name in checksums.txt" >&2
         exit 1
     fi
     echo "$expected"
@@ -184,7 +186,7 @@ assert_sha256() {
     local actual
     actual="$(sha256sum "$file_path" | awk '{print tolower($1)}')"
     if [[ "$actual" != "$expected" ]]; then
-        echo "Checksum mismatch for $file_path. Expected $expected, got $actual."
+        echo "Checksum mismatch for $file_path. Expected $expected, got $actual." >&2
         exit 1
     fi
 }
@@ -267,15 +269,15 @@ prepare_release_inputs() {
 
     if [[ -n "$ARTIFACT_FILE" || -n "$CHECKSUMS_FILE" ]]; then
         if [[ -z "$ARTIFACT_FILE" || -z "$CHECKSUMS_FILE" ]]; then
-            echo "--artifact-file and --checksums-file must be provided together."
+            echo "--artifact-file and --checksums-file must be provided together." >&2
             exit 1
         fi
         if [[ ! -f "$ARTIFACT_FILE" ]]; then
-            echo "Artifact file not found: $ARTIFACT_FILE"
+            echo "Artifact file not found: $ARTIFACT_FILE" >&2
             exit 1
         fi
         if [[ ! -f "$CHECKSUMS_FILE" ]]; then
-            echo "Checksums file not found: $CHECKSUMS_FILE"
+            echo "Checksums file not found: $CHECKSUMS_FILE" >&2
             exit 1
         fi
         artifact_name="$(basename "$ARTIFACT_FILE")"
@@ -349,6 +351,10 @@ TEMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEMP_ROOT"' EXIT
 
 mapfile -t release_inputs < <(prepare_release_inputs "$TEMP_ROOT")
+if [[ "${#release_inputs[@]}" -ne 2 || -z "${release_inputs[0]:-}" || -z "${release_inputs[1]:-}" ]]; then
+    echo "Release input preparation did not produce artifact path and artifact name." >&2
+    exit 1
+fi
 ARTIFACT_PATH="${release_inputs[0]}"
 ARTIFACT_NAME="${release_inputs[1]}"
 

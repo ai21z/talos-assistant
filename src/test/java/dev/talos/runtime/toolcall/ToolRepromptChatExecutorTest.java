@@ -10,6 +10,7 @@ import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
 
+import java.net.ConnectException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -95,6 +96,27 @@ class ToolRepromptChatExecutorTest {
         assertFalse(continueLoop);
         assertEquals("[Model 'missing-model' not found - tool loop aborted. "
                 + missing.guidance() + "]", state.currentText);
+        assertTrue(state.currentNativeCalls.isEmpty());
+    }
+
+    @Test
+    void connectionFailureUsesGenericEngineWordingNotOllama() {
+        EngineException.ConnectionFailed failure = new EngineException.ConnectionFailed(
+                "http://127.0.0.1:18115",
+                new ConnectException("connection refused"));
+        LoopState state = state(LlmClient.scriptedFailure(failure));
+
+        boolean continueLoop = ToolRepromptChatExecutor.execute(
+                state,
+                state.messages,
+                tools(),
+                ChatRequestControls.defaults(),
+                "test reprompt");
+
+        assertFalse(continueLoop);
+        assertEquals("[Model engine not reachable - tool loop aborted. "
+                + failure.guidance() + "]", state.currentText);
+        assertFalse(state.currentText.contains("Ollama"), state.currentText);
         assertTrue(state.currentNativeCalls.isEmpty());
     }
 

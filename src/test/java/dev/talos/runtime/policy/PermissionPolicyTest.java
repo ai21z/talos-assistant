@@ -121,6 +121,130 @@ class PermissionPolicyTest {
     }
 
     @Test
+    void explicitDenyRuleMatchesCanonicalReadAlias() {
+        Config cfg = configWithRules(List.of(
+                rule("deny", List.of("talos.read_file"), List.of("READ_ONLY"), List.of("INSPECT"), List.of("README.md"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("file_read", Map.of("path", "README.md")),
+                ToolRiskLevel.READ_ONLY,
+                ExecutionPhase.INSPECT));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("CONFIG_DENY", decision.reasonCode());
+    }
+
+    @Test
+    void protectedReadAliasAsksWithoutRemembering() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(new Config(null),
+                new ToolCall("file_read", Map.of("path", ".env")),
+                ToolRiskLevel.READ_ONLY,
+                ExecutionPhase.INSPECT));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("PROTECTED_PATH_ASK", decision.reasonCode());
+        assertFalse(decision.rememberEligible());
+    }
+
+    @Test
+    void explicitDenyRuleAppliesToCopyDestinationResource() {
+        Config cfg = configWithRules(List.of(
+                rule("deny", List.of("talos.copy_path"), List.of("WRITE"), List.of("APPLY"), List.of("blocked/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("talos.copy_path", Map.of("from", "README.md", "to", "blocked/copy.md")),
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("CONFIG_DENY", decision.reasonCode());
+        assertEquals("blocked/copy.md", decision.relativePath());
+    }
+
+    @Test
+    void explicitAllowRequiresEveryChangedBatchPathToBeCovered() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.apply_workspace_batch"), List.of("WRITE"), List.of("APPLY"),
+                        List.of("allowed/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"allowed/one"},
+                          {"op":"mkdir","path":"outside/two"}
+                        ]
+                        """)),
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.ASK, decision.action());
+        assertEquals("DEFAULT_WRITE_ASK", decision.reasonCode());
+        assertEquals("allowed/one", decision.relativePath());
+    }
+
+    @Test
+    void explicitAllowAppliesWhenEveryChangedBatchPathIsCovered() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.apply_workspace_batch"), List.of("WRITE"), List.of("APPLY"),
+                        List.of("allowed/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"allowed/one"},
+                          {"op":"mkdir","path":"allowed/two"}
+                        ]
+                        """)),
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.ALLOW, decision.action());
+        assertEquals("CONFIG_ALLOW", decision.reasonCode());
+    }
+
+    @Test
+    void explicitAllowForCopyRequiresDestinationCoverageButNotSourceCoverage() {
+        Config cfg = configWithRules(List.of(
+                rule("allow", List.of("talos.copy_path"), List.of("WRITE"), List.of("APPLY"), List.of("allowed/**"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("talos.copy_path", Map.of("from", "README.md", "to", "allowed/README.md")),
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.ALLOW, decision.action());
+        assertEquals("CONFIG_ALLOW", decision.reasonCode());
+        assertEquals("allowed/README.md", decision.relativePath());
+    }
+
+    @Test
+    void renameComputedProtectedDestinationIsDeniedBeforeApproval() {
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(new Config(),
+                new ToolCall("talos.rename_path", Map.of("path", "notes.txt", "new_name", ".env")),
+                ToolRiskLevel.WRITE,
+                ExecutionPhase.APPLY));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("PROTECTED_PATH_DENY", decision.reasonCode());
+        assertEquals(".env", decision.relativePath());
+        assertTrue(decision.protectedPath());
+    }
+
+    @Test
     void defaultSafeWriteAsksAndCanBeRemembered() {
         PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
 

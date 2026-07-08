@@ -37,9 +37,9 @@ final class ToolRepromptChatExecutor {
         } catch (EngineException.ContextBudgetExceeded budget) {
             return ToolRepromptContextBudgetHandler.handle(state, budget, retryName);
         } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable during {}: {}",
+            LOG.warn("Model engine not reachable during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
-            state.finishWithAnswer("[Ollama not reachable - tool loop aborted. " + cf.guidance() + "]");
+            state.finishWithAnswer(connectionFailedAnswer(cf));
             return false;
         } catch (EngineException.ModelNotFound mnf) {
             LOG.warn("Model not found during {}: {}",
@@ -58,6 +58,10 @@ final class ToolRepromptChatExecutor {
             state.finishWithAnswer("(error during follow-up LLM call: " + e.getMessage() + ")");
             return false;
         }
+    }
+
+    static String connectionFailedAnswer(EngineException.ConnectionFailed cf) {
+        return "[Model engine not reachable - tool loop aborted. " + cf.guidance() + "]";
     }
 
     static boolean executeResult(

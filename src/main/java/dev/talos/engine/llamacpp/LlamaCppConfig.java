@@ -120,6 +120,21 @@ record LlamaCppConfig(
         return "local-llama-cpp";
     }
 
+    String modelSourceNote() {
+        if (modelPath != null && !modelPath.isBlank()) {
+            try {
+                Path filename = Path.of(modelPath).getFileName();
+                if (filename != null) return "GGUF file: " + filename;
+            } catch (Exception ignored) {
+                return "";
+            }
+        }
+        if (hfFile != null && !hfFile.isBlank()) {
+            return "GGUF file: " + hfFile.trim();
+        }
+        return "";
+    }
+
     private static String hfRepoName(String repo) {
         String value = Objects.toString(repo, "").trim();
         int slash = value.lastIndexOf('/');

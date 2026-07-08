@@ -4,6 +4,7 @@ import dev.talos.safety.ProtectedPathTokens;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -28,6 +29,19 @@ public final class ProtectedPathPolicy {
     public static List<ResourceDecision> classifyAll(Path workspace, ToolCall call) {
         if (call == null) return List.of(ResourceDecision.noPath());
         var decisions = new java.util.ArrayList<ResourceDecision>();
+        if (WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            try {
+                WorkspaceOperationPlanner.checkpointPlan(call).ifPresent(plan -> {
+                    for (var effect : plan.pathEffects()) {
+                        if (effect != null && effect.path() != null && !effect.path().isBlank()) {
+                            decisions.add(classify(workspace, effect.path()));
+                        }
+                    }
+                });
+            } catch (IllegalArgumentException ignored) {
+                // Invalid operation payloads are handled by normal pre-approval validation.
+            }
+        }
         if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             for (String value : WorkspaceBatchPlanParser.pathValues(call)) {
                 if (value != null && !value.isBlank()) {
