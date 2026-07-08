@@ -131,7 +131,7 @@ public final class ScriptedNativeLlmClient {
             if (response.text() != null && !response.text().isEmpty()) {
                 chunks.add(TokenChunk.of(response.text()));
             }
-            chunks.add(TokenChunk.eos());
+            chunks.add(TokenChunk.eos(response.finishReason()));
             return chunks.stream();
         }
 
@@ -299,7 +299,7 @@ public final class ScriptedNativeLlmClient {
         if (response.text() != null && !response.text().isEmpty()) {
             chunks.add(TokenChunk.of(response.text()));
         }
-        chunks.add(TokenChunk.eos());
+        chunks.add(TokenChunk.eos(response.finishReason()));
         return chunks.stream();
     }
 

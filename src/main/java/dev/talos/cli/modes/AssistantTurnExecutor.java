@@ -221,6 +221,7 @@ public final class AssistantTurnExecutor {
                 LlmClient.StreamResult streamResult =
                         TurnModelDispatcher.dispatchStreaming(ctx, messages, currentTurnPlan);
                 String answer = streamResult.text();
+                recordOutputLimitIfNeeded(streamResult);
 
                 // Flush the stream filter so any pending non-tool text is emitted
                 if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
@@ -254,7 +255,7 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
-                            out.append(resolution.answer());
+                            out.append(withOutputLimitNotice(resolution.answer(), streamResult, ctx, false));
                         }
                     } else {
                         // No tool calls - content was streamed; record full text for memory.
@@ -266,7 +267,7 @@ public final class AssistantTurnExecutor {
                         answer = shapeAnswerWithoutTools(answer, messages, currentTurnPlan, ctx, true, opts);
                         emitStreamingNoToolCorrectionIfNeeded(rawAnswer, answer, ctx);
                         emitMalformedProtocolReplacementIfNeeded(rawAnswer, answer, ctx);
-                        out.append(answer);
+                        out.append(withOutputLimitNotice(answer, streamResult, ctx, true));
                     }
                 } else {
                     out.append("(no answer)");
@@ -280,6 +281,7 @@ public final class AssistantTurnExecutor {
                         messages,
                         currentTurnPlan,
                         opts.llmTimeoutMs);
+                recordOutputLimitIfNeeded(streamResult);
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
                     try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
                 }
@@ -299,7 +301,7 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
-                            answer = resolution.answer();
+                            answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
                         }
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
@@ -309,7 +311,7 @@ public final class AssistantTurnExecutor {
                         ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
                                 answer, messages, currentTurnPlan, workspace, ctx, opts);
                         appendExtraSummary(out, resolution.extraSummary());
-                        answer = resolution.answer();
+                        answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
                     }
                     out.append(answer);
                 } else {
@@ -406,6 +408,33 @@ public final class AssistantTurnExecutor {
         out.append("\n[Error during LLM call")
                 .append(detail != null && !detail.isBlank() ? ": " + detail : "")
                 .append("]\n");
+    }
+
+    private static void recordOutputLimitIfNeeded(LlmClient.StreamResult result) {
+        if (result == null || !result.outputLimitReached()) return;
+        LocalTurnTraceCapture.warning(
+                "LLM_OUTPUT_LIMIT_REACHED",
+                "Provider reported finish_reason=length; response stopped at the configured output limit and may be incomplete.");
+    }
+
+    private static String withOutputLimitNotice(
+            String answer,
+            LlmClient.StreamResult result,
+            Context ctx,
+            boolean alreadyStreamed
+    ) {
+        String safeAnswer = answer == null ? "" : answer;
+        if (result == null || !result.outputLimitReached()) {
+            return safeAnswer;
+        }
+        String notice = "\n\n[Model output limit reached: provider reported finish_reason=length; the answer may be incomplete.]";
+        if (alreadyStreamed && ctx != null && ctx.streamSink() != null) {
+            ctx.streamSink().accept(notice);
+            if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+                filter.flush();
+            }
+        }
+        return safeAnswer + notice;
     }
 
     private static void recordBackendFailureOutcome(String classification) {

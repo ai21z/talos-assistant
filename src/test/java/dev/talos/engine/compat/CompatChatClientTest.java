@@ -237,6 +237,29 @@ class CompatChatClientTest {
     }
 
     @Test
+    void chatStreamPropagatesLengthFinishReasonOnEos() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                data: {"choices":[{"delta":{"content":"partial"}}]}
+
+                data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+
+                data: [DONE]
+
+                """, "text/event-stream");
+        try {
+            CompatChatClient client = client(server);
+
+            List<TokenChunk> chunks = client.chatStream(requestForStream()).toList();
+
+            assertEquals("partial", chunks.get(0).text());
+            assertTrue(chunks.get(1).done());
+            assertEquals("length", chunks.get(1).finishReason());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void chatStreamParsesCompleteToolCallDelta() throws Exception {
         HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
                 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"talos.write_file","arguments":"{\\\"path\\\":\\\"scripts.js\\\",\\\"content\\\":\\\"ok\\\"}"}}]},"finish_reason":"tool_calls"}]}

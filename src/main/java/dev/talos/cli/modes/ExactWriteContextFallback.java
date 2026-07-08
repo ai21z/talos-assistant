@@ -165,6 +165,6 @@ final class ExactWriteContextFallback {
                 safe.jsonSchema(),
                 tags,
                 safe.sampling(),
-                safe.maxOutputTokens());
+                0);
     }
 }

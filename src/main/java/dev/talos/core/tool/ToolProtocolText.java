@@ -76,7 +76,7 @@ public final class ToolProtocolText {
             return "";
         }
         String stripped = STRIP_PATTERN.matcher(text).replaceAll("");
-        stripped = CODE_FENCE_PATTERN.matcher(stripped).replaceAll("");
+        stripped = stripRecognizedCodeFences(stripped);
         stripped = BARE_JSON_PATTERN.matcher(stripped).replaceAll("");
         stripped = stripMalformedToolProtocolBlocks(stripped);
         stripped = stripped.replaceAll("\\n{3,}", "\n\n");
@@ -90,9 +90,21 @@ public final class ToolProtocolText {
     public static boolean containsToolCalls(String text) {
         if (text == null || text.isBlank()) return false;
         if (STRIP_PATTERN.matcher(text).find()) return true;
-        if (CODE_FENCE_PATTERN.matcher(text).find()) return true;
+        if (containsRecognizedCodeFenceToolCall(text)) return true;
         if (BARE_JSON_PATTERN.matcher(text).find()) return true;
         return looksLikeStandaloneToolJson(text);
+    }
+
+    /** Returns true when a code fence contains a recognized Talos tool name or accepted alias. */
+    public static boolean containsRecognizedCodeFenceToolCall(String text) {
+        if (text == null || text.isBlank()) return false;
+        Matcher matcher = CODE_FENCE_PATTERN.matcher(text);
+        while (matcher.find()) {
+            if (containsAcceptedToolNameField(matcher.group(1))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -163,6 +175,20 @@ public final class ToolProtocolText {
         return out.toString();
     }
 
+    private static String stripRecognizedCodeFences(String text) {
+        Matcher matcher = CODE_FENCE_PATTERN.matcher(text);
+        StringBuilder out = new StringBuilder(text.length());
+        while (matcher.find()) {
+            if (containsAcceptedToolNameField(matcher.group(1))) {
+                matcher.appendReplacement(out, "");
+            } else {
+                matcher.appendReplacement(out, Matcher.quoteReplacement(matcher.group()));
+            }
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
     private static List<int[]> malformedToolProtocolSpans(String text) {
         String value = text == null ? "" : text;
         if (value.isBlank()) return List.of();
@@ -187,10 +213,14 @@ public final class ToolProtocolText {
     }
 
     private static boolean isMalformedToolProtocolCandidate(String candidate) {
+        return containsAcceptedToolNameField(candidate) && !looksLikeStandaloneToolJson(candidate);
+    }
+
+    private static boolean containsAcceptedToolNameField(String candidate) {
         Matcher nameMatcher = TOOL_NAME_FIELD_PATTERN.matcher(candidate);
         while (nameMatcher.find()) {
             if (isRecognizedToolName(nameMatcher.group(1))) {
-                return !looksLikeStandaloneToolJson(candidate);
+                return true;
             }
         }
         return false;
@@ -255,6 +285,9 @@ public final class ToolProtocolText {
     }
 
     private static boolean isRecognizedToolName(String rawName) {
-        return ToolNamePolicy.resolve(rawName).accepted();
+        ToolNamePolicy.Decision decision = ToolNamePolicy.resolve(rawName);
+        return decision.accepted()
+                || (decision.status() == ToolNamePolicy.AliasDecisionStatus.UNKNOWN
+                && decision.canonicalToolName().startsWith("talos."));
     }
 }

@@ -617,10 +617,29 @@ public final class LlmClient implements AutoCloseable {
      * @param text      assembled prose text (sanitized, think-tags stripped)
      * @param toolCalls native tool calls from the model (empty if none)
      */
-    public record StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls) {
+    public record StreamResult(
+            String text,
+            List<ChatMessage.NativeToolCall> toolCalls,
+            String finishReason
+    ) {
+        public StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls) {
+            this(text, toolCalls, "");
+        }
+
+        public StreamResult {
+            text = text == null ? "" : text;
+            toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+            finishReason = finishReason == null ? "" : finishReason.strip();
+        }
+
         /** Returns true if the model returned native tool calls. */
         public boolean hasToolCalls() {
             return toolCalls != null && !toolCalls.isEmpty();
+        }
+
+        /** Returns true when the provider stopped because the requested output cap was reached. */
+        public boolean outputLimitReached() {
+            return "length".equalsIgnoreCase(finishReason);
         }
     }
 
@@ -931,10 +950,15 @@ public final class LlmClient implements AutoCloseable {
             List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
             int alreadyEmittedLen = 0;
             boolean visibleOutputEmitted = false;
+            String finishReason = "";
             try {
                 for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
                     if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
-                    if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+                    if (ch == null) break;
+                    if (Boolean.TRUE.equals(ch.done())) {
+                        finishReason = Objects.toString(ch.finishReason(), "").strip();
+                        break;
+                    }
 
                     if (ch.hasToolCalls()) {
                         toolCalls.addAll(ch.toolCalls());
@@ -958,12 +982,12 @@ public final class LlmClient implements AutoCloseable {
                         onChunk.accept(emit);
                         visibleOutputEmitted = true;
                     }
-                    if (ToolProtocolText.containsToolCalls(acc.toString())) {
+                    if (toolCalls.isEmpty() && ToolProtocolText.containsToolCalls(acc.toString())) {
                         break;
                     }
                     if (acc.length() >= safeCap()) break;
                 }
-                return new StreamResult(acc.toString(), toolCalls);
+                return new StreamResult(acc.toString(), toolCalls, finishReason);
             } catch (EngineException.Transient transientFailure) {
                 if (streamWasLocallyClosed(activeStream, stream)) {
                     return abortedStreamResult(

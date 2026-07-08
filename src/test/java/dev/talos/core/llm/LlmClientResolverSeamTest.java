@@ -138,6 +138,54 @@ final class LlmClientResolverSeamTest {
         assertFalse(result.text().contains("trailing ramble"), result.text());
     }
 
+    @Test
+    void ordinary_fenced_json_does_not_close_generation_early() {
+        OrdinaryJsonFenceThenAnswerResolver resolver = new OrdinaryJsonFenceThenAnswerResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("show me an example package.json")),
+                null,
+                5_000L,
+                List.of());
+
+        assertEquals(4, resolver.chunksConsumed.get(),
+                "ordinary fenced package JSON must not be treated as complete tool protocol");
+        assertTrue(result.text().contains("demo-app"), result.text());
+        assertTrue(result.text().contains("done after example"), result.text());
+    }
+
+    @Test
+    void mixed_native_tool_calls_do_not_trigger_text_tool_early_close() {
+        MixedNativeAndTextToolResolver resolver = new MixedNativeAndTextToolResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("create the file")),
+                null,
+                5_000L,
+                List.of());
+
+        assertEquals(4, resolver.chunksConsumed.get(),
+                "once native tool calls are present, text cleanup must not close the provider stream early");
+        assertTrue(result.hasToolCalls());
+        assertTrue(result.text().contains("tail after native call"), result.text());
+    }
+
+    @Test
+    void stream_result_records_length_finish_reason() {
+        LengthFinishReasonResolver resolver = new LengthFinishReasonResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("answer briefly")),
+                5_000L,
+                List.of());
+
+        assertTrue(result.outputLimitReached());
+        assertEquals("length", result.finishReason());
+    }
+
     private static Config engineConfig() {
         return engineConfigWithTimeout(null);
     }
@@ -354,6 +402,74 @@ final class LlmClientResolverSeamTest {
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
                     .onClose(() -> streamClosed.set(true));
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class OrdinaryJsonFenceThenAnswerResolver implements LlmEngineResolver {
+        private final AtomicInteger chunksConsumed = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            return Stream.of(
+                    TokenChunk.of("Here is package.json:\n"),
+                    TokenChunk.of("```json\n{\"name\":\"demo-app\",\"version\":\"1.0.0\"}\n```\n"),
+                    TokenChunk.of("done after example"),
+                    TokenChunk.eos()
+            ).peek(ignored -> chunksConsumed.incrementAndGet());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class MixedNativeAndTextToolResolver implements LlmEngineResolver {
+        private final AtomicInteger chunksConsumed = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            return Stream.of(
+                    TokenChunk.ofToolCalls(List.of(new ChatMessage.NativeToolCall(
+                            "call_write",
+                            "talos.write_file",
+                            java.util.Map.of("path", "index.html", "content", "<h1>Hello</h1>")))),
+                    TokenChunk.of("```json\n{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"extra.txt\",\"content\":\"x\"}}\n```\n"),
+                    TokenChunk.of("tail after native call"),
+                    TokenChunk.eos()
+            ).peek(ignored -> chunksConsumed.incrementAndGet());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class LengthFinishReasonResolver implements LlmEngineResolver {
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            return Stream.of(TokenChunk.of("partial answer"), TokenChunk.eos("length"));
         }
 
         @Override

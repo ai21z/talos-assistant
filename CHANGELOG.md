@@ -8,7 +8,11 @@
   initial mutation and workspace-operation requests cap at 1024 tokens instead
   of burning the managed server `--predict 2048` backstop. Prompt-debug renders
   the cap when present, and streamed text-form tool calls now close generation
-  once a complete Talos tool payload is detected.
+  once a complete Talos tool payload is detected. Provider `finish_reason=length`
+  now propagates into turn output/trace as an output-limit warning, exact-write
+  compact fallback clears the first-request cap so complete file bodies can be
+  produced, and ordinary fenced JSON such as `package.json` examples no longer
+  enters the text-tool parser or stream-stop path.
 - [T991] Made managed llama.cpp setup choose the context window through a
   bounded selector instead of a hard-coded `8192`: the Qwen 14B profile can
   select `16384` when measured CUDA VRAM or system RAM meets the documented

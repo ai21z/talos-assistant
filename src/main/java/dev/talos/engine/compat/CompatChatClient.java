@@ -333,7 +333,7 @@ public final class CompatChatClient {
                 chunks.add(TokenChunk.ofToolCalls(calls));
             }
 
-            chunks.add(TokenChunk.eos());
+            chunks.add(TokenChunk.eos(firstChoice(json).path("finish_reason").asText("")));
             return List.copyOf(chunks);
         } catch (EngineException e) {
             throw e;
@@ -469,6 +469,7 @@ public final class CompatChatClient {
         private final ObjectMapper mapper;
         private final Deque<TokenChunk> pending = new ArrayDeque<>();
         private final Map<Integer, PartialToolCall> partialToolCalls = new LinkedHashMap<>();
+        private String finishReason = "";
         private boolean finished;
 
         private SseIterator(BufferedReader reader, ObjectMapper mapper) {
@@ -504,7 +505,7 @@ public final class CompatChatClient {
 
                 if (line == null) {
                     flushToolCallsIfAny();
-                    pending.add(TokenChunk.eos());
+                    pending.add(TokenChunk.eos(finishReason));
                     finished = true;
                     return;
                 }
@@ -516,7 +517,7 @@ public final class CompatChatClient {
                 String data = line.substring("data:".length()).trim();
                 if ("[DONE]".equals(data)) {
                     flushToolCallsIfAny();
-                    pending.add(TokenChunk.eos());
+                    pending.add(TokenChunk.eos(finishReason));
                     finished = true;
                     return;
                 }
@@ -546,6 +547,9 @@ public final class CompatChatClient {
                 }
 
                 String finishReason = choice.path("finish_reason").asText("");
+                if (!finishReason.isBlank()) {
+                    this.finishReason = finishReason;
+                }
                 if ("tool_calls".equals(finishReason)) {
                     flushToolCallsIfAny();
                 }
