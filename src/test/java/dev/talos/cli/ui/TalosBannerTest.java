@@ -77,6 +77,17 @@ class TalosBannerTest {
         String output = captureCompact(Path.of("."), "auto");
         assertTrue(output.contains("auto"), "Compact banner should show the mode");
     }
+
+    @Test
+    void printCompact_reports_setup_incomplete_when_managed_engine_files_are_missing() {
+        String output = captureCompact(Path.of("."), "auto");
+
+        assertTrue(output.contains("setup incomplete"), output);
+        assertTrue(output.contains("talos setup models"), output);
+        assertFalse(output.contains("ready · type"), output);
+        assertFalse(output.contains("ready - type"), output);
+        assertFalse(output.contains("[ok] setup incomplete"), output);
+    }
     @Test
     void printCompact_omits_unicode_icon() {
         String compact = captureCompact(Path.of("."), "rag");

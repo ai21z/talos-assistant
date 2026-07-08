@@ -158,7 +158,8 @@ public final class SetupWizardRunner {
             Path serverPath = chooseServer(snapshot, reader, out, log, userHome, engineInstaller);
             if (serverPath == null) {
                 line(out, log, "Model setup skipped. No config written.");
-                line(out, log, "Next: provide a Linux-compatible llama-server path, then rerun `talos setup wizard`.");
+                line(out, log, "Next: provide a " + serverPathDescription(snapshot)
+                        + ", then rerun `talos setup wizard`.");
                 return new Result(0, false, snapshot.configPath(), null, log.toString());
             }
 
@@ -280,7 +281,8 @@ public final class SetupWizardRunner {
                 || install.status() == LlamaCppEngineInstaller.Status.REUSED) {
             return install.serverPath();
         }
-        line(out, log, "Pinned engine install failed; you can provide a Linux-compatible llama-server path or skip.");
+        line(out, log, "Pinned engine install failed; you can provide a "
+                + serverPathDescription(snapshot) + " or skip.");
         return null;
     }
 
@@ -290,7 +292,8 @@ public final class SetupWizardRunner {
             StringBuilder log,
             SetupWizardSnapshot snapshot) throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
-            String raw = ask(reader, out, log, "Enter Linux-compatible llama-server path, or press Enter to skip model setup: ");
+            String raw = ask(reader, out, log, "Enter " + serverPathDescription(snapshot)
+                    + ", or press Enter to skip model setup: ");
             if (raw.isBlank()) {
                 return null;
             }
@@ -313,6 +316,12 @@ public final class SetupWizardRunner {
         }
         line(out, log, "No compatible llama-server selected after 3 attempts.");
         return null;
+    }
+
+    private static String serverPathDescription(SetupWizardSnapshot snapshot) {
+        return snapshot != null && snapshot.wsl()
+                ? "Linux-compatible llama-server path"
+                : "llama-server path";
     }
 
     private static LlamaCppModelManifest.Entry chooseProfile(BufferedReader reader, PrintStream out, StringBuilder log) throws Exception {

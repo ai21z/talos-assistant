@@ -251,6 +251,32 @@ class SetupWizardPlannerTest {
     }
 
     @Test
+    void interactiveWizardOnWindowsUsesWindowsNeutralServerPathWordingWhenSkipped() {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(new SetupWizardSnapshot(
+                "Windows 11",
+                "amd64",
+                false,
+                "",
+                21,
+                config,
+                false,
+                null,
+                false,
+                512_000,
+                16_384,
+                32_768));
+
+        SetupWizardRunner.Result result = run(plan, "\n");
+
+        assertEquals(0, result.exitCode());
+        assertFalse(result.wroteConfig());
+        assertTrue(result.output().contains("Enter llama-server path"), result.output());
+        assertTrue(result.output().contains("Next: provide a llama-server path"), result.output());
+        assertFalse(result.output().contains("Linux-compatible"), result.output());
+    }
+
+    @Test
     void interactiveWizardDeniesPinnedEngineInstallWithoutSideEffects() throws Exception {
         Path config = tempDir.resolve(".talos").resolve("config.yaml");
         SetupWizardPlan plan = SetupWizardPlanner.plan(snapshot(config, false, null, false, true));

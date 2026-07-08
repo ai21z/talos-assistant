@@ -1,6 +1,8 @@
 package dev.talos.cli.ui;
 
 import dev.talos.core.Config;
+import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.engine.llamacpp.LlamaCppPreflight;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -40,7 +42,7 @@ public final class TalosBanner {
                 activeMode,
                 resolveModel(cfg),
                 debug,
-                "Type a request or /help");
+                startupHint(cfg));
         TerminalCapabilities caps = TerminalCapabilities.detectDefault();
         int width = TerminalWidths.resolve(
                 terminalWidth, System.getenv(), StartupBannerRenderer.DEFAULT_WIDTH);
@@ -67,7 +69,7 @@ public final class TalosBanner {
                 activeMode,
                 resolveModel(cfg),
                 "off",
-                "Type a request or /help");
+                startupHint(cfg));
         out.println();
         out.print(StartupBannerRenderer.render(
                 snapshot,
@@ -81,6 +83,21 @@ public final class TalosBanner {
 
     static String resolveModel(Config cfg) {
         return CliStatusDashboard.resolveModel(cfg);
+    }
+
+    static String startupHint(Config cfg) {
+        try {
+            EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+            if ("llama_cpp".equals(runtime.backend())) {
+                LlamaCppPreflight.Report report = LlamaCppPreflight.check(cfg);
+                if (report.managed() && !report.filesOk()) {
+                    return "setup incomplete · run talos setup models or /help";
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return "setup incomplete · run talos status --verbose";
+        }
+        return "ready · type /help, /status, /tools · or ask a question";
     }
 }
 
