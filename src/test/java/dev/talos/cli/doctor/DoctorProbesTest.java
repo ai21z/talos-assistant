@@ -211,6 +211,26 @@ class DoctorProbesTest {
     }
 
     @Test
+    void startModePassesWhenSuccessfulModelSmokeIsFast() throws IOException {
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+
+            ProbeResult result = new ServerProbe(true).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertTrue(result.detail().contains("end-to-end model smoke verified"), result.detail());
+            assertFalse(result.detail().contains("slow"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void startModeWarnsWhenSuccessfulModelSmokeIsSlow() throws IOException {
         HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ofMillis(60));
         try {
@@ -226,7 +246,7 @@ class DoctorProbesTest {
             assertTrue(result.detail().contains("model smoke verified"), result.detail());
             assertTrue(result.detail().contains("slow"), result.detail());
             assertTrue(result.detail().contains("qwen2.5-coder-14b"), result.detail());
-            assertTrue(result.detail().contains("smaller or GPU-accelerated model"), result.detail());
+            assertTrue(result.detail().contains("GPU acceleration or stronger hardware"), result.detail());
         } finally {
             server.stop(0);
         }

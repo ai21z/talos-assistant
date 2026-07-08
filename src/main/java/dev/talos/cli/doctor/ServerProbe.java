@@ -126,10 +126,11 @@ public final class ServerProbe implements DoctorProbe {
             if (elapsed.compareTo(slowSmokeWarningThreshold) > 0) {
                 return ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but slow: "
-                                + elapsed.toSeconds()
-                                + "s for startup/smoke on "
+                                + elapsedSeconds(elapsed)
+                                + " for startup/smoke on "
                                 + runtime.model()
-                                + "; managed server released again. For practical CPU-only use, try a smaller or GPU-accelerated model.");
+                                + "; managed server released again. This profile may be too slow for practical edit work on this machine;"
+                                + " use GPU acceleration or stronger hardware before relying on it.");
             }
             return ProbeResult.pass(id(),
                     "end-to-end model smoke verified (" + replyChars + " reply chars);"
@@ -139,5 +140,9 @@ public final class ServerProbe implements DoctorProbe {
                     "end-to-end server start failed: " + e.getMessage(),
                     "check ~/.talos/logs/llama_cpp-" + preflight.port() + ".log");
         }
+    }
+
+    private static String elapsedSeconds(Duration elapsed) {
+        return String.format(Locale.ROOT, "%.1fs", elapsed.toMillis() / 1000.0);
     }
 }
