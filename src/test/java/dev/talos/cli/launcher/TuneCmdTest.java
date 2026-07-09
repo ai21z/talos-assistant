@@ -247,6 +247,32 @@ class TuneCmdTest {
     }
 
     @Test
+    void ubuntuNestedInstalledLaneIsRecognizedWithoutAnInstallPrompt() throws Exception {
+        // The Ubuntu tar nests the binary; an already-installed lane must
+        // not dishonestly prompt "not installed yet" and must propose the
+        // path that actually exists.
+        writeConfig();
+        Path nestedExe = home.resolve(".talos").resolve("engines").resolve("llama.cpp")
+                .resolve("b9860").resolve("ubuntu-x64-cpu")
+                .resolve("build").resolve("bin").resolve("llama-server");
+        Files.createDirectories(nestedExe.getParent());
+        Files.writeString(nestedExe, "exe", StandardCharsets.UTF_8);
+        CountingInstaller installer = new CountingInstaller();
+
+        Run run = run("", (configPath, doctorOut) -> 0, freshLog(""), "", installer,
+                "Linux", "amd64", "Ubuntu 22.04.4 LTS", false);
+
+        assertEquals(0, run.exit, run.output);
+        assertTrue(run.output.contains("ubuntu-x64-cpu"), run.output);
+        assertFalse(run.output.contains("not installed yet"),
+                "an installed nested lane must not be re-prompted for install: " + run.output);
+        assertEquals(0, installer.calls,
+                "no install may be offered for an already-installed lane");
+        assertTrue(run.output.replace('\\', '/').contains("ubuntu-x64-cpu/build/bin/llama-server"),
+                "the proposal must carry the executable that actually exists: " + run.output);
+    }
+
+    @Test
     void helpTextPromisesOnlyDetectProposeApproveVerifyAndCpuFallback() {
         assertTrue(TuneCmd.DESCRIPTION.contains("detect"), TuneCmd.DESCRIPTION);
         assertTrue(TuneCmd.DESCRIPTION.contains("propose"), TuneCmd.DESCRIPTION);
@@ -282,13 +308,29 @@ class TuneCmdTest {
             TuneCmd.ServerLogReader logReader,
             String driverVersion,
             TuneCmd.EngineInstaller installer) throws Exception {
+        return run(input, doctorRunner, logReader, driverVersion, installer,
+                "Windows 11", "amd64", "", false);
+    }
+
+    private Run run(
+            String input,
+            TuneCmd.DoctorRunner doctorRunner,
+            TuneCmd.ServerLogReader logReader,
+            String driverVersion,
+            TuneCmd.EngineInstaller installer,
+            String osName,
+            String osArch,
+            String distroName,
+            boolean wsl) throws Exception {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         PrintStream out = new PrintStream(stdout, true, StandardCharsets.UTF_8);
         int exit = TuneCmd.run(
                 home.resolve(".talos").resolve("config.yaml"),
                 home,
-                "Windows 11",
-                "amd64",
+                osName,
+                osArch,
+                distroName,
+                wsl,
                 new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)),
                 out,
                 () -> driverVersion.isBlank()

@@ -133,7 +133,8 @@ public final class SetupWizardEnvironmentProbe {
         }
     }
 
-    private static boolean detectWsl() {
+    /** Shared platform detection; also consumed by {@code talos tune}. */
+    public static boolean detectWsl() {
         String distro = System.getenv("WSL_DISTRO_NAME");
         String interop = System.getenv("WSL_INTEROP");
         if ((distro != null && !distro.isBlank()) || (interop != null && !interop.isBlank())) {
@@ -144,7 +145,11 @@ public final class SetupWizardEnvironmentProbe {
                 || fileContains("/proc/sys/kernel/osrelease", "wsl");
     }
 
-    private static String detectDistro() {
+    /**
+     * Shared distro detection (single owner; {@code talos tune} reuses it
+     * rather than growing a second /etc/os-release reader).
+     */
+    public static String detectDistro() {
         Path osRelease = Path.of("/etc/os-release");
         if (!Files.isRegularFile(osRelease)) {
             return "";

@@ -7,7 +7,6 @@ import dev.talos.engine.llamacpp.ManagedContextSelector;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.function.Predicate;
 
 /**
  * Pure planning stage of {@code talos tune} (T987).
@@ -36,6 +35,7 @@ public final class TunePlanner {
             String osName,
             String osArch,
             boolean wsl,
+            String distroName,
             String gpuName,
             String gpuDriverVersion,
             long gpuVramTotalMb,
@@ -54,12 +54,24 @@ public final class TunePlanner {
             String expectedSpeedLine) {
     }
 
-    public static Optional<Proposal> plan(Facts facts, Path userHome, Predicate<Path> fileExists) {
+    /**
+     * Read-only lookup of an already-installed lane executable under its
+     * install directory. Install layouts differ per platform: Windows zips
+     * put the exe at the top, the Ubuntu tar nests it (build/bin), so the
+     * real implementation searches recursively - the same walk the
+     * installer itself uses to find what it extracted.
+     */
+    @FunctionalInterface
+    public interface InstalledExecutableLocator {
+        Optional<Path> locate(Path installDir, String executableName);
+    }
+
+    public static Optional<Proposal> plan(Facts facts, Path userHome, InstalledExecutableLocator locator) {
         SetupWizardSnapshot snapshot = new SetupWizardSnapshot(
                 facts.osName(),
                 facts.osArch(),
                 facts.wsl(),
-                "",
+                facts.distroName(),
                 21,
                 null,
                 false,
@@ -76,7 +88,12 @@ public final class TunePlanner {
             return Optional.empty();
         }
         LlamaCppEngineManifest.Entry lane = selected.get();
-        Path serverPath = lane.installDir(userHome).resolve(lane.executableName());
+        Path installDir = lane.installDir(userHome);
+        Optional<Path> installed = locator.locate(installDir, lane.executableName());
+        // Proposed path = the executable actually on disk when the lane is
+        // installed (layouts nest per platform); the flat default is only a
+        // display placeholder until the installer reports the real path.
+        Path serverPath = installed.orElseGet(() -> installDir.resolve(lane.executableName()));
         boolean cuda = lane.backend().startsWith("cuda");
         ManagedContextSelector.Decision context = ManagedContextSelector.select(
                 new ManagedContextSelector.Request(
@@ -87,7 +104,7 @@ public final class TunePlanner {
         return Optional.of(new Proposal(
                 lane,
                 serverPath,
-                fileExists.test(serverPath),
+                installed.isPresent(),
                 context,
                 detectionSummary(facts),
                 expectedSpeedLine(facts, cuda)));

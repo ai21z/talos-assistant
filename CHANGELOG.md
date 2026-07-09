@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- `talos tune` now works on Ubuntu and WSL. The tune snapshot carries the
+  real distro identity (reusing the setup wizard's /etc/os-release
+  detection instead of a hardcoded blank), so Ubuntu/WSL x64 selects the
+  shipped ubuntu-x64-cpu lane instead of reporting that no pinned lane
+  exists. Installed-lane detection now recognizes the actual install
+  layout through the installer's own recursive executable search (the
+  Ubuntu tar nests the binary under build/bin), so an already-installed
+  lane is no longer re-prompted for install and the proposal carries the
+  executable path that actually exists. Windows lane planning is
+  unchanged, and unsupported distros still get the honest no-pinned-lane
+  answer.
 - Ordinary managed llama.cpp sessions no longer run at debug log verbosity.
   The previous default `-lv 4` wrote prompt and workspace content into the
   plaintext server log on every session. Debug verbosity is now scoped to

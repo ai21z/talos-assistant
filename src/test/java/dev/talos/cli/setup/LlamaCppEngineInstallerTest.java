@@ -37,6 +37,32 @@ class LlamaCppEngineInstallerTest {
     }
 
     @Test
+    void locateInstalledExecutableFindsNestedFlatAndReportsMissing() throws Exception {
+        Path nestedRoot = tempDir.resolve("nested-install");
+        Path nested = nestedRoot.resolve("build").resolve("bin").resolve("llama-server");
+        Files.createDirectories(nested.getParent());
+        Files.writeString(nested, "exe", StandardCharsets.UTF_8);
+        assertEquals(nested.toAbsolutePath().normalize(),
+                LlamaCppEngineInstaller.locateInstalledExecutable(nestedRoot, "llama-server").orElseThrow(),
+                "the nested Ubuntu tar layout must be recognized");
+
+        Path flatRoot = tempDir.resolve("flat-install");
+        Path flat = flatRoot.resolve("llama-server.exe");
+        Files.createDirectories(flatRoot);
+        Files.writeString(flat, "exe", StandardCharsets.UTF_8);
+        assertEquals(flat.toAbsolutePath().normalize(),
+                LlamaCppEngineInstaller.locateInstalledExecutable(flatRoot, "llama-server.exe").orElseThrow(),
+                "the flat Windows zip layout must be recognized");
+
+        assertTrue(LlamaCppEngineInstaller
+                        .locateInstalledExecutable(tempDir.resolve("absent"), "llama-server").isEmpty(),
+                "a missing install must honestly report empty");
+        assertTrue(LlamaCppEngineInstaller
+                        .locateInstalledExecutable(nestedRoot, "other-binary").isEmpty(),
+                "an unrelated binary name must not count as the lane executable");
+    }
+
+    @Test
     void checksumMismatchFailsClosedAndDoesNotPromoteInstallDir() throws Exception {
         var entry = manifest("mismatch", "0000000000000000000000000000000000000000000000000000000000000000");
         var result = installer(new FakeDownloader("wrong bytes"), extractingServer()).install(entry, tempDir);

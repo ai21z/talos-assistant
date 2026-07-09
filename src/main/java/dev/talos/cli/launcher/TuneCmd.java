@@ -5,6 +5,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import dev.talos.cli.doctor.NvidiaGpuQuery;
 import dev.talos.cli.setup.LlamaCppEngineInstaller;
 import dev.talos.cli.setup.LlamaCppEngineManifest;
+import dev.talos.cli.setup.SetupWizardEnvironmentProbe;
 import dev.talos.cli.tune.TuneConfigEditor;
 import dev.talos.cli.tune.TunePlanner;
 import dev.talos.cli.tune.TuneVerifier;
@@ -91,6 +92,8 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
                 userHome,
                 System.getProperty("os.name", "unknown"),
                 System.getProperty("os.arch", "unknown"),
+                SetupWizardEnvironmentProbe.detectDistro(),
+                SetupWizardEnvironmentProbe.detectWsl(),
                 System.in,
                 System.out,
                 NvidiaGpuQuery::read,
@@ -109,6 +112,8 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
             Path userHome,
             String osName,
             String osArch,
+            String distroName,
+            boolean wsl,
             InputStream input,
             PrintStream out,
             GpuFactsSupplier gpuFacts,
@@ -134,7 +139,8 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
             TunePlanner.Facts facts = new TunePlanner.Facts(
                     osName,
                     osArch,
-                    false,
+                    wsl,
+                    distroName,
                     gpu.map(NvidiaGpuQuery.GpuFacts::name).orElse(""),
                     gpu.map(NvidiaGpuQuery.GpuFacts::driverVersion).orElse(""),
                     gpu.map(NvidiaGpuQuery.GpuFacts::vramTotalMb).orElse(-1L),
@@ -144,7 +150,7 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
                     configuredModelFileSize(yaml));
 
             Optional<TunePlanner.Proposal> planned = TunePlanner.plan(
-                    facts, userHome, Files::isRegularFile);
+                    facts, userHome, LlamaCppEngineInstaller::locateInstalledExecutable);
             if (planned.isEmpty()) {
                 out.println("No pinned engine lane exists for this platform yet. No changes made.");
                 return 2;
