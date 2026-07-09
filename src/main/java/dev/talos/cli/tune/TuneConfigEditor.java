@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -184,35 +183,6 @@ public final class TuneConfigEditor {
             return "engines.llama_cpp has no server_path key";
         }
         return "";
-    }
-
-    /** First {@code port:} inside the llama_cpp block, or the fallback. */
-    public static int configuredPort(String yaml, int fallback) {
-        boolean inLlamaBlock = false;
-        int llamaIndent = -1;
-        for (String line : yaml.lines().toList()) {
-            int indent = leadingSpaces(line);
-            String trimmed = line.trim();
-            if (trimmed.equals("llama_cpp:")) {
-                inLlamaBlock = true;
-                llamaIndent = indent;
-                continue;
-            }
-            if (inLlamaBlock && !line.isBlank() && indent <= llamaIndent) {
-                inLlamaBlock = false;
-            }
-            if (inLlamaBlock) {
-                Matcher matcher = PORT_LINE.matcher(line);
-                if (matcher.matches()) {
-                    try {
-                        return Integer.parseInt(matcher.group(1));
-                    } catch (NumberFormatException ignored) {
-                        return fallback;
-                    }
-                }
-            }
-        }
-        return fallback;
     }
 
     private static Map<?, ?> llamaBlock(String yaml) {

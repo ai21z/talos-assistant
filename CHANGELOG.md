@@ -32,6 +32,16 @@
   shared-memory spill is suspected. The CPU expected-speed line is an
   estimate with its basis pinned in code, and the doctor's existing
   "run talos tune" guidance now names a command that exists.
+  Post-review hardening: the editor inserts missing context,
+  context_reason, and server_args keys on legacy configs and verifies the
+  parsed result actually carries the proposal before anything is written,
+  uneditable configs (connect-only, no server_path) are rejected before
+  the install offer, "already matches" is only claimed on a semantic
+  match, the backup is restored on every non-verified exit including
+  exceptions, the verify log port comes from the engine's own config
+  resolution, and verification requires the managed server log to have
+  been refreshed by the run it just started so stale evidence or a
+  pre-existing server on the port can never produce "Verified".
 - [T986] Shipped pinned GPU-capable llama.cpp engine lanes. The setup manifest
   now carries Windows x64 CPU, CUDA 12.4, and CUDA 13.3 lanes from llama.cpp
   `b9918` (SHA-256 pinned, cudart driver-runtime companion archives modeled

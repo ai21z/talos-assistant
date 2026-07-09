@@ -256,7 +256,7 @@ final class LlamaCppServerManager implements AutoCloseable {
     }
 
     private Path logPath() {
-        return logDir.resolve("llama_cpp-" + config.port() + ".log");
+        return LlamaCppRuntimePaths.managedLogFile(logDir, config.port());
     }
 
     private static Path defaultLogDir() {

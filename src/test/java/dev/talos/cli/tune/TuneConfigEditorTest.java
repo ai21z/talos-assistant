@@ -100,12 +100,6 @@ class TuneConfigEditorTest {
         assertTrue(!diff.contains("model_path"), "unchanged lines must not appear in the diff:\n" + diff);
     }
 
-    @Test
-    void portIsReadFromTheConfigForVerifyLogLookup() {
-        assertEquals(18_115, TuneConfigEditor.configuredPort(OWNER_SHAPED_CONFIG, 9999));
-        assertEquals(9_999, TuneConfigEditor.configuredPort("llm:\n  model: x\n", 9_999));
-    }
-
     private static final String LEGACY_CONFIG_WITHOUT_CONTEXT = """
             llm:
               transport: "engine"

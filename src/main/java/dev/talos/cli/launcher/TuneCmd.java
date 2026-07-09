@@ -9,6 +9,7 @@ import dev.talos.cli.tune.TuneConfigEditor;
 import dev.talos.cli.tune.TunePlanner;
 import dev.talos.cli.tune.TuneVerifier;
 import dev.talos.core.Config;
+import dev.talos.engine.llamacpp.LlamaCppRuntimePaths;
 import picocli.CommandLine;
 
 import java.io.BufferedReader;
@@ -63,9 +64,20 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
         int run(Path configPath, PrintStream out);
     }
 
+    /**
+     * One observation of the managed server log. The lastModified stamp lets
+     * tune prove the log was refreshed by the verification run it just
+     * started, instead of trusting stale evidence from an earlier server.
+     */
+    public record LogSnapshot(boolean exists, long lastModifiedMillis, String content) {
+        public LogSnapshot {
+            content = content == null ? "" : content;
+        }
+    }
+
     @FunctionalInterface
     public interface ServerLogReader {
-        String read(Path talosHome, int port);
+        LogSnapshot snapshot(Path talosHome, int port);
     }
 
     @Override
@@ -89,7 +101,7 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
                         userHome.resolve(".talos").toAbsolutePath().normalize(),
                         true,
                         out),
-                TuneCmd::readManagedServerLog);
+                TuneCmd::snapshotManagedServerLog);
     }
 
     static int run(
@@ -212,41 +224,79 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
             out.println("Restore with: copy the backup over " + configPath
                     + " (byte-identical to the pre-tune config).");
 
-            out.println();
-            out.println("Verifying: running talos doctor --start against the new config.");
-            int doctorExit = doctorRunner.run(configPath, out);
-            int port = TuneConfigEditor.configuredPort(edit.updatedYaml(), 18115);
-            String serverLog = logReader.read(userHome.resolve(".talos"), port);
-            boolean cudaLane = proposal.lane().backend().startsWith("cuda");
-            TuneVerifier.Result verify = TuneVerifier.verify(serverLog, cudaLane, doctorExit);
+            // From here on the written config is unverified: every exit that
+            // is not a passed verification restores the backup, including
+            // exceptions out of the doctor run or the log read.
+            try {
+                out.println();
+                out.println("Verifying: running talos doctor --start against the new config.");
+                Path talosHome = userHome.resolve(".talos");
+                int port = LlamaCppRuntimePaths.effectivePort(new Config(configPath));
+                LogSnapshot beforeRun = logReader.snapshot(talosHome, port);
+                int doctorExit = doctorRunner.run(configPath, out);
+                LogSnapshot afterRun = logReader.snapshot(talosHome, port);
 
-            if (!verify.passed()) {
-                Files.copy(backup, configPath, StandardCopyOption.REPLACE_EXISTING);
-                out.println("Verify failed: " + verify.summary() + ".");
-                out.println("The previous config was restored from " + backup + ".");
-                return 1;
+                boolean logRefreshed = afterRun.exists()
+                        && (!beforeRun.exists()
+                        || beforeRun.lastModifiedMillis() != afterRun.lastModifiedMillis());
+                if (doctorExit == 0 && !logRefreshed) {
+                    Files.copy(backup, configPath, StandardCopyOption.REPLACE_EXISTING);
+                    out.println("Verify failed: the managed server log was not refreshed during "
+                            + "verification, so the evidence cannot be tied to the tuned config "
+                            + "(is another server already running on port " + port + "?).");
+                    out.println("The previous config was restored from " + backup + ".");
+                    return 1;
+                }
+
+                boolean cudaLane = proposal.lane().backend().startsWith("cuda");
+                TuneVerifier.Result verify = TuneVerifier.verify(afterRun.content(), cudaLane, doctorExit);
+                if (!verify.passed()) {
+                    Files.copy(backup, configPath, StandardCopyOption.REPLACE_EXISTING);
+                    out.println("Verify failed: " + verify.summary() + ".");
+                    out.println("The previous config was restored from " + backup + ".");
+                    return 1;
+                }
+                out.println("Verified: " + verify.summary() + ".");
+                if (verify.spillSuspected()) {
+                    out.println("Warning: generation speed is far below the lane's expected class. "
+                            + "The config was kept because offload evidence is real, but investigate "
+                            + "VRAM pressure before relying on this lane.");
+                }
+                return 0;
+            } catch (Exception verifyError) {
+                restoreBackupBestEffort(backup, configPath, out);
+                out.println("tune verification errored: " + safeMessage(verifyError)
+                        + ". The tuned config was not kept.");
+                return 2;
             }
-            out.println("Verified: " + verify.summary() + ".");
-            if (verify.spillSuspected()) {
-                out.println("Warning: generation speed is far below the lane's expected class. "
-                        + "The config was kept because offload evidence is real, but investigate "
-                        + "VRAM pressure before relying on this lane.");
-            }
-            return 0;
         } catch (Exception error) {
             out.println("tune failed: " + safeMessage(error));
             return 2;
         }
     }
 
-    private static String readManagedServerLog(Path talosHome, int port) {
+    private static void restoreBackupBestEffort(Path backup, Path configPath, PrintStream out) {
         try {
-            Path logPath = talosHome.resolve("logs").resolve("llama_cpp-" + port + ".log");
-            return Files.isRegularFile(logPath)
-                    ? Files.readString(logPath, StandardCharsets.UTF_8)
-                    : "";
+            Files.copy(backup, configPath, StandardCopyOption.REPLACE_EXISTING);
+            out.println("The previous config was restored from " + backup + ".");
+        } catch (Exception restoreError) {
+            out.println("Automatic restore failed (" + safeMessage(restoreError)
+                    + "); restore manually from " + backup + ".");
+        }
+    }
+
+    private static LogSnapshot snapshotManagedServerLog(Path talosHome, int port) {
+        try {
+            Path logPath = LlamaCppRuntimePaths.managedLogFile(talosHome.resolve("logs"), port);
+            if (!Files.isRegularFile(logPath)) {
+                return new LogSnapshot(false, 0L, "");
+            }
+            return new LogSnapshot(
+                    true,
+                    Files.getLastModifiedTime(logPath).toMillis(),
+                    Files.readString(logPath, StandardCharsets.UTF_8));
         } catch (Exception e) {
-            return "";
+            return new LogSnapshot(false, 0L, "");
         }
     }
 

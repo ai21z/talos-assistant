@@ -161,6 +161,92 @@ class TuneCmdTest {
     }
 
     @Test
+    void doctorExceptionAfterWriteRestoresBackupExactly() throws Exception {
+        Path config = writeConfig();
+        installLaneExe("win-x64-cuda-13.3");
+        String before = Files.readString(config, StandardCharsets.UTF_8);
+
+        Run run = run("y\n",
+                (configPath, doctorOut) -> {
+                    throw new IllegalStateException("doctor blew up");
+                },
+                freshLog(CUDA_LOG),
+                "610.62",
+                new CountingInstaller());
+
+        assertEquals(2, run.exit, run.output);
+        assertEquals(before, Files.readString(config, StandardCharsets.UTF_8),
+                "an exception during verification must restore the previous config");
+        assertTrue(run.output.contains("restored"), run.output);
+    }
+
+    @Test
+    void logReaderExceptionAfterWriteRestoresBackupExactly() throws Exception {
+        Path config = writeConfig();
+        installLaneExe("win-x64-cuda-13.3");
+        String before = Files.readString(config, StandardCharsets.UTF_8);
+
+        Run run = run("y\n",
+                (configPath, doctorOut) -> 0,
+                (talosHome, port) -> {
+                    throw new IllegalStateException("log read blew up");
+                },
+                "610.62",
+                new CountingInstaller());
+
+        assertEquals(2, run.exit, run.output);
+        assertEquals(before, Files.readString(config, StandardCharsets.UTF_8));
+        assertTrue(run.output.contains("restored"), run.output);
+    }
+
+    @Test
+    void staleServerLogCannotProduceVerified() throws Exception {
+        Path config = writeConfig();
+        installLaneExe("win-x64-cuda-13.3");
+        String before = Files.readString(config, StandardCharsets.UTF_8);
+        TuneCmd.LogSnapshot stale = new TuneCmd.LogSnapshot(true, 1_000L, CUDA_LOG);
+
+        Run run = run("y\n",
+                (configPath, doctorOut) -> 0,
+                new FakeLogReader(stale, stale),
+                "610.62",
+                new CountingInstaller());
+
+        assertEquals(1, run.exit, run.output);
+        assertEquals(before, Files.readString(config, StandardCharsets.UTF_8),
+                "a stale log must never verify the tuned config");
+        assertFalse(run.output.contains("Verified:"), run.output);
+        assertTrue(run.output.contains("not refreshed"), run.output);
+        assertTrue(run.output.contains("restored"), run.output);
+    }
+
+    @Test
+    void verifyLogLookupUsesTheEnginesOwnPortResolution() throws Exception {
+        // A config without an explicit port key: the raw file suggests the
+        // host-embedded port, but the engine resolves through the merged
+        // default config. Tune must land on whatever the engine lands on,
+        // never on its own reading of the raw file.
+        Path config = writeConfig();
+        Files.writeString(config,
+                Files.readString(config, StandardCharsets.UTF_8)
+                        .replace("    host: \"http://127.0.0.1\"\n    port: 18115\n",
+                                "    host: \"http://127.0.0.1:19342\"\n"),
+                StandardCharsets.UTF_8);
+        installLaneExe("win-x64-cuda-13.3");
+        FakeLogReader reader = freshLog(CUDA_LOG);
+
+        Run run = run("y\n", (configPath, doctorOut) -> 0, reader, "610.62", new CountingInstaller());
+
+        assertEquals(0, run.exit, run.output);
+        int runtimePort = dev.talos.engine.llamacpp.LlamaCppRuntimePaths.effectivePort(
+                new dev.talos.core.Config(config));
+        assertFalse(reader.ports.isEmpty(), run.output);
+        assertTrue(reader.ports.stream().allMatch(port -> port == runtimePort),
+                "the verify log lookup must use the engine-effective port " + runtimePort
+                        + ", saw: " + reader.ports);
+    }
+
+    @Test
     void helpTextPromisesOnlyDetectProposeApproveVerifyAndCpuFallback() {
         assertTrue(TuneCmd.DESCRIPTION.contains("detect"), TuneCmd.DESCRIPTION);
         assertTrue(TuneCmd.DESCRIPTION.contains("propose"), TuneCmd.DESCRIPTION);
@@ -187,6 +273,15 @@ class TuneCmdTest {
             String serverLog,
             String driverVersion,
             TuneCmd.EngineInstaller installer) throws Exception {
+        return run(input, (configPath, doctorOut) -> doctorExit, freshLog(serverLog), driverVersion, installer);
+    }
+
+    private Run run(
+            String input,
+            TuneCmd.DoctorRunner doctorRunner,
+            TuneCmd.ServerLogReader logReader,
+            String driverVersion,
+            TuneCmd.EngineInstaller installer) throws Exception {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         PrintStream out = new PrintStream(stdout, true, StandardCharsets.UTF_8);
         int exit = TuneCmd.run(
@@ -201,9 +296,34 @@ class TuneCmdTest {
                         : Optional.of(new dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts(
                                 "NVIDIA GeForce RTX 5070 Ti", 16_303, 15_268, driverVersion)),
                 installer,
-                (configPath, doctorOut) -> doctorExit,
-                (talosHome, port) -> serverLog);
+                doctorRunner,
+                logReader);
         return new Run(exit, stdout.toString(StandardCharsets.UTF_8));
+    }
+
+    private static FakeLogReader freshLog(String content) {
+        return new FakeLogReader(
+                new TuneCmd.LogSnapshot(false, 0L, ""),
+                new TuneCmd.LogSnapshot(true, 2_000L, content));
+    }
+
+    private static final class FakeLogReader implements TuneCmd.ServerLogReader {
+        private final TuneCmd.LogSnapshot before;
+        private final TuneCmd.LogSnapshot after;
+        final java.util.List<Integer> ports = new java.util.ArrayList<>();
+        private int calls;
+
+        FakeLogReader(TuneCmd.LogSnapshot before, TuneCmd.LogSnapshot after) {
+            this.before = before;
+            this.after = after;
+        }
+
+        @Override
+        public TuneCmd.LogSnapshot snapshot(Path talosHome, int port) {
+            ports.add(port);
+            calls++;
+            return calls == 1 ? before : after;
+        }
     }
 
     private static final class CountingInstaller implements TuneCmd.EngineInstaller {
