@@ -264,6 +264,35 @@ public final class MutationIntent {
                     + "(?:explain|show|tell)\\s+(?:me\\s+)?how\\s+to)\\s+"
                     + CORE_MUTATION_VERBS + "\\b");
 
+    /**
+     * Explicit inline-output phrases (T1000): the user is asking for chat
+     * codegen, not a workspace artifact. Deliberately phrase-anchored, no
+     * fuzzy intent inference, and overridden whenever a target file is
+     * actually named.
+     */
+    private static final List<String> INLINE_OUTPUT_PHRASES = List.of(
+            "output only the code",
+            "only output the code",
+            "output just the code",
+            "just show the code",
+            "just show me the code",
+            "show only the code",
+            "show me only the code",
+            "answer inline",
+            "inline answer",
+            "do not create a file",
+            "don't create a file",
+            "do not create any files",
+            "don't create any files",
+            "do not create files",
+            "don't create files",
+            "do not write a file",
+            "don't write a file",
+            "do not write any files",
+            "don't write any files",
+            "do not write files",
+            "don't write files");
+
     private MutationIntent() {}
 
     public record SourceToTargetArtifact(Set<String> sourceTargets, Set<String> outputTargets) {
@@ -286,6 +315,7 @@ public final class MutationIntent {
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
+        if (looksInlineOutputOnlyRequest(lower)) return "inline-output-request";
         if (looksFileScopedDefectFixRequest(lower)) return "explicit-file-scoped-defect-fix-request";
         if (looksFixProblemInFileTarget(lower)) return "explicit-fix-problem-in-file-target";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
@@ -302,6 +332,22 @@ public final class MutationIntent {
             if (lower.contains(marker)) return "explicit-mutation-marker";
         }
         return "non-mutating";
+    }
+
+    private static boolean looksInlineOutputOnlyRequest(String lower) {
+        boolean inlinePhrase = false;
+        for (String phrase : INLINE_OUTPUT_PHRASES) {
+            if (lower.contains(phrase)) {
+                inlinePhrase = true;
+                break;
+            }
+        }
+        if (!inlinePhrase) {
+            return false;
+        }
+        // Naming a target file wins over the inline phrasing: "write twoSum
+        // to Solution.java, output only the code" still routes to mutation.
+        return !NAMED_FILE_TARGET.matcher(lower).find();
     }
 
     public static boolean isExplicitMutationClassificationReason(String reason) {

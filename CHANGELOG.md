@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- [T1000] Explicit inline-output phrases ("output only the code", "just show
+  me the code", "answer inline", "do not create any files") now classify as
+  chat codegen instead of auto-routing to a file write with an invented
+  filename. The signal is phrase-anchored and conservative: naming a target
+  file keeps mutation routing, and the write boundary is unchanged for every
+  shape without an inline phrase.
+- Branch regression-review hardening: cap-truncated tool-required generations
+  recover with one cap-lifted retry instead of surfacing a backend-blaming
+  malformed-response error; resolved tool-loop answers no longer inherit the
+  first generation's output-limit notice; the no-first-token wall clock can
+  no longer be defeated by thread-start latency and clock skew; XML tool
+  blocks pass the same recognized-name gate as code fences; the
+  example/sample/template target suppression no longer eats explicitly
+  commanded targets; cuda lane matching is token-anchored (a "barracuda"
+  path is not a CUDA lane) with family-correct driver floors; and
+  `talos status --verbose` reports the effective context the server
+  launches with, not just the configured number.
 - [T987] Added `talos tune`: detect, propose, approve, verify. Detection is
   read-only (shared nvidia-smi primitive, assume-no-GPU degradation), the
   proposal is an exact config diff that only touches the engine lane,

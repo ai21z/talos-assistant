@@ -280,4 +280,34 @@ class MutationIntentTest {
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "I am only chatting, please don't inspect my files. What can you do for me?"));
     }
+
+    @org.junit.jupiter.api.Test
+    void explicitInlineOutputPhrasesClassifyAsNonMutatingChatCodegen() {
+        String captured = "Write a Java method int[] twoSum(int[] nums, int target) that returns "
+                + "the indices of two numbers that add up to target. Output only the code.";
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "inline-output-request", MutationIntent.classificationReason(captured));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MutationIntent.looksExplicitMutationRequest(captured));
+
+        for (String input : java.util.List.of(
+                "Write a quicksort in Python. Just show me the code.",
+                "Write a debounce helper in JavaScript, answer inline please.")) {
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "inline-output-request", MutationIntent.classificationReason(input), input);
+        }
+        // Overlaps the older read-only negation counter-signal; either
+        // reason is fine as long as the outcome is non-mutating.
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MutationIntent.looksExplicitMutationRequest(
+                        "Write a regex for emails. Do not create any files."));
+    }
+
+    @org.junit.jupiter.api.Test
+    void namedFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
+        String input = "Write twoSum to Solution.java. Output only the code.";
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(input),
+                MutationIntent.classificationReason(input));
+    }
 }
