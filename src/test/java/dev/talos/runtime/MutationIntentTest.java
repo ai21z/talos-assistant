@@ -311,6 +311,35 @@ class MutationIntentTest {
                 MutationIntent.classificationReason(input));
     }
 
+    /**
+     * T1009: rename is a CORE_MUTATION_VERB, so sentence-initial rename
+     * classifies correctly, but the mid-sentence MARKERS net had no rename
+     * entry, unlike fix/change/update. The live probe showed the model
+     * running read-only and printing the corrected file as prose instead.
+     */
+    @org.junit.jupiter.api.Test
+    void midSentenceRenameRequestsClassifyAsMutation() {
+        for (String input : java.util.List.of(
+                "In src/app.js, rename the function reset to resetAll.",
+                "In the tracker module, rename shippedCount to shippedTotal.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void renameQuestionsAndAdvisoryFormsStayReadOnly() {
+        for (String input : java.util.List.of(
+                "Should I rename the function reset to resetAll?",
+                "How do I rename a function in Java?",
+                "Can you explain how to rename the reset function?")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
     @org.junit.jupiter.api.Test
     void namedSourceFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
         for (String input : java.util.List.of(

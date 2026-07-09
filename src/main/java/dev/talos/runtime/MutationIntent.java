@@ -108,7 +108,7 @@ public final class MutationIntent {
             "apply the", "apply these", "apply those",
             "append ", "append exactly", "append line", "append one line",
             "add a ", "add the ", "remove the ", "delete the ",
-            "refactor ",
+            "refactor ", "rename ",
             "darker and more minimal"
     );
 
@@ -284,7 +284,7 @@ public final class MutationIntent {
                     + CORE_MUTATION_VERBS + "\\s+(?:it|this|that|them)\\s*\\?");
 
     private static final Pattern INSTRUCTIONAL_MUTATION_QUESTION = Pattern.compile(
-            "\\b(?:how\\s+to|how\\s+(?:can|could|should)\\s+(?:i|we)|"
+            "\\b(?:how\\s+to|how\\s+(?:can|could|should|do|would)\\s+(?:i|we)|"
                     + "(?:explain|show|tell)\\s+(?:me\\s+)?how\\s+to)\\s+"
                     + CORE_MUTATION_VERBS + "\\b");
 

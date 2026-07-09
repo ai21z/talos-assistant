@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1009] Mid-sentence rename requests ("In src/app.js, rename the function
+  reset to resetAll.") now classify as mutation like their fix/change/update
+  siblings, so the model gets edit tools instead of running read-only and
+  printing the corrected file as prose. Question and how-to forms stay
+  read-only, and the instructional-question guard now also covers the
+  "how do I" and "how would I" phrasings for every mutation verb.
 - [T1008] Named tool forcing now actually enforces on the managed backend.
   llama-server (pinned b9918) parses tool_choice as a string only, and the
   OpenAI named-function object form silently degraded to "auto", so every
