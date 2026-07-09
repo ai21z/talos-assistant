@@ -75,7 +75,7 @@ public final class ToolProtocolText {
         if (looksLikeStandaloneToolJson(text)) {
             return "";
         }
-        String stripped = STRIP_PATTERN.matcher(text).replaceAll("");
+        String stripped = stripRecognizedXmlBlocks(text);
         stripped = stripRecognizedCodeFences(stripped);
         stripped = BARE_JSON_PATTERN.matcher(stripped).replaceAll("");
         stripped = stripMalformedToolProtocolBlocks(stripped);
@@ -89,10 +89,26 @@ public final class ToolProtocolText {
      */
     public static boolean containsToolCalls(String text) {
         if (text == null || text.isBlank()) return false;
-        if (STRIP_PATTERN.matcher(text).find()) return true;
+        if (containsRecognizedXmlToolCall(text)) return true;
         if (containsRecognizedCodeFenceToolCall(text)) return true;
         if (BARE_JSON_PATTERN.matcher(text).find()) return true;
         return looksLikeStandaloneToolJson(text);
+    }
+
+    /**
+     * Returns true when an XML-variant block names a recognized Talos tool or
+     * accepted alias. Foreign-named XML (a model quoting some other agent's
+     * protocol) is prose, not Talos protocol, matching the fence gate.
+     */
+    public static boolean containsRecognizedXmlToolCall(String text) {
+        if (text == null || text.isBlank()) return false;
+        Matcher matcher = STRIP_PATTERN.matcher(text);
+        while (matcher.find()) {
+            if (containsAcceptedToolNameField(matcher.group())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Returns true when a code fence contains a recognized Talos tool name or accepted alias. */
@@ -172,6 +188,20 @@ public final class ToolProtocolText {
         if (cursor < text.length()) {
             out.append(text, cursor, text.length());
         }
+        return out.toString();
+    }
+
+    private static String stripRecognizedXmlBlocks(String text) {
+        Matcher matcher = STRIP_PATTERN.matcher(text);
+        StringBuilder out = new StringBuilder(text.length());
+        while (matcher.find()) {
+            if (containsAcceptedToolNameField(matcher.group())) {
+                matcher.appendReplacement(out, "");
+            } else {
+                matcher.appendReplacement(out, Matcher.quoteReplacement(matcher.group()));
+            }
+        }
+        matcher.appendTail(out);
         return out.toString();
     }
 

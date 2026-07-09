@@ -164,7 +164,7 @@ public final class ToolCallParser {
      */
     public static boolean containsToolCalls(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) return false;
-        if (VARIANT_TAG_PATTERN.matcher(llmResponse).find()) return true;
+        if (ToolProtocolText.containsRecognizedXmlToolCall(llmResponse)) return true;
         if (ToolProtocolText.containsRecognizedCodeFenceToolCall(llmResponse)) return true;
         if (BARE_JSON_PATTERN.matcher(llmResponse).find()) return true;
         if (tryParseStandaloneToolJson(llmResponse) != null) return true;

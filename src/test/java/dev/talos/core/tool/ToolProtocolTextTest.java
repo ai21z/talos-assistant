@@ -101,6 +101,33 @@ class ToolProtocolTextTest {
     }
 
     @Test
+    void foreignNamedXmlBlocksAreNotDetectedAsToolProtocol() {
+        assertFalse(ToolProtocolText.containsToolCalls(
+                "<tool_call>{\"name\": \"demo-app\", \"arguments\": {}}</tool_call>"));
+        assertTrue(ToolProtocolText.containsToolCalls(
+                "<tool_call>{\"name\": \"talos.write_file\", \"arguments\": {\"path\": \"a\"}}</tool_call>"));
+    }
+
+    @Test
+    void stripToolCallsPreservesForeignNamedXmlBlocks() {
+        String answer = "Example integration:\n"
+                + "<tool_call>{\"name\": \"weather-api\", \"arguments\": {}}</tool_call>\n"
+                + "End of example.";
+
+        String stripped = ToolProtocolText.stripToolCalls(answer);
+
+        assertTrue(stripped.contains("weather-api"), stripped);
+        assertTrue(stripped.contains("End of example."), stripped);
+
+        String talos = "Before.\n"
+                + "<tool_call>{\"name\": \"talos.read_file\", \"arguments\": {\"path\": \"x\"}}</tool_call>\n"
+                + "After.";
+        String talosStripped = ToolProtocolText.stripToolCalls(talos);
+        assertFalse(talosStripped.contains("talos.read_file"), talosStripped);
+        assertTrue(talosStripped.contains("After."), talosStripped);
+    }
+
+    @Test
     void stripToolCallsPreservesOrdinaryFencedJsonWithNameField() {
         String answer = """
                 Here is an example package manifest:

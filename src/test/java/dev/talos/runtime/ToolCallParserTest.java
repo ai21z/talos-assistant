@@ -190,7 +190,7 @@ class ToolCallParserTest {
 
     @Test
     void containsToolCallsReturnsTrueWhenPresent() {
-        String response = "text <tool_call>{\"name\":\"x\"}</tool_call> more";
+        String response = "text <tool_call>{\"name\":\"talos.grep\"}</tool_call> more";
         assertTrue(ToolCallParser.containsToolCalls(response));
     }
 
@@ -251,9 +251,9 @@ class ToolCallParserTest {
     void stripToolCallsHandlesMultipleBlocks() {
         String response = """
                 Start.
-                <tool_call>{"name":"a"}</tool_call>
+                <tool_call>{"name":"talos.grep"}</tool_call>
                 Middle.
-                <tool_call>{"name":"b"}</tool_call>
+                <tool_call>{"name":"talos.read_file"}</tool_call>
                 End.""";
 
         String stripped = ToolCallParser.stripToolCalls(response);
@@ -443,6 +443,15 @@ class ToolCallParserTest {
         String stripped = ToolCallParser.stripToolCalls(response);
         assertTrue(stripped.contains("demo-app"), stripped);
         assertTrue(stripped.contains("version"), stripped);
+    }
+
+    @Test
+    void foreignNamedXmlVariantIsNeitherDetectedNorParsed() {
+        String response = "<tool_call>{\"name\": \"demo-app\", \"arguments\": {}}</tool_call>";
+
+        assertFalse(ToolCallParser.containsToolCalls(response),
+                "a foreign-named XML block must not enter the tool loop");
+        assertTrue(ToolCallParser.parse(response).isEmpty());
     }
 
     // ── Protocol hardening: bare JSON ────────────────────────────────
