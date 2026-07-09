@@ -72,6 +72,25 @@ class TopLevelStatusCmdTest {
     }
 
     @Test
+    void verboseEngineStatusReportsEffectiveContextWhenManagedFloorRaisesIt() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", 4_096)))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 8192"),
+                "status must report the context the server actually launches with: " + output);
+        assertTrue(output.contains("configured 4096"), output);
+    }
+
+    @Test
     void verboseEngineStatusDoesNotExposeMalformedConfiguredModelPath() {
         Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of(

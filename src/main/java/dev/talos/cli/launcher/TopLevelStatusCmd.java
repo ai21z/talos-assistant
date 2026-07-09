@@ -162,9 +162,21 @@ public class TopLevelStatusCmd implements Runnable {
         if (!"llama_cpp".equals(backend)) return;
         Map<String, Object> engines = CfgUtil.map(cfg == null ? null : cfg.data.get("engines"));
         Map<String, Object> llama = CfgUtil.map(engines.get("llama_cpp"));
-        int context = CfgUtil.intAt(llama, "context", 8192);
+        int configured = CfgUtil.intAt(llama, "context",
+                dev.talos.engine.llamacpp.ManagedContextSelector.DEFAULT_CONTEXT);
+        String mode = String.valueOf(llama.getOrDefault("mode", "managed"))
+                .trim().toLowerCase(java.util.Locale.ROOT).replace('-', '_');
+        // Report the context the server actually launches with: managed mode
+        // floors at the selector default, connect-only floors at 256
+        // (mirrors LlamaCppConfig.from).
+        int effective = "connect_only".equals(mode)
+                ? Math.max(256, configured)
+                : Math.max(configured, dev.talos.engine.llamacpp.ManagedContextSelector.DEFAULT_CONTEXT);
         String reason = safeReason(llama.get("context_reason"));
-        out.append("  Context     : ").append(context);
+        out.append("  Context     : ").append(effective);
+        if (effective != configured) {
+            out.append(" (configured ").append(configured).append(", raised by the engine floor)");
+        }
         if (!reason.isBlank()) {
             out.append(" - ").append(reason);
         }
