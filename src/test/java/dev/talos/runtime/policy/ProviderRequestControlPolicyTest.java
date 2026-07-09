@@ -31,6 +31,7 @@ class ProviderRequestControlPolicyTest {
 
         assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
         assertEquals(List.of("action-obligation:MUTATING_TOOL_REQUIRED"), controls.debugTags());
+        assertEquals(1024, controls.maxOutputTokens());
     }
 
     @Test
@@ -52,6 +53,7 @@ class ProviderRequestControlPolicyTest {
 
         assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
         assertEquals(List.of("action-obligation:CONDITIONAL_REVIEW_FIX"), controls.debugTags());
+        assertEquals(1024, controls.maxOutputTokens());
     }
 
     @Test
@@ -72,6 +74,7 @@ class ProviderRequestControlPolicyTest {
         assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
         assertEquals(List.of("action-obligation:INSPECT_REQUIRED",
                 "evidence-obligation:WORKSPACE_INSPECTION_REQUIRED"), controls.debugTags());
+        assertEquals(512, controls.maxOutputTokens());
     }
 
     @Test
@@ -96,6 +99,7 @@ class ProviderRequestControlPolicyTest {
         assertEquals(List.of("action-obligation:VERIFY_FROM_EVIDENCE",
                 "evidence-obligation:VERIFY_FROM_TRACE_OR_EVIDENCE",
                 "required-tool:talos.run_command"), controls.debugTags());
+        assertEquals(512, controls.maxOutputTokens());
     }
 
     @Test
@@ -120,6 +124,7 @@ class ProviderRequestControlPolicyTest {
         assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
         assertEquals("", controls.namedTool());
         assertEquals(List.of("action-obligation:WORKSPACE_OPERATION_REQUIRED"), controls.debugTags());
+        assertEquals(1024, controls.maxOutputTokens());
     }
 
     @Test
@@ -146,6 +151,7 @@ class ProviderRequestControlPolicyTest {
         assertEquals(List.of(
                 "action-obligation:WORKSPACE_OPERATION_REQUIRED",
                 "required-tool:talos.apply_workspace_batch"), controls.debugTags());
+        assertEquals(1024, controls.maxOutputTokens());
     }
 
     @Test
@@ -242,6 +248,26 @@ class ProviderRequestControlPolicyTest {
                 false);
 
         assertEquals(ToolChoiceMode.AUTO, controls.toolChoice());
+        assertEquals(1024, controls.maxOutputTokens());
+    }
+
+    @Test
+    void unsupportedBackendStillCapsInspectionToolObligationWithoutForcingTools() {
+        var contract = TaskContractResolver.fromUserRequest("Inspect this project and explain what it does.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file", "talos.grep"),
+                List.of("talos.read_file", "talos.grep"),
+                List.of());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.read_file"), tool("talos.grep")),
+                false);
+
+        assertEquals(ToolChoiceMode.AUTO, controls.toolChoice());
+        assertEquals(512, controls.maxOutputTokens());
     }
 
     private static ToolSpec tool(String name) {

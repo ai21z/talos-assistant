@@ -1615,6 +1615,89 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void exampleArtifactFilenamesDoNotBecomeRequiredReadTargets() {
+        for (String input : List.of(
+                "Show me an example package.json for a demo app.",
+                "Give me a sample package.json for a small Node project.",
+                "What would a template package.json look like?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.expectedTargets().isEmpty(), input + " -> " + contract.expectedTargets());
+        }
+    }
+
+    @Test
+    void explicitMutationVerbsOverrideExampleSuppression() {
+        for (String input : List.of(
+                "Rewrite the sample package.json in this repo.",
+                "Modify the sample package.json to add a build script.",
+                "Overwrite the sample package.json with the new fields.",
+                "Replace the sample package.json in the workspace.",
+                "Generate a sample package.json in this workspace.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(Set.of("package.json"), contract.expectedTargets(), input);
+        }
+    }
+
+    @Test
+    void dotsInsideTokensDoNotSeverTheGoverningVerb() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Update the v1.2 draft of the sample package.json.");
+
+        assertEquals(Set.of("package.json"), contract.expectedTargets(),
+                "a version-number dot must not read as a sentence boundary");
+    }
+
+    @Test
+    void governingVerbUpToOneHundredSixtyCharsBeforeTargetStillBinds() {
+        String filler = "as agreed in the long planning discussion about restructuring every "
+                + "module of this workspace and the whole build pipeline, ";
+        String input = "Update, " + filler + "the sample package.json.";
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+        assertEquals(Set.of("package.json"), contract.expectedTargets(),
+                "the governing verb sits beyond 80 chars but within the widened window: " + input);
+    }
+
+    @Test
+    void exampleSuppressionSurvivesLocaleLengthChangingCharacters() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "İstanbul notes review: show me an example package.json for the demo app.");
+
+        assertTrue(contract.expectedTargets().isEmpty(),
+                "locale-length-changing characters must not misalign the suppression windows: "
+                        + contract.expectedTargets());
+    }
+
+    @Test
+    void explicitPackageJsonReadAndMutationTargetsStillBind() {
+        for (String input : List.of(
+                "Read package.json and summarize it.",
+                "Open package.json and tell me the scripts.",
+                "Inspect package.json for broken scripts.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals(Set.of("package.json"), contract.expectedTargets(), input);
+        }
+
+        TaskContract create = TaskContractResolver.fromUserRequest("Create package.json for this Node project.");
+
+        assertTrue(create.mutationAllowed());
+        assertEquals(Set.of("package.json"), create.expectedTargets());
+
+        TaskContract createSample = TaskContractResolver.fromUserRequest(
+                "Create a sample package.json for this Node project.");
+
+        assertTrue(createSample.mutationAllowed());
+        assertEquals(Set.of("package.json"), createSample.expectedTargets());
+    }
+
+    @Test
     void imageReadQuestionsCaptureExpectedTargetsWithoutMutationIntent() {
         for (String input : List.of(
                 "Summarize image.png using OCR text only.",

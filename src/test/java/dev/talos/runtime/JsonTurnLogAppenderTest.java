@@ -213,6 +213,51 @@ class JsonTurnLogAppenderTest {
     }
 
     /**
+     * Transport-loss abort after partial output: the marker is appended
+     * AFTER the partial text, so a startsWith on the full body misses it
+     * and the confabulated partial would replay as authoritative history.
+     * Detection must be line-anchored anywhere in the body.
+     */
+    @Test
+    void streamedPartialBodyWithTrailingAbortMarkerIsTaggedAborted(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sid-partial-aborted";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Streamed(
+                        "I refactored the parser and all tests pass.\n"
+                                + "[turn aborted: stream transport failed after partial output, "
+                                + "retry skipped to avoid duplicate output]", ""),
+                        4),
+                "refactor the parser");
+
+        List<TurnRecord> recs = store.loadTurns(sid);
+        assertEquals(1, recs.size());
+        assertEquals("aborted", recs.get(0).status());
+    }
+
+    /**
+     * The buffered (non-streaming) path wraps the same aborted body in
+     * {@code Result.Ok}; it must not be tagged "ok" and replayed either.
+     */
+    @Test
+    void okTurnWithTrailingAbortMarkerIsTaggedAborted(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sid-ok-aborted";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Ok(
+                        "Partial explanation of the module.\n[turn aborted: interrupted]"), 2),
+                "explain the module");
+
+        List<TurnRecord> recs = store.loadTurns(sid);
+        assertEquals(1, recs.size());
+        assertEquals("aborted", recs.get(0).status());
+    }
+
+    /**
      * Lexical-prefix anchoring of the abort marker must not over-fire on
      * real model prose that happens to contain the word "aborted" in the
      * middle of a sentence.

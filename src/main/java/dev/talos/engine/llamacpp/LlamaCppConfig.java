@@ -25,10 +25,12 @@ record LlamaCppConfig(
         boolean jinja,
         String chatTemplate,
         String chatTemplateFile,
-        List<String> serverArgs
+        List<String> serverArgs,
+        boolean verificationLogging
 ) {
-    static final int DEFAULT_CONTEXT = 8192;
-    static final int MIN_MANAGED_AGENT_CONTEXT = 8192;
+    static final int DEFAULT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
+    static final int MIN_MANAGED_AGENT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
+    static final int MAX_CONTEXT = LlamaCppContextLimits.MAX_CONTEXT;
 
     enum Mode {
         MANAGED,
@@ -49,14 +51,16 @@ record LlamaCppConfig(
         String host = stringAt(block, "host", "http://127.0.0.1");
         int port = CfgUtil.intAt(block, "port", portFromHost(host, 8080));
         int configuredContext = CfgUtil.intAt(block, "context", DEFAULT_CONTEXT);
-        int context = mode == Mode.MANAGED
-                ? Math.max(configuredContext, MIN_MANAGED_AGENT_CONTEXT)
-                : Math.max(256, configuredContext);
+        int context = clampContext(configuredContext, mode);
         boolean allowRemote = CfgUtil.boolAt(block, "allow_remote", false);
         boolean jinja = CfgUtil.boolAt(block, "jinja", true);
         String chatTemplate = stringAt(block, "chat_template", "");
         String chatTemplateFile = stringAt(block, "chat_template_file", "");
         List<String> serverArgs = CfgUtil.strList(block.get("server_args"));
+        // Programmatic marker set by verification runs (doctor --start, tune),
+        // never part of the user's config file; see LlamaCppVerificationLaunch.
+        boolean verificationLogging = CfgUtil.boolAt(
+                block, LlamaCppVerificationLaunch.KEY, false);
 
         return new LlamaCppConfig(
                 mode,
@@ -73,7 +77,8 @@ record LlamaCppConfig(
                 jinja,
                 chatTemplate,
                 chatTemplateFile,
-                serverArgs);
+                serverArgs,
+                verificationLogging);
     }
 
     boolean managed() {
@@ -147,6 +152,11 @@ record LlamaCppConfig(
     private static Mode parseMode(String raw) {
         String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT).replace('-', '_');
         return "connect_only".equals(normalized) ? Mode.CONNECT_ONLY : Mode.MANAGED;
+    }
+
+    private static int clampContext(int configuredContext, Mode mode) {
+        int minimum = mode == Mode.MANAGED ? MIN_MANAGED_AGENT_CONTEXT : 256;
+        return Math.min(MAX_CONTEXT, Math.max(minimum, configuredContext));
     }
 
     private static String stringAt(Map<String, Object> block, String key, String fallback) {

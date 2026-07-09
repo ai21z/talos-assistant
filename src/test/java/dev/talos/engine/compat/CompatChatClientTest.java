@@ -79,7 +79,7 @@ class CompatChatClientTest {
                             "",
                             ResponseFormatMode.JSON_OBJECT,
                             "",
-                            List.of("expected-target-repair")));
+                            List.of("expected-target-repair")).withMaxOutputTokens(512));
 
             String result = client.chat(request);
 
@@ -92,6 +92,7 @@ class CompatChatClientTest {
             assertEquals("main system", body.path("messages").get(0).path("content").asText());
             assertEquals("required", body.path("tool_choice").asText());
             assertEquals("json_object", body.path("response_format").path("type").asText());
+            assertEquals(512, body.path("max_tokens").asInt());
             assertEquals("talos.write_file", body.path("tools").get(0).path("function").path("name").asText());
 
             var snapshot = PromptDebugCapture.latest().orElseThrow();
@@ -99,6 +100,7 @@ class CompatChatClientTest {
             assertEquals(bodyRef.get(), snapshot.providerBodyJson());
             assertEquals(ToolChoiceMode.REQUIRED, snapshot.controls().toolChoice());
             assertEquals(ResponseFormatMode.JSON_OBJECT, snapshot.controls().responseFormat());
+            assertEquals(512, snapshot.controls().maxOutputTokens());
         } finally {
             server.stop(0);
         }
@@ -204,6 +206,7 @@ class CompatChatClientTest {
             assertFalse(body.has("top_p"));
             assertFalse(body.has("top_k"));
             assertFalse(body.has("seed"));
+            assertFalse(body.has("max_tokens"));
         } finally {
             server.stop(0);
         }
@@ -228,6 +231,29 @@ class CompatChatClientTest {
             assertEquals("Hel", chunks.get(0).text());
             assertEquals("lo", chunks.get(1).text());
             assertTrue(chunks.get(2).done());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void chatStreamPropagatesLengthFinishReasonOnEos() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                data: {"choices":[{"delta":{"content":"partial"}}]}
+
+                data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+
+                data: [DONE]
+
+                """, "text/event-stream");
+        try {
+            CompatChatClient client = client(server);
+
+            List<TokenChunk> chunks = client.chatStream(requestForStream()).toList();
+
+            assertEquals("partial", chunks.get(0).text());
+            assertTrue(chunks.get(1).done());
+            assertEquals("length", chunks.get(1).finishReason());
         } finally {
             server.stop(0);
         }

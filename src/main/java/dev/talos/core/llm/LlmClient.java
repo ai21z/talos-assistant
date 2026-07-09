@@ -4,6 +4,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.util.UiChrome;
 import dev.talos.spi.EngineException;
@@ -53,9 +54,11 @@ public final class LlmClient implements AutoCloseable {
     private final long responseMaxChars;
 
     /**
-     * P2 - wall-clock budget for a single LLM call (one full
+     * P2 - no-progress wall-clock budget for a single LLM call (one full
      * {@link #chatStreamFull} or {@link #chatFull} invocation, including all
-     * internal retries).
+     * internal retries). Once token chunks are arriving, the idle watchdog below
+     * becomes the live-progress guard so slow local models are not killed solely
+     * because they crossed the first wall-clock threshold.
      *
      * <p><b>Why this exists:</b> the JDK {@code HttpRequest.timeout(...)} only
      * fires while waiting for the <em>next</em> chunk; once chunks trickle in
@@ -65,7 +68,9 @@ public final class LlmClient implements AutoCloseable {
      * legacy path in {@code AssistantTurnExecutor} already wraps its call in
      * a {@code CompletableFuture.get(timeout)}, but the streaming path and
      * the tool-call-loop re-prompts had no equivalent. This field, plus
-     * {@link LlmCallBudget#run}, closes that gap.
+     * {@link LlmCallBudget#run}, closes that gap. Calls that never produce a
+     * first chunk still fail at this budget; calls that keep producing chunks
+     * can continue past it until they finish or go idle.
      *
      * <p>Default 300_000 ms (5 min), overridable via
      * {@code limits.llm_timeout_ms} in config or per-call via the
@@ -81,10 +86,9 @@ public final class LlmClient implements AutoCloseable {
      *
      * <p><b>Why this exists in addition to the wall-clock budget:</b> a short
      * prompt that wedges the model produces a long stretch of zero tokens
-     * well before the 5-min wall-clock fires. The user-visible UX is "Talos
+     * well before a long wall-clock budget would fire. The user-visible UX is "Talos
      * is frozen". An idle watchdog catches that case in tens of seconds, not
-     * minutes, while the wall-clock still backstops genuinely-slow-but-alive
-     * generations on big local models.
+     * minutes, while genuine chunk progress keeps big local-model generations alive.
      *
      * <p>Configurable via {@code limits.llm_idle_ms}; default 60_000 ms.
      * Set ≤0 to disable.
@@ -613,13 +617,53 @@ public final class LlmClient implements AutoCloseable {
      * Result of a structured streaming chat, carrying both assembled text
      * and any native tool calls returned by the model.
      *
-     * @param text      assembled prose text (sanitized, think-tags stripped)
-     * @param toolCalls native tool calls from the model (empty if none)
+     * @param text        assembled prose text (sanitized, think-tags stripped)
+     * @param toolCalls   native tool calls from the model (empty if none)
+     * @param finishReason provider finish reason ("" when not reported)
+     * @param abortReason why Talos aborted the generation ("" when it
+     *                    completed normally) - explicit metadata so
+     *                    consumers never have to re-derive the abort from
+     *                    the marker text
      */
-    public record StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls) {
+    public record StreamResult(
+            String text,
+            List<ChatMessage.NativeToolCall> toolCalls,
+            String finishReason,
+            String abortReason
+    ) {
+        public StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls) {
+            this(text, toolCalls, "", "");
+        }
+
+        public StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls, String finishReason) {
+            this(text, toolCalls, finishReason, "");
+        }
+
+        public StreamResult {
+            text = text == null ? "" : text;
+            toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+            finishReason = finishReason == null ? "" : finishReason.strip();
+            abortReason = abortReason == null ? "" : abortReason.strip();
+        }
+
         /** Returns true if the model returned native tool calls. */
         public boolean hasToolCalls() {
             return toolCalls != null && !toolCalls.isEmpty();
+        }
+
+        /** Returns true when the provider stopped because the requested output cap was reached. */
+        public boolean outputLimitReached() {
+            return "length".equalsIgnoreCase(finishReason);
+        }
+
+        /**
+         * True when Talos aborted the generation (wall-clock, idle
+         * watchdog, repetition breaker, interrupt, or transport loss after
+         * partial output) instead of the model completing it. Any text is
+         * at best a partial answer and must not be treated as authoritative.
+         */
+        public boolean aborted() {
+            return !abortReason.isEmpty();
         }
     }
 
@@ -717,16 +761,19 @@ public final class LlmClient implements AutoCloseable {
         // rationale (gemma4:26b April 2026 incident: 200+ lines of "The
         // user's prompt is '..." before the 387s wall-clock fired).
         RepetitionBreaker breaker = new RepetitionBreaker();
-        Consumer<String> trackingSink = chunk -> {
+        Consumer<String> progressSink = chunk -> {
             lastChunkAt.set(System.currentTimeMillis());
             breaker.onChunk(chunk);
+        };
+        Consumer<String> trackingSink = chunk -> {
+            progressSink.accept(chunk);
             if (onChunk != null) onChunk.accept(chunk);
         };
         Supplier<Boolean> cancel = this.externalCancel;
         Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
-                        messages, trackingSink, engineRequestTimeout, cancel,
+                        messages, trackingSink, progressSink, engineRequestTimeout, cancel,
                         lastChunkAt, activeStream, requestToolSpecs, controls, true),
                 wallClockMs,
                 lastChunkAt,
@@ -799,7 +846,7 @@ public final class LlmClient implements AutoCloseable {
         Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
-                        messages, trackingSink, engineRequestTimeout, cancel,
+                        messages, trackingSink, trackingSink, engineRequestTimeout, cancel,
                         lastChunkAt, activeStream, requestToolSpecs, controls, false),
                 wallClockMs,
                 lastChunkAt,
@@ -832,6 +879,7 @@ public final class LlmClient implements AutoCloseable {
      */
     private StreamResult engineAssembledWithMessagesFullTracked(List<ChatMessage> messages,
                                                                 Consumer<String> trackingSink,
+                                                                Consumer<String> progressOnlySink,
                                                                 Duration timeout,
                                                                 Supplier<Boolean> cancelled,
                                                                 AtomicLong lastChunkAt,
@@ -846,12 +894,12 @@ public final class LlmClient implements AutoCloseable {
             if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) return true;
             return Thread.currentThread().isInterrupted();
         };
-        // Bump the heartbeat once before we start blocking on the engine -
-        // protects against an engine that takes >idleMs to produce its
-        // first chunk on a cold model.
-        if (lastChunkAt != null) lastChunkAt.set(System.currentTimeMillis());
+        // The pre-engine heartbeat prime lives in LlmCallBudget.run, which
+        // sets and captures the same value so thread-start latency can never
+        // read as first-token progress (T988). Priming here on the worker
+        // thread would race that capture.
         return engineAssembledWithMessagesFull(
-                messages, trackingSink, timeout, wrapped, activeStream,
+                messages, trackingSink, progressOnlySink, timeout, wrapped, activeStream,
                 requestToolSpecs, controls, streamRequest);
     }
 
@@ -862,6 +910,7 @@ public final class LlmClient implements AutoCloseable {
      */
     private StreamResult engineAssembledWithMessagesFull(List<ChatMessage> messages,
                                                          Consumer<String> onChunk,
+                                                         Consumer<String> progressOnlySink,
                                                          Duration timeout,
                                                          Supplier<Boolean> cancelled,
                                                          AtomicReference<AutoCloseable> activeStream,
@@ -894,21 +943,59 @@ public final class LlmClient implements AutoCloseable {
                     tools, finalRequestControls);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
             try {
+                boolean deferVisibleChunks = shouldDeferVisibleChunksForCapRetry(req);
+                Consumer<String> firstAttemptSink = deferVisibleChunks
+                        ? progressOnlySink
+                        : onChunk;
+                StreamResult first = consumeEngineStream(
+                        engineResolver.chatStream(req), activeStream, cancelled, firstAttemptSink, !deferVisibleChunks);
+                if (!shouldRetryCapTruncatedToolResult(req, first)) {
+                    if (deferVisibleChunks && onChunk != null && first != null && !first.text().isEmpty()) {
+                        onChunk.accept(first.text());
+                    }
+                    return first;
+                }
+                // T989 recovery: a per-request output cap cut a tool-required
+                // generation before any usable tool call was produced. One
+                // retry with the cap lifted; the managed server --predict
+                // backstop still bounds it.
+                ChatRequest liftedReq = new ChatRequest(
+                        req.backend, req.model, req.systemPrompt, req.userPrompt,
+                        req.snippets, req.timeout, req.messages, req.tools,
+                        withDebugTag(req.controls, "output-cap-lifted-retry").withMaxOutputTokens(0));
+                PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(liftedReq, streamRequest));
                 return consumeEngineStream(
-                        engineResolver.chatStream(req), activeStream, cancelled, onChunk);
+                        engineResolver.chatStream(liftedReq), activeStream, cancelled, onChunk, true);
             } catch (EngineException.MalformedResponse malformed) {
                 if (!shouldRetryCompatToolArgumentsNonStreaming(malformed, req)) {
                     throw malformed;
                 }
+                // A capped request that truncated mid-arguments fails the same
+                // way non-streamed, so the retry also lifts the cap (T989).
+                boolean liftCap = req.controls != null && req.controls.maxOutputTokens() > 0;
+                ChatRequestControls retryControls = withDebugTag(
+                        req.controls,
+                        liftCap ? "compat-tool-arguments-uncapped-retry" : "compat-tool-arguments-nonstream-retry");
+                if (liftCap) {
+                    retryControls = retryControls.withMaxOutputTokens(0);
+                }
                 ChatRequest retryReq = new ChatRequest(
                         req.backend, req.model, req.systemPrompt, req.userPrompt,
                         req.snippets, req.timeout, req.messages, req.tools,
-                        withDebugTag(req.controls, "compat-tool-arguments-nonstream-retry"));
+                        retryControls);
                 PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(retryReq, false));
                 return consumeEngineStream(
-                        engineResolver.chatStreamNonStreaming(retryReq), activeStream, cancelled, onChunk);
+                        engineResolver.chatStreamNonStreaming(retryReq), activeStream, cancelled, onChunk, true);
             }
         });
+    }
+
+    private static boolean shouldDeferVisibleChunksForCapRetry(ChatRequest request) {
+        if (request == null || request.controls == null) return false;
+        if (request.controls.maxOutputTokens() <= 0) return false;
+        if (request.tools == null || request.tools.isEmpty()) return false;
+        ToolChoiceMode mode = request.controls.toolChoice();
+        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED;
     }
 
     private Duration engineRequestTimeout(long wallClockMs) {
@@ -919,7 +1006,8 @@ public final class LlmClient implements AutoCloseable {
     private StreamResult consumeEngineStream(java.util.stream.Stream<TokenChunk> stream,
                                              AtomicReference<AutoCloseable> activeStream,
                                              Supplier<Boolean> cancelled,
-                                             Consumer<String> onChunk) {
+                                             Consumer<String> onChunk,
+                                             boolean chunksAreVisible) {
         // Try-with-resources ensures the token stream's onClose hook fires on
         // every exit path (break, exception, normal return). Registering the
         // stream before iteration gives the watchdog a handle it can close if
@@ -930,10 +1018,15 @@ public final class LlmClient implements AutoCloseable {
             List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
             int alreadyEmittedLen = 0;
             boolean visibleOutputEmitted = false;
+            String finishReason = "";
             try {
                 for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
                     if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
-                    if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+                    if (ch == null) break;
+                    if (Boolean.TRUE.equals(ch.done())) {
+                        finishReason = Objects.toString(ch.finishReason(), "").strip();
+                        break;
+                    }
 
                     if (ch.hasToolCalls()) {
                         toolCalls.addAll(ch.toolCalls());
@@ -955,11 +1048,16 @@ public final class LlmClient implements AutoCloseable {
 
                     if (onChunk != null && !emit.isEmpty()) {
                         onChunk.accept(emit);
-                        visibleOutputEmitted = true;
+                        if (chunksAreVisible) {
+                            visibleOutputEmitted = true;
+                        }
+                    }
+                    if (toolCalls.isEmpty() && ToolProtocolText.containsToolCalls(acc.toString())) {
+                        break;
                     }
                     if (acc.length() >= safeCap()) break;
                 }
-                return new StreamResult(acc.toString(), toolCalls);
+                return new StreamResult(acc.toString(), toolCalls, finishReason);
             } catch (EngineException.Transient transientFailure) {
                 if (streamWasLocallyClosed(activeStream, stream)) {
                     return abortedStreamResult(
@@ -979,12 +1077,11 @@ public final class LlmClient implements AutoCloseable {
     }
 
     private static StreamResult abortedStreamResult(String partialText, String reason) {
-        String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + Objects.toString(reason, "generation aborted") + "]";
+        String abortReason = Objects.toString(reason, "generation aborted");
+        String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + abortReason + "]";
         String partial = Objects.toString(partialText, "");
-        if (partial.isBlank()) {
-            return new StreamResult(marker, List.of());
-        }
-        return new StreamResult(partial + System.lineSeparator() + marker, List.of());
+        String text = partial.isBlank() ? marker : partial + System.lineSeparator() + marker;
+        return new StreamResult(text, List.of(), "", abortReason);
     }
 
     private static boolean streamWasLocallyClosed(
@@ -1002,7 +1099,28 @@ public final class LlmClient implements AutoCloseable {
         ToolChoiceMode mode = request.controls == null
                 ? ToolChoiceMode.AUTO
                 : request.controls.toolChoice();
-        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED;
+        // Capped requests also qualify under AUTO: backends without required
+        // tool choice still receive caps (T989), and a cap can truncate the
+        // arguments of a voluntarily emitted tool call.
+        boolean capped = request.controls != null && request.controls.maxOutputTokens() > 0;
+        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED || capped;
+    }
+
+    /**
+     * True when a per-request output cap stopped a tool-required generation
+     * before any usable tool call (native or complete text-form) arrived.
+     * Such a result can never satisfy the turn's tool obligation, so one
+     * cap-lifted retry is strictly better than surfacing the truncation.
+     */
+    private static boolean shouldRetryCapTruncatedToolResult(ChatRequest request, StreamResult result) {
+        if (request == null || result == null) return false;
+        if (request.controls == null || request.controls.maxOutputTokens() <= 0) return false;
+        if (request.tools == null || request.tools.isEmpty()) return false;
+        ToolChoiceMode mode = request.controls.toolChoice();
+        if (mode != ToolChoiceMode.REQUIRED && mode != ToolChoiceMode.NAMED) return false;
+        if (!result.outputLimitReached()) return false;
+        if (result.hasToolCalls()) return false;
+        return !ToolProtocolText.containsToolCalls(result.text());
     }
 
     private List<ToolSpec> effectiveToolSpecs(List<ToolSpec> requestToolSpecs) {
@@ -1022,7 +1140,8 @@ public final class LlmClient implements AutoCloseable {
                 safe.responseFormat(),
                 safe.jsonSchema(),
                 tags,
-                safe.sampling());
+                safe.sampling(),
+                safe.maxOutputTokens());
     }
 
     /** Layers llm.sampling config values under turn-level sampling decisions (set fields win). */

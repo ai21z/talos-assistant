@@ -134,7 +134,7 @@ class PromptDebugCommandTest {
                                 "",
                                 ResponseFormatMode.JSON_OBJECT,
                                 "",
-                                List.of("expected-target-repair"))),
+                                List.of("expected-target-repair")).withMaxOutputTokens(512)),
                 false,
                 "{\"model\":\"qwen2.5-coder:14b\",\"system\":\"main system\\n\\n[CurrentTurnCapability]\",\"messages\":[{\"role\":\"user\",\"content\":\"Create index.html, styles.css, and scripts.js\"}]}"));
         PromptDebugCommand command = new PromptDebugCommand();
@@ -147,6 +147,7 @@ class PromptDebugCommandTest {
         assertTrue(info.text.contains("Ollama merges system messages"), info.text);
         assertTrue(info.text.contains("Tool choice: REQUIRED"), info.text);
         assertTrue(info.text.contains("Response format: JSON_OBJECT"), info.text);
+        assertTrue(info.text.contains("Max output tokens: 512"), info.text);
         assertTrue(info.text.contains("Debug tags: expected-target-repair"), info.text);
         assertTrue(info.text.contains("Expected-target coverage: MISSING"), info.text);
         assertTrue(info.text.contains("Expected targets:"), info.text);

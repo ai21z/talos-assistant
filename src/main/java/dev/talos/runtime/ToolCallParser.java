@@ -164,8 +164,8 @@ public final class ToolCallParser {
      */
     public static boolean containsToolCalls(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) return false;
-        if (VARIANT_TAG_PATTERN.matcher(llmResponse).find()) return true;
-        if (CODE_FENCE_PATTERN.matcher(llmResponse).find()) return true;
+        if (ToolProtocolText.containsRecognizedXmlToolCall(llmResponse)) return true;
+        if (ToolProtocolText.containsRecognizedCodeFenceToolCall(llmResponse)) return true;
         if (BARE_JSON_PATTERN.matcher(llmResponse).find()) return true;
         if (tryParseStandaloneToolJson(llmResponse) != null) return true;
         // Align with Pass 2b: detect adjacent standalone raw JSON objects that
@@ -261,7 +261,10 @@ public final class ToolCallParser {
     }
 
     static boolean isRecognizedToolName(String rawName) {
-        return ToolAliasPolicy.resolve(rawName).accepted();
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(rawName);
+        return decision.accepted()
+                || (decision.status() == ToolAliasPolicy.AliasDecisionStatus.UNKNOWN
+                && decision.canonicalToolName().startsWith("talos."));
     }
 
     // ── Internal extraction helpers ──────────────────────────────────
@@ -332,7 +335,7 @@ public final class ToolCallParser {
 
             try {
                 ToolCall call = parseJson(jsonPayload);
-                if (call != null) {
+                if (call != null && isRecognizedToolName(call.toolName())) {
                     calls.add(call);
                 }
             } catch (Exception e) {

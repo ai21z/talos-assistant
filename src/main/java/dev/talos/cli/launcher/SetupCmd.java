@@ -8,8 +8,11 @@ import dev.talos.cli.setup.SetupWizardRenderer;
 import dev.talos.cli.setup.SetupWizardRunner;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
+import dev.talos.engine.llamacpp.ManagedContextSelector;
 import picocli.CommandLine;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -155,7 +158,14 @@ public class SetupCmd implements Callable<Integer> {
             Path modelPath,
             Path cacheDir,
             int port) {
-        return renderManagedLlamaCppProfileConfig(profileName, serverPath, modelPath, cacheDir, port, "", 18116);
+        return renderManagedLlamaCppProfileConfig(
+                profileName,
+                serverPath,
+                modelPath,
+                cacheDir,
+                port,
+                "",
+                18116);
     }
 
     public static String renderManagedLlamaCppProfileConfig(
@@ -166,6 +176,26 @@ public class SetupCmd implements Callable<Integer> {
             int port,
             String embedProfile,
             int embedPort) {
+        return renderManagedLlamaCppProfileConfig(
+                profileName,
+                serverPath,
+                modelPath,
+                cacheDir,
+                port,
+                embedProfile,
+                embedPort,
+                managedContextDecision(profileName, serverPath));
+    }
+
+    public static String renderManagedLlamaCppProfileConfig(
+            String profileName,
+            Path serverPath,
+            Path modelPath,
+            Path cacheDir,
+            int port,
+            String embedProfile,
+            int embedPort,
+            ManagedContextSelector.Decision contextDecision) {
         String normalizedProfile = normalizeProfile(profileName);
         boolean userOwnedModel = modelPath != null;
         ModelProfile known = PROFILES.get(normalizedProfile);
@@ -193,6 +223,9 @@ public class SetupCmd implements Callable<Integer> {
                 cacheDir == null ? defaultHfCacheDir() : cacheDir,
                 Math.max(1, embedPort));
         boolean vectorsEnabled = embedding != null;
+        ManagedContextSelector.Decision context = contextDecision == null
+                ? managedContextDecision(normalizedProfile, serverPath)
+                : contextDecision;
 
         return """
                 llm:
@@ -211,7 +244,8 @@ public class SetupCmd implements Callable<Integer> {
                     model: "%s"
                     host: "http://127.0.0.1"
                     port: %d
-                    context: 8192
+                    context: %d
+                    context_reason: "%s"
                     jinja: true
                     server_args: []
 
@@ -232,6 +266,8 @@ public class SetupCmd implements Callable<Integer> {
                 hfCacheDir,
                 yamlScalar(alias),
                 Math.max(1, port),
+                context.context(),
+                yamlScalar(context.reason()),
                 nativeCalling,
                 embeddingYaml.stripTrailing(),
                 vectorsEnabled);
@@ -331,6 +367,7 @@ public class SetupCmd implements Callable<Integer> {
 
         String normalizedProfile = normalizeProfile(profile);
         ModelPathSelection selectedModelPath = selectModelPath(normalizedProfile, modelPath, cacheDir);
+        ManagedContextSelector.Decision context = managedContextDecision(normalizedProfile, serverPath);
 
         String yaml = renderManagedLlamaCppProfileConfig(
                 profile,
@@ -339,7 +376,8 @@ public class SetupCmd implements Callable<Integer> {
                 cacheDir == null ? defaultHfCacheDir() : cacheDir,
                 port,
                 embedProfile,
-                embedPort);
+                embedPort,
+                context);
 
         Path parent = target.getParent();
         if (parent != null) {
@@ -353,6 +391,7 @@ public class SetupCmd implements Callable<Integer> {
         Files.writeString(target, yaml, StandardCharsets.UTF_8);
         System.out.println("Wrote Talos model config: " + target);
         System.out.println("Profile: " + normalizedProfile);
+        System.out.println("Context: " + context.context() + " (" + context.reason() + ")");
         if (selectedModelPath.path() == null) {
             System.out.println("Model cache: " + (cacheDir == null ? defaultHfCacheDir() : cacheDir));
             System.out.println("The model downloads through managed llama.cpp on first start.");
@@ -587,6 +626,64 @@ public class SetupCmd implements Callable<Integer> {
 
     private static String yamlScalar(String value) {
         return Objects.toString(value, "").replace("\\", "/").replace("\"", "\\\"");
+    }
+
+    private static ManagedContextSelector.Decision managedContextDecision(String profileName, Path serverPath) {
+        ManagedContextSelector.Lane lane = ManagedContextSelector.laneFromServerPath(serverPath);
+        long vramTotalMb = lane == ManagedContextSelector.Lane.CUDA ? nvidiaVramTotalMb() : -1;
+        long systemMemoryMb = systemMemoryMb();
+        return ManagedContextSelector.select(new ManagedContextSelector.Request(
+                normalizeProfile(profileName),
+                lane,
+                vramTotalMb,
+                systemMemoryMb));
+    }
+
+    private static long systemMemoryMb() {
+        try {
+            OperatingSystemMXBean mx = ManagementFactory.getOperatingSystemMXBean();
+            if (mx instanceof com.sun.management.OperatingSystemMXBean sun) {
+                long bytes = sun.getTotalMemorySize();
+                return bytes > 0 ? bytes / (1024 * 1024) : -1;
+            }
+        } catch (RuntimeException ignored) {
+            return -1;
+        }
+        return -1;
+    }
+
+    private static long nvidiaVramTotalMb() {
+        try {
+            Process process = new ProcessBuilder(
+                    "nvidia-smi",
+                    "--query-gpu=memory.total",
+                    "--format=csv,noheader,nounits")
+                    .redirectErrorStream(true)
+                    .start();
+            boolean finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return -1;
+            }
+            if (process.exitValue() != 0) return -1;
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            return output.lines()
+                    .map(String::trim)
+                    .filter(line -> !line.isBlank())
+                    .map(line -> line.replace("MiB", "").replace("MB", "").trim())
+                    .mapToLong(value -> {
+                        try {
+                            return Long.parseLong(value);
+                        } catch (NumberFormatException ignored) {
+                            return -1;
+                        }
+                    })
+                    .filter(value -> value > 0)
+                    .findFirst()
+                    .orElse(-1);
+        } catch (Exception ignored) {
+            return -1;
+        }
     }
 
     private static String safeTimestamp() {

@@ -8,6 +8,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -59,6 +61,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         ChatRequest request = firstRequest(recorded);
         assertEquals(List.of("talos.write_file"), request.tools.stream().map(ToolSpec::name).toList());
         assertEquals(ToolChoiceMode.REQUIRED, request.controls.toolChoice());
+        assertEquals(1024, request.controls.maxOutputTokens());
     }
 
     @Test
@@ -158,7 +161,7 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                 .build();
 
         AssistantTurnExecutor.execute(
-                messages("Please perform the selected diagnostic action."),
+                messages("Read notes.txt and summarize it."),
                 workspace,
                 ctx,
                 new AssistantTurnExecutor.Options());
@@ -167,6 +170,79 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         assertEquals(1, toolExecutions.get(), "native tool call should enter the tool loop");
         assertEquals(1, completionCountAtToolExecution.get(),
                 "stream completion should happen before tool execution starts");
+        assertEquals(512, firstRequest(recorded).controls.maxOutputTokens());
+    }
+
+    @Test
+    void lengthLimitedNoToolAnswerAddsVisibleWarningAndTrace(@TempDir Path workspace) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("Partial answer", List.of(), "length")),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-t989-length",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Explain briefly.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Explain briefly."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.text().contains("Partial answer"), out.text());
+            assertTrue(out.text().contains("output limit"), out.text());
+            assertTrue(trace.warnings().stream().anyMatch(warning ->
+                    "LLM_OUTPUT_LIMIT_REACHED".equals(warning.code())
+                            && warning.message().contains("finish_reason=length")));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void bufferedAbortMarkerRecordsFailedOutcome(@TempDir Path workspace) {
+        var blocking = ScriptedNativeLlmClient.blockingAfterFirstChunk(5_000L);
+        var ctx = Context.builder(new Config())
+                .llm(blocking.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-t988-abort",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Answer slowly.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Answer slowly."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options().llmTimeoutMs(150L));
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.text().contains("[turn aborted"), out.text());
+            assertEquals("FAILED", trace.outcome().status());
+            assertEquals("LLM_ABORTED", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     private static List<ChatMessage> messages(String request) {

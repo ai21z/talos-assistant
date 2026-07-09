@@ -6,6 +6,8 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Health;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -97,6 +99,96 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void managedModeClampsServerArgsContextOverrideBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 8192,
+                    "server_args", List.of("--ctx-size", "2147483647")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "--ctx-size", "262144");
+            assertFalse(containsPair(command, "--ctx-size", "2147483647"),
+                    "raw absurd context must not win over Talos' launch clamp: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeClampsServerArgsContextOverrideAboveIntegerRangeBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 8192,
+                    "server_args", List.of("--ctx-size", "9999999999")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "--ctx-size", "262144");
+            assertFalse(containsPair(command, "--ctx-size", "9999999999"),
+                    "raw out-of-int context must not win over Talos' launch clamp: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeDropsInvalidNegativeServerArgsContextOverrideBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 8192,
+                    "server_args", List.of("--ctx-size", "-1")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-c", "8192");
+            assertFalse(containsPair(command, "--ctx-size", "-1"),
+                    "raw negative context must not win over Talos' safe context: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void managedModeDefaultsToSingleAgentSlotAndBoundedPrediction() throws Exception {
         Path exe = touch("llama-server.exe");
         Path model = touch("agent.gguf");
@@ -118,6 +210,73 @@ class LlamaCppServerManagerTest {
             List<String> command = launcher.commands.get(0);
             assertContainsPair(command, "--parallel", "1");
             assertContainsPair(command, "--predict", "2048");
+            // Privacy: ordinary managed sessions must not run at debug log
+            // verbosity - llama.cpp debug logs write prompt and workspace
+            // content into the plaintext server log. Debug verbosity is
+            // scoped to verification launches (doctor --start, tune).
+            assertFalse(command.contains("-lv"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+            assertFalse(command.contains("--verbosity"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+            assertFalse(command.contains("--log-verbosity"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void verificationLaunchAddsDebugVerbosityForLogEvidence() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "verification_logging", true));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-lv", "4");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void verificationLaunchStillHonorsUserVerbosityOverride() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "verification_logging", true,
+                    "server_args", List.of("-lv", "1")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-lv", "1");
+            assertFalse(containsPair(command, "-lv", "4"),
+                    "user-configured verbosity must win over the verification default: " + command);
         } finally {
             server.stop(0);
         }
@@ -148,6 +307,40 @@ class LlamaCppServerManagerTest {
             assertContainsPair(command, "-n", "512");
             assertFalse(command.contains("--parallel"), "must not add default --parallel when -np is configured: " + command);
             assertFalse(command.contains("--predict"), "must not add default --predict when -n is configured: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-lv", "--verbosity", "--log-verbosity", "--verbosity=2", "--log-verbosity=2"})
+    void managedModeHonorsVerbosityOverrideAliasesFromServerArgs(String verbosityArg) throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            List<String> serverArgs = verbosityArg.contains("=") ? List.of(verbosityArg) : List.of(verbosityArg, "2");
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "server_args", serverArgs));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertTrue(command.contains(verbosityArg), command::toString);
+            assertFalse(containsPair(command, "-lv", "4"),
+                    "must not add default -lv 4 when verbosity is configured: " + command);
+            if (!"-lv".equals(verbosityArg)) {
+                assertFalse(command.contains("-lv"), "must not add default -lv when another alias is configured: " + command);
+            }
         } finally {
             server.stop(0);
         }
@@ -281,6 +474,18 @@ class LlamaCppServerManagerTest {
         LlamaCppConfig config = LlamaCppConfig.from(cfg);
 
         assertEquals(4096, config.context());
+    }
+
+    @Test
+    void hugeConfiguredContextIsClampedBeforeLaunch() {
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "context", Integer.MAX_VALUE));
+
+        LlamaCppConfig config = LlamaCppConfig.from(cfg);
+
+        assertEquals(262_144, config.context(),
+                "hand-edited context must be bounded before reaching llama-server -c");
     }
 
     @Test
@@ -619,6 +824,11 @@ class LlamaCppServerManagerTest {
         assertTrue(index >= 0, "missing flag " + flag + " in " + command);
         assertTrue(index + 1 < command.size(), "missing value for " + flag + " in " + command);
         assertEquals(value, command.get(index + 1));
+    }
+
+    private static boolean containsPair(List<String> command, String flag, String value) {
+        int index = command.indexOf(flag);
+        return index >= 0 && index + 1 < command.size() && value.equals(command.get(index + 1));
     }
 
     private static HttpServer startHealthServer(int status, String body) throws IOException {

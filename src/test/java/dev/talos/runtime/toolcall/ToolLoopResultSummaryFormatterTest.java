@@ -110,6 +110,41 @@ class ToolLoopResultSummaryFormatterTest {
     }
 
     @Test
+    void readOnlyAnswerSummaryDisclosesStableSuccessfulReadSet() {
+        var result = new ToolCallLoop.LoopResult(
+                "answer",
+                1,
+                3,
+                List.of("talos.list_dir", "talos.read_file", "talos.read_file"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("notes/project-notes.md", "notes/meeting-notes.md"),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.continueLoop(),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", "notes", true, false, false,
+                                "project-notes.md\nmeeting-notes.md\n", "", null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "notes/project-notes.md", true, false, false,
+                                "read", "", null),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "notes/meeting-notes.md", true, false, false,
+                                "read", "", null)));
+
+        assertEquals(
+                "[Used 3 tool(s): talos.list_dir, talos.read_file | 1 iteration(s) "
+                        + "| read: notes/meeting-notes.md, notes/project-notes.md]",
+                ToolLoopResultSummaryFormatter.format(result));
+    }
+
+    @Test
     void loopResultSummaryDelegatesToFormatterOwner() throws Exception {
         String loopSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/ToolCallLoop.java"));

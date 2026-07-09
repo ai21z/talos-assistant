@@ -72,4 +72,73 @@ class ToolProtocolTextTest {
         assertFalse(ToolProtocolText.looksLikeStandaloneToolJson(
                 "{\"name\": \"ordinary\", \"arguments\": {\"path\": \"index.html\"}}"));
     }
+
+    @Test
+    void containsToolCallsDetectsCompleteProtocolButNotOrdinaryJson() {
+        assertTrue(ToolProtocolText.containsToolCalls("""
+                ```json
+                {"name":"talos.write_file","arguments":{"path":"index.html","content":"ok"}}
+                ```
+                """));
+        assertTrue(ToolProtocolText.containsToolCalls("""
+                ```json
+                {"name":"talos.echo","arguments":{"input":"hello"}}
+                ```
+                """));
+        assertTrue(ToolProtocolText.containsToolCalls(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}"));
+        assertTrue(ToolProtocolText.containsToolCalls(
+                "<tool>{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}</tool>"));
+
+        assertFalse(ToolProtocolText.containsToolCalls("{\"name\":\"ordinary\"}"));
+        assertFalse(ToolProtocolText.containsToolCalls("""
+                Here is an example package manifest:
+                ```json
+                {"name":"demo-app","version":"1.0.0"}
+                ```
+                """));
+        assertFalse(ToolProtocolText.containsToolCalls("```java\nSystem.out.println(\"talos.write_file\");\n```"));
+    }
+
+    @Test
+    void foreignNamedXmlBlocksAreNotDetectedAsToolProtocol() {
+        assertFalse(ToolProtocolText.containsToolCalls(
+                "<tool_call>{\"name\": \"demo-app\", \"arguments\": {}}</tool_call>"));
+        assertTrue(ToolProtocolText.containsToolCalls(
+                "<tool_call>{\"name\": \"talos.write_file\", \"arguments\": {\"path\": \"a\"}}</tool_call>"));
+    }
+
+    @Test
+    void stripToolCallsPreservesForeignNamedXmlBlocks() {
+        String answer = "Example integration:\n"
+                + "<tool_call>{\"name\": \"weather-api\", \"arguments\": {}}</tool_call>\n"
+                + "End of example.";
+
+        String stripped = ToolProtocolText.stripToolCalls(answer);
+
+        assertTrue(stripped.contains("weather-api"), stripped);
+        assertTrue(stripped.contains("End of example."), stripped);
+
+        String talos = "Before.\n"
+                + "<tool_call>{\"name\": \"talos.read_file\", \"arguments\": {\"path\": \"x\"}}</tool_call>\n"
+                + "After.";
+        String talosStripped = ToolProtocolText.stripToolCalls(talos);
+        assertFalse(talosStripped.contains("talos.read_file"), talosStripped);
+        assertTrue(talosStripped.contains("After."), talosStripped);
+    }
+
+    @Test
+    void stripToolCallsPreservesOrdinaryFencedJsonWithNameField() {
+        String answer = """
+                Here is an example package manifest:
+                ```json
+                {"name":"demo-app","version":"1.0.0"}
+                ```
+                """;
+
+        String stripped = ToolProtocolText.stripToolCalls(answer);
+
+        assertTrue(stripped.contains("demo-app"), stripped);
+        assertTrue(stripped.contains("version"), stripped);
+    }
 }

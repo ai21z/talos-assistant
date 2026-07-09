@@ -100,10 +100,35 @@ class MemoryUpdateListenerTest {
         assertEquals("body", MemoryUpdateListener.extractText(new Result.Streamed("body", "[S]")));
     }
 
+    // ---- Abort truth: aborted turns are not conversational history ----
+
+    @Test void abortedStreamedTurnWithPartialBodyIsNotRecorded() {
+        // Stripping only the marker line would persist the confabulated
+        // partial as a clean normal answer; the whole turn must be skipped.
+        listener.onTurnComplete(tr(new Result.Streamed(
+                "I refactored the parser and all tests pass.\n"
+                        + "[turn aborted: stream transport failed after partial output]", ""), 1),
+                "refactor the parser");
+        assertEquals(0, cm.turnCount());
+    }
+
+    @Test void abortedOkTurnWithPartialBodyIsNotRecorded() {
+        listener.onTurnComplete(tr(new Result.Ok(
+                "Partial explanation of the module.\n[turn aborted: interrupted]"), 1),
+                "explain the module");
+        assertEquals(0, cm.turnCount());
+    }
+
     // ---- BUG #1: UI chrome must not leak into conversation history ----
 
     @Test void stripUiChromeRemovesUsedToolsLine() {
         String in = "Here is your answer.\n[Used 2 tool(s): talos.read_file | 2 iteration(s)]";
+        assertEquals("Here is your answer.",
+                MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
+    @Test void stripUiChromeRemovesGroundingDisclosureLine() {
+        String in = "Here is your answer.\n[Grounding: answered without reading workspace files]";
         assertEquals("Here is your answer.",
                 MemoryUpdateListener.stripUiChromeForHistory(in));
     }

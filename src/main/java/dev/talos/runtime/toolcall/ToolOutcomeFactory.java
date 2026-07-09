@@ -87,7 +87,7 @@ final class ToolOutcomeFactory {
                 success,
                 call != null && ToolCallSupport.isMutatingTool(call.toolName()),
                 classification != null && classification.denied(),
-                success ? toolOutcomeSummary(toolName(call), result.output()) : "",
+                success ? toolOutcomeSummary(canonicalToolName(call), result.output()) : "",
                 success ? "" : errorMessage(result),
                 result == null ? null : result.verification(),
                 result == null || result.error() == null ? "" : result.error().code(),
@@ -110,8 +110,16 @@ final class ToolOutcomeFactory {
         };
     }
 
-    private static String toolOutcomeSummary(String toolName, String output) {
-        if (!"talos.list_dir".equals(toolName)) {
+    /**
+     * Summary policy keys on the CANONICAL tool name: downstream evidence
+     * consumers canonicalize, so an accepted list_dir alias ("ls",
+     * "list_dir", ...) must get the same full evidence summary as
+     * "talos.list_dir" - a first-sentence summary of a directory listing
+     * reads as missing evidence and causes a false refusal. The outcome
+     * itself still carries the raw name for trace.
+     */
+    private static String toolOutcomeSummary(String canonicalToolName, String output) {
+        if (!"talos.list_dir".equals(canonicalToolName)) {
             return ToolCallSupport.firstSentenceSummary(output);
         }
         String value = output == null ? "" : output.strip();
@@ -124,6 +132,10 @@ final class ToolOutcomeFactory {
 
     private static String toolName(ToolCall call) {
         return call == null ? "" : call.toolName();
+    }
+
+    private static String canonicalToolName(ToolCall call) {
+        return call == null ? "" : call.canonicalToolName();
     }
 
     private static String errorMessage(ToolResult result) {

@@ -60,6 +60,26 @@ class ExactWriteContextFallbackTest {
     }
 
     @Test
+    void compactExactWriteFallbackClearsInitialOutputCap() {
+        Context ctx = Context.builder(new Config())
+                .nativeToolSpecs(List.of(writeFile()))
+                .build();
+        CurrentTurnPlan plan = exactWritePlan();
+
+        ExactWriteContextFallback.Request request = ExactWriteContextFallback
+                .prepare(ctx, plan, (ignoredCtx, ignoredPlan, ignoredTools) -> new ChatRequestControls(
+                        ToolChoiceMode.REQUIRED,
+                        "talos.write_file",
+                        ResponseFormatMode.TEXT,
+                        "",
+                        List.of()).withMaxOutputTokens(1024))
+                .orElseThrow();
+
+        assertEquals(0, request.controls().maxOutputTokens(),
+                "compact exact-write fallback must be allowed to emit complete file bodies");
+    }
+
+    @Test
     void skipsFallbackWithoutExactLiteralExpectation() {
         Context ctx = Context.builder(new Config())
                 .nativeToolSpecs(List.of(writeFile()))

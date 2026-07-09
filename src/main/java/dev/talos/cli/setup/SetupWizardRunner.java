@@ -225,6 +225,11 @@ public final class SetupWizardRunner {
         line(out, log, "  llama-server: " + (snapshot.llamaServerPath() == null
                 ? "not detected"
                 : snapshot.llamaServerPath() + (snapshot.llamaServerExists() ? " (file found)" : " (not a file)")));
+        if (snapshot.gpuDetected()) {
+            line(out, log, "  GPU: " + snapshot.gpuName() + " (driver " + snapshot.gpuDriverVersion()
+                    + (snapshot.gpuVramTotalMb() > 0 ? ", VRAM " + snapshot.gpuVramTotalMb() + " MB" : "")
+                    + "; source nvidia-smi)");
+        }
         line(out, log, "");
     }
 
@@ -270,6 +275,15 @@ public final class SetupWizardRunner {
         line(out, log, "  asset: " + entry.assetName());
         line(out, log, "  size: ~" + Math.max(1, entry.sizeBytes() / (1024 * 1024)) + " MB");
         line(out, log, "  SHA-256: " + entry.sha256());
+        if (entry.companion() != null) {
+            line(out, log, "  driver runtime asset: " + entry.companion().assetName());
+            line(out, log, "  driver runtime size: ~" + Math.max(1, entry.companion().sizeBytes() / (1024 * 1024)) + " MB");
+            line(out, log, "  driver runtime SHA-256: " + entry.companion().sha256());
+        }
+        if (!entry.minNvidiaDriver().isBlank()) {
+            line(out, log, "  driver floor: NVIDIA >= " + entry.minNvidiaDriver()
+                    + " (detected " + (snapshot.gpuDriverVersion().isBlank() ? "none" : snapshot.gpuDriverVersion()) + ")");
+        }
         line(out, log, "  install dir: " + entry.installDir(talosHome));
         if (!askYes(reader, out, log, "Install this pinned llama.cpp engine now? [y/N] ")) {
             return null;

@@ -1,6 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.llm.LlmClient;
@@ -221,6 +222,7 @@ public final class AssistantTurnExecutor {
                 LlmClient.StreamResult streamResult =
                         TurnModelDispatcher.dispatchStreaming(ctx, messages, currentTurnPlan);
                 String answer = streamResult.text();
+                recordOutputLimitIfNeeded(streamResult);
 
                 // Flush the stream filter so any pending non-tool text is emitted
                 if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
@@ -238,7 +240,18 @@ public final class AssistantTurnExecutor {
                 }
 
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                    if (isAbortedGeneration(streamResult, answer)) {
+                        // Aborted generation on the streaming path. The partial
+                        // prose already reached the terminal but the abort
+                        // marker was appended to the result text after the
+                        // stream ended, so without an explicit emit the abort
+                        // is silent to the user. The partial must not be
+                        // shaped, ground-retried, or executed as a tool call.
+                        streamed = true;
+                        recordLlmAbortOutcome();
+                        emitStreamingAbortNotice(answer, ctx);
+                        out.append(answer);
+                    } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
                             emitBlockedSmallTalkToolCallAnswer(answer, ctx);
@@ -254,6 +267,11 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
+                            // The output-limit notice describes the surfaced text.
+                            // A resolved tool-loop answer comes from later
+                            // uncapped generations, so the first request's
+                            // finish_reason must not annotate it (the trace
+                            // warning still records the truncation).
                             out.append(resolution.answer());
                         }
                     } else {
@@ -266,7 +284,7 @@ public final class AssistantTurnExecutor {
                         answer = shapeAnswerWithoutTools(answer, messages, currentTurnPlan, ctx, true, opts);
                         emitStreamingNoToolCorrectionIfNeeded(rawAnswer, answer, ctx);
                         emitMalformedProtocolReplacementIfNeeded(rawAnswer, answer, ctx);
-                        out.append(answer);
+                        out.append(withOutputLimitNotice(answer, streamResult, ctx, true));
                     }
                 } else {
                     out.append("(no answer)");
@@ -280,12 +298,16 @@ public final class AssistantTurnExecutor {
                         messages,
                         currentTurnPlan,
                         opts.llmTimeoutMs);
+                recordOutputLimitIfNeeded(streamResult);
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
                     try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
                 }
                 String answer = streamResult.text();
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                    if (isAbortedGeneration(streamResult, answer)) {
+                        recordLlmAbortOutcome();
+                        answer = withOutputLimitNotice(answer, streamResult, ctx, false);
+                    } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
                         } else {
@@ -299,6 +321,9 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
+                            // See the streaming branch: resolved tool-loop
+                            // answers do not inherit the first generation's
+                            // output-limit notice.
                             answer = resolution.answer();
                         }
                     } else {
@@ -309,7 +334,7 @@ public final class AssistantTurnExecutor {
                         ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
                                 answer, messages, currentTurnPlan, workspace, ctx, opts);
                         appendExtraSummary(out, resolution.extraSummary());
-                        answer = resolution.answer();
+                        answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
                     }
                     out.append(answer);
                 } else {
@@ -408,6 +433,34 @@ public final class AssistantTurnExecutor {
                 .append("]\n");
     }
 
+    private static void recordOutputLimitIfNeeded(LlmClient.StreamResult result) {
+        if (result == null || !result.outputLimitReached()) return;
+        LocalTurnTraceCapture.warning(
+                "LLM_OUTPUT_LIMIT_REACHED",
+                "Provider reported finish_reason=length; response stopped at the configured output limit and may be incomplete.");
+    }
+
+    private static String withOutputLimitNotice(
+            String answer,
+            LlmClient.StreamResult result,
+            Context ctx,
+            boolean alreadyStreamed
+    ) {
+        String safeAnswer = answer == null ? "" : answer;
+        if (result == null || !result.outputLimitReached()) {
+            return safeAnswer;
+        }
+        String notice = "\n\n" + UiChrome.OUTPUT_LIMIT_PREFIX
+                + ": provider reported finish_reason=length; the answer may be incomplete.]";
+        if (alreadyStreamed && ctx != null && ctx.streamSink() != null) {
+            ctx.streamSink().accept(notice);
+            if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+                filter.flush();
+            }
+        }
+        return safeAnswer + notice;
+    }
+
     private static void recordBackendFailureOutcome(String classification) {
         LocalTurnTraceCapture.recordOutcome(
                 "FAILED",
@@ -415,6 +468,44 @@ public final class AssistantTurnExecutor {
                 "UNKNOWN",
                 "BACKEND_ERROR",
                 classification);
+    }
+
+    private static void recordLlmAbortOutcome() {
+        recordBackendFailureOutcome("LLM_ABORTED");
+    }
+
+    /**
+     * Aborted-generation discriminator: the {@link LlmClient.StreamResult}
+     * abort metadata is authoritative; the shared line-anchored marker scan
+     * backstops results that were reassembled from plain text and lost the
+     * metadata. A plain startsWith is NOT enough - a transport abort after
+     * partial output appends the marker AFTER the partial text.
+     */
+    private static boolean isAbortedGeneration(LlmClient.StreamResult result, String answer) {
+        if (result != null && result.aborted()) return true;
+        if (result != null && (result.hasToolCalls() || ToolProtocolText.containsToolCalls(result.text()))) {
+            return false;
+        }
+        return UiChrome.containsTurnAbortMarker(answer);
+    }
+
+    /**
+     * Makes a streaming-path abort honestly visible. The abort marker is
+     * appended to the result text after the stream closed, so it never
+     * traveled through the stream sink; without this emit the user sees
+     * prose stop mid-sentence with no explanation while the transcript
+     * records an abort.
+     */
+    private static void emitStreamingAbortNotice(String answer, Context ctx) {
+        if (ctx == null || ctx.streamSink() == null) return;
+        String marker = UiChrome.turnAbortMarkerLine(answer);
+        if (marker.isEmpty()) {
+            marker = UiChrome.TURN_ABORTED_PREFIX + ": generation aborted]";
+        }
+        ctx.streamSink().accept("\n\n" + marker);
+        if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+            filter.flush();
+        }
     }
 
     private static String engineFailureClassification(EngineException ex) {

@@ -2,6 +2,149 @@
 
 ## [Unreleased]
 
+- Final branch-review blockers fixed: aborted turns are classified before
+  text-tool routing on both provider paths, so abort markers cannot be
+  mistaken for executable tool calls, and inline code-generation prompts no
+  longer treat abbreviations such as "D.C." as `.c` file targets while real
+  C files such as `alloc.c` still route as file mutations.
+- `talos tune` now works on Ubuntu and WSL. The tune snapshot carries the
+  real distro identity (reusing the setup wizard's /etc/os-release
+  detection instead of a hardcoded blank), so Ubuntu/WSL x64 selects the
+  shipped ubuntu-x64-cpu lane instead of reporting that no pinned lane
+  exists. Installed-lane detection now recognizes the actual install
+  layout through the installer's own recursive executable search (the
+  Ubuntu tar nests the binary under build/bin), so an already-installed
+  lane is no longer re-prompted for install and the proposal carries the
+  executable path that actually exists. Windows lane planning is
+  unchanged, and unsupported distros still get the honest no-pinned-lane
+  answer.
+- Ordinary managed llama.cpp sessions no longer run at debug log verbosity.
+  The previous default `-lv 4` wrote prompt and workspace content into the
+  plaintext server log on every session. Debug verbosity is now scoped to
+  verification launches: `talos doctor --start` (and `talos tune` through
+  it) marks its in-memory config so offload and rate evidence still lands
+  in the server log, ordinary launches stay at llama.cpp's normal
+  verbosity, and a user-configured verbosity in `server_args` always wins.
+  Evidence stays honest when verbosity is insufficient: doctor reports
+  rates as not measured and tune refuses to verify a GPU lane without
+  offload evidence. Docs corrected to match: `doctor --start` verifies
+  start, smoke, and rates, `talos tune` verifies GPU offload, and a docs
+  test now pins that attribution.
+- Tool-outcome evidence summaries now key on the canonical tool name, so
+  accepted list_dir aliases ("ls", "list_dir", "list_directory") carry the
+  same full directory evidence as "talos.list_dir" instead of collapsing
+  to a first-sentence summary that downstream evidence consumers read as
+  missing evidence. Outcomes still carry the raw tool name for trace.
+- File-target classification shares one extension inventory (it existed
+  as four hand-copied lists that had already drifted) and now includes
+  common source extensions (py, go, rs, rb, php, c, cpp, cs). "Edit
+  app.py to fix the bug, show me only the code" routes as a mutation like
+  its .java equivalent always did, while inline codegen with no named
+  target file stays non-mutating.
+- Checkpoint restore no longer wipes the live directory tree before
+  rewriting it. Restore is now two-phase: first every expected path is put
+  in place constructively (directories created without a pre-wipe, file
+  overwrites per-file atomic via temp-and-move, type-flipped paths
+  displaced aside instead of destroyed), and only after all writes succeed
+  are extras, recorded-absent targets, and displaced remnants deleted. A
+  mid-restore failure can leave a mix of live and checkpoint content but
+  can no longer strip the workspace. Blob integrity and containment
+  preflight stay fail-closed before any mutation. The recovery path shares
+  this logic and inherits the fix.
+- Abort truth on both provider paths: aborted generations now carry explicit
+  abort metadata on the LLM result, and abort detection is line-anchored
+  instead of a prefix check, so a transport loss after partial output (the
+  marker lands AFTER the partial text) can no longer pass as a normal
+  answer. The streaming path records the FAILED / LLM_ABORTED outcome and
+  emits the abort marker to the terminal (it previously stayed silent
+  because the marker was appended after the stream closed), the buffered
+  path keeps recording it, aborted partial output is excluded from
+  conversation history instead of being persisted with only the marker line
+  stripped, and the turn log tags aborted bodies "aborted" on both the
+  streamed and buffered result shapes so cross-session replay refuses them.
+- [T1000] Explicit inline-output phrases ("output only the code", "just show
+  me the code", "answer inline", "do not create any files") now classify as
+  chat codegen instead of auto-routing to a file write with an invented
+  filename. The signal is phrase-anchored and conservative: naming a target
+  file keeps mutation routing, and the write boundary is unchanged for every
+  shape without an inline phrase.
+- Branch regression-review hardening: cap-truncated tool-required generations
+  recover with one cap-lifted retry instead of surfacing a backend-blaming
+  malformed-response error; resolved tool-loop answers no longer inherit the
+  first generation's output-limit notice; the no-first-token wall clock can
+  no longer be defeated by thread-start latency and clock skew; XML tool
+  blocks pass the same recognized-name gate as code fences; the
+  example/sample/template target suppression no longer eats explicitly
+  commanded targets; cuda lane matching is token-anchored (a "barracuda"
+  path is not a CUDA lane) with family-correct driver floors; and
+  `talos status --verbose` reports the effective context the server
+  launches with, not just the configured number.
+- [T987] Added `talos tune`: detect, propose, approve, verify. Detection is
+  read-only (shared nvidia-smi primitive, assume-no-GPU degradation), the
+  proposal is an exact config diff that only touches the engine lane,
+  context, context_reason, and `server_args: []` (llama.cpp auto-fit owns
+  GPU placement, Talos passes no layer flags), the write happens only after
+  approval with a timestamped backup and an atomic replace, and verification
+  reads GPU offload and generation rates back from the managed server log
+  via `talos doctor --start`. A CUDA lane with no offload evidence restores
+  the backup byte for byte instead of claiming GPU acceleration; full
+  offload with CPU-class speed keeps the config but warns that a
+  shared-memory spill is suspected. The CPU expected-speed line is an
+  estimate with its basis pinned in code, and the doctor's existing
+  "run talos tune" guidance now names a command that exists.
+  Post-review hardening: the editor inserts missing context,
+  context_reason, and server_args keys on legacy configs and verifies the
+  parsed result actually carries the proposal before anything is written,
+  uneditable configs (connect-only, no server_path) are rejected before
+  the install offer, "already matches" is only claimed on a semantic
+  match, the backup is restored on every non-verified exit including
+  exceptions, the verify log port comes from the engine's own config
+  resolution, and verification requires the managed server log to have
+  been refreshed by the run it just started so stale evidence or a
+  pre-existing server on the port can never produce "Verified".
+- [T986] Shipped pinned GPU-capable llama.cpp engine lanes. The setup manifest
+  now carries Windows x64 CPU, CUDA 12.4, and CUDA 13.3 lanes from llama.cpp
+  `b9918` (SHA-256 pinned, cudart driver-runtime companion archives modeled
+  with their own digests and extracted beside `llama-server.exe`), next to the
+  existing Ubuntu CPU lane. Lane selection gates on detected NVIDIA driver
+  evidence (CUDA 13.3 needs driver 580+, CUDA 12.4 needs 551.61+, both floors
+  live only in the manifest and the doctor probe reads them from there); no
+  driver evidence, an unparseable version, or a companion digest mismatch all
+  fail safe to the CPU lane with no partial install. The wizard states tag,
+  assets, digests, and the driver floor, and still asks before downloading.
+- [T989] Added provider-neutral per-request output-token caps and mapped them
+  to llama.cpp/OpenAI-compatible `max_tokens` on the compat transport. Initial
+  inspection and command tool-obligation requests now cap at 512 tokens, while
+  initial mutation and workspace-operation requests cap at 1024 tokens instead
+  of burning the managed server `--predict 2048` backstop. Prompt-debug renders
+  the cap when present, and streamed text-form tool calls now close generation
+  once a complete Talos tool payload is detected. Provider `finish_reason=length`
+  now propagates into turn output/trace as an output-limit warning, exact-write
+  compact fallback clears the first-request cap so complete file bodies can be
+  produced, and ordinary fenced JSON such as `package.json` examples no longer
+  enters the text-tool parser or stream-stop path.
+- [T991] Made managed llama.cpp setup choose the context window through a
+  bounded selector instead of a hard-coded `8192`: the Qwen 14B profile can
+  select `16384` when measured CUDA VRAM or system RAM meets the documented
+  headroom floor, while unverified or under-measured lanes stay at `8192`.
+  Setup writes the selected value and estimate reason into config, and
+  `talos status --verbose` now displays both.
+- [T992] Made `talos doctor` report read-only GPU facts from `nvidia-smi`
+  when available, including adapter name, VRAM totals, free VRAM, driver
+  version, probe source, and the configured llama.cpp server lane. CUDA lanes
+  now warn before server startup when the detected driver is below the
+  path-derived floor, while CPU-lane configs with a visible GPU point users
+  toward `talos tune` instead of claiming GPU/VRAM is unprobed.
+- [T993] Made `talos doctor --start` report measured llama.cpp prompt and
+  generation rates when managed timing evidence is available, project a stated
+  reference turn against `limits.llm_timeout_ms`, and warn when a profile is
+  likely too slow for practical edit work. Missing or too-small timing samples
+  now stay honest as unmeasured, and connect-only checks no longer claim a
+  managed server was released.
+- [T996] Made managed llama.cpp launches capture GPU/offload ground truth by
+  default with `-lv 4`, while respecting user verbosity overrides. Added a
+  shared b9918 log parser for offload, fit, buffer, and timing evidence used by
+  doctor/tuning follow-up work.
 - [T963] Made `talos setup models --profile gpt-oss-20b` fail truthfully unless
   it can write a startable local GGUF config. The setup path now honors an
   explicit `--model-path`, resolves an exact `gpt-oss-20b-mxfp4.gguf` from the

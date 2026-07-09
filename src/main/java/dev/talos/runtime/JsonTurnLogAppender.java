@@ -105,7 +105,10 @@ public final class JsonTurnLogAppender implements SessionListener {
     static String statusOf(Result r) {
         if (r == null) return "";
         return switch (r) {
-            case Result.Ok ignored           -> "ok";
+            // The buffered (non-streaming) turn path wraps its final text in
+            // Ok, including aborted generations - those must not be tagged
+            // "ok" and replayed any more than their streamed siblings.
+            case Result.Ok ok                -> isAbortMarker(ok.text) ? "aborted" : "ok";
             // A streamed turn whose fullText is (or starts with) the bracketed
             // "[turn aborted" marker is NOT conversational content - it is the
             // sentinel LlmClient.withWallClockBudget emits on wall-clock
@@ -130,16 +133,18 @@ public final class JsonTurnLogAppender implements SessionListener {
     }
 
     /**
-     * True when {@code text} is the bracketed "[turn aborted" sentinel produced
-     * by {@link dev.talos.core.llm.LlmClient} when a call exceeds its
-     * wall-clock budget, hits the idle watchdog, or is interrupted. Kept
-     * lexical (prefix match after trimming) so it never over-fires on real
-     * model prose that happens to contain the word "aborted" mid-sentence.
+     * True when {@code text} carries the bracketed "[turn aborted" sentinel
+     * produced by {@link dev.talos.core.llm.LlmClient} when a call exceeds
+     * its wall-clock budget, hits the idle watchdog, is interrupted, or
+     * loses the transport after partial output. In the partial-output shape
+     * the marker follows the partial text, so detection is line-anchored
+     * anywhere in the body (see {@code UiChrome.containsTurnAbortMarker}) -
+     * a startsWith on the full body tags the turn "ok" and replays the
+     * confabulated partial as authoritative history. Still lexical per
+     * line, so prose mentioning "aborted" mid-sentence never over-fires.
      */
     static boolean isAbortMarker(String text) {
-        if (text == null) return false;
-        String t = text.stripLeading();
-        return t.startsWith(UiChrome.TURN_ABORTED_PREFIX);
+        return UiChrome.containsTurnAbortMarker(text);
     }
 
     static String statusOfStreamed(String text) {

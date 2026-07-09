@@ -68,6 +68,55 @@ class DoctorCmdTest {
         assertTrue(report.contains("re-run 'talos doctor'"), report);
     }
 
+    /**
+     * --start is the verification launch: it must mark its in-memory config
+     * so the managed server runs with the debug log verbosity that offload
+     * and rate evidence needs. Ordinary runs (and ordinary sessions, which
+     * never see this marker) stay at normal verbosity so prompt content is
+     * not written to plaintext logs.
+     */
+    @Test
+    void doctorStartMarksItsConfigAsAVerificationLaunch() throws Exception {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", touch("llama-server.exe").toString(),
+                "model_path", tempDir.resolve("missing.gguf").toString(),
+                "host", "http://127.0.0.1",
+                "port", 1));
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
+
+        DoctorCmd.run(cfg, tempDir.resolve("ws"), tempDir.resolve("home"),
+                true, new PrintStream(bout, true, StandardCharsets.UTF_8));
+
+        assertEquals(Boolean.TRUE, llamaCppBlock(cfg).get("verification_logging"),
+                "doctor --start must request verification log verbosity");
+    }
+
+    @Test
+    void doctorWithoutStartDoesNotMarkAVerificationLaunch() throws Exception {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", touch("llama-server.exe").toString(),
+                "model_path", touch("agent.gguf").toString(),
+                "host", "http://127.0.0.1",
+                "port", 1));
+        ByteArrayOutputStream bout = new ByteArrayOutputStream();
+
+        DoctorCmd.run(cfg, tempDir.resolve("ws"), tempDir.resolve("home"),
+                false, new PrintStream(bout, true, StandardCharsets.UTF_8));
+
+        assertTrue(!llamaCppBlock(cfg).containsKey("verification_logging"),
+                "a non-start doctor run must not request debug logging");
+    }
+
+    private static Map<?, ?> llamaCppBlock(Config cfg) {
+        Object engines = cfg.data.get("engines");
+        assertTrue(engines instanceof Map<?, ?>, "engines block expected");
+        Object block = ((Map<?, ?>) engines).get("llama_cpp");
+        assertTrue(block instanceof Map<?, ?>, "llama_cpp block expected");
+        return (Map<?, ?>) block;
+    }
+
     @Test
     void workspaceResolutionPrefersExplicitRoot() {
         Path resolved = DoctorCmd.resolveWorkspace(tempDir.toString());

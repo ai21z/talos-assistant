@@ -12,9 +12,7 @@ import dev.talos.spi.types.ToolSpec;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 final class TurnModelDispatcher {
@@ -52,26 +50,18 @@ final class TurnModelDispatcher {
             CurrentTurnPlan plan,
             long timeoutMs
     ) throws TimeoutException, ExecutionException, InterruptedException {
-        CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
-                () -> dispatchBuffered(ctx, messages, plan));
         try {
-            return fut.get(timeoutMs, TimeUnit.MILLISECONDS);
-        } catch (ExecutionException ex) {
-            Throwable cause = ex.getCause();
-            if (!(cause instanceof EngineException.ContextBudgetExceeded budget)) {
-                throw ex;
-            }
+            return dispatchBuffered(ctx, messages, plan, timeoutMs);
+        } catch (EngineException.ContextBudgetExceeded budget) {
             Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
                     ctx,
                     plan,
                     TurnModelDispatcher::chatControlsForTurn);
             if (fallback.isEmpty()) {
-                throw ex;
+                throw budget;
             }
             ExactWriteContextFallback.record(plan, budget);
-            CompletableFuture<LlmClient.StreamResult> fallbackFuture = CompletableFuture.supplyAsync(
-                    () -> dispatchExactWriteContextFallback(ctx, fallback.get()));
-            return fallbackFuture.get(timeoutMs, TimeUnit.MILLISECONDS);
+            return dispatchExactWriteContextFallback(ctx, fallback.get(), timeoutMs);
         }
     }
 
@@ -80,7 +70,7 @@ final class TurnModelDispatcher {
             List<ChatMessage> messages,
             CurrentTurnPlan plan
     ) {
-        return dispatchBuffered(ctx, messages, plan, ctx.nativeToolSpecs());
+        return dispatchBuffered(ctx, messages, plan, ctx.nativeToolSpecs(), null);
     }
 
     static LlmClient.StreamResult dispatchEscalatedRetry(
@@ -132,20 +122,48 @@ final class TurnModelDispatcher {
             Context ctx,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
+            long timeoutMs
+    ) {
+        return dispatchBuffered(ctx, messages, plan, ctx.nativeToolSpecs(), timeoutMs);
+    }
+
+    private static LlmClient.StreamResult dispatchBuffered(
+            Context ctx,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
             List<ToolSpec> requestToolSpecs
     ) {
+        return dispatchBuffered(ctx, messages, plan, requestToolSpecs, null);
+    }
+
+    private static LlmClient.StreamResult dispatchBuffered(
+            Context ctx,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            List<ToolSpec> requestToolSpecs,
+            Long timeoutMs
+    ) {
+        ChatRequestControls controls = chatControlsForTurn(
+                ctx,
+                plan,
+                requestToolSpecsForControls(ctx, requestToolSpecs));
+        if (timeoutMs != null) {
+            return ctx.llm().chatFull(messages, timeoutMs, requestToolSpecs, controls);
+        }
         return ctx.llm().chatFull(
                 messages,
                 requestToolSpecs,
-                chatControlsForTurn(ctx, plan, requestToolSpecsForControls(ctx, requestToolSpecs)));
+                controls);
     }
 
     private static LlmClient.StreamResult dispatchExactWriteContextFallback(
             Context ctx,
-            ExactWriteContextFallback.Request fallback
+            ExactWriteContextFallback.Request fallback,
+            long timeoutMs
     ) {
         return ctx.llm().chatFull(
                 fallback.messages(),
+                timeoutMs,
                 fallback.toolSpecs(),
                 fallback.controls());
     }

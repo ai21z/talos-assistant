@@ -32,8 +32,17 @@ public final class UiChrome {
     /** Second anchor for the tool summary (guards against bare "[Used" prose). */
     public static final String TOOL_SUMMARY_MARKER = "tool(s)";
 
+    /** Read-set suffix inside the tool summary line. */
+    public static final String TOOL_SUMMARY_READ_PREFIX = " | read: ";
+
+    /** Workspace grounding note line for no-tool workspace answers. */
+    public static final String GROUNDING_NOTE_PREFIX = "[Grounding: ";
+
     /** Tool-call budget notice: {@code [Tool-call limit reached. ...]}. */
     public static final String TOOL_CALL_LIMIT_PREFIX = "[Tool-call limit reached";
+
+    /** Provider output budget notice: {@code [Model output limit reached: ...]}. */
+    public static final String OUTPUT_LIMIT_PREFIX = "[Model output limit reached";
 
     /** LLM wall-clock/idle/repetition/interrupt abort sentinel. */
     public static final String TURN_ABORTED_PREFIX = "[turn aborted";
@@ -82,5 +91,33 @@ public final class UiChrome {
     public static final String CONTEXT_COMPACTED_PREFIX = "[context compacted";
 
     private UiChrome() {
+    }
+
+    /**
+     * True when {@code text} carries the {@link #TURN_ABORTED_PREFIX}
+     * sentinel anywhere as a line of its own. The marker is emitted either
+     * as the whole result text (watchdog aborts) or appended after partial
+     * output on its own line (transport loss after visible output), so a
+     * prefix check on the full text misses the partial-output shape and
+     * lets a confabulated partial pass as a normal answer.
+     *
+     * <p>Detection stays line-anchored (trimmed line startsWith) so prose
+     * that mentions the marker mid-sentence never fires. A line that
+     * genuinely starts with the marker text - for example quoted from a
+     * log - fires deliberately: erring toward "aborted" refuses to persist
+     * possibly-unfinished output, which is the trust-safe direction.
+     */
+    public static boolean containsTurnAbortMarker(String text) {
+        return !turnAbortMarkerLine(text).isEmpty();
+    }
+
+    /** The first line-anchored abort-marker line in {@code text}, or "". */
+    public static String turnAbortMarkerLine(String text) {
+        if (text == null || text.isEmpty()) return "";
+        for (String line : text.split("\\R")) {
+            String stripped = line.strip();
+            if (stripped.startsWith(TURN_ABORTED_PREFIX)) return stripped;
+        }
+        return "";
     }
 }

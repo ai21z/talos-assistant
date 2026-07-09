@@ -49,6 +49,28 @@ class UiChromeContractTest {
     }
 
     @Test
+    void toolSummaryWithGroundingDisclosureIsStripped() {
+        // pins ToolLoopResultSummaryFormatter.format(result, disclosure)
+        // when read-set grounding appends workspace candidate counts.
+        var result = new ToolCallLoop.LoopResult(
+                "answer", 2, 2, List.of("talos.list_dir", "talos.read_file"),
+                null, 1, 0, false, 0, null, 0, 0, 0, 0, null, null, Map.of());
+        String summary = ToolLoopResultSummaryFormatter.format(
+                result,
+                new ToolLoopResultSummaryFormatter.GroundingDisclosure(
+                        "1 of 3 workspace candidate files read, unread: todos.md, notes.md"));
+
+        assertTrue(summary.contains("workspace candidate files read"), summary);
+        assertStripped(summary);
+    }
+
+    @Test
+    void groundingDisclosureLineIsStripped() {
+        // pins AnswerGroundingDisclosure.zeroReadWorkspaceNote via UiChrome.GROUNDING_NOTE_PREFIX.
+        assertStripped("[Grounding: answered without reading workspace files]");
+    }
+
+    @Test
     void iterationLimitNoticeIsStripped() {
         // pins ToolLoopFinalAnswerFinalizer.ITERATION_LIMIT
         String withNotice = ToolLoopFinalAnswerFinalizer.withIterationLimitNotice("Partial answer.");
@@ -70,6 +92,12 @@ class UiChromeContractTest {
     void toolCallLimitNoticeIsStripped() {
         // pins ToolLoopFinalAnswerFinalizer.ITERATION_LIMIT literal form
         assertStripped("[Tool-call limit reached. Some tool calls were not executed.]");
+    }
+
+    @Test
+    void outputLimitNoticeIsStripped() {
+        // pins AssistantTurnExecutor.withOutputLimitNotice
+        assertStripped("[Model output limit reached: provider reported finish_reason=length; the answer may be incomplete.]");
     }
 
     @Test

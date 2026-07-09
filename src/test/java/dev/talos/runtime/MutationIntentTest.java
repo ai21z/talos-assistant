@@ -280,4 +280,121 @@ class MutationIntentTest {
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "I am only chatting, please don't inspect my files. What can you do for me?"));
     }
+
+    @org.junit.jupiter.api.Test
+    void explicitInlineOutputPhrasesClassifyAsNonMutatingChatCodegen() {
+        String captured = "Write a Java method int[] twoSum(int[] nums, int target) that returns "
+                + "the indices of two numbers that add up to target. Output only the code.";
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "inline-output-request", MutationIntent.classificationReason(captured));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MutationIntent.looksExplicitMutationRequest(captured));
+
+        for (String input : java.util.List.of(
+                "Write a quicksort in Python. Just show me the code.",
+                "Write a debounce helper in JavaScript, answer inline please.")) {
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "inline-output-request", MutationIntent.classificationReason(input), input);
+        }
+        // Overlaps the older read-only negation counter-signal; either
+        // reason is fine as long as the outcome is non-mutating.
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MutationIntent.looksExplicitMutationRequest(
+                        "Write a regex for emails. Do not create any files."));
+    }
+
+    @org.junit.jupiter.api.Test
+    void namedFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
+        String input = "Write twoSum to Solution.java. Output only the code.";
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(input),
+                MutationIntent.classificationReason(input));
+    }
+
+    @org.junit.jupiter.api.Test
+    void namedSourceFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
+        for (String input : java.util.List.of(
+                "Edit app.py to fix the bug. Show me only the code.",
+                "Update server.go to add graceful shutdown. Output only the code.",
+                "Fix main.rs so it compiles. Just show me the code.",
+                "Refactor engine.cpp to remove the global state. Output just the code.",
+                "Edit Program.cs to add logging. Show only the code.",
+                "Update gemfile_tasks.rb to add the lint task. Output only the code.",
+                "Edit index.php to escape the query. Just show me the code.",
+                "Fix alloc.c so the buffer is bounded. Show me only the code.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCExtensionDoesNotTreatAbbreviationsAsFileTargets() {
+        for (String input : java.util.List.of(
+                "Write a quicksort. Show me only the code. It is for D.C. rules.",
+                "Write a date formatter. Output only the code. It handles 300 B.C. dates.",
+                "Write a thermostat helper. Just show me the code. It controls the A.C.")) {
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "inline-output-request", MutationIntent.classificationReason(input), input);
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(
+                        "Fix alloc.c so the buffer is bounded. Show me only the code."),
+                "real C file targets must still override inline-output phrasing");
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCExtensionDoesNotTreatAbbreviationsAsExplicitFileTargets() {
+        for (String input : java.util.List.of(
+                "The team agreed to update D.C. next quarter.",
+                "Rewrite B.C. in your answer only.",
+                "Rewrite N.C. compliance notes in your answer only.",
+                "Condense notes.md into D.C. as a sentence in chat.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void inlineCodegenForSourceLanguagesWithoutTargetFileStaysNonMutating() {
+        for (String input : java.util.List.of(
+                "Show me only the code for a Python function that parses dates.",
+                "Write a Go worker pool. Output only the code.",
+                "Write a Rust iterator adapter. Just show me the code.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void sourceToTargetCapturePreservesExtensionsThatStartWithC() {
+        MutationIntent.SourceToTargetArtifact artifact = MutationIntent.sourceToTargetArtifact(
+                        "Condense src/parser.cpp into dist/parser-summary.csv.")
+                .orElseThrow();
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("src/parser.cpp"),
+                artifact.sourceTargets());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("dist/parser-summary.csv"),
+                artifact.outputTargets());
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCSourceFileTargetsStillOverrideInlineOutputPhrases() {
+        for (String input : java.util.List.of(
+                "Fix x.c. Show me only the code.",
+                "Fix x.c please. Show me only the code.",
+                "Update a.c in your answer only.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
 }

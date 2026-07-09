@@ -14,6 +14,9 @@ import java.util.Set;
 
 /** Maps runtime-owned turn obligations to provider-neutral chat controls. */
 public final class ProviderRequestControlPolicy {
+    static final int READ_ONLY_INITIAL_MAX_OUTPUT_TOKENS = 512;
+    static final int MUTATION_INITIAL_MAX_OUTPUT_TOKENS = 1024;
+
     private static final Set<String> MUTATING_TOOLS = Set.of("talos.write_file", "talos.edit_file");
     private static final Set<String> WORKSPACE_TOOLS = Set.of(
             "talos.apply_workspace_batch", "talos.mkdir", "talos.copy_path",
@@ -38,7 +41,7 @@ public final class ProviderRequestControlPolicy {
             boolean requiredToolChoiceSupported,
             boolean namedToolChoiceSupported
     ) {
-        if (!requiredToolChoiceSupported || plan == null || visibleTools == null || visibleTools.isEmpty()) {
+        if (plan == null || visibleTools == null || visibleTools.isEmpty()) {
             return ChatRequestControls.defaults();
         }
 
@@ -48,6 +51,18 @@ public final class ProviderRequestControlPolicy {
         boolean workspaceToolsVisible = hasAnyTool(visibleTools, WORKSPACE_TOOLS);
         boolean inspectionToolsVisible = hasAnyTool(visibleTools, INSPECTION_TOOLS);
         boolean commandToolsVisible = hasAnyTool(visibleTools, COMMAND_TOOLS);
+        int maxOutputTokens = initialGenerationCap(
+                action,
+                evidence,
+                mutatingToolsVisible,
+                workspaceToolsVisible,
+                inspectionToolsVisible,
+                commandToolsVisible,
+                explicitCommandRequest(plan));
+
+        if (!requiredToolChoiceSupported) {
+            return ChatRequestControls.defaults().withMaxOutputTokens(maxOutputTokens);
+        }
 
         boolean require = false;
         String namedTool = "";
@@ -92,7 +107,7 @@ public final class ProviderRequestControlPolicy {
             tags.add("evidence-obligation:" + evidence.name());
         }
 
-        if (!require) return ChatRequestControls.defaults();
+        if (!require) return ChatRequestControls.defaults().withMaxOutputTokens(maxOutputTokens);
         // Tool-obligation turns run near-greedy: server-default sampling with a
         // random seed produced divergent outputs for byte-identical requests in
         // the 0.10.1 release banks (T740).
@@ -102,7 +117,38 @@ public final class ProviderRequestControlPolicy {
                 ResponseFormatMode.TEXT,
                 "",
                 tags,
-                SamplingControls.NEAR_GREEDY);
+                SamplingControls.NEAR_GREEDY,
+                maxOutputTokens);
+    }
+
+    private static int initialGenerationCap(
+            ActionObligation action,
+            EvidenceObligation evidence,
+            boolean mutatingToolsVisible,
+            boolean workspaceToolsVisible,
+            boolean inspectionToolsVisible,
+            boolean commandToolsVisible,
+            boolean explicitCommandRequest
+    ) {
+        if (action == ActionObligation.WORKSPACE_OPERATION_REQUIRED && workspaceToolsVisible) {
+            return MUTATION_INITIAL_MAX_OUTPUT_TOKENS;
+        }
+        if ((action == ActionObligation.MUTATING_TOOL_REQUIRED
+                || action == ActionObligation.REPAIR_FROM_VERIFIER_FINDINGS)
+                && mutatingToolsVisible) {
+            return MUTATION_INITIAL_MAX_OUTPUT_TOKENS;
+        }
+        if (action == ActionObligation.CONDITIONAL_REVIEW_FIX
+                && (mutatingToolsVisible || workspaceToolsVisible)) {
+            return MUTATION_INITIAL_MAX_OUTPUT_TOKENS;
+        }
+        if (explicitCommandRequest && commandToolsVisible) {
+            return READ_ONLY_INITIAL_MAX_OUTPUT_TOKENS;
+        }
+        if ((requiresInspectionTool(action) || requiresEvidenceTool(evidence)) && inspectionToolsVisible) {
+            return READ_ONLY_INITIAL_MAX_OUTPUT_TOKENS;
+        }
+        return 0;
     }
 
     private static boolean requiresInspectionTool(ActionObligation action) {

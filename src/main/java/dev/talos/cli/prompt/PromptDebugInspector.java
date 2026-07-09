@@ -48,6 +48,10 @@ public final class PromptDebugInspector {
         }
         out.append('\n');
         out.append("- Response format: ").append(snapshot.controls().responseFormat()).append('\n');
+        if (snapshot.controls().maxOutputTokens() > 0) {
+            out.append("- Max output tokens: ")
+                    .append(snapshot.controls().maxOutputTokens()).append('\n');
+        }
         if (snapshot.controls().sampling().anySet()) {
             var sampling = snapshot.controls().sampling();
             out.append("- Sampling: temperature=").append(sampling.temperature())
