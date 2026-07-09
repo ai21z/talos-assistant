@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- Tool-outcome evidence summaries now key on the canonical tool name, so
+  accepted list_dir aliases ("ls", "list_dir", "list_directory") carry the
+  same full directory evidence as "talos.list_dir" instead of collapsing
+  to a first-sentence summary that downstream evidence consumers read as
+  missing evidence. Outcomes still carry the raw tool name for trace.
+- File-target classification shares one extension inventory (it existed
+  as four hand-copied lists that had already drifted) and now includes
+  common source extensions (py, go, rs, rb, php, c, cpp, cs). "Edit
+  app.py to fix the bug, show me only the code" routes as a mutation like
+  its .java equivalent always did, while inline codegen with no named
+  target file stays non-mutating.
 - Checkpoint restore no longer wipes the live directory tree before
   rewriting it. Restore is now two-phase: first every expected path is put
   in place constructively (directories created without a pre-wipe, file

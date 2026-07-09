@@ -310,4 +310,33 @@ class MutationIntentTest {
                 MutationIntent.looksExplicitMutationRequest(input),
                 MutationIntent.classificationReason(input));
     }
+
+    @org.junit.jupiter.api.Test
+    void namedSourceFileTargetsKeepMutationRoutingDespiteInlinePhrases() {
+        for (String input : java.util.List.of(
+                "Edit app.py to fix the bug. Show me only the code.",
+                "Update server.go to add graceful shutdown. Output only the code.",
+                "Fix main.rs so it compiles. Just show me the code.",
+                "Refactor engine.cpp to remove the global state. Output just the code.",
+                "Edit Program.cs to add logging. Show only the code.",
+                "Update gemfile_tasks.rb to add the lint task. Output only the code.",
+                "Edit index.php to escape the query. Just show me the code.",
+                "Fix alloc.c so the buffer is bounded. Show me only the code.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void inlineCodegenForSourceLanguagesWithoutTargetFileStaysNonMutating() {
+        for (String input : java.util.List.of(
+                "Show me only the code for a Python function that parses dates.",
+                "Write a Go worker pool. Output only the code.",
+                "Write a Rust iterator adapter. Just show me the code.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
 }

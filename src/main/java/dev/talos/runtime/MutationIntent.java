@@ -128,32 +128,37 @@ public final class MutationIntent {
             "extra", "new", "separate", "unlinked"
     );
 
+    /**
+     * The single file-target extension inventory every target pattern
+     * below composes from. It previously existed as four hand-copied
+     * variants that drifted (one carried "py", the others did not, so
+     * "Edit app.py ... show me only the code" routed inline while the
+     * same request against App.java routed as a mutation). Longer
+     * alternatives sit before their prefixes (cpp before cs before c)
+     * so the trailing boundary lookahead matches without backtracking.
+     */
+    private static final String FILE_TARGET_EXTENSIONS =
+            "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|c|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp";
+
+    private static final String FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS =
+            FILE_TARGET_EXTENSIONS + "|pdf|doc|docx|xls|xlsx|ppt|pptx";
+
     private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
             "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp))"
+                    + "(?:" + FILE_TARGET_EXTENSIONS + "))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final String EXPLICIT_FILE_TARGET =
             "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
-                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
-                    + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
-                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
-
-    private static final String FIX_PROBLEM_FILE_TARGET =
-            "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|py|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "(?:" + FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS + "))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
 
     private static final String CAPTURED_FILE_TARGET =
             "`?((?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "(?:" + FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS + "))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?)))`?";
@@ -165,13 +170,13 @@ public final class MutationIntent {
     private static final Pattern FIX_PROBLEM_IN_FILE_TARGET = Pattern.compile(
             "\\bfix\\s+(?:(?:the|a|an)\\s+)?(?:[a-z0-9_#$./\\\\-]+\\s+){1,8}"
                     + "(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
-                    + FIX_PROBLEM_FILE_TARGET
+                    + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern FILE_SCOPED_DEFECT_MENTION = Pattern.compile(
             "\\b(?:bug|defect|issue|problem|error|failure|failing|broken)\\b.{0,120}"
                     + "\\b(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
-                    + FIX_PROBLEM_FILE_TARGET
+                    + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
             Pattern.DOTALL);
 

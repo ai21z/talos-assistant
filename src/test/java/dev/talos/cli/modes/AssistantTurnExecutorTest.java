@@ -5683,8 +5683,24 @@ class AssistantTurnExecutorTest {
                     out.text());
             assertTrue(continuationPrompt.contains("test_dijkstra.py"), continuationPrompt);
             assertTrue(continuationPrompt.contains("Remaining expected target"), continuationPrompt);
-            assertFalse(continuationPrompt.contains("dijkstra.py, test_dijkstra.py"),
-                    "continuation should focus on the remaining unsatisfied target only: " + continuationPrompt);
+            // Envelope-agnostic focus check: either continuation shape (the
+            // fresh [RemainingExpectedTargetsAfterMutationRetry] frame or the
+            // in-loop [Expected target progress] overlay, which .py requests
+            // share with .java since the file-target inventories unified) must
+            // list ONLY the unsatisfied target as remaining. The satisfied
+            // target may still appear elsewhere (the turn's requiredTargets
+            // history), but never in the remaining list.
+            java.util.regex.Matcher remaining = java.util.regex.Pattern
+                    .compile("Remaining expected target[^:]*:\\s*([^\\n]*)")
+                    .matcher(continuationPrompt);
+            assertTrue(remaining.find(), continuationPrompt);
+            String remainingList = remaining.group(1).strip();
+            assertTrue(remainingList.startsWith("test_dijkstra.py"),
+                    "continuation must focus on the remaining unsatisfied target only, got: " + remainingList);
+            assertFalse(remainingList.startsWith("dijkstra.py")
+                            || remainingList.contains(" dijkstra.py")
+                            || remainingList.contains(",dijkstra.py"),
+                    "already-satisfied target must not be re-demanded as remaining: " + remainingList);
         }
 
         @Test

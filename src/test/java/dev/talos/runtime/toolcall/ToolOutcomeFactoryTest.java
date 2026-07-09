@@ -171,6 +171,46 @@ class ToolOutcomeFactoryTest {
         assertTrue(outcome.summary().endsWith("\n... (tool outcome summary truncated)"));
     }
 
+    /**
+     * The evidence-summary decision must run on the canonical tool name:
+     * downstream evidence consumers canonicalize, so an accepted list_dir
+     * alias that fell back to the first-sentence summary would truncate
+     * the directory evidence and cause a false evidence refusal.
+     */
+    @Test
+    void listDirAliasSuccessKeepsEvidenceSummaryNotFirstSentence() {
+        String output = "docs\nsrc\nbuild.gradle. and more entries\nREADME.md";
+        for (String alias : List.of("ls", "list_dir", "list_directory")) {
+            ToolCall listDir = new ToolCall(alias, Map.of("path", "."));
+            ToolResult result = ToolResult.ok(output);
+            ToolExecutionFailureClassifier.Classification classification =
+                    ToolExecutionFailureClassifier.classify(listDir, result, ".");
+
+            ToolCallLoop.ToolOutcome outcome =
+                    ToolOutcomeFactory.executed(listDir, ".", result, classification, null, null);
+
+            assertEquals(alias, outcome.toolName(), "the outcome keeps the raw tool name");
+            assertEquals("talos.list_dir", outcome.canonicalToolName());
+            assertEquals(output, outcome.summary(),
+                    alias + " must carry the full list_dir evidence summary");
+        }
+    }
+
+    @Test
+    void listDirAliasLargeOutputGetsEvidenceTruncationMarker() {
+        ToolCall listDir = new ToolCall("ls", Map.of("path", "."));
+        String output = "x".repeat(4_001);
+        ToolResult result = ToolResult.ok(output);
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(listDir, result, ".");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(listDir, ".", result, classification, null, null);
+
+        assertEquals(4_000 + "\n... (tool outcome summary truncated)".length(), outcome.summary().length());
+        assertTrue(outcome.summary().endsWith("\n... (tool outcome summary truncated)"));
+    }
+
     @Test
     void executionStageDelegatesToolOutcomeConstructionToFactory() throws Exception {
         String source = Files.readString(Path.of(
