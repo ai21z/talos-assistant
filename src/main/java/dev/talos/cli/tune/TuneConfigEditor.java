@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 /**
  * Surgical config edit for {@code talos tune} (T987).
@@ -24,8 +23,6 @@ import java.util.regex.Pattern;
  * the edited YAML rather than trusting the line editor.
  */
 public final class TuneConfigEditor {
-
-    private static final Pattern PORT_LINE = Pattern.compile("^\\s*port:\\s*(\\d+)\\s*$");
 
     private TuneConfigEditor() {}
 

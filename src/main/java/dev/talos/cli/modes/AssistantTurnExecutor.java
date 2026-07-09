@@ -239,7 +239,18 @@ public final class AssistantTurnExecutor {
                 }
 
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                    if (isAbortedGeneration(streamResult, answer)) {
+                        // Aborted generation on the streaming path. The partial
+                        // prose already reached the terminal but the abort
+                        // marker was appended to the result text after the
+                        // stream ended, so without an explicit emit the abort
+                        // is silent to the user. The partial must not be
+                        // shaped, ground-retried, or executed as a tool call.
+                        streamed = true;
+                        recordLlmAbortOutcome();
+                        emitStreamingAbortNotice(answer, ctx);
+                        out.append(answer);
+                    } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
                             emitBlockedSmallTalkToolCallAnswer(answer, ctx);
@@ -262,17 +273,6 @@ public final class AssistantTurnExecutor {
                             // warning still records the truncation).
                             out.append(resolution.answer());
                         }
-                    } else if (isAbortedGeneration(streamResult, answer)) {
-                        // Aborted generation on the streaming path. The partial
-                        // prose already reached the terminal but the abort
-                        // marker was appended to the result text after the
-                        // stream ended, so without an explicit emit the abort
-                        // is silent to the user. The partial must not be
-                        // shaped or ground-retried as if it were an answer.
-                        streamed = true;
-                        recordLlmAbortOutcome();
-                        emitStreamingAbortNotice(answer, ctx);
-                        out.append(answer);
                     } else {
                         // No tool calls - content was streamed; record full text for memory.
                         // Streaming no-tool branch. We cannot silently retry here
@@ -303,7 +303,10 @@ public final class AssistantTurnExecutor {
                 }
                 String answer = streamResult.text();
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                    if (isAbortedGeneration(streamResult, answer)) {
+                        recordLlmAbortOutcome();
+                        answer = withOutputLimitNotice(answer, streamResult, ctx, false);
+                    } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
                         } else {
@@ -327,15 +330,10 @@ public final class AssistantTurnExecutor {
                         // Grounding retry gate: if the user explicitly asked for evidence
                         // / reading / inspection and the answer is long-and-confident,
                         // re-prompt once asking the model to answer from workspace evidence.
-                        if (isAbortedGeneration(streamResult, answer)) {
-                            recordLlmAbortOutcome();
-                            answer = withOutputLimitNotice(answer, streamResult, ctx, false);
-                        } else {
-                            ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
-                                    answer, messages, currentTurnPlan, workspace, ctx, opts);
-                            appendExtraSummary(out, resolution.extraSummary());
-                            answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
-                        }
+                        ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
+                                answer, messages, currentTurnPlan, workspace, ctx, opts);
+                        appendExtraSummary(out, resolution.extraSummary());
+                        answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
                     }
                     out.append(answer);
                 } else {

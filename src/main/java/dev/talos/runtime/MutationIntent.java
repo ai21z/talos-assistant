@@ -141,12 +141,19 @@ public final class MutationIntent {
             "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|c|md|txt|json|yaml|yml|xml|"
                     + "properties|gradle|kts|toml|ini|env|csv|tmp";
 
+    private static final String NAMED_FILE_TARGET_EXTENSIONS =
+            "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp";
+
+    private static final String NAMED_C_SOURCE_FILE_TARGET =
+            "(?:(?:[A-Za-z0-9_.-]+[\\\\/])+)?[A-Za-z0-9_-][A-Za-z0-9_.-]+\\.c";
+
     private static final String FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS =
             FILE_TARGET_EXTENSIONS + "|pdf|doc|docx|xls|xlsx|ppt|pptx";
 
     private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
-                    + "(?:" + FILE_TARGET_EXTENSIONS + "))"
+            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:" + NAMED_C_SOURCE_FILE_TARGET + ")"
+                    + "|(?:[A-Za-z0-9_.\\\\/-]+\\.(?:" + NAMED_FILE_TARGET_EXTENSIONS + ")))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final String EXPLICIT_FILE_TARGET =

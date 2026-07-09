@@ -6,6 +6,8 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.core.util.UiChrome;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
@@ -34,6 +36,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AssistantTurnExecutorAbortTruthTest {
 
     private static final String PARTIAL = "The first half of an answer that never finished";
+    private static final String PASS_2B_TOOL_JSON_PARTIAL = """
+            {"name":"talos.write_file","arguments":{"path":"index.html","content":"function one() { if (ready) { return 1; } }"}}
+            {"name":"talos.write_file","arguments":{"path":"style.css","content":"@media screen { body { color: teal; } }"}}
+            """;
+    private static final String TOOL_JSON_THEN_ABORT_MARKER =
+            PASS_2B_TOOL_JSON_PARTIAL + "\n[turn aborted: stream transport failed after partial output]";
 
     @Test
     void streamingAbortAfterPartialOutputRecordsLlmAbortedAndShowsTheMarker(@TempDir Path workspace) {
@@ -151,6 +159,92 @@ class AssistantTurnExecutorAbortTruthTest {
 
             assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
             assertNotNull(trace.outcome(), "a trailing abort marker must record a turn outcome");
+            assertEquals("FAILED", trace.outcome().status());
+            assertEquals("LLM_ABORTED", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void streamingAbortWithTextToolJsonRecordsAbortBeforeToolLoop(@TempDir Path workspace) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(TOOL_JSON_THEN_ABORT_MARKER, List.of())),
+                4096);
+        List<String> chunks = new ArrayList<>();
+        Context ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .streamSink(chunks::add)
+                .onStreamComplete(() -> { })
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null), 1))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-abort-streaming-tool-json",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Explain briefly.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Explain briefly."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.streamed(), "partial tool JSON was streamed before the abort");
+            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
+            assertFalse(out.text().contains("retry-output"),
+                    "an aborted turn must not enter the tool loop or continue generation");
+            assertNotNull(trace.outcome(), "an aborted turn with text tool JSON must record a turn outcome");
+            assertEquals("FAILED", trace.outcome().status());
+            assertEquals("LLM_ABORTED", trace.outcome().classification());
+            assertTrue(String.join("", chunks).contains(UiChrome.TURN_ABORTED_PREFIX),
+                    "the abort must be visible on the streamed surface, got chunks: " + chunks);
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void bufferedAbortWithTextToolJsonRecordsAbortBeforeToolLoop(@TempDir Path workspace) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(TOOL_JSON_THEN_ABORT_MARKER, List.of())),
+                4096);
+        Context ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null), 1))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-abort-buffered-tool-json",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Create the files.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Create the files."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
+            assertFalse(out.text().contains("retry-output"),
+                    "an aborted buffered turn must not enter the tool loop or continue generation");
+            assertNotNull(trace.outcome(), "an aborted buffered turn with text tool JSON must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
         } finally {

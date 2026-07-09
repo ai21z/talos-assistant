@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Final branch-review blockers fixed: aborted turns are classified before
+  text-tool routing on both provider paths, so abort markers cannot be
+  mistaken for executable tool calls, and inline code-generation prompts no
+  longer treat abbreviations such as "D.C." as `.c` file targets while real
+  C files such as `alloc.c` still route as file mutations.
 - `talos tune` now works on Ubuntu and WSL. The tune snapshot carries the
   real distro identity (reusing the setup wizard's /etc/os-release
   detection instead of a hardcoded blank), so Ubuntu/WSL x64 selects the

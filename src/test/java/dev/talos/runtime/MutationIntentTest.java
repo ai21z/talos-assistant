@@ -329,6 +329,25 @@ class MutationIntentTest {
     }
 
     @org.junit.jupiter.api.Test
+    void singleLetterCExtensionDoesNotTreatAbbreviationsAsFileTargets() {
+        for (String input : java.util.List.of(
+                "Write a quicksort. Show me only the code. It is for D.C. rules.",
+                "Write a date formatter. Output only the code. It handles 300 B.C. dates.",
+                "Write a thermostat helper. Just show me the code. It controls the A.C.")) {
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    "inline-output-request", MutationIntent.classificationReason(input), input);
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(
+                        "Fix alloc.c so the buffer is bounded. Show me only the code."),
+                "real C file targets must still override inline-output phrasing");
+    }
+
+    @org.junit.jupiter.api.Test
     void inlineCodegenForSourceLanguagesWithoutTargetFileStaysNonMutating() {
         for (String input : java.util.List.of(
                 "Show me only the code for a Python function that parses dates.",
