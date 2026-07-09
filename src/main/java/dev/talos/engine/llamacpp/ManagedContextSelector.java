@@ -54,11 +54,17 @@ public final class ManagedContextSelector {
         };
     }
 
+    // "cuda" must start a path token ("win-x64-cuda-13.3", "cuda13"), so a
+    // username or directory merely containing the letters ("barracuda")
+    // never grades a CPU binary on the CUDA VRAM floor.
+    private static final java.util.regex.Pattern CUDA_PATH_TOKEN =
+            java.util.regex.Pattern.compile("(?<![a-z0-9])cuda");
+
     public static Lane laneFromServerPath(Path serverPath) {
         String normalized = Objects.toString(serverPath, "")
                 .toLowerCase(Locale.ROOT)
                 .replace('\\', '/');
-        if (normalized.contains("cuda")) return Lane.CUDA;
+        if (CUDA_PATH_TOKEN.matcher(normalized).find()) return Lane.CUDA;
         if (normalized.isBlank()) return Lane.UNKNOWN;
         return Lane.CPU;
     }

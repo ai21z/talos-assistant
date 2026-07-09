@@ -148,6 +148,13 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
     }
 
     private record ServerLane(String label, boolean cuda, String requiredDriver) {
+        private static final java.util.regex.Pattern CUDA_13_FAMILY =
+                java.util.regex.Pattern.compile("(?<![a-z0-9])cuda[-_.]?13");
+        private static final java.util.regex.Pattern CUDA_12_FAMILY =
+                java.util.regex.Pattern.compile("(?<![a-z0-9])cuda[-_.]?12");
+        private static final java.util.regex.Pattern CUDA_TOKEN =
+                java.util.regex.Pattern.compile("(?<![a-z0-9])cuda");
+
         static ServerLane from(Config cfg) {
             Map<String, Object> engines = CfgUtil.map(cfg == null ? null : cfg.data.get("engines"));
             Map<String, Object> llama = CfgUtil.map(engines.get("llama_cpp"));
@@ -159,18 +166,19 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
                 return new ServerLane("connect-only (configured)", false, "");
             }
             // Driver floors are manifest metadata (T986); this probe never
-            // carries its own copies.
-            if (normalized.contains("cuda-13.3") || normalized.contains("cuda13.3")
-                    || normalized.contains("cuda_13.3") || normalized.contains("cuda13")) {
+            // carries its own copies. Family matching is token-anchored so a
+            // path merely containing the letters cuda ("barracuda") stays on
+            // the CPU lane, and any cuda-12 minor uses the 12.4 floor rather
+            // than the strictest one.
+            if (CUDA_13_FAMILY.matcher(normalized).find()) {
                 return new ServerLane("cuda-13.3 (configured path)", true,
                         LlamaCppEngineManifest.minNvidiaDriverForBackend("cuda-13.3"));
             }
-            if (normalized.contains("cuda-12.4") || normalized.contains("cuda12.4")
-                    || normalized.contains("cuda_12.4") || normalized.contains("cuda12")) {
+            if (CUDA_12_FAMILY.matcher(normalized).find()) {
                 return new ServerLane("cuda-12.4 (configured path)", true,
                         LlamaCppEngineManifest.minNvidiaDriverForBackend("cuda-12.4"));
             }
-            if (normalized.contains("cuda")) {
+            if (CUDA_TOKEN.matcher(normalized).find()) {
                 return new ServerLane("cuda (configured path)", true,
                         LlamaCppEngineManifest.strictestCudaDriverFloor());
             }

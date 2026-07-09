@@ -75,4 +75,21 @@ class ManagedContextSelectorTest {
         assertEquals(8_192, decision.context());
         assertTrue(decision.reason().contains("unverified"), decision.reason());
     }
+
+    @org.junit.jupiter.api.Test
+    void laneFromServerPathRequiresCudaAsAPathToken() {
+        org.junit.jupiter.api.Assertions.assertEquals(
+                ManagedContextSelector.Lane.CPU,
+                ManagedContextSelector.laneFromServerPath(
+                        java.nio.file.Path.of("C:/Users/barracuda/llama.cpp/llama-server.exe")),
+                "a username containing the letters cuda must not classify the lane as CUDA");
+        org.junit.jupiter.api.Assertions.assertEquals(
+                ManagedContextSelector.Lane.CUDA,
+                ManagedContextSelector.laneFromServerPath(
+                        java.nio.file.Path.of("C:/x/.talos/engines/llama.cpp/b9918/win-x64-cuda-13.3/llama-server.exe")));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                ManagedContextSelector.Lane.CUDA,
+                ManagedContextSelector.laneFromServerPath(
+                        java.nio.file.Path.of("C:/tools/cuda13/llama-server.exe")));
+    }
 }

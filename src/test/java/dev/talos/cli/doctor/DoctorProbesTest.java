@@ -635,6 +635,33 @@ class DoctorProbesTest {
         return cfg;
     }
 
+    @org.junit.jupiter.api.Test
+    void cuda12MinorVariantsUseTheCuda124FloorNotTheStrictestOne() {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", "C:/talos/engines/llama-cpp/cuda-12.6/llama-server.exe"));
+
+        ProbeResult result = new RuntimeEnvironmentProbe(successfulGpuQuery(
+                "NVIDIA GeForce RTX 4070, 12282, 11000, 555.85")).run(ctx(cfg));
+
+        assertTrue(result.detail().contains("serverLane=cuda-12"), result.detail());
+        assertFalse(result.detail().contains("below required"),
+                "driver 555.85 satisfies the 12.4 floor; the 13.x floor must not apply: " + result.detail());
+    }
+
+    @org.junit.jupiter.api.Test
+    void cudaLettersInsideAnotherWordDoNotClassifyTheLaneAsCuda() {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "managed",
+                "server_path", "C:/Users/barracuda/llama.cpp/llama-server.exe"));
+
+        ProbeResult result = new RuntimeEnvironmentProbe(successfulGpuQuery(
+                "NVIDIA GeForce RTX 4070, 12282, 11000, 555.85")).run(ctx(cfg));
+
+        assertTrue(result.detail().contains("serverLane=cpu"), result.detail());
+        assertFalse(result.detail().contains("below required"), result.detail());
+    }
+
     private static RuntimeEnvironmentProbe.GpuQueryRunner successfulGpuQuery(String output) {
         return () -> new RuntimeEnvironmentProbe.GpuQueryResult(0, output, "");
     }
