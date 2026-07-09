@@ -19,6 +19,21 @@ class TuneVerifierTest {
             slot print_timing: id  0 | task 0 | eval time =   10312.11 ms /    64 tokens (  161.13 ms per token,     6.21 tokens per second)
             """;
 
+    private static final String CUDA_LOG_ZERO_OFFLOAD = """
+            load_tensors: offloaded 0/49 layers to GPU
+            slot print_timing: id  0 | task 0 | eval time =   10312.11 ms /    64 tokens (  161.13 ms per token,     6.21 tokens per second)
+            """;
+
+    private static final String CUDA_LOG_PARTIAL_OFFLOAD_SLOW = """
+            load_tensors: offloaded 24/49 layers to GPU
+            slot print_timing: id  0 | task 0 | eval time =   10312.11 ms /    64 tokens (  161.13 ms per token,     6.21 tokens per second)
+            """;
+
+    private static final String CUDA_LOG_FULL_OFFLOAD_TINY_SMOKE_ONLY = """
+            load_tensors: offloaded 49/49 layers to GPU
+            slot print_timing: id  0 | task 0 | eval time =      17.10 ms /     2 tokens (    8.55 ms per token,   116.99 tokens per second)
+            """;
+
     private static final String LOG_WITHOUT_OFFLOAD = """
             srv  log_server_r: request: GET /health 127.0.0.1 200
             slot print_timing: id  0 | task 0 | eval time =     834.32 ms /    64 tokens (   13.04 ms per token,    76.71 tokens per second)
@@ -40,6 +55,35 @@ class TuneVerifierTest {
 
         assertFalse(result.passed(), "no offload line means no GPU claim");
         assertTrue(result.summary().contains("offload"), result.summary());
+    }
+
+    @Test
+    void cudaLaneWithZeroOffloadedLayersFailsVerification() {
+        TuneVerifier.Result result = TuneVerifier.verify(CUDA_LOG_ZERO_OFFLOAD, true, 0);
+
+        assertFalse(result.passed(), "0/N offload is CPU execution, not verified GPU acceleration");
+        assertTrue(result.summary().contains("0/49"), result.summary());
+        assertTrue(result.summary().contains("refusing"), result.summary());
+    }
+
+    @Test
+    void cudaLaneWithPartialOffloadAndCpuClassSpeedWarnsSpill() {
+        TuneVerifier.Result result = TuneVerifier.verify(CUDA_LOG_PARTIAL_OFFLOAD_SLOW, true, 0);
+
+        assertTrue(result.passed(), result.summary());
+        assertTrue(result.spillSuspected(), result.summary());
+        assertTrue(result.summary().contains("partial"), result.summary());
+        assertTrue(result.summary().contains("estimate"), result.summary());
+    }
+
+    @Test
+    void cudaLaneIgnoresTinySmokeEvalInsteadOfCallingItMeasuredGenerationRate() {
+        TuneVerifier.Result result = TuneVerifier.verify(CUDA_LOG_FULL_OFFLOAD_TINY_SMOKE_ONLY, true, 0);
+
+        assertTrue(result.passed(), result.summary());
+        assertFalse(result.summary().contains("116.99"), result.summary());
+        assertFalse(result.summary().contains("measured"), result.summary());
+        assertTrue(result.summary().contains("generation unavailable"), result.summary());
     }
 
     @Test

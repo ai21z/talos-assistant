@@ -157,7 +157,7 @@ final class LlamaCppServerManager implements AutoCloseable {
         if (config.verificationLogging()) {
             appendManagedAgentDefault(command, config.serverArgs(), VERBOSITY_FLAGS, "-lv", VERIFICATION_LOG_VERBOSITY);
         }
-        command.addAll(config.serverArgs());
+        command.addAll(LlamaCppContextArgs.sanitize(config.serverArgs()));
         return command;
     }
 

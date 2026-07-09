@@ -253,6 +253,45 @@ class DoctorProbesTest {
     }
 
     @Test
+    void startModeFailsWhenModelOnlyEchoesTheSmokePrompt() throws IOException {
+        HttpServer server = startEchoChatServer();
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "echo-model"));
+
+            ProbeResult result = new ServerProbe(true).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.FAIL, result.status());
+            assertTrue(result.detail().contains("model smoke reply did not contain"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeFailsWhenModelWrapsSmokeTokenInExtraText() throws IOException {
+        HttpServer server = startChatServer("The token is " + MODEL_SMOKE_REPLY + ".");
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "verbose-model"));
+
+            ProbeResult result = new ServerProbe(true).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.FAIL, result.status());
+            assertTrue(result.detail().contains("model smoke reply did not exactly match"),
+                    result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void startModePassesWhenSuccessfulModelSmokeIsFast() throws IOException {
         AtomicInteger chatCalls = new AtomicInteger();
         HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls);
@@ -308,6 +347,34 @@ class DoctorProbesTest {
             assertTrue(result.detail().contains("smaller profile"), result.detail());
             assertTrue(result.detail().contains("external server left running"), result.detail());
             assertFalse(result.detail().contains("managed server released again"), result.detail());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeWarnsWhenMeasuredRatesProjectSlowAgentTurnEvenWithRaisedTimeout() throws IOException {
+        HttpServer server = startChatServer(MODEL_SMOKE_REPLY);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "qwen2.5-coder-14b"));
+            cfg.data.put("limits", Map.of("llm_timeout_ms", 1_200_000L));
+            LlamaCppLogEvidence rates = LlamaCppLogEvidence.parse("""
+                    0.40.000.000 I slot print_timing: id  0 | task 7 | prompt eval time =   50000.00 ms /  4000 tokens (   12.50 ms per token,    80.00 tokens per second)
+                    3.17.254.000 I slot print_timing: id  0 | task 7 |        eval time =  137254.90 ms /   700 tokens (  196.08 ms per token,     5.10 tokens per second)
+                    """);
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    (ctx, preflight) -> rates).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("practical edit work"), result.detail());
+            assertTrue(result.detail().contains("reference turn"), result.detail());
         } finally {
             server.stop(0);
         }
@@ -719,6 +786,22 @@ class DoctorProbesTest {
             byte[] bytes = ("""
                     {"choices":[{"message":{"role":"assistant","content":"%s"}}]}
                     """.formatted(reply)).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    private static HttpServer startEchoChatServer() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String escaped = body.replace("\\", "\\\\").replace("\"", "\\\"");
+            byte[] bytes = ("""
+                    {"choices":[{"message":{"role":"assistant","content":"%s"}}]}
+                    """.formatted(escaped)).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();

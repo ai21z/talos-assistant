@@ -1,6 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.llm.LlmClient;
@@ -482,6 +483,9 @@ public final class AssistantTurnExecutor {
      */
     private static boolean isAbortedGeneration(LlmClient.StreamResult result, String answer) {
         if (result != null && result.aborted()) return true;
+        if (result != null && (result.hasToolCalls() || ToolProtocolText.containsToolCalls(result.text()))) {
+            return false;
+        }
         return UiChrome.containsTurnAbortMarker(answer);
     }
 

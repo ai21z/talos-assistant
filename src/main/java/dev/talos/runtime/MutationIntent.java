@@ -134,11 +134,13 @@ public final class MutationIntent {
      * variants that drifted (one carried "py", the others did not, so
      * "Edit app.py ... show me only the code" routed inline while the
      * same request against App.java routed as a mutation). Longer
-     * alternatives sit before their prefixes (cpp before cs before c)
-     * so the trailing boundary lookahead matches without backtracking.
+     * alternatives sit before their prefixes so the trailing boundary
+     * lookahead matches without backtracking. Single-letter {@code .c}
+     * targets are handled by a stricter file-name pattern below so state
+     * abbreviations such as "D.C." do not look like files.
      */
     private static final String FILE_TARGET_EXTENSIONS =
-            "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|c|md|txt|json|yaml|yml|xml|"
+            "html|htm|css|js|jsx|ts|tsx|java|py|go|rs|rb|php|cpp|cs|md|txt|json|yaml|yml|xml|"
                     + "properties|gradle|kts|toml|ini|env|csv|tmp";
 
     private static final String NAMED_FILE_TARGET_EXTENSIONS =
@@ -146,10 +148,18 @@ public final class MutationIntent {
                     + "properties|gradle|kts|toml|ini|env|csv|tmp";
 
     private static final String NAMED_C_SOURCE_FILE_TARGET =
-            "(?:(?:[A-Za-z0-9_.-]+[\\\\/])+)?[A-Za-z0-9_-][A-Za-z0-9_.-]+\\.c";
+            "(?:(?:[A-Za-z0-9_.-]+[\\\\/])+)?[A-Za-z0-9_-][A-Za-z0-9_.-]*[A-Za-z0-9_-]\\.c";
+
+    private static final String C_SOURCE_FILE_TARGET =
+            "(?:(?:[a-z0-9_.-]+[\\\\/])+)?[a-z0-9_-][a-z0-9_.-]*[a-z0-9_-]\\.c";
 
     private static final String FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS =
             FILE_TARGET_EXTENSIONS + "|pdf|doc|docx|xls|xlsx|ppt|pptx";
+
+    private static final String FILE_TARGET_WITH_EXTENSION =
+            "(?:" + C_SOURCE_FILE_TARGET + ")"
+                    + "|(?:[a-z0-9_.\\\\/-]+\\.(?:"
+                    + FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS + "))";
 
     private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
             "(?i)(?<![A-Za-z0-9_./\\\\-])((?:" + NAMED_C_SOURCE_FILE_TARGET + ")"
@@ -157,21 +167,23 @@ public final class MutationIntent {
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final String EXPLICIT_FILE_TARGET =
-            "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:" + FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS + "))"
+            "(?:`?(?:(?:" + FILE_TARGET_WITH_EXTENSION + ")"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
 
     private static final String CAPTURED_FILE_TARGET =
-            "`?((?:(?:[a-z0-9_.\\\\/-]+\\."
-                    + "(?:" + FILE_TARGET_EXTENSIONS_WITH_DOCUMENTS + "))"
+            "`?((?:(?:" + FILE_TARGET_WITH_EXTENSION + ")"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?)))`?";
 
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
+    private static final Pattern SINGLE_LETTER_C_SOURCE_TARGET_AFTER_MUTATION = Pattern.compile(
+            "\\b(?i:" + CORE_MUTATION_VERBS + ")\\s+(?i:only\\s+)?[A-Za-z0-9_-]\\.c"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern FIX_PROBLEM_IN_FILE_TARGET = Pattern.compile(
@@ -292,6 +304,7 @@ public final class MutationIntent {
             "show me only the code",
             "answer inline",
             "inline answer",
+            "in your answer only",
             "do not create a file",
             "don't create a file",
             "do not create any files",
@@ -321,13 +334,14 @@ public final class MutationIntent {
     public static String classificationReason(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return "empty-user-request";
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return "synthetic-tool-result";
-        String lower = userRequest.toLowerCase(Locale.ROOT).trim();
+        String original = userRequest.trim();
+        String lower = original.toLowerCase(Locale.ROOT);
         if (containsGlobalReadOnlyNegation(lower)) return "global-read-only-negation";
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
-        if (looksInlineOutputOnlyRequest(lower)) return "inline-output-request";
+        if (looksInlineOutputOnlyRequest(original, lower)) return "inline-output-request";
         if (looksFileScopedDefectFixRequest(lower)) return "explicit-file-scoped-defect-fix-request";
         if (looksFixProblemInFileTarget(lower)) return "explicit-fix-problem-in-file-target";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
@@ -346,7 +360,7 @@ public final class MutationIntent {
         return "non-mutating";
     }
 
-    private static boolean looksInlineOutputOnlyRequest(String lower) {
+    private static boolean looksInlineOutputOnlyRequest(String original, String lower) {
         boolean inlinePhrase = false;
         for (String phrase : INLINE_OUTPUT_PHRASES) {
             if (lower.contains(phrase)) {
@@ -359,7 +373,48 @@ public final class MutationIntent {
         }
         // Naming a target file wins over the inline phrasing: "write twoSum
         // to Solution.java, output only the code" still routes to mutation.
-        return !NAMED_FILE_TARGET.matcher(lower).find();
+        return !NAMED_FILE_TARGET.matcher(lower).find()
+                && !looksSingleLetterCSourceFileInlineOverride(original);
+    }
+
+    private static boolean looksSingleLetterCSourceFileInlineOverride(String original) {
+        Matcher matcher = SINGLE_LETTER_C_SOURCE_TARGET_AFTER_MUTATION.matcher(original);
+        while (matcher.find()) {
+            String tail = stripSingleLetterCInlineFiller(original.substring(matcher.end()));
+            String lowerTail = tail.toLowerCase(Locale.ROOT);
+            for (String phrase : INLINE_OUTPUT_PHRASES) {
+                if (lowerTail.startsWith(phrase)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String stripSingleLetterCInlineFiller(String tail) {
+        String value = tail == null ? "" : tail.stripLeading();
+        for (int i = 0; i < 4; i++) {
+            value = value.replaceFirst("^[\\p{Punct}\\s]+", "").stripLeading();
+            String lower = value.toLowerCase(Locale.ROOT);
+            String next = stripLeadingFillerToken(value, lower, "please");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "then");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "now");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "and");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "just");
+            if (next == null) next = stripLeadingFillerToken(value, lower, "for me");
+            if (next == null) return value;
+            value = next.stripLeading();
+        }
+        return value;
+    }
+
+    private static String stripLeadingFillerToken(String value, String lower, String token) {
+        if (!lower.startsWith(token)) return null;
+        int end = token.length();
+        if (lower.length() > end && Character.isLetterOrDigit(lower.charAt(end))) {
+            return null;
+        }
+        return value.substring(end);
     }
 
     public static boolean isExplicitMutationClassificationReason(String reason) {

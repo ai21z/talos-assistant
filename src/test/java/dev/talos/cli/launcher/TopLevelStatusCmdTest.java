@@ -91,6 +91,138 @@ class TopLevelStatusCmdTest {
     }
 
     @Test
+    void verboseEngineStatusReportsServerArgsContextOverrideAsEffectiveContext() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", 8_192,
+                        "server_args", java.util.List.of("-c", "12288"))))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 12288"), output);
+        assertTrue(output.contains("server_args override"), output);
+    }
+
+    @Test
+    void verboseEngineStatusClampsAbsurdServerArgsContextOverride() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", 8_192,
+                        "server_args", java.util.List.of("--ctx-size", "2147483647"))))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 262144"), output);
+        assertTrue(output.contains("server_args override"), output);
+    }
+
+    @Test
+    void verboseEngineStatusClampsOutOfIntegerRangeServerArgsContextOverride() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", 8_192,
+                        "server_args", java.util.List.of("--ctx-size", "9999999999"))))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 262144"), output);
+        assertTrue(output.contains("server_args override"), output);
+    }
+
+    @Test
+    void verboseEngineStatusIgnoresInvalidNegativeServerArgsContextOverride() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", 8_192,
+                        "server_args", java.util.List.of("--ctx-size", "-1"))))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 8192"), output);
+        assertFalse(output.contains("server_args override"), output);
+    }
+
+    @Test
+    void verboseEngineStatusClampsAbsurdConfiguredContextWithoutServerArgsOverride() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", Integer.MAX_VALUE)))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 262144"), output);
+        assertTrue(output.contains("configured 2147483647"), output);
+    }
+
+    @Test
+    void verboseEngineStatusIgnoresServerArgsContextOverrideInConnectOnlyMode() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "connect_only",
+                        "context", 4_096,
+                        "server_args", java.util.List.of("-c", "12288"))))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 4096"), output);
+        assertFalse(output.contains("server_args override"), output);
+    }
+
+    @Test
+    void verboseEngineStatusIgnoresNonLlamaCppContextFlagSpelling() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "model", "qwen2.5-coder-14b",
+                        "mode", "managed",
+                        "context", 8_192,
+                        "server_args", java.util.List.of("--context", "12288"))))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Context     : 8192"), output);
+        assertFalse(output.contains("server_args override"), output);
+    }
+
+    @Test
     void verboseEngineStatusDoesNotExposeMalformedConfiguredModelPath() {
         Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of(

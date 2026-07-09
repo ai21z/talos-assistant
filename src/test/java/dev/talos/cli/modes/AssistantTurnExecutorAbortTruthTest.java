@@ -169,7 +169,11 @@ class AssistantTurnExecutorAbortTruthTest {
     @Test
     void streamingAbortWithTextToolJsonRecordsAbortBeforeToolLoop(@TempDir Path workspace) {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
-                List.of(new LlmClient.StreamResult(TOOL_JSON_THEN_ABORT_MARKER, List.of())),
+                List.of(new LlmClient.StreamResult(
+                        TOOL_JSON_THEN_ABORT_MARKER,
+                        List.of(),
+                        "",
+                        "stream transport failed after partial tool JSON")),
                 4096);
         List<String> chunks = new ArrayList<>();
         Context ctx = Context.builder(new Config())
@@ -215,11 +219,16 @@ class AssistantTurnExecutorAbortTruthTest {
     @Test
     void bufferedAbortWithTextToolJsonRecordsAbortBeforeToolLoop(@TempDir Path workspace) {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
-                List.of(new LlmClient.StreamResult(TOOL_JSON_THEN_ABORT_MARKER, List.of())),
+                List.of(new LlmClient.StreamResult(
+                        TOOL_JSON_THEN_ABORT_MARKER,
+                        List.of(),
+                        "",
+                        "stream transport failed after partial tool JSON")),
                 4096);
         Context ctx = Context.builder(new Config())
                 .llm(recorded.client())
                 .sandbox(new Sandbox(workspace, Map.of()))
+                .approvalGate((description, detail) -> true)
                 .toolCallLoop(new ToolCallLoop(new TurnProcessor(null), 1))
                 .build();
 
@@ -247,6 +256,49 @@ class AssistantTurnExecutorAbortTruthTest {
             assertNotNull(trace.outcome(), "an aborted buffered turn with text tool JSON must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void normalToolTurnMayMentionAbortMarkerInsideToolContent(@TempDir Path workspace) {
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "I will write it.\n"
+                                + "<tool_call>{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"log.txt\",\"content\":\"[turn aborted: copied from a log]\"}}</tool_call>",
+                        List.of(),
+                        "",
+                        "")),
+                4096);
+        Context ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .approvalGate((description, detail) -> true)
+                .toolCallLoop(new ToolCallLoop(new TurnProcessor(null), 1))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-normal-tool-json-with-marker",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Create log.txt.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Create log.txt."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertFalse(out.text().contains("LLM_ABORTED"), out.text());
+            assertNotNull(trace.outcome(), "a normal tool turn should still record an outcome");
+            assertFalse("LLM_ABORTED".equals(trace.outcome().classification()), trace.outcome().toString());
         } finally {
             LocalTurnTraceCapture.clear();
         }

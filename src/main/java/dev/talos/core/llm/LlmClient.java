@@ -761,16 +761,19 @@ public final class LlmClient implements AutoCloseable {
         // rationale (gemma4:26b April 2026 incident: 200+ lines of "The
         // user's prompt is '..." before the 387s wall-clock fired).
         RepetitionBreaker breaker = new RepetitionBreaker();
-        Consumer<String> trackingSink = chunk -> {
+        Consumer<String> progressSink = chunk -> {
             lastChunkAt.set(System.currentTimeMillis());
             breaker.onChunk(chunk);
+        };
+        Consumer<String> trackingSink = chunk -> {
+            progressSink.accept(chunk);
             if (onChunk != null) onChunk.accept(chunk);
         };
         Supplier<Boolean> cancel = this.externalCancel;
         Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
-                        messages, trackingSink, engineRequestTimeout, cancel,
+                        messages, trackingSink, progressSink, engineRequestTimeout, cancel,
                         lastChunkAt, activeStream, requestToolSpecs, controls, true),
                 wallClockMs,
                 lastChunkAt,
@@ -843,7 +846,7 @@ public final class LlmClient implements AutoCloseable {
         Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
-                        messages, trackingSink, engineRequestTimeout, cancel,
+                        messages, trackingSink, trackingSink, engineRequestTimeout, cancel,
                         lastChunkAt, activeStream, requestToolSpecs, controls, false),
                 wallClockMs,
                 lastChunkAt,
@@ -876,6 +879,7 @@ public final class LlmClient implements AutoCloseable {
      */
     private StreamResult engineAssembledWithMessagesFullTracked(List<ChatMessage> messages,
                                                                 Consumer<String> trackingSink,
+                                                                Consumer<String> progressOnlySink,
                                                                 Duration timeout,
                                                                 Supplier<Boolean> cancelled,
                                                                 AtomicLong lastChunkAt,
@@ -895,7 +899,7 @@ public final class LlmClient implements AutoCloseable {
         // read as first-token progress (T988). Priming here on the worker
         // thread would race that capture.
         return engineAssembledWithMessagesFull(
-                messages, trackingSink, timeout, wrapped, activeStream,
+                messages, trackingSink, progressOnlySink, timeout, wrapped, activeStream,
                 requestToolSpecs, controls, streamRequest);
     }
 
@@ -906,6 +910,7 @@ public final class LlmClient implements AutoCloseable {
      */
     private StreamResult engineAssembledWithMessagesFull(List<ChatMessage> messages,
                                                          Consumer<String> onChunk,
+                                                         Consumer<String> progressOnlySink,
                                                          Duration timeout,
                                                          Supplier<Boolean> cancelled,
                                                          AtomicReference<AutoCloseable> activeStream,
@@ -938,9 +943,16 @@ public final class LlmClient implements AutoCloseable {
                     tools, finalRequestControls);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
             try {
+                boolean deferVisibleChunks = shouldDeferVisibleChunksForCapRetry(req);
+                Consumer<String> firstAttemptSink = deferVisibleChunks
+                        ? progressOnlySink
+                        : onChunk;
                 StreamResult first = consumeEngineStream(
-                        engineResolver.chatStream(req), activeStream, cancelled, onChunk);
+                        engineResolver.chatStream(req), activeStream, cancelled, firstAttemptSink, !deferVisibleChunks);
                 if (!shouldRetryCapTruncatedToolResult(req, first)) {
+                    if (deferVisibleChunks && onChunk != null && first != null && !first.text().isEmpty()) {
+                        onChunk.accept(first.text());
+                    }
                     return first;
                 }
                 // T989 recovery: a per-request output cap cut a tool-required
@@ -953,7 +965,7 @@ public final class LlmClient implements AutoCloseable {
                         withDebugTag(req.controls, "output-cap-lifted-retry").withMaxOutputTokens(0));
                 PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(liftedReq, streamRequest));
                 return consumeEngineStream(
-                        engineResolver.chatStream(liftedReq), activeStream, cancelled, onChunk);
+                        engineResolver.chatStream(liftedReq), activeStream, cancelled, onChunk, true);
             } catch (EngineException.MalformedResponse malformed) {
                 if (!shouldRetryCompatToolArgumentsNonStreaming(malformed, req)) {
                     throw malformed;
@@ -973,9 +985,17 @@ public final class LlmClient implements AutoCloseable {
                         retryControls);
                 PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(retryReq, false));
                 return consumeEngineStream(
-                        engineResolver.chatStreamNonStreaming(retryReq), activeStream, cancelled, onChunk);
+                        engineResolver.chatStreamNonStreaming(retryReq), activeStream, cancelled, onChunk, true);
             }
         });
+    }
+
+    private static boolean shouldDeferVisibleChunksForCapRetry(ChatRequest request) {
+        if (request == null || request.controls == null) return false;
+        if (request.controls.maxOutputTokens() <= 0) return false;
+        if (request.tools == null || request.tools.isEmpty()) return false;
+        ToolChoiceMode mode = request.controls.toolChoice();
+        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED;
     }
 
     private Duration engineRequestTimeout(long wallClockMs) {
@@ -986,7 +1006,8 @@ public final class LlmClient implements AutoCloseable {
     private StreamResult consumeEngineStream(java.util.stream.Stream<TokenChunk> stream,
                                              AtomicReference<AutoCloseable> activeStream,
                                              Supplier<Boolean> cancelled,
-                                             Consumer<String> onChunk) {
+                                             Consumer<String> onChunk,
+                                             boolean chunksAreVisible) {
         // Try-with-resources ensures the token stream's onClose hook fires on
         // every exit path (break, exception, normal return). Registering the
         // stream before iteration gives the watchdog a handle it can close if
@@ -1027,7 +1048,9 @@ public final class LlmClient implements AutoCloseable {
 
                     if (onChunk != null && !emit.isEmpty()) {
                         onChunk.accept(emit);
-                        visibleOutputEmitted = true;
+                        if (chunksAreVisible) {
+                            visibleOutputEmitted = true;
+                        }
                     }
                     if (toolCalls.isEmpty() && ToolProtocolText.containsToolCalls(acc.toString())) {
                         break;

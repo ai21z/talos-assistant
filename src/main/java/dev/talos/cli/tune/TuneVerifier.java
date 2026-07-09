@@ -20,6 +20,7 @@ public final class TuneVerifier {
      * this floor matches the Windows shared-memory spill shape.
      */
     public static final double SPILL_FLOOR_TOKENS_PER_SECOND = 15.0;
+    private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
 
     private TuneVerifier() {}
 
@@ -33,6 +34,7 @@ public final class TuneVerifier {
         LlamaCppLogEvidence evidence = LlamaCppLogEvidence.parse(serverLog == null ? "" : serverLog);
         Optional<LlamaCppLogEvidence.Timing> generation = evidence.timings().stream()
                 .filter(timing -> "eval".equals(timing.kind()))
+                .filter(timing -> timing.tokens() >= MIN_GENERATION_RATE_SAMPLE_TOKENS)
                 .max(Comparator.comparingInt(LlamaCppLogEvidence.Timing::taskId));
 
         if (!cudaLane) {
@@ -49,22 +51,34 @@ public final class TuneVerifier {
                     "no offload evidence in the server log; refusing to claim GPU acceleration");
         }
         LlamaCppLogEvidence.Offload facts = offload.get();
+        if (facts.offloadedLayers() <= 0) {
+            return new Result(false, false, String.format(Locale.ROOT,
+                    "offloaded %d/%d layers to %s (server log); refusing to claim GPU acceleration",
+                    facts.offloadedLayers(), facts.totalLayers(), facts.target()));
+        }
         StringBuilder summary = new StringBuilder(String.format(Locale.ROOT,
-                "offloaded %d/%d layers to %s (server log)",
+                "%soffloaded %d/%d layers to %s (server log)",
+                facts.offloadedLayers() < facts.totalLayers() ? "partial " : "",
                 facts.offloadedLayers(), facts.totalLayers(), facts.target()));
         boolean spill = false;
         if (generation.isPresent()) {
             double rate = generation.get().tokensPerSecond();
             summary.append(String.format(Locale.ROOT, "; generation %.1f tok/s (measured)", rate));
-            if (facts.offloadedLayers() == facts.totalLayers()
-                    && rate > 0
+            if (rate > 0
                     && rate < SPILL_FLOOR_TOKENS_PER_SECOND) {
                 spill = true;
                 summary.append(String.format(Locale.ROOT,
-                        "; below the %.0f tok/s spill floor (estimate) despite full offload, "
-                                + "Windows shared-memory spill suspected",
-                        SPILL_FLOOR_TOKENS_PER_SECOND));
+                        "; below the %.0f tok/s spill floor (estimate), "
+                                + "%s",
+                        SPILL_FLOOR_TOKENS_PER_SECOND,
+                        facts.offloadedLayers() < facts.totalLayers()
+                                ? "partial offload or CPU spill suspected"
+                                : "Windows shared-memory spill suspected"));
             }
+        } else {
+            summary.append(String.format(Locale.ROOT,
+                    "; generation unavailable (no >=%d-token eval timing in server log)",
+                    MIN_GENERATION_RATE_SAMPLE_TOKENS));
         }
         return new Result(true, spill, summary.toString());
     }

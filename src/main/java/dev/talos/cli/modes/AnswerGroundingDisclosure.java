@@ -11,6 +11,7 @@ import dev.talos.spi.types.ChatMessage;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -212,8 +213,12 @@ final class AnswerGroundingDisclosure {
         try {
             Path root = workspace.toAbsolutePath().normalize();
             Path resolved = root.resolve(normalized).normalize();
-            return resolved.startsWith(root) && Files.isRegularFile(resolved);
-        } catch (RuntimeException ignored) {
+            if (!resolved.startsWith(root)) return false;
+            if (!Files.isRegularFile(resolved, LinkOption.NOFOLLOW_LINKS)) return false;
+            Path realRoot = root.toRealPath();
+            Path realResolved = resolved.toRealPath();
+            return realResolved.startsWith(realRoot);
+        } catch (IOException | RuntimeException ignored) {
             return false;
         }
     }
@@ -243,7 +248,11 @@ final class AnswerGroundingDisclosure {
     }
 
     private static String normalizePath(String path) {
-        return ToolCallSupport.normalizePath(path == null ? "" : path.strip());
+        String normalized = ToolCallSupport.normalizePath(path == null ? "" : path.strip());
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
     }
 
     private static String canonicalToolName(String toolName) {

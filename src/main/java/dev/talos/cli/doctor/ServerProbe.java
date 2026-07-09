@@ -44,6 +44,7 @@ public final class ServerProbe implements DoctorProbe {
     private static final int MIN_PROMPT_RATE_SAMPLE_TOKENS = 256;
     private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
     private static final double SLOW_PROJECTION_TIMEOUT_FRACTION = 0.50d;
+    private static final double PRACTICAL_REFERENCE_TURN_WARNING_SECONDS = 60.0d;
     private static final int RATE_SAMPLE_CONTEXT_REPETITIONS = 96;
     private static final String RATE_SAMPLE_CONTEXT_SENTENCE = "Local workspace assistant measurement context. ";
     private static final String RATE_SAMPLE_PROMPT = """
@@ -145,13 +146,23 @@ public final class ServerProbe implements DoctorProbe {
             long startNanos = System.nanoTime();
             String reply = chatEngine.chat(new ChatRequest(
                     runtime.backend(), runtime.model(), "",
-                    "Reply exactly " + MODEL_SMOKE_TOKEN + " and no other text.", List.of(), null));
+                    "Reply with the smoke token formed by joining TALOS, MODEL, SMOKE, and OK with underscores. "
+                            + "Return only that token.",
+                    List.of(), null));
             Duration elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
             String normalized = reply == null ? "" : reply.strip();
             int replyChars = normalized.length();
-            if (!normalized.toUpperCase(Locale.ROOT).contains(MODEL_SMOKE_TOKEN)) {
+            String normalizedUpper = normalized.toUpperCase(Locale.ROOT);
+            if (!normalizedUpper.contains(MODEL_SMOKE_TOKEN)) {
                 return ProbeResult.fail(id(),
                         "model smoke reply did not contain " + MODEL_SMOKE_TOKEN
+                                + " (" + replyChars + " reply chars)",
+                        "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
+                                + preflight.port() + ".log");
+            }
+            if (!MODEL_SMOKE_TOKEN.equals(normalizedUpper)) {
+                return ProbeResult.fail(id(),
+                        "model smoke reply did not exactly match " + MODEL_SMOKE_TOKEN
                                 + " (" + replyChars + " reply chars)",
                         "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
                                 + preflight.port() + ".log");
@@ -231,8 +242,10 @@ public final class ServerProbe implements DoctorProbe {
         double projectedSeconds = REFERENCE_PROMPT_TOKENS / promptRate
                 + REFERENCE_GENERATED_TOKENS / generationRate;
         double timeoutSeconds = llmTimeoutMs(ctx) / 1000.0d;
-        double warningThreshold = timeoutSeconds * SLOW_PROJECTION_TIMEOUT_FRACTION;
-        boolean warn = projectedSeconds > warningThreshold;
+        double timeoutFractionThreshold = timeoutSeconds * SLOW_PROJECTION_TIMEOUT_FRACTION;
+        boolean aboveTimeoutFraction = projectedSeconds > timeoutFractionThreshold;
+        boolean abovePracticalThreshold = projectedSeconds > PRACTICAL_REFERENCE_TURN_WARNING_SECONDS;
+        boolean warn = aboveTimeoutFraction || abovePracticalThreshold;
         String summary = "prompt eval " + oneDecimal(promptRate)
                 + " tok/s, generation " + oneDecimal(generationRate)
                 + " tok/s; projected reference turn ("
@@ -242,11 +255,15 @@ public final class ServerProbe implements DoctorProbe {
                 + " generated tokens) about "
                 + oneDecimal(projectedSeconds)
                 + "s"
-                + (warn
+                + (aboveTimeoutFraction
                 ? ", above " + percent(SLOW_PROJECTION_TIMEOUT_FRACTION)
                 + " of limits.llm_timeout_ms (" + oneDecimal(timeoutSeconds) + "s)"
                 : ", within " + percent(SLOW_PROJECTION_TIMEOUT_FRACTION)
-                + " of limits.llm_timeout_ms (" + oneDecimal(timeoutSeconds) + "s)");
+                + " of limits.llm_timeout_ms (" + oneDecimal(timeoutSeconds) + "s)")
+                + (abovePracticalThreshold
+                ? ", above " + oneDecimal(PRACTICAL_REFERENCE_TURN_WARNING_SECONDS)
+                + "s practical edit work threshold"
+                : "");
         return new RateAssessment(true, warn, summary);
     }
 

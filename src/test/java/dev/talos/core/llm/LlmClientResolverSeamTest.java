@@ -230,6 +230,44 @@ final class LlmClientResolverSeamTest {
     }
 
     @Test
+    void streaming_capped_required_retry_does_not_emit_discarded_first_generation_prose() {
+        CapTruncationResolver resolver = new CapTruncationResolver(false);
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        StringBuilder emitted = new StringBuilder();
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("write the file")),
+                emitted::append,
+                5_000L,
+                writeToolSpecs(),
+                cappedRequiredControls(1024));
+
+        assertTrue(result.hasToolCalls(), "uncapped retry must recover the required tool call");
+        assertEquals(List.of(1024, 0), resolver.capsSeen);
+        assertFalse(emitted.toString().contains("Sure, writing the file now"),
+                "discarded capped generation prose must not be streamed before the uncapped retry: " + emitted);
+    }
+
+    @Test
+    void streaming_capped_required_nonretry_answer_is_emitted_to_visible_sink() {
+        CappedShortAnswerResolver resolver = new CappedShortAnswerResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        StringBuilder emitted = new StringBuilder();
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("write the file")),
+                emitted::append,
+                5_000L,
+                writeToolSpecs(),
+                cappedRequiredControls(1024));
+
+        assertEquals("I cannot safely write that without more detail.", result.text());
+        assertEquals(result.text(), emitted.toString(),
+                "when a capped first generation does not qualify for retry, deferred text must be flushed visibly");
+        assertEquals(List.of(1024), resolver.capsSeen);
+    }
+
+    @Test
     void capped_length_with_complete_text_tool_call_does_not_retry() {
         CompleteTextToolCallResolver resolver = new CompleteTextToolCallResolver();
         LlmClient client = new LlmClient(engineConfig(), resolver);
@@ -672,6 +710,29 @@ final class LlmClientResolverSeamTest {
                             "call_recovered",
                             "talos.write_file",
                             java.util.Map.of("path", "index.html", "content", "<h1>done</h1>")))),
+                    TokenChunk.eos("stop"));
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class CappedShortAnswerResolver implements LlmEngineResolver {
+        final List<Integer> capsSeen = new ArrayList<>();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            int cap = request.controls == null ? -1 : request.controls.maxOutputTokens();
+            capsSeen.add(cap);
+            return Stream.of(
+                    TokenChunk.of("I cannot safely write that without more detail."),
                     TokenChunk.eos("stop"));
         }
 

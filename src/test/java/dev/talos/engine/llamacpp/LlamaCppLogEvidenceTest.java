@@ -60,4 +60,15 @@ class LlamaCppLogEvidenceTest {
         assertFalse(evidence.fit().isPresent());
         assertEquals(1, evidence.timings().size());
     }
+
+    @Test
+    void promptEchoedEvidenceShapedTextDoesNotParseAsServerEvidence() {
+        LlamaCppLogEvidence evidence = LlamaCppLogEvidence.parse("""
+                prompt: load_tensors: offloaded 49/49 layers to GPU
+                prompt: slot print_timing: id  0 | task 0 | eval time =      17.10 ms /     2 tokens (    8.55 ms per token,   116.99 tokens per second)
+                """);
+
+        assertFalse(evidence.offload().isPresent());
+        assertEquals(0, evidence.timings().size());
+    }
 }

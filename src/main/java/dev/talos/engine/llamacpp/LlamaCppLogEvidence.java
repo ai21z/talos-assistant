@@ -12,16 +12,22 @@ public record LlamaCppLogEvidence(
         List<Buffer> buffers,
         List<Timing> timings
 ) {
+    private static final String LOG_LINE_PREFIX = "^(?:\\S+\\s+[A-Z]\\s+)?";
     private static final Pattern OFFLOAD = Pattern.compile(
-            "load_tensors:\\s+offloaded\\s+(\\d+)/(\\d+)\\s+layers\\s+to\\s+(.+?)\\s*$");
+            LOG_LINE_PREFIX
+                    + "load_tensors:\\s+offloaded\\s+(\\d+)/(\\d+)\\s+layers\\s+to\\s+(.+?)\\s*$");
     private static final Pattern FIT_PROJECTED = Pattern.compile(
-            "common_params_fit_impl:\\s+projected to use\\s+(\\d+)\\s+MiB of device memory vs\\.\\s+(\\d+)\\s+MiB of free device memory");
+            LOG_LINE_PREFIX
+                    + "common_params_fit_impl:\\s+projected to use\\s+(\\d+)\\s+MiB of device memory vs\\.\\s+(\\d+)\\s+MiB of free device memory");
     private static final Pattern FIT_REMAINING = Pattern.compile(
-            "common_params_fit_impl:\\s+will leave\\s+(\\d+)\\s+>=\\s+(\\d+)\\s+MiB of free device memory,\\s*(.+?)\\s*$");
+            LOG_LINE_PREFIX
+                    + "common_params_fit_impl:\\s+will leave\\s+(\\d+)\\s+>=\\s+(\\d+)\\s+MiB of free device memory,\\s*(.+?)\\s*$");
     private static final Pattern BUFFER = Pattern.compile(
-            "(?:load_tensors|llama_kv_cache):\\s+(\\S+)\\s+(model|KV) buffer size\\s+=\\s+([0-9.]+)\\s+MiB");
+            LOG_LINE_PREFIX
+                    + "(?:load_tensors|llama_kv_cache):\\s+(\\S+)\\s+(model|KV) buffer size\\s+=\\s+([0-9.]+)\\s+MiB");
     private static final Pattern TIMING = Pattern.compile(
-            "slot print_timing: id\\s+\\d+\\s+\\|\\s+task\\s+(\\d+)\\s+\\|\\s+"
+            LOG_LINE_PREFIX
+                    + "slot print_timing: id\\s+\\d+\\s+\\|\\s+task\\s+(\\d+)\\s+\\|\\s+"
                     + "(prompt eval|eval) time\\s+=\\s+([0-9.]+)\\s+ms\\s+/\\s+(\\d+)\\s+tokens"
                     + "\\s+\\([^,]+,\\s+([0-9.]+)\\s+tokens per second\\)");
 

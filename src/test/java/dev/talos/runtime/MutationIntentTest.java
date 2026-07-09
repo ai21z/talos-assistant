@@ -348,12 +348,51 @@ class MutationIntentTest {
     }
 
     @org.junit.jupiter.api.Test
+    void singleLetterCExtensionDoesNotTreatAbbreviationsAsExplicitFileTargets() {
+        for (String input : java.util.List.of(
+                "The team agreed to update D.C. next quarter.",
+                "Rewrite B.C. in your answer only.",
+                "Rewrite N.C. compliance notes in your answer only.",
+                "Condense notes.md into D.C. as a sentence in chat.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
     void inlineCodegenForSourceLanguagesWithoutTargetFileStaysNonMutating() {
         for (String input : java.util.List.of(
                 "Show me only the code for a Python function that parses dates.",
                 "Write a Go worker pool. Output only the code.",
                 "Write a Rust iterator adapter. Just show me the code.")) {
             org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void sourceToTargetCapturePreservesExtensionsThatStartWithC() {
+        MutationIntent.SourceToTargetArtifact artifact = MutationIntent.sourceToTargetArtifact(
+                        "Condense src/parser.cpp into dist/parser-summary.csv.")
+                .orElseThrow();
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("src/parser.cpp"),
+                artifact.sourceTargets());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of("dist/parser-summary.csv"),
+                artifact.outputTargets());
+    }
+
+    @org.junit.jupiter.api.Test
+    void singleLetterCSourceFileTargetsStillOverrideInlineOutputPhrases() {
+        for (String input : java.util.List.of(
+                "Fix x.c. Show me only the code.",
+                "Fix x.c please. Show me only the code.",
+                "Update a.c in your answer only.")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
                     MutationIntent.looksExplicitMutationRequest(input),
                     input + " -> " + MutationIntent.classificationReason(input));
         }

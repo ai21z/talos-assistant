@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AnswerGroundingDisclosureTest {
@@ -55,6 +56,85 @@ class AnswerGroundingDisclosureTest {
                 List.of(ChatMessage.user("What is this project? Does phantom.md matter?")));
 
         assertTrue(disclosure.workspaceCandidateNote().isBlank(), disclosure.workspaceCandidateNote());
+    }
+
+    @Test
+    void dotPrefixedReadPathCountsAsTheSameTopLevelCandidate(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "real evidence\n");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(
+                        outcome("talos.list_dir", "."),
+                        outcome("talos.read_file", "./README.md")),
+                List.of("./README.md"));
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user("What is this project?"),
+                ChatMessage.toolResult("call_list",
+                        "[tool_result:talos.list_dir]\nREADME.md\n[/tool_result]"));
+
+        var disclosure = AnswerGroundingDisclosure.toolLoopDisclosure(
+                loopResult,
+                workspaceExplainPlan("What is this project?"),
+                workspace,
+                messages);
+
+        assertTrue(disclosure.workspaceCandidateNote().isBlank(), disclosure.workspaceCandidateNote());
+    }
+
+    @Test
+    void symlinkCandidateResolvingOutsideWorkspaceIsNotDisclosed(@TempDir Path workspace) throws Exception {
+        Path outside = Files.createTempDirectory("talos-grounding-outside-");
+        Path secret = outside.resolve("secret.md");
+        Files.writeString(secret, "outside\n");
+        Path link = workspace.resolve("linked.md");
+        try {
+            Files.createSymbolicLink(link, secret);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException e) {
+            assumeTrue(false, "symlink creation unavailable on this platform: " + e.getMessage());
+        }
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(outcome("talos.list_dir", ".")),
+                List.of());
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user("What is this project?"),
+                ChatMessage.toolResult("call_list",
+                        "[tool_result:talos.list_dir]\nlinked.md\n[/tool_result]"));
+
+        var disclosure = AnswerGroundingDisclosure.toolLoopDisclosure(
+                loopResult,
+                workspaceExplainPlan("What is this project?"),
+                workspace,
+                messages);
+
+        assertTrue(disclosure.workspaceCandidateNote().isBlank(), disclosure.workspaceCandidateNote());
+    }
+
+    @Test
+    void symlinkedWorkspaceStillDisclosesUnreadRealCandidates(@TempDir Path temp) throws Exception {
+        Path realWorkspace = temp.resolve("real-workspace");
+        Files.createDirectories(realWorkspace);
+        Files.writeString(realWorkspace.resolve("README.md"), "real evidence\n");
+        Path linkedWorkspace = temp.resolve("linked-workspace");
+        try {
+            Files.createSymbolicLink(linkedWorkspace, realWorkspace);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException e) {
+            assumeTrue(false, "symlink creation unavailable on this platform: " + e.getMessage());
+        }
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                List.of(outcome("talos.list_dir", ".")),
+                List.of());
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user("What is this project?"),
+                ChatMessage.toolResult("call_list",
+                        "[tool_result:talos.list_dir]\nREADME.md\n[/tool_result]"));
+
+        var disclosure = AnswerGroundingDisclosure.toolLoopDisclosure(
+                loopResult,
+                workspaceExplainPlan("What is this project?"),
+                linkedWorkspace,
+                messages);
+
+        assertTrue(disclosure.workspaceCandidateNote().contains("README.md"),
+                disclosure.workspaceCandidateNote());
     }
 
     private static CurrentTurnPlan workspaceExplainPlan(String request) {
