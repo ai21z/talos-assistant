@@ -33,8 +33,16 @@ public final class TaskContractResolver {
             "(?is).*\\b(?:example|sample|template)\\s+$");
     private static final Pattern INLINE_EXAMPLE_ARTIFACT_AFTER = Pattern.compile(
             "(?is)^\\s*(?:example|sample|template)\\b.*");
+    // Kept aligned with the MutationIntent verb families: a target governed by
+    // any explicit action verb must bind even when example/sample/template
+    // words appear nearby (T1002 hardening).
     private static final Pattern EXPLICIT_TARGET_ACTION_BEFORE = Pattern.compile(
-            "(?i)\\b(?:read|open|inspect|summarize|create|write|edit|update|fix|delete|remove|use)\\b");
+            "(?i)\\b(?:read|open|inspect|summarize|create|write|edit|update|fix|delete|remove|use"
+                    + "|modify|overwrite|replace|rewrite|regenerate|make|build|generate|scaffold"
+                    + "|change|copy|move|rename|append|refactor)\\b");
+    // A sentence boundary is punctuation followed by whitespace; dots inside
+    // filenames, version numbers, or abbreviations never sever the verb.
+    private static final Pattern SENTENCE_BOUNDARY_BEFORE_TARGET = Pattern.compile("[.?!;]\\s");
 
     private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
@@ -630,11 +638,14 @@ public final class TaskContractResolver {
 
     private static boolean inlineExampleArtifactMention(String userRequest, int start, int end) {
         if (userRequest == null || userRequest.isBlank() || start < 0 || end < start) return false;
-        String lower = userRequest.toLowerCase(Locale.ROOT);
-        int beforeStart = Math.max(0, start - 80);
-        int afterEnd = Math.min(lower.length(), end + 40);
-        String before = lower.substring(beforeStart, start);
-        String after = lower.substring(end, afterEnd);
+        // Windows are sliced from the original string first and lowercased
+        // per window: lowercasing the whole request can change its length
+        // (Turkish dotted capital I under ROOT), which would misalign the
+        // matcher offsets and silently disable the suppression.
+        int beforeStart = Math.max(0, start - 160);
+        int afterEnd = Math.min(userRequest.length(), end + 40);
+        String before = userRequest.substring(beforeStart, start).toLowerCase(Locale.ROOT);
+        String after = userRequest.substring(end, afterEnd).toLowerCase(Locale.ROOT);
         if (explicitTargetActionNear(before)) return false;
         return INLINE_EXAMPLE_ARTIFACT_BEFORE.matcher(before).matches()
                 || INLINE_EXAMPLE_ARTIFACT_AFTER.matcher(after).matches();
@@ -643,11 +654,13 @@ public final class TaskContractResolver {
     private static boolean explicitTargetActionNear(String beforeTarget) {
         if (beforeTarget == null || beforeTarget.isBlank()) return false;
         String tail = beforeTarget.replaceAll("\\s+", " ");
-        int boundary = Math.max(
-                Math.max(tail.lastIndexOf('.'), tail.lastIndexOf('?')),
-                Math.max(tail.lastIndexOf('!'), tail.lastIndexOf(';')));
-        if (boundary >= 0) {
-            tail = tail.substring(boundary + 1);
+        Matcher boundary = SENTENCE_BOUNDARY_BEFORE_TARGET.matcher(tail);
+        int lastBoundaryEnd = -1;
+        while (boundary.find()) {
+            lastBoundaryEnd = boundary.end();
+        }
+        if (lastBoundaryEnd >= 0) {
+            tail = tail.substring(lastBoundaryEnd);
         }
         return EXPLICIT_TARGET_ACTION_BEFORE.matcher(tail).find();
     }
