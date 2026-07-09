@@ -11,7 +11,7 @@ import picocli.CommandLine;
         subcommands = {
                 SetupCmd.class, RagIndexCmd.class, RagAskCmd.class, RunCmd.class,
                 NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class, DiagnoseCmd.class,
-                DoctorCmd.class, PromptRenderCmd.class
+                DoctorCmd.class, PromptRenderCmd.class, TuneCmd.class
         }
 )
 public class RootCmd implements Runnable {

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- [T987] Added `talos tune`: detect, propose, approve, verify. Detection is
+  read-only (shared nvidia-smi primitive, assume-no-GPU degradation), the
+  proposal is an exact config diff that only touches the engine lane,
+  context, context_reason, and `server_args: []` (llama.cpp auto-fit owns
+  GPU placement, Talos passes no layer flags), the write happens only after
+  approval with a timestamped backup and an atomic replace, and verification
+  reads GPU offload and generation rates back from the managed server log
+  via `talos doctor --start`. A CUDA lane with no offload evidence restores
+  the backup byte for byte instead of claiming GPU acceleration; full
+  offload with CPU-class speed keeps the config but warns that a
+  shared-memory spill is suspected. The CPU expected-speed line is an
+  estimate with its basis pinned in code, and the doctor's existing
+  "run talos tune" guidance now names a command that exists.
 - [T986] Shipped pinned GPU-capable llama.cpp engine lanes. The setup manifest
   now carries Windows x64 CPU, CUDA 12.4, and CUDA 13.3 lanes from llama.cpp
   `b9918` (SHA-256 pinned, cudart driver-runtime companion archives modeled

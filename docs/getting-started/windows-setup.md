@@ -63,4 +63,12 @@ talos status --verbose
 talos doctor --start
 ```
 
+## 6. Tune (optional)
+
+`talos tune` detects your hardware read-only, proposes an exact config diff (engine lane, context window, no GPU layer flags), applies it only after you approve with a timestamped backup, and then verifies GPU offload and generation rates from the server log. If verification cannot prove the GPU lane, it restores your previous config.
+
+```powershell
+talos tune
+```
+
 Do not treat the model as ready until `talos doctor --start` completes the end-to-end model smoke. If doctor reports a slow smoke warning, Talos is configured, but normal edit turns may be too slow on that machine.
