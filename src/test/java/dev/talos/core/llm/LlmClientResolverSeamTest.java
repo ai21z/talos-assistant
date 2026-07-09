@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Spliterators;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -253,6 +254,72 @@ final class LlmClientResolverSeamTest {
         assertEquals(List.of(512), resolver.capsSeen,
                 "capped chat answers without a tool obligation must not burn an uncapped retry");
         assertTrue(result.outputLimitReached(), result.finishReason());
+    }
+
+    @Test
+    void no_first_token_hang_fails_at_the_wall_clock_budget_when_idle_exceeds_it() {
+        // Contract from T988: the wall clock is the no-progress budget before
+        // the first token. The run()-owned heartbeat prime must not count as
+        // progress, even when llm_idle_ms is configured far above the budget.
+        BlockingNoChunkResolver resolver = new BlockingNoChunkResolver();
+        Config config = engineConfig();
+        Object limitsBlock = config.data.computeIfAbsent("limits", ignored -> new LinkedHashMap<String, Object>());
+        if (limitsBlock instanceof java.util.Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> limits = (java.util.Map<String, Object>) map;
+            limits.put("llm_idle_ms", 30_000L);
+        }
+        LlmClient client = new LlmClient(config, resolver);
+
+        long started = System.currentTimeMillis();
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("hello")), 400L);
+        long elapsed = System.currentTimeMillis() - started;
+
+        assertTrue(result.text().contains("wall-clock"),
+                "a call with zero chunks must abort with the wall-clock reason, got: " + result.text());
+        assertTrue(elapsed < 10_000L,
+                "the abort must happen at the wall-clock budget, not the idle limit; took " + elapsed + " ms");
+        resolver.release();
+    }
+
+    private static final class BlockingNoChunkResolver implements LlmEngineResolver {
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        void release() {
+            release.countDown();
+        }
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    try {
+                        release.await(20, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return false;
+                }
+
+                @Override
+                public TokenChunk next() {
+                    throw new NoSuchElementException();
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
     }
 
     private static List<ToolSpec> writeToolSpecs() {

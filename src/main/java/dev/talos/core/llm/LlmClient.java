@@ -869,10 +869,10 @@ public final class LlmClient implements AutoCloseable {
             if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) return true;
             return Thread.currentThread().isInterrupted();
         };
-        // Bump the heartbeat once before we start blocking on the engine -
-        // protects against an engine that takes >idleMs to produce its
-        // first chunk on a cold model.
-        if (lastChunkAt != null) lastChunkAt.set(System.currentTimeMillis());
+        // The pre-engine heartbeat prime lives in LlmCallBudget.run, which
+        // sets and captures the same value so thread-start latency can never
+        // read as first-token progress (T988). Priming here on the worker
+        // thread would race that capture.
         return engineAssembledWithMessagesFull(
                 messages, trackingSink, timeout, wrapped, activeStream,
                 requestToolSpecs, controls, streamRequest);

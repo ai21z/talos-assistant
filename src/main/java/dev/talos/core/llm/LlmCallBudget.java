@@ -42,7 +42,16 @@ final class LlmCallBudget implements AutoCloseable {
         final AtomicReference<AutoCloseable> activeStream = new AtomicReference<>();
         java.util.concurrent.ScheduledFuture<?> watchdog = null;
         CompletableFuture<LlmClient.StreamResult> future;
-        long initialChunkAt = lastChunkAt == null ? -1L : lastChunkAt.get();
+        // This budget owns the pre-engine heartbeat prime: setting and
+        // capturing the same value here means only a real token chunk can
+        // ever read as progress. A worker-side prime would race this capture
+        // and could turn thread-start latency into false first-token
+        // progress, silently disabling the no-progress wall clock.
+        long initialChunkAt = -1L;
+        if (lastChunkAt != null) {
+            initialChunkAt = System.currentTimeMillis();
+            lastChunkAt.set(initialChunkAt);
+        }
 
         if (wallClockMs <= 0) {
             return work.apply(activeStream);
@@ -138,6 +147,11 @@ final class LlmCallBudget implements AutoCloseable {
             long now = System.currentTimeMillis();
             long waitMs = Math.max(1L, firstDeadline - now);
             if (now >= firstDeadline) {
+                if (future.isDone() && !future.isCompletedExceptionally() && !future.isCancelled()) {
+                    // A completed generation always wins over an abort
+                    // decision made from stale idle facts.
+                    return future.get(1L, TimeUnit.MILLISECONDS);
+                }
                 long currentChunkAt = lastChunkAt.get();
                 observedProgress = observedProgress || currentChunkAt > initialChunkAt;
                 long idleForMs = now - currentChunkAt;
@@ -154,9 +168,13 @@ final class LlmCallBudget implements AutoCloseable {
             try {
                 return future.get(waitMs, TimeUnit.MILLISECONDS);
             } catch (TimeoutException timedOut) {
-                if (System.currentTimeMillis() < firstDeadline) {
-                    throw timedOut;
-                }
+                // Re-evaluate instead of rethrowing: future.get measures its
+                // wait monotonically while the deadline uses the wall clock,
+                // so a coarse tick or backward step can wake this thread
+                // fractionally before the deadline reads as crossed. The
+                // loop recomputes the residual wait; aborting here would
+                // kill a progressing generation with a false wall-clock
+                // reason.
             }
         }
     }
