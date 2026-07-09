@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- [T986] Shipped pinned GPU-capable llama.cpp engine lanes. The setup manifest
+  now carries Windows x64 CPU, CUDA 12.4, and CUDA 13.3 lanes from llama.cpp
+  `b9918` (SHA-256 pinned, cudart driver-runtime companion archives modeled
+  with their own digests and extracted beside `llama-server.exe`), next to the
+  existing Ubuntu CPU lane. Lane selection gates on detected NVIDIA driver
+  evidence (CUDA 13.3 needs driver 580+, CUDA 12.4 needs 551.61+, both floors
+  live only in the manifest and the doctor probe reads them from there); no
+  driver evidence, an unparseable version, or a companion digest mismatch all
+  fail safe to the CPU lane with no partial install. The wizard states tag,
+  assets, digests, and the driver floor, and still asks before downloading.
 - [T989] Added provider-neutral per-request output-token caps and mapped them
   to llama.cpp/OpenAI-compatible `max_tokens` on the compat transport. Initial
   inspection and command tool-obligation requests now cap at 512 tokens, while

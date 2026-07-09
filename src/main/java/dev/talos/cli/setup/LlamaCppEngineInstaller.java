@@ -62,6 +62,23 @@ public final class LlamaCppEngineInstaller {
                             "Extracted archive did not contain " + entry.executableName());
                 }
 
+                LlamaCppEngineManifest.CompanionAsset companion = entry.companion();
+                if (companion != null) {
+                    // The driver runtime is a separate upstream archive. It is
+                    // verified with its own digest and extracted into the
+                    // directory containing the server executable, all before
+                    // promotion, so a failure here leaves no partial install.
+                    Path companionArchive = tmpRoot.resolve(companion.assetName());
+                    downloader.download(companion.url(), companionArchive);
+                    String companionActual = sha256Hex(companionArchive);
+                    if (!companionActual.equalsIgnoreCase(companion.sha256())) {
+                        return new Result(Status.FAILED, null,
+                                "SHA-256 mismatch for " + companion.assetName() + ": expected "
+                                        + companion.sha256() + " but got " + companionActual);
+                    }
+                    extractor.extract(companionArchive, server.getParent());
+                }
+
                 deleteRecursivelyIfExists(installDir);
                 Files.createDirectories(installDir.getParent());
                 promoteDirectory(staging, installDir);

@@ -33,6 +33,7 @@ public final class SetupWizardEnvironmentProbe {
                 : configExists
                 ? configuredServerPath(configPath).orElseGet(SetupWizardEnvironmentProbe::pathServerCandidate)
                 : pathServerCandidate();
+        Optional<dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts> gpu = gpuFacts();
 
         return new SetupWizardSnapshot(
                 System.getProperty("os.name", "unknown"),
@@ -46,7 +47,22 @@ public final class SetupWizardEnvironmentProbe {
                 serverPath != null && Files.isRegularFile(serverPath),
                 usableDiskMb(configPath),
                 Runtime.getRuntime().maxMemory() / (1024 * 1024),
-                systemMemoryMb());
+                systemMemoryMb(),
+                gpu.map(dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts::name).orElse(""),
+                gpu.map(dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts::vramTotalMb).orElse(-1L),
+                gpu.map(dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts::driverVersion).orElse(""));
+    }
+
+    /**
+     * GPU evidence is only queried where a manifest lane can use it (Windows,
+     * outside WSL). Failure or absence degrades to "no GPU evidence", which
+     * lane selection treats as CPU (T986).
+     */
+    private static Optional<dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts> gpuFacts() {
+        if (!isWindowsOs() || detectWsl()) {
+            return Optional.empty();
+        }
+        return dev.talos.cli.doctor.NvidiaGpuQuery.read();
     }
 
     private static Path defaultConfigPath() {

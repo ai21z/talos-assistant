@@ -21,11 +21,16 @@ talos doctor --start
 
 ## Where to get `llama-server`
 
-The current pinned Ubuntu/WSL x64 CPU lane uses the llama.cpp `b9860` release:
+The current pinned Ubuntu/WSL x64 CPU lane uses the llama.cpp `b9860` release, and the Windows lanes use `b9918`:
 
-- Release: https://github.com/ggml-org/llama.cpp/releases/tag/b9860
+- Ubuntu release: https://github.com/ggml-org/llama.cpp/releases/tag/b9860
 - Ubuntu x64 (CPU): `llama-b9860-bin-ubuntu-x64.tar.gz`
-- Windows x64 (CPU): `llama-b9860-bin-win-cpu-x64.zip`
+- Windows release: https://github.com/ggml-org/llama.cpp/releases/tag/b9918
+- Windows x64 (CPU): `llama-b9918-bin-win-cpu-x64.zip`
+- Windows x64 (CUDA 12.4, NVIDIA driver 551.61+): `llama-b9918-bin-win-cuda-12.4-x64.zip` plus `cudart-llama-bin-win-cuda-12.4-x64.zip`
+- Windows x64 (CUDA 13.3, NVIDIA driver 580+): `llama-b9918-bin-win-cuda-13.3-x64.zip` plus `cudart-llama-bin-win-cuda-13.3-x64.zip`
+
+The setup wizard selects the Windows lane from detected NVIDIA driver evidence and falls back to CPU when no compatible driver is detected. GPU offload is verified by `talos doctor --start` from the server log, not assumed from the binary name.
 
 The first accepted model to try is Qwen. It is a large CPU model, not a low-resource default:
 

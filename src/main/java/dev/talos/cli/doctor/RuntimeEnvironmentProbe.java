@@ -1,5 +1,6 @@
 package dev.talos.cli.doctor;
 
+import dev.talos.cli.setup.LlamaCppEngineManifest;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 
@@ -7,31 +8,30 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.FileStore;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 /** Reports bounded local runtime and hardware facts with read-only GPU detection. */
 public final class RuntimeEnvironmentProbe implements DoctorProbe {
-    private static final Duration GPU_QUERY_TIMEOUT = Duration.ofSeconds(3);
 
     private final GpuQueryRunner gpuQueryRunner;
 
     public RuntimeEnvironmentProbe() {
-        this(new NvidiaSmiQueryRunner());
+        this(defaultRunner());
     }
 
     RuntimeEnvironmentProbe(GpuQueryRunner gpuQueryRunner) {
         this.gpuQueryRunner = gpuQueryRunner == null
-                ? new NvidiaSmiQueryRunner()
+                ? defaultRunner()
                 : gpuQueryRunner;
+    }
+
+    private static GpuQueryRunner defaultRunner() {
+        return () -> new GpuQueryResult(NvidiaGpuQuery.query());
     }
 
     @Override
@@ -93,12 +93,16 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
         GpuQueryResult query() throws IOException, InterruptedException;
     }
 
-    record GpuQueryResult(int exitCode, String stdout, String stderr) {}
+    record GpuQueryResult(int exitCode, String stdout, String stderr) {
+        GpuQueryResult(NvidiaGpuQuery.QueryResult result) {
+            this(result.exitCode(), result.stdout(), result.stderr());
+        }
+    }
 
     private static final class GpuProbe {
-        private final GpuInfo info;
+        private final NvidiaGpuQuery.GpuFacts info;
 
-        private GpuProbe(GpuInfo info) {
+        private GpuProbe(NvidiaGpuQuery.GpuFacts info) {
             this.info = info;
         }
 
@@ -111,7 +115,7 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
                 if (result.exitCode() != 0) {
                     return failed();
                 }
-                Optional<GpuInfo> parsed = GpuInfo.parse(result.stdout());
+                Optional<NvidiaGpuQuery.GpuFacts> parsed = NvidiaGpuQuery.parse(result.stdout());
                 return parsed.<GpuProbe>map(GpuProbe::new)
                         .orElseGet(GpuProbe::failed);
             } catch (Exception e) {
@@ -136,40 +140,10 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
                 return "gpuProbe=nvidia-smi failed; assuming no GPU source=nvidia-smi";
             }
             return "gpu=nvidia-smi:" + info.name()
-                    + " vramTotalMb=" + info.totalMb()
-                    + " vramFreeMb=" + info.freeMb()
+                    + " vramTotalMb=" + info.vramTotalMb()
+                    + " vramFreeMb=" + info.vramFreeMb()
                     + " driver=" + info.driverVersion()
                     + " source=nvidia-smi";
-        }
-    }
-
-    private record GpuInfo(String name, long totalMb, long freeMb, String driverVersion) {
-        static Optional<GpuInfo> parse(String stdout) {
-            String firstLine = Objects.toString(stdout, "").lines()
-                    .map(String::trim)
-                    .filter(line -> !line.isBlank())
-                    .findFirst()
-                    .orElse("");
-            if (firstLine.isBlank()) return Optional.empty();
-            String[] parts = firstLine.split(",", 4);
-            if (parts.length < 4) return Optional.empty();
-            try {
-                return Optional.of(new GpuInfo(
-                        parts[0].trim(),
-                        parseMb(parts[1]),
-                        parseMb(parts[2]),
-                        parts[3].trim()));
-            } catch (RuntimeException e) {
-                return Optional.empty();
-            }
-        }
-
-        private static long parseMb(String value) {
-            String digits = Objects.toString(value, "")
-                    .replace("MiB", "")
-                    .replace("MB", "")
-                    .trim();
-            return Long.parseLong(digits);
         }
     }
 
@@ -184,16 +158,21 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
             if ("connect_only".equals(mode)) {
                 return new ServerLane("connect-only (configured)", false, "");
             }
+            // Driver floors are manifest metadata (T986); this probe never
+            // carries its own copies.
             if (normalized.contains("cuda-13.3") || normalized.contains("cuda13.3")
                     || normalized.contains("cuda_13.3") || normalized.contains("cuda13")) {
-                return new ServerLane("cuda-13.3 (configured path)", true, "580.00");
+                return new ServerLane("cuda-13.3 (configured path)", true,
+                        LlamaCppEngineManifest.minNvidiaDriverForBackend("cuda-13.3"));
             }
             if (normalized.contains("cuda-12.4") || normalized.contains("cuda12.4")
                     || normalized.contains("cuda_12.4") || normalized.contains("cuda12")) {
-                return new ServerLane("cuda-12.4 (configured path)", true, "551.61");
+                return new ServerLane("cuda-12.4 (configured path)", true,
+                        LlamaCppEngineManifest.minNvidiaDriverForBackend("cuda-12.4"));
             }
             if (normalized.contains("cuda")) {
-                return new ServerLane("cuda (configured path)", true, "580.00");
+                return new ServerLane("cuda (configured path)", true,
+                        LlamaCppEngineManifest.strictestCudaDriverFloor());
             }
             return new ServerLane("cpu (configured path)", false, "");
         }
@@ -242,78 +221,5 @@ public final class RuntimeEnvironmentProbe implements DoctorProbe {
             }
             return out;
         }
-    }
-
-    private static final class NvidiaSmiQueryRunner implements GpuQueryRunner {
-        @Override
-        public GpuQueryResult query() throws IOException, InterruptedException {
-            IOException lastIo = null;
-            for (String candidate : nvidiaSmiCandidates()) {
-                try {
-                    return run(candidate);
-                } catch (IOException e) {
-                    lastIo = e;
-                }
-            }
-            if (lastIo != null) throw lastIo;
-            return new GpuQueryResult(127, "", "nvidia-smi not found");
-        }
-
-        private static GpuQueryResult run(String command) throws IOException, InterruptedException {
-            Process process = new ProcessBuilder(
-                    command,
-                    "--query-gpu=name,memory.total,memory.free,driver_version",
-                    "--format=csv,noheader,nounits")
-                    .redirectErrorStream(false)
-                    .start();
-            boolean done = process.waitFor(GPU_QUERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            if (!done) {
-                process.destroyForcibly();
-                return new GpuQueryResult(124, "", "nvidia-smi timed out");
-            }
-            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-            return new GpuQueryResult(process.exitValue(), stdout, stderr);
-        }
-
-        private static List<String> nvidiaSmiCandidates() {
-            List<String> candidates = new ArrayList<>();
-            candidates.add(isWindows() ? "nvidia-smi.exe" : "nvidia-smi");
-            if (isWindows()) {
-                String root = firstNonBlank(System.getenv("SystemRoot"), "C:\\Windows");
-                candidates.add(Path.of(root, "System32", "nvidia-smi.exe").toString());
-                Path driverStore = Path.of(root, "System32", "DriverStore", "FileRepository");
-                candidates.addAll(driverStoreCandidates(driverStore));
-            }
-            return candidates.stream().distinct().toList();
-        }
-
-        private static List<String> driverStoreCandidates(Path root) {
-            if (!Files.isDirectory(root)) return List.of();
-            try (var stream = Files.find(root, 4,
-                    (path, attrs) -> attrs.isRegularFile()
-                            && "nvidia-smi.exe".equalsIgnoreCase(path.getFileName().toString())
-                            && path.toString().toLowerCase(Locale.ROOT).contains("nvdm"))) {
-                return stream
-                        .sorted(Comparator.comparing(Path::toString).reversed())
-                        .limit(4)
-                        .map(Path::toString)
-                        .toList();
-            } catch (IOException e) {
-                return List.of();
-            }
-        }
-
-        private static boolean isWindows() {
-            return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-        }
-    }
-
-    private static String firstNonBlank(String... values) {
-        for (String value : values) {
-            String text = Objects.toString(value, "").trim();
-            if (!text.isBlank()) return text;
-        }
-        return "";
     }
 }

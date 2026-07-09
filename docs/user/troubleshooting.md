@@ -19,9 +19,11 @@ For the pinned Ubuntu/WSL x64 CPU lane, use:
 - https://github.com/ggml-org/llama.cpp/releases/tag/b9860
 - `llama-b9860-bin-ubuntu-x64.tar.gz`
 
-For Windows x64 (CPU), choose the matching Windows x64 CPU artifact from the same llama.cpp release and configure it with `talos setup models`.
+For Windows x64, the pinned lanes come from the llama.cpp `b9918` release (https://github.com/ggml-org/llama.cpp/releases/tag/b9918) and are wizard-installable with SHA-256 verification. Configure a manual download with `talos setup models`.
 
-- Windows x64 (CPU): `llama-b9860-bin-win-cpu-x64.zip`
+- Windows x64 (CPU): `llama-b9918-bin-win-cpu-x64.zip`
+- Windows x64 (CUDA 12.4, NVIDIA driver 551.61+): `llama-b9918-bin-win-cuda-12.4-x64.zip` plus `cudart-llama-bin-win-cuda-12.4-x64.zip`
+- Windows x64 (CUDA 13.3, NVIDIA driver 580+): `llama-b9918-bin-win-cuda-13.3-x64.zip` plus `cudart-llama-bin-win-cuda-13.3-x64.zip`
 - First accepted model to try: https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
 - GGUF file: `qwen2.5-coder-14b-instruct-q4_k_m.gguf`
 

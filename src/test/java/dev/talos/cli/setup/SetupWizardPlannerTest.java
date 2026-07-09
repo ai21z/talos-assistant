@@ -362,6 +362,68 @@ class SetupWizardPlannerTest {
         assertTrue(result.output().contains("Doctor summary:"), result.output());
     }
 
+    @Test
+    void windowsCudaPlanNamesBothAssetsAndDigestsAndStaysAskFirst() {
+        SetupWizardPlan plan = SetupWizardPlanner.plan(windowsGpuSnapshot("610.62"));
+
+        SetupWizardStep step = plan.requiredStep("llama-server");
+        assertEquals(SetupWizardStep.Action.ASK, step.action());
+        assertFalse(plan.hasSideEffects(), "planner must stay side-effect free");
+        assertTrue(step.detail().contains("win-x64-cuda-13.3"), step.detail());
+        assertTrue(step.detail().contains("b9918"), step.detail());
+        assertTrue(step.detail().contains("llama-b9918-bin-win-cuda-13.3-x64.zip"), step.detail());
+        assertTrue(step.detail().contains("d5d786b93b683da2a902b1e62c43ee251ce15837a6d0ea19393be3e84a8dcb87"),
+                step.detail());
+        assertTrue(step.detail().contains("cudart-llama-bin-win-cuda-13.3-x64.zip"), step.detail());
+        assertTrue(step.detail().contains("1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"),
+                step.detail());
+    }
+
+    @Test
+    void interactiveWizardOffersCudaLaneWithFullProvenanceAndDeclineInstallsNothing() throws Exception {
+        Path config = tempDir.resolve(".talos").resolve("config.yaml");
+        SetupWizardPlan plan = SetupWizardPlanner.plan(windowsGpuSnapshot("610.62", config));
+        FakeEngineInstaller installer = new FakeEngineInstaller();
+
+        SetupWizardRunner.Result result = run(plan, "n\n\n", installer);
+
+        assertEquals(0, result.exitCode());
+        assertEquals(0, installer.calls, "declining the pinned engine must install nothing");
+        assertFalse(result.wroteConfig());
+        assertFalse(Files.exists(config));
+        assertTrue(result.output().contains("Install this pinned llama.cpp engine now?"), result.output());
+        assertTrue(result.output().contains("llama-b9918-bin-win-cuda-13.3-x64.zip"), result.output());
+        assertTrue(result.output().contains("d5d786b93b683da2a902b1e62c43ee251ce15837a6d0ea19393be3e84a8dcb87"),
+                result.output());
+        assertTrue(result.output().contains("cudart-llama-bin-win-cuda-13.3-x64.zip"), result.output());
+        assertTrue(result.output().contains("1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"),
+                result.output());
+        assertTrue(result.output().contains("driver floor"), result.output());
+    }
+
+    private SetupWizardSnapshot windowsGpuSnapshot(String driverVersion) {
+        return windowsGpuSnapshot(driverVersion, tempDir.resolve(".talos").resolve("config.yaml"));
+    }
+
+    private SetupWizardSnapshot windowsGpuSnapshot(String driverVersion, Path config) {
+        return new SetupWizardSnapshot(
+                "Windows 11",
+                "amd64",
+                false,
+                "",
+                21,
+                config,
+                false,
+                null,
+                false,
+                512_000,
+                16_384,
+                32_768,
+                "NVIDIA GeForce RTX 5070 Ti",
+                16_303,
+                driverVersion);
+    }
+
     private SetupWizardRunner.Result run(SetupWizardPlan plan, String input) {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         return SetupWizardRunner.run(
