@@ -198,6 +198,9 @@ public final class RepairPolicy {
                 + "\"arguments\":{\"path\":\"" + targetPathForJson(path) + "\","
                 + "\"old_string\":\"...\",\"new_string\":\"...\"}}. "
                 + "Fill old_string and new_string with real file text, not placeholders. "
+                + "For an append or insert task, set old_string to an existing anchor line "
+                + "copied exactly from the read result and new_string to that same anchor "
+                + "line plus the added text. "
                 + "Do not call talos.edit_file with empty old_string again. If you "
                 + "cannot form the exact edit, stop and say no edit was applied.";
     }

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- [T1007] Surgical edits are now grammar-floored and idiom-taught for weak
+  local models. The edit_file schema (and the compact retry spec, which
+  previously stripped it) declares minLength 1 on old_string and path, which
+  llama.cpp compiles into the sampling grammar so the observed
+  empty-old_string failure shape is unproducible on the managed backend.
+  Every writable prompt surface and the empty-edit repair instruction now
+  teach the append anchor idiom (old_string = an existing anchor line,
+  new_string = that line plus the added text) and read-before-edit, closing
+  the gap that made append-shaped edits fail nondeterministically.
 - Final branch-review blockers fixed: aborted turns are classified before
   text-tool routing on both provider paths, so abort markers cannot be
   mistaken for executable tool calls, and inline code-generation prompts no

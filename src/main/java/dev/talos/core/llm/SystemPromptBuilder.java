@@ -379,7 +379,7 @@ public final class SystemPromptBuilder {
                 sb.append("- You CAN create files. You have talos.write_file. USE IT when a file creation or full overwrite is required.\n");
             }
             if (hasTool(descriptors, "talos.edit_file")) {
-                sb.append("- When the user asks you to EDIT an existing file, call talos.edit_file with old_string and new_string.\n");
+                sb.append("- When the user asks you to EDIT an existing file, read it first, then call talos.edit_file with old_string and new_string. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text.\n");
             }
             sb.append("- NEVER claim you changed a file unless a listed mutation tool actually succeeded.\n");
             sb.append("- After writing or editing, briefly confirm what you did.\n");
@@ -596,7 +596,7 @@ public final class SystemPromptBuilder {
             FILE CREATION AND MODIFICATION (CRITICAL):
             - You CAN create files. You have talos.write_file. USE IT.
             - When the user asks you to CREATE, WRITE, SAVE, PUT, or GENERATE a file → call talos.write_file with the full content.
-            - When the user asks you to EDIT an existing file → call talos.edit_file with old_string and new_string.
+            - When the user asks you to EDIT an existing file → read it first, then call talos.edit_file with old_string and new_string. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text.
             - NEVER say "I cannot create files." NEVER just print code in a code block. ALWAYS call the tool.
             - After writing or editing, briefly confirm what you did.
             
@@ -641,7 +641,7 @@ public final class SystemPromptBuilder {
             FILE CREATION AND MODIFICATION (CRITICAL):
             - You CAN create files. You have talos.write_file. USE IT.
             - When the user asks you to CREATE, WRITE, SAVE, PUT, or GENERATE a file → call talos.write_file with the full content.
-            - When the user asks you to EDIT an existing file → call talos.edit_file with old_string and new_string.
+            - When the user asks you to EDIT an existing file → read it first, then call talos.edit_file with old_string and new_string. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text.
             - NEVER say "I cannot create files." NEVER just print code in a code block. ALWAYS call the tool.
             - After writing or editing, briefly confirm what you did.
             

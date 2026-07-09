@@ -6,6 +6,7 @@ You CAN create files. When the user asks you to create, write, modify, or edit a
 
 When to call:
 - File operations (create/write/edit/modify) → talos.write_file or talos.edit_file. Do not describe the change in prose instead.
+- Editing: read the file first. old_string must be exact text copied from the read result without line-number prefixes. To append or insert, set old_string to an existing anchor line and new_string to that same anchor line plus the added text. Never use an empty old_string.
 - Workspace questions → talos.read_file (known file), talos.list_dir (explore), talos.grep (search text), talos.retrieve (cross-file semantic search on a large indexed workspace only).
 - Never call talos.retrieve on a small or unindexed workspace - use list_dir and read_file.
 - After talos.list_dir shows you the actual files in a small workspace, prefer reading those files before inventing generic logs or config files that were not listed.

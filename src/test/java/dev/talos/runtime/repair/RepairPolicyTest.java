@@ -629,6 +629,22 @@ class RepairPolicyTest {
         assertTrue(RepairPolicy.nextEmptyEditRepair(state).isEmpty());
     }
 
+    /**
+     * T1007: the empty-edit repair fires most often on append-shaped tasks,
+     * where "copy the exact text" is confusing guidance because nothing is
+     * being replaced. The instruction must teach the anchor idiom.
+     */
+    @Test
+    void emptyEditRepairInstructionTeachesTheAppendAnchorIdiom() {
+        String instruction = RepairPolicy.emptyEditRepairInstruction("notes.md")
+                .toLowerCase(java.util.Locale.ROOT);
+
+        assertTrue(instruction.contains("anchor line"),
+                "empty-edit repair must teach the anchor idiom: " + instruction);
+        assertTrue(instruction.contains("append"),
+                "empty-edit repair must name the append case: " + instruction);
+    }
+
     @Test
     void staleEditRepairRequiresRereadBeforeRetry() {
         LoopState state = loopState();

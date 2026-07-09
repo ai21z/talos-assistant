@@ -40,16 +40,21 @@ public final class FileEditTool implements TalosTool {
     @Override public String description() {
         return "Replace a unique string in a workspace file. "
                 + "TIP: call talos.read_file first to see the exact content. "
-                + "old_string must match the file exactly - strip any line-number prefixes from read_file output before using.";
+                + "old_string must match the file exactly - strip any line-number prefixes from read_file output before using. "
+                + "To APPEND or INSERT text (nothing to replace): set old_string to an existing anchor line copied exactly from the file, "
+                + "and set new_string to that same anchor line plus the added text. Never call this tool with an empty old_string.";
     }
 
     @Override
     public ToolDescriptor descriptor() {
+        // T1007: minLength floors compile into the llama.cpp sampling grammar,
+        // so an empty old_string or path is unproducible on the managed
+        // backend. Runtime validation below stays as the second layer.
         return new ToolDescriptor(NAME, description(),
                 """
                 {"type":"object","properties":{
-                  "path":{"type":"string","description":"Relative path to the file in the workspace"},
-                  "old_string":{"type":"string","description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' - do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file."},
+                  "path":{"type":"string","minLength":1,"description":"Relative path to the file in the workspace"},
+                  "old_string":{"type":"string","minLength":1,"description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' - do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file. For an append or insert, use an existing anchor line as old_string and repeat it plus the added text in new_string."},
                   "new_string":{"type":"string","description":"Replacement text (may be empty to delete the matched text)"}
                 },"required":["path","old_string","new_string"]}""",
                 ToolRiskLevel.WRITE,

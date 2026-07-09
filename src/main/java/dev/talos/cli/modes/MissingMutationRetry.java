@@ -629,17 +629,23 @@ final class MissingMutationRetry {
                 .toList();
     }
 
-    private static ToolSpec compactMutationRetryToolSpec(ToolSpec spec) {
+    /**
+     * Compact retry specs stay small for token budget, but must keep the
+     * T1007 grammar floor: llama.cpp compiles minLength into the sampling
+     * grammar, and the retry is exactly where empty old_string failures
+     * concentrate. Package-private for the regression test.
+     */
+    static ToolSpec compactMutationRetryToolSpec(ToolSpec spec) {
         if (spec == null) return null;
         return switch (spec.name()) {
             case "talos.write_file" -> new ToolSpec(
                     "talos.write_file",
                     "Write file.",
-                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}");
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"minLength\":1},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}");
             case "talos.edit_file" -> new ToolSpec(
                     "talos.edit_file",
-                    "Edit exact text.",
-                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_string\":{\"type\":\"string\"},\"new_string\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}");
+                    "Edit exact text. To append or insert, set old_string to an existing anchor line and new_string to that line plus the added text.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"minLength\":1},\"old_string\":{\"type\":\"string\",\"minLength\":1},\"new_string\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}");
             default -> spec;
         };
     }

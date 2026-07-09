@@ -57,6 +57,44 @@ class FileEditToolTest {
         assertEquals(ToolRiskLevel.WRITE, tool.descriptor().riskLevel());
     }
 
+    /**
+     * T1007: llama.cpp compiles tool JSON schemas into the sampling grammar,
+     * including string minLength, so a non-empty floor on old_string and path
+     * makes the observed weak-model failure shape (old_string of 0 bytes)
+     * unproducible at the sampler on the managed backend. new_string stays
+     * unconstrained because an empty replacement is a legitimate deletion.
+     */
+    @Test
+    void schemaForbidsEmptyOldStringAndPathAtTheGrammarLevel() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var schema = mapper.readTree(tool.descriptor().parametersSchema());
+        var props = schema.get("properties");
+
+        assertEquals(1, props.get("old_string").path("minLength").asInt(-1),
+                "old_string must carry minLength 1 so the grammar forbids the empty string");
+        assertEquals(1, props.get("path").path("minLength").asInt(-1),
+                "path must carry minLength 1");
+        assertTrue(props.get("new_string").path("minLength").isMissingNode(),
+                "new_string must stay unconstrained; empty replacement is a legitimate deletion");
+    }
+
+    /**
+     * T1007: an append has no old text to replace, so the tool must teach the
+     * anchor idiom, otherwise weak models encode append as an empty old_string.
+     */
+    @Test
+    void descriptionAndSchemaTeachTheAppendAnchorIdiom() {
+        String description = tool.description().toLowerCase(java.util.Locale.ROOT);
+        String schemaDoc = tool.descriptor().parametersSchema().toLowerCase(java.util.Locale.ROOT);
+
+        assertTrue(description.contains("anchor line"),
+                "description must teach the append anchor idiom: " + tool.description());
+        assertTrue(description.contains("append"),
+                "description must name the append case: " + tool.description());
+        assertTrue(schemaDoc.contains("anchor line"),
+                "old_string schema description must teach the anchor idiom");
+    }
+
     // ── Happy paths ─────────────────────────────────────────────────
 
     @Test

@@ -188,4 +188,33 @@ class MissingMutationRetryTest {
         assertFalse(content.contains("class-token"), content);
         assertTrue(content.length() < 1_800, "compact repair context too large: " + content.length());
     }
+
+    /**
+     * T1007: the compact retry ToolSpec replaces the rich descriptor exactly
+     * where failures concentrate, so it must carry the same grammar floor
+     * (minLength) that keeps empty old_string unproducible on the managed
+     * backend, and must keep teaching the anchor idiom.
+     */
+    @Test
+    void compactRetryEditSpecKeepsTheGrammarFloorAndAnchorIdiom() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var editSpec = MissingMutationRetry.compactMutationRetryToolSpec(new dev.talos.spi.types.ToolSpec(
+                "talos.edit_file", "ignored", "{}"));
+        var writeSpec = MissingMutationRetry.compactMutationRetryToolSpec(new dev.talos.spi.types.ToolSpec(
+                "talos.write_file", "ignored", "{}"));
+
+        var editProps = mapper.readTree(editSpec.parametersSchemaJson()).get("properties");
+        assertEquals(1, editProps.get("old_string").path("minLength").asInt(-1),
+                "compact edit spec must keep minLength 1 on old_string");
+        assertEquals(1, editProps.get("path").path("minLength").asInt(-1),
+                "compact edit spec must keep minLength 1 on path");
+        assertTrue(editProps.get("new_string").path("minLength").isMissingNode(),
+                "new_string stays unconstrained for legitimate deletions");
+        assertTrue(editSpec.description().toLowerCase(java.util.Locale.ROOT).contains("anchor"),
+                "compact edit spec must keep the anchor idiom hint: " + editSpec.description());
+
+        var writeProps = mapper.readTree(writeSpec.parametersSchemaJson()).get("properties");
+        assertEquals(1, writeProps.get("path").path("minLength").asInt(-1),
+                "compact write spec must keep minLength 1 on path");
+    }
 }
