@@ -109,6 +109,58 @@ class TuneCmdTest {
     }
 
     @Test
+    void connectOnlyConfigIsRejectedBeforeTheInstallOffer() throws Exception {
+        Path config = writeConfig();
+        Files.writeString(config,
+                Files.readString(config, StandardCharsets.UTF_8)
+                        .replace("mode: \"managed\"", "mode: \"connect-only\""),
+                StandardCharsets.UTF_8);
+        String before = Files.readString(config, StandardCharsets.UTF_8);
+        CountingInstaller installer = new CountingInstaller();
+
+        Run run = run("y\ny\n", 0, CUDA_LOG, "610.62", installer);
+
+        assertEquals(2, run.exit, run.output);
+        assertEquals(0, installer.calls, "an uneditable config must be rejected before any install offer");
+        assertEquals(before, Files.readString(config, StandardCharsets.UTF_8));
+        assertTrue(run.output.contains("No changes made"), run.output);
+    }
+
+    @Test
+    void legacyConfigWithoutContextGetsTheFullProposalApplied() throws Exception {
+        Path config = writeConfig();
+        Files.writeString(config,
+                Files.readString(config, StandardCharsets.UTF_8)
+                        .replace("    context: 8192\n", ""),
+                StandardCharsets.UTF_8);
+        installLaneExe("win-x64-cuda-13.3");
+
+        Run run = run("y\n", 0, CUDA_LOG, "610.62", true);
+
+        assertEquals(0, run.exit, run.output);
+        String after = Files.readString(config, StandardCharsets.UTF_8);
+        assertTrue(after.contains("context: 16384"),
+                "the proposed context must actually land in a legacy config:\n" + after);
+        assertTrue(after.contains("context_reason:"), after);
+        assertTrue(after.contains("server_args: []"), after);
+    }
+
+    @Test
+    void alreadyMatchesIsOnlyClaimedWhenTheConfigActuallyMatches() throws Exception {
+        Path config = writeConfig();
+        installLaneExe("win-x64-cuda-13.3");
+
+        Run first = run("y\n", 0, CUDA_LOG, "610.62", true);
+        assertEquals(0, first.exit, first.output);
+        assertFalse(first.output.contains("already matches"), first.output);
+
+        Run second = run("y\n", 0, CUDA_LOG, "610.62", true);
+        assertEquals(0, second.exit, second.output);
+        assertTrue(second.output.contains("already matches"),
+                "a second run on the tuned config must report an honest match: " + second.output);
+    }
+
+    @Test
     void helpTextPromisesOnlyDetectProposeApproveVerifyAndCpuFallback() {
         assertTrue(TuneCmd.DESCRIPTION.contains("detect"), TuneCmd.DESCRIPTION);
         assertTrue(TuneCmd.DESCRIPTION.contains("propose"), TuneCmd.DESCRIPTION);
@@ -126,6 +178,15 @@ class TuneCmdTest {
             String serverLog,
             String driverVersion,
             boolean expectConfig) throws Exception {
+        return run(input, doctorExit, serverLog, driverVersion, new CountingInstaller());
+    }
+
+    private Run run(
+            String input,
+            int doctorExit,
+            String serverLog,
+            String driverVersion,
+            TuneCmd.EngineInstaller installer) throws Exception {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         PrintStream out = new PrintStream(stdout, true, StandardCharsets.UTF_8);
         int exit = TuneCmd.run(
@@ -139,16 +200,25 @@ class TuneCmdTest {
                         ? Optional.empty()
                         : Optional.of(new dev.talos.cli.doctor.NvidiaGpuQuery.GpuFacts(
                                 "NVIDIA GeForce RTX 5070 Ti", 16_303, 15_268, driverVersion)),
-                (entry, talosHome) -> {
-                    Path exe = entry.installDir(talosHome).resolve(entry.executableName());
-                    Files.createDirectories(exe.getParent());
-                    Files.writeString(exe, "exe", StandardCharsets.UTF_8);
-                    return new LlamaCppEngineInstaller.Result(
-                            LlamaCppEngineInstaller.Status.INSTALLED, exe, "Installed " + exe);
-                },
+                installer,
                 (configPath, doctorOut) -> doctorExit,
                 (talosHome, port) -> serverLog);
         return new Run(exit, stdout.toString(StandardCharsets.UTF_8));
+    }
+
+    private static final class CountingInstaller implements TuneCmd.EngineInstaller {
+        int calls;
+
+        @Override
+        public LlamaCppEngineInstaller.Result install(
+                LlamaCppEngineManifest.Entry entry, Path talosHome) throws Exception {
+            calls++;
+            Path exe = entry.installDir(talosHome).resolve(entry.executableName());
+            Files.createDirectories(exe.getParent());
+            Files.writeString(exe, "exe", StandardCharsets.UTF_8);
+            return new LlamaCppEngineInstaller.Result(
+                    LlamaCppEngineInstaller.Status.INSTALLED, exe, "Installed " + exe);
+        }
     }
 
     private Path writeConfig() throws Exception {

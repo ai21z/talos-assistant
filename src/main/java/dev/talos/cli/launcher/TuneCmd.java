@@ -111,6 +111,12 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
                 return 2;
             }
             String yaml = Files.readString(configPath, StandardCharsets.UTF_8);
+            String uneditable = TuneConfigEditor.editableReason(yaml);
+            if (!uneditable.isBlank()) {
+                out.println("tune cannot edit this config: " + uneditable + ".");
+                out.println("Adjust the config manually or run `talos setup wizard`. No changes made.");
+                return 2;
+            }
 
             Optional<NvidiaGpuQuery.GpuFacts> gpu = gpuFacts.get();
             TunePlanner.Facts facts = new TunePlanner.Facts(
@@ -174,10 +180,21 @@ public final class TuneCmd implements java.util.concurrent.Callable<Integer> {
 
             TuneConfigEditor.Edit edit = TuneConfigEditor.propose(
                     yaml, serverPath, proposal.context().context(), proposal.context().reason());
+            if (!TuneConfigEditor.appliesProposal(
+                    edit.updatedYaml(), serverPath, proposal.context().context(), proposal.context().reason())) {
+                out.println();
+                out.println("tune could not apply the proposal to this config safely. No changes made.");
+                return 2;
+            }
             if (edit.diff().isBlank()) {
                 out.println();
-                out.println("Config already matches the proposal. No changes needed.");
-                return 0;
+                if (TuneConfigEditor.appliesProposal(
+                        yaml, serverPath, proposal.context().context(), proposal.context().reason())) {
+                    out.println("Config already matches the proposal. No changes needed.");
+                    return 0;
+                }
+                out.println("tune could not apply the proposal to this config. No changes made.");
+                return 2;
             }
             out.println();
             out.println("Proposed config change (exact diff):");
