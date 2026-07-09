@@ -118,7 +118,13 @@ final class AppendLinePreApprovalGuard {
                 && !signature.contains("offset=");
     }
 
-    private static String parseCompleteReadFileBody(String body) {
+    /**
+     * Reconstructs the real file content from a complete line-numbered
+     * read_file body, or returns null when the body is truncated or not a
+     * numbered read. Package-visible: the T1003 invalid-edit recovery
+     * planner shares this single owner of the numbered-body format.
+     */
+    static String parseCompleteReadFileBody(String body) {
         if (body == null || body.isBlank()) return null;
         if (body.contains("... (") || body.contains("output truncated") || body.startsWith("(file has")) {
             return null;

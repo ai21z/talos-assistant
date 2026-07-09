@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- [T1003] Repeated invalid edit_file calls on a small, completely read text
+  file now recover through one bounded full-rewrite instead of ending the
+  turn with only "copy the exact old_string". When a weak model spends both
+  empty-old_string strikes (even inside the same generation batch as the
+  read), Talos plans a deterministic recovery: the retry surface narrows to
+  talos.write_file for that exact path, the model is instructed to produce
+  the complete corrected content from the same-turn read, and the write goes
+  through the normal approval card with a full diff plus unchanged
+  verification and readback. Every gate fails closed: unread, truncated,
+  redacted, oversized, or non-text targets, read-only contracts, and turns
+  whose native tool surface does not expose talos.write_file keep the
+  existing truthful stop, and the recovery is one-shot per path so a failed
+  recovery still ends truthfully.
 - [T1009] Mid-sentence rename requests ("In src/app.js, rename the function
   reset to resetAll.") now classify as mutation like their fix/change/update
   siblings, so the model gets edit tools instead of running read-only and

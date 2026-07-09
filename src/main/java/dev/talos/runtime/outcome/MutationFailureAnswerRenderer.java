@@ -5,6 +5,7 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.PendingActionObligation;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -350,7 +351,16 @@ public final class MutationFailureAnswerRenderer {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (answer != null && answer.startsWith("[Action obligation failed:")) return answer;
+        // T1003: a breached invalid-edit full-rewrite recovery must terminate
+        // through this truthful invalid-mutation summary (the obligation was
+        // only a bounded retry for the same invalid edits). Other obligation
+        // flows keep their own terminal answers.
+        boolean editRecoveryBreach = answer != null
+                && answer.startsWith(PendingActionObligation.EDIT_RECOVERY_FAILURE_MARKER);
+        if (answer != null && !editRecoveryBreach
+                && answer.startsWith("[Action obligation failed:")) {
+            return answer;
+        }
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;

@@ -68,7 +68,8 @@ final class RedactedReadWritebackGuard {
         return sentinels;
     }
 
-    private static boolean hasSameTurnRedactedReadForPath(LoopState state, String pathHint) {
+    /** Package-visible: the T1003 recovery planner excludes redacted reads. */
+    static boolean hasSameTurnRedactedReadForPath(LoopState state, String pathHint) {
         String target = ToolCallSupport.canonicalizeReadPath(pathHint);
         if (target.isBlank()) return false;
         for (Map.Entry<String, String> entry : state.readFileBodiesThisTurn.entrySet()) {

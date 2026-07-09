@@ -25,15 +25,33 @@ final class ToolRepromptObligationSelector {
                 StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state);
         List<String> remainingExpectedTargets =
                 ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+        // T1003: unprompted invalid-edit recovery targets carry a bounded
+        // full-rewrite obligation of their own and narrow the retry surface
+        // to talos.write_file, like the static repair flow.
+        List<String> editRecoveryTargets = state.editRecoveryFullRewriteTargets.stream()
+                .filter(path -> !state.editRecoveryPromptedPaths.contains(path))
+                .sorted()
+                .toList();
         boolean staticRepairObligationActive = !remainingRepairTargets.isEmpty()
                 && (!state.staticWebFullRewriteRequiredTargets.isEmpty()
                 || StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)
                 || state.hasPendingActionObligation());
+        boolean editRecoveryObligationActive = !editRecoveryTargets.isEmpty();
         boolean expectedTargetObligationActive = !remainingExpectedTargets.isEmpty()
                 && (outcome.mutationsThisIteration() > 0 || state.hasPendingActionObligation());
         if (staticRepairObligationActive) {
             state.setPendingActionObligation(
                     PendingActionObligation.staticRepairTargets(remainingRepairTargets));
+        } else if (editRecoveryObligationActive) {
+            state.setPendingActionObligation(
+                    PendingActionObligation.expectedTargets(
+                            editRecoveryTargets,
+                            PendingActionObligation.EDIT_RECOVERY_FAILURE_MARKER
+                                    + " talos.edit_file was repeatedly called with an empty "
+                                    + "old_string for " + String.join(", ", editRecoveryTargets)
+                                    + " and the recovery generation did not produce the required "
+                                    + "talos.write_file call. The requested edit was not applied to "
+                                    + "these target(s)."));
         } else if (expectedTargetObligationActive) {
             state.setPendingActionObligation(
                     PendingActionObligation.expectedTargets(remainingExpectedTargets));
@@ -42,7 +60,7 @@ final class ToolRepromptObligationSelector {
         }
         List<ToolSpec> repromptToolSpecs = ToolRepromptRequestBuilder.toolSpecs(
                 state,
-                staticRepairObligationActive,
+                staticRepairObligationActive || editRecoveryObligationActive,
                 expectedTargetObligationActive);
         return new Selection(
                 remainingRepairTargets,

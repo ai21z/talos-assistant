@@ -288,6 +288,11 @@ class JsonScenarioPackTest {
     void mutationPromptEmptyEditArgsStopsCleanly() {
         var loaded = JsonScenarioLoader.load("scenarios/21-mutation-prompt-empty-edit-args-stops-cleanly.json");
 
+        // T1003: after the two empty-old_string strikes on a read small text
+        // file, Talos now grants one bounded full-rewrite recovery generation.
+        // The scripted model wastes it with prose, so the turn must still end
+        // with the canonical truthful invalid-mutation stop: no approval, no
+        // mutation, and the breached recovery obligation named as the reason.
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
@@ -296,8 +301,9 @@ class JsonScenarioPackTest {
                     .assertAnswerContains(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION)
                     .assertAnswerContains("No file changes were applied")
                     .assertAnswerContains("Repeated empty or missing talos.edit_file arguments")
+                    .assertAnswerContains("Pending action obligation")
                     .assertAnswerNotContains("[iteration limit reached]")
-                    .assertAnswerNotContains("This response should not be reached")
+                    .assertAnswerNotContains("I cannot produce the complete corrected file content")
                     .assertFileContains("index.html", "<title>Horror Synthwave Band</title>")
                     .assertFileNotContains("index.html", "class=\"cta-button\"");
         }

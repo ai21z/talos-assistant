@@ -7,6 +7,15 @@ import java.util.Objects;
 
 public record PendingActionObligation(Kind kind, List<String> targets, String failureContext) {
 
+    /**
+     * T1003: marker that opens the failure context of a bounded invalid-edit
+     * full-rewrite recovery obligation. When such an obligation is breached,
+     * the invalid-mutation answer renderer recognizes this marker and lets
+     * the canonical truthful invalid-mutation summary take over, because the
+     * obligation was only a bounded retry for the same invalid edits.
+     */
+    public static final String EDIT_RECOVERY_FAILURE_MARKER = "[Edit recovery failed]";
+
     public enum Kind {
         EXPECTED_TARGETS_REMAINING("expected target progress"),
         STATIC_REPAIR_TARGETS_REMAINING("static repair progress"),

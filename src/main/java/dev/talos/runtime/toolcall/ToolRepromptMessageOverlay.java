@@ -26,10 +26,33 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
         ToolRepromptMessageOverlay overlay = new ToolRepromptMessageOverlay(state);
         overlay.applyStaleEditRepair();
         overlay.applyEmptyEditRepair();
+        overlay.applyEditRecoveryFullRewrite();
         overlay.applyStaticRepairProgress(remainingRepairTargets);
         overlay.applyExpectedTargetProgress(remainingExpectedTargets);
         overlay.applyCurrentTaskAnchor(userTask);
         return overlay;
+    }
+
+    /**
+     * T1003: one bounded full-rewrite recovery per path after repeated
+     * empty-argument edit_file failures on a small, completely read,
+     * unredacted text file. Marking the path prompted makes the recovery
+     * one-shot: the failure policy stops normally if the failure persists.
+     */
+    private void applyEditRecoveryFullRewrite() {
+        for (String path : state.editRecoveryFullRewriteTargets.stream().sorted().toList()) {
+            if (!state.editRecoveryPromptedPaths.add(path)) continue;
+            addSystem(
+                    "[Edit recovery] talos.edit_file repeatedly failed for `" + path
+                            + "` with empty old_string after the file was read. Do not call "
+                            + "talos.edit_file for this file again this turn. Call talos.write_file "
+                            + "once for `" + path + "` with the COMPLETE corrected file content "
+                            + "based on the same-turn read (without line-number prefixes), keeping "
+                            + "all existing content plus the requested change. The write requires "
+                            + "approval and shows a full diff. If you cannot produce the complete "
+                            + "corrected content, say no edit was applied.",
+                    "[Edit recovery]");
+        }
     }
 
     private void applyStaleEditRepair() {

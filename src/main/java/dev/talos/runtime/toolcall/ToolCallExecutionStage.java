@@ -309,6 +309,10 @@ public final class ToolCallExecutionStage {
         if (state == null) return Set.of();
         Set<String> targets = new HashSet<>(RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages));
         targets.addAll(state.staticWebFullRewriteRequiredTargets);
+        // T1003: once the invalid-edit recovery is planned for a path,
+        // further edit_file calls on it are blocked; the recovery is a
+        // single bounded write_file with complete content.
+        targets.addAll(state.editRecoveryFullRewriteTargets);
         return Set.copyOf(targets);
     }
 

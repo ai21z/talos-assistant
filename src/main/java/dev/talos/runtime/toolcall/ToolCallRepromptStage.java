@@ -70,6 +70,11 @@ public final class ToolCallRepromptStage {
             return mutationEvidenceBudget.get();
         }
 
+        // T1003: register bounded full-rewrite recovery targets BEFORE the
+        // failure policy runs, so strikes spent in the same generation batch
+        // as the read (the observed weak-model shape) can still recover.
+        EditRecoveryFullRewritePlanner.plan(state);
+
         FailureDecision failureDecision = FailurePolicy.defaults(state.maxIterations)
                 .afterIteration(state, outcome);
         if (failureDecision.shouldStop()) {
