@@ -181,6 +181,29 @@ class AssistantTurnExecutorToolLoopOutcomeCharacterizationTest {
                 .build();
     }
 
+    @Test
+    void resolvedToolLoopAnswerDoesNotInheritFirstGenerationOutputLimitNotice(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "PROJECT_MARKER = T989-NOTICE\n");
+        ToolRegistry registry = registryWith(new ReadFileTool());
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(readCall("call_read_notes", "notes.md")), "length"),
+                        new LlmClient.StreamResult("The notes.md marker is T989-NOTICE.", List.of(), "stop")),
+                16_384);
+        Context ctx = context(workspace, registry, recorded, 4);
+
+        AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                messages("Read notes.md and answer with the project marker from the file."),
+                workspace,
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(out.text().contains("T989-NOTICE"), out.text());
+        assertFalse(out.text().contains("output limit"),
+                "a resolved tool-loop answer must not inherit the first generation's output-limit notice: "
+                        + out.text());
+    }
+
     private static ToolRegistry registryWith(dev.talos.tools.TalosTool... tools) {
         ToolRegistry registry = new ToolRegistry();
         for (dev.talos.tools.TalosTool tool : tools) {

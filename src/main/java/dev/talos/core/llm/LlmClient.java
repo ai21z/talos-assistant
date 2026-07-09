@@ -917,16 +917,39 @@ public final class LlmClient implements AutoCloseable {
                     tools, finalRequestControls);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
             try {
-                return consumeEngineStream(
+                StreamResult first = consumeEngineStream(
                         engineResolver.chatStream(req), activeStream, cancelled, onChunk);
+                if (!shouldRetryCapTruncatedToolResult(req, first)) {
+                    return first;
+                }
+                // T989 recovery: a per-request output cap cut a tool-required
+                // generation before any usable tool call was produced. One
+                // retry with the cap lifted; the managed server --predict
+                // backstop still bounds it.
+                ChatRequest liftedReq = new ChatRequest(
+                        req.backend, req.model, req.systemPrompt, req.userPrompt,
+                        req.snippets, req.timeout, req.messages, req.tools,
+                        withDebugTag(req.controls, "output-cap-lifted-retry").withMaxOutputTokens(0));
+                PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(liftedReq, streamRequest));
+                return consumeEngineStream(
+                        engineResolver.chatStream(liftedReq), activeStream, cancelled, onChunk);
             } catch (EngineException.MalformedResponse malformed) {
                 if (!shouldRetryCompatToolArgumentsNonStreaming(malformed, req)) {
                     throw malformed;
                 }
+                // A capped request that truncated mid-arguments fails the same
+                // way non-streamed, so the retry also lifts the cap (T989).
+                boolean liftCap = req.controls != null && req.controls.maxOutputTokens() > 0;
+                ChatRequestControls retryControls = withDebugTag(
+                        req.controls,
+                        liftCap ? "compat-tool-arguments-uncapped-retry" : "compat-tool-arguments-nonstream-retry");
+                if (liftCap) {
+                    retryControls = retryControls.withMaxOutputTokens(0);
+                }
                 ChatRequest retryReq = new ChatRequest(
                         req.backend, req.model, req.systemPrompt, req.userPrompt,
                         req.snippets, req.timeout, req.messages, req.tools,
-                        withDebugTag(req.controls, "compat-tool-arguments-nonstream-retry"));
+                        retryControls);
                 PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(retryReq, false));
                 return consumeEngineStream(
                         engineResolver.chatStreamNonStreaming(retryReq), activeStream, cancelled, onChunk);
@@ -1033,7 +1056,28 @@ public final class LlmClient implements AutoCloseable {
         ToolChoiceMode mode = request.controls == null
                 ? ToolChoiceMode.AUTO
                 : request.controls.toolChoice();
-        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED;
+        // Capped requests also qualify under AUTO: backends without required
+        // tool choice still receive caps (T989), and a cap can truncate the
+        // arguments of a voluntarily emitted tool call.
+        boolean capped = request.controls != null && request.controls.maxOutputTokens() > 0;
+        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED || capped;
+    }
+
+    /**
+     * True when a per-request output cap stopped a tool-required generation
+     * before any usable tool call (native or complete text-form) arrived.
+     * Such a result can never satisfy the turn's tool obligation, so one
+     * cap-lifted retry is strictly better than surfacing the truncation.
+     */
+    private static boolean shouldRetryCapTruncatedToolResult(ChatRequest request, StreamResult result) {
+        if (request == null || result == null) return false;
+        if (request.controls == null || request.controls.maxOutputTokens() <= 0) return false;
+        if (request.tools == null || request.tools.isEmpty()) return false;
+        ToolChoiceMode mode = request.controls.toolChoice();
+        if (mode != ToolChoiceMode.REQUIRED && mode != ToolChoiceMode.NAMED) return false;
+        if (!result.outputLimitReached()) return false;
+        if (result.hasToolCalls()) return false;
+        return !ToolProtocolText.containsToolCalls(result.text());
     }
 
     private List<ToolSpec> effectiveToolSpecs(List<ToolSpec> requestToolSpecs) {

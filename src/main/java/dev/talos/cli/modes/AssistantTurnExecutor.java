@@ -255,7 +255,12 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
-                            out.append(withOutputLimitNotice(resolution.answer(), streamResult, ctx, false));
+                            // The output-limit notice describes the surfaced text.
+                            // A resolved tool-loop answer comes from later
+                            // uncapped generations, so the first request's
+                            // finish_reason must not annotate it (the trace
+                            // warning still records the truncation).
+                            out.append(resolution.answer());
                         }
                     } else {
                         // No tool calls - content was streamed; record full text for memory.
@@ -301,7 +306,10 @@ public final class AssistantTurnExecutor {
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
-                            answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
+                            // See the streaming branch: resolved tool-loop
+                            // answers do not inherit the first generation's
+                            // output-limit notice.
+                            answer = resolution.answer();
                         }
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
