@@ -54,9 +54,11 @@ public final class LlmClient implements AutoCloseable {
     private final long responseMaxChars;
 
     /**
-     * P2 - wall-clock budget for a single LLM call (one full
+     * P2 - no-progress wall-clock budget for a single LLM call (one full
      * {@link #chatStreamFull} or {@link #chatFull} invocation, including all
-     * internal retries).
+     * internal retries). Once token chunks are arriving, the idle watchdog below
+     * becomes the live-progress guard so slow local models are not killed solely
+     * because they crossed the first wall-clock threshold.
      *
      * <p><b>Why this exists:</b> the JDK {@code HttpRequest.timeout(...)} only
      * fires while waiting for the <em>next</em> chunk; once chunks trickle in
@@ -66,7 +68,9 @@ public final class LlmClient implements AutoCloseable {
      * legacy path in {@code AssistantTurnExecutor} already wraps its call in
      * a {@code CompletableFuture.get(timeout)}, but the streaming path and
      * the tool-call-loop re-prompts had no equivalent. This field, plus
-     * {@link LlmCallBudget#run}, closes that gap.
+     * {@link LlmCallBudget#run}, closes that gap. Calls that never produce a
+     * first chunk still fail at this budget; calls that keep producing chunks
+     * can continue past it until they finish or go idle.
      *
      * <p>Default 300_000 ms (5 min), overridable via
      * {@code limits.llm_timeout_ms} in config or per-call via the
@@ -82,10 +86,9 @@ public final class LlmClient implements AutoCloseable {
      *
      * <p><b>Why this exists in addition to the wall-clock budget:</b> a short
      * prompt that wedges the model produces a long stretch of zero tokens
-     * well before the 5-min wall-clock fires. The user-visible UX is "Talos
+     * well before a long wall-clock budget would fire. The user-visible UX is "Talos
      * is frozen". An idle watchdog catches that case in tens of seconds, not
-     * minutes, while the wall-clock still backstops genuinely-slow-but-alive
-     * generations on big local models.
+     * minutes, while genuine chunk progress keeps big local-model generations alive.
      *
      * <p>Configurable via {@code limits.llm_idle_ms}; default 60_000 ms.
      * Set ≤0 to disable.

@@ -211,6 +211,40 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
         }
     }
 
+    @Test
+    void bufferedAbortMarkerRecordsFailedOutcome(@TempDir Path workspace) {
+        var blocking = ScriptedNativeLlmClient.blockingAfterFirstChunk(5_000L);
+        var ctx = Context.builder(new Config())
+                .llm(blocking.client())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-t988-abort",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Answer slowly.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Answer slowly."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options().llmTimeoutMs(150L));
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.text().contains("[turn aborted"), out.text());
+            assertEquals("FAILED", trace.outcome().status());
+            assertEquals("LLM_ABORTED", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     private static List<ChatMessage> messages(String request) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("You are Talos."));

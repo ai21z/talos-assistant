@@ -14,6 +14,9 @@ import java.util.NoSuchElementException;
 import java.util.Spliterators;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -32,6 +35,13 @@ public final class ScriptedNativeLlmClient {
     }
 
     public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
+
+    public record BlockingClient(
+            LlmClient client,
+            CountDownLatch firstChunkEmitted,
+            AtomicBoolean streamClosed,
+            AtomicInteger chatCalls
+    ) {}
 
     public record CompactAwareClient(
             LlmClient client,
@@ -99,6 +109,33 @@ public final class ScriptedNativeLlmClient {
             llm.put("default_backend", "llama_cpp");
         }
         return new LlmClient(config, new CompatRecoveryResolver(recovery, followups));
+    }
+
+    public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        Object limitsBlock = config.data.computeIfAbsent("limits", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (limitsBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> limits = (Map<String, Object>) map;
+            limits.put("llm_timeout_ms", configuredTimeoutMs);
+            limits.put("llm_idle_ms", 1_000L);
+        }
+        CountDownLatch firstChunkEmitted = new CountDownLatch(1);
+        AtomicBoolean streamClosed = new AtomicBoolean();
+        AtomicInteger chatCalls = new AtomicInteger();
+        BlockingResolver resolver = new BlockingResolver(firstChunkEmitted, streamClosed, chatCalls);
+        return new BlockingClient(
+                new LlmClient(config, resolver),
+                firstChunkEmitted,
+                streamClosed,
+                chatCalls);
     }
 
     private static final class Resolver implements LlmEngineResolver {
@@ -301,6 +338,68 @@ public final class ScriptedNativeLlmClient {
         }
         chunks.add(TokenChunk.eos(response.finishReason()));
         return chunks.stream();
+    }
+
+    private static final class BlockingResolver implements LlmEngineResolver {
+        private final CountDownLatch firstChunkEmitted;
+        private final AtomicBoolean streamClosed;
+        private final AtomicInteger chatCalls;
+
+        private BlockingResolver(
+                CountDownLatch firstChunkEmitted,
+                AtomicBoolean streamClosed,
+                AtomicInteger chatCalls) {
+            this.firstChunkEmitted = firstChunkEmitted;
+            this.streamClosed = streamClosed;
+            this.chatCalls = chatCalls;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, false, false, 0);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            chatCalls.incrementAndGet();
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    while (!streamClosed.get()) {
+                        try {
+                            TimeUnit.MILLISECONDS.sleep(10);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                    throw new EngineException.Transient(
+                            "stream closed by Talos",
+                            new java.io.IOException("stream closed by Talos"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    firstChunkEmitted.countDown();
+                    return TokenChunk.of("partial");
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
+                    .onClose(() -> streamClosed.set(true));
+        }
+
+        @Override
+        public void close() {
+        }
     }
 
     private static Stream<TokenChunk> malformedToolArgumentStream() {

@@ -308,10 +308,15 @@ public final class AssistantTurnExecutor {
                         // Grounding retry gate: if the user explicitly asked for evidence
                         // / reading / inspection and the answer is long-and-confident,
                         // re-prompt once asking the model to answer from workspace evidence.
-                        ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
-                                answer, messages, currentTurnPlan, workspace, ctx, opts);
-                        appendExtraSummary(out, resolution.extraSummary());
-                        answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
+                        if (isTurnAbortMarker(answer)) {
+                            recordLlmAbortOutcome();
+                            answer = withOutputLimitNotice(answer, streamResult, ctx, false);
+                        } else {
+                            ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
+                                    answer, messages, currentTurnPlan, workspace, ctx, opts);
+                            appendExtraSummary(out, resolution.extraSummary());
+                            answer = withOutputLimitNotice(resolution.answer(), streamResult, ctx, false);
+                        }
                     }
                     out.append(answer);
                 } else {
@@ -445,6 +450,15 @@ public final class AssistantTurnExecutor {
                 "UNKNOWN",
                 "BACKEND_ERROR",
                 classification);
+    }
+
+    private static void recordLlmAbortOutcome() {
+        recordBackendFailureOutcome("LLM_ABORTED");
+    }
+
+    private static boolean isTurnAbortMarker(String answer) {
+        if (answer == null) return false;
+        return answer.stripLeading().startsWith(UiChrome.TURN_ABORTED_PREFIX);
     }
 
     private static String engineFailureClassification(EngineException ex) {
