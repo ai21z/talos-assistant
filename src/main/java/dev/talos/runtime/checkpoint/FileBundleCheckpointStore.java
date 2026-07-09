@@ -39,9 +39,48 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
     private static final java.util.concurrent.atomic.AtomicLong CAPTURE_SEQUENCE =
             new java.util.concurrent.atomic.AtomicLong();
     private final Path root;
+    private final RestoreFileWriter restoreFileWriter;
 
     public FileBundleCheckpointStore(Path root) {
+        this(root, FileBundleCheckpointStore::replaceFileAtomically);
+    }
+
+    /** Package-private seam so tests can inject write faults mid-restore. */
+    FileBundleCheckpointStore(Path root, RestoreFileWriter restoreFileWriter) {
         this.root = root == null ? CheckpointConfig.defaultRoot() : root;
+        this.restoreFileWriter = restoreFileWriter == null
+                ? FileBundleCheckpointStore::replaceFileAtomically
+                : restoreFileWriter;
+    }
+
+    /** How restore puts a single file's replacement bytes in place. */
+    interface RestoreFileWriter {
+        void replaceFile(Path target, byte[] bytes) throws IOException;
+    }
+
+    /**
+     * Per-file atomic replace: the bytes land in a temp file beside the
+     * target and are promoted with a move, so a crash or fault mid-write
+     * can never leave a half-written target - the file holds either its
+     * previous content or the full replacement.
+     */
+    static void replaceFileAtomically(Path target, byte[] bytes) throws IOException {
+        Path parent = target.getParent();
+        if (parent == null) {
+            Files.write(target, bytes);
+            return;
+        }
+        Path tmp = Files.createTempFile(parent, ".talos-restore", ".tmp");
+        try {
+            Files.write(tmp, bytes);
+            try {
+                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     @Override
@@ -237,22 +276,48 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                         0,
                         preflight.failed());
             }
+            // Phase 1 - constructive. Every expected path is put in place
+            // WITHOUT deleting anything: directories are created (never
+            // pre-wiped), file overwrites are per-file atomic, and a path
+            // whose type flipped since capture is displaced aside instead
+            // of destroyed. A failure anywhere in this phase therefore
+            // cannot strip the live tree - the residual is a mix of live
+            // and checkpoint content, never a loss (the restore-safety
+            // checkpoint taken before restore covers rolling that back).
+            List<Path> displaced = new ArrayList<>();
             for (RestoreEntry entry : preflight.entries()) {
-                if (entry.existedBefore()) {
-                    if ("DIRECTORY".equals(entry.entryType())) {
-                        restoreDirectoryState(entry.target());
-                        Files.createDirectories(entry.target());
-                        restored++;
-                        continue;
-                    }
-                    Path parent = entry.target().getParent();
-                    if (parent != null) Files.createDirectories(parent);
-                    Files.write(entry.target(), entry.bytes());
+                if (!entry.existedBefore()) continue;
+                if ("DIRECTORY".equals(entry.entryType())) {
+                    displaceTypeConflict(entry.target(), true, displaced);
+                    Files.createDirectories(entry.target());
                     restored++;
-                } else {
+                    continue;
+                }
+                Path parent = entry.target().getParent();
+                if (parent != null) Files.createDirectories(parent);
+                displaceTypeConflict(entry.target(), false, displaced);
+                restoreFileWriter.replaceFile(entry.target(), entry.bytes());
+                restored++;
+            }
+
+            // Phase 2 - destructive, only now that the replacement content
+            // is fully in place: children created after capture inside
+            // restored directory trees, recorded-absent targets, and any
+            // displaced type-conflict remnants.
+            Set<Path> expected = expectedTargets(preflight.entries());
+            for (RestoreEntry entry : preflight.entries()) {
+                if (entry.existedBefore() && "DIRECTORY".equals(entry.entryType())) {
+                    deleteExtrasUnder(entry.target(), expected);
+                }
+            }
+            for (RestoreEntry entry : preflight.entries()) {
+                if (!entry.existedBefore()) {
                     deletePathIfExists(entry.target());
                     deleted++;
                 }
+            }
+            for (Path leftover : displaced) {
+                deletePathIfExists(leftover);
             }
         } catch (Exception e) {
             return CheckpointRestoreResult.partial(
@@ -321,9 +386,51 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return new RestorePreflight(List.copyOf(entries), failed, List.copyOf(failureReasons));
     }
 
-    private static void restoreDirectoryState(Path target) throws IOException {
-        deletePathIfExists(target);
-        Files.createDirectories(target);
+    /**
+     * A restore target whose on-disk type no longer matches the checkpoint
+     * (a file where a directory was captured, or the reverse) is moved
+     * aside instead of deleted, so the content survives a later phase-1
+     * failure. Successful restores clean the displaced remnant in phase 2;
+     * after a failure it remains beside the target as recoverable data.
+     */
+    private static void displaceTypeConflict(
+            Path target,
+            boolean wantDirectory,
+            List<Path> displaced
+    ) throws IOException {
+        if (!Files.exists(target)) return;
+        if (Files.isDirectory(target) == wantDirectory) return;
+        Path aside = target.resolveSibling(
+                target.getFileName() + ".talos-displaced-" + UUID.randomUUID());
+        Files.move(target, aside);
+        displaced.add(aside);
+    }
+
+    /** All paths the manifest says should exist after the restore. */
+    private static Set<Path> expectedTargets(List<RestoreEntry> entries) {
+        Set<Path> expected = new LinkedHashSet<>();
+        for (RestoreEntry entry : entries) {
+            if (entry.existedBefore()) {
+                expected.add(entry.target().toAbsolutePath().normalize());
+            }
+        }
+        return expected;
+    }
+
+    /**
+     * Deletes everything under {@code dir} that the manifest does not
+     * expect - the replacement for the old delete-then-rewrite, run only
+     * after every expected path is already in place. Reverse walk order
+     * removes children before their directories.
+     */
+    private static void deleteExtrasUnder(Path dir, Set<Path> expected) throws IOException {
+        if (!Files.isDirectory(dir)) return;
+        try (var stream = Files.walk(dir)) {
+            for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                if (expected.contains(path.toAbsolutePath().normalize())) continue;
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private static void deletePathIfExists(Path target) throws IOException {

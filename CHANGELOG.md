@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- Checkpoint restore no longer wipes the live directory tree before
+  rewriting it. Restore is now two-phase: first every expected path is put
+  in place constructively (directories created without a pre-wipe, file
+  overwrites per-file atomic via temp-and-move, type-flipped paths
+  displaced aside instead of destroyed), and only after all writes succeed
+  are extras, recorded-absent targets, and displaced remnants deleted. A
+  mid-restore failure can leave a mix of live and checkpoint content but
+  can no longer strip the workspace. Blob integrity and containment
+  preflight stay fail-closed before any mutation. The recovery path shares
+  this logic and inherits the fix.
 - Abort truth on both provider paths: aborted generations now carry explicit
   abort metadata on the LLM result, and abort detection is line-anchored
   instead of a prefix check, so a transport loss after partial output (the

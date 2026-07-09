@@ -429,6 +429,111 @@ class FileBundleCheckpointStoreTest {
                 "duplicate directory and child entries must still remove later-added children");
     }
 
+    /**
+     * Restore atomicity: a directory restore must never strip the live tree
+     * before the replacement content is safely in place. A write failure
+     * mid-restore may leave a mix of live and checkpoint content, but it
+     * must not LOSE anything - no file deleted, no extra removed.
+     */
+    @Test
+    void directoryRestoreWriteFailureLeavesLiveFilesAndExtrasIntact(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace.resolve("assets"));
+        Files.writeString(workspace.resolve("assets/a.txt"), "a-before");
+        Files.writeString(workspace.resolve("assets/b.txt"), "b-before");
+
+        java.util.concurrent.atomic.AtomicInteger writes = new java.util.concurrent.atomic.AtomicInteger();
+        FileBundleCheckpointStore store = new FileBundleCheckpointStore(
+                temp.resolve("checkpoints"),
+                (target, bytes) -> {
+                    if (writes.incrementAndGet() >= 2) {
+                        throw new java.io.IOException("injected write failure");
+                    }
+                    FileBundleCheckpointStore.replaceFileAtomically(target, bytes);
+                });
+        CheckpointService service = new CheckpointService(store);
+
+        // ghost.txt is captured absent-before and listed FIRST, so a restore
+        // that deletes in manifest order would remove it before any write.
+        CheckpointCaptureResult capture = service.captureBeforeRestore(
+                workspace,
+                config(true),
+                List.of("ghost.txt", "assets"),
+                "fault injection",
+                "trc-test",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.writeString(workspace.resolve("assets/a.txt"), "a-current");
+        Files.writeString(workspace.resolve("assets/b.txt"), "b-current");
+        Files.writeString(workspace.resolve("assets/added-after.txt"), "extra-must-survive-failure");
+        Files.writeString(workspace.resolve("ghost.txt"), "created-after-capture");
+
+        CheckpointRestoreResult restore = service.restore(workspace, capture.checkpointId());
+
+        assertFalse(restore.success(), "injected write failure must not report success");
+        assertTrue(Files.exists(workspace.resolve("assets/a.txt")),
+                "no live file may be lost to a mid-restore failure");
+        assertEquals("b-current", Files.readString(workspace.resolve("assets/b.txt")),
+                "the file whose write failed must keep its live content");
+        assertEquals("extra-must-survive-failure",
+                Files.readString(workspace.resolve("assets/added-after.txt")),
+                "extras must not be deleted before all replacement content is in place");
+        assertEquals("created-after-capture", Files.readString(workspace.resolve("ghost.txt")),
+                "recorded-absent targets must not be deleted before all writes succeed");
+    }
+
+    /**
+     * Ordering contract: extras (children added after capture) and
+     * recorded-absent targets are deleted only AFTER every replacement
+     * write has succeeded - observed from inside the writer itself.
+     */
+    @Test
+    void extrasAreDeletedOnlyAfterAllReplacementWritesSucceed(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace.resolve("assets"));
+        Files.writeString(workspace.resolve("assets/a.txt"), "a-before");
+        Files.writeString(workspace.resolve("assets/b.txt"), "b-before");
+        Path extra = workspace.resolve("assets/added-after.txt");
+        Path ghost = workspace.resolve("ghost.txt");
+
+        List<Boolean> extraPresentAtWrite = new java.util.ArrayList<>();
+        List<Boolean> ghostPresentAtWrite = new java.util.ArrayList<>();
+        FileBundleCheckpointStore store = new FileBundleCheckpointStore(
+                temp.resolve("checkpoints"),
+                (target, bytes) -> {
+                    extraPresentAtWrite.add(Files.exists(extra));
+                    ghostPresentAtWrite.add(Files.exists(ghost));
+                    FileBundleCheckpointStore.replaceFileAtomically(target, bytes);
+                });
+        CheckpointService service = new CheckpointService(store);
+
+        CheckpointCaptureResult capture = service.captureBeforeRestore(
+                workspace,
+                config(true),
+                List.of("ghost.txt", "assets"),
+                "ordering contract",
+                "trc-test",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.writeString(workspace.resolve("assets/a.txt"), "a-current");
+        Files.writeString(workspace.resolve("assets/b.txt"), "b-current");
+        Files.writeString(extra, "extra");
+        Files.writeString(ghost, "created-after-capture");
+
+        CheckpointRestoreResult restore = service.restore(workspace, capture.checkpointId());
+
+        assertTrue(restore.success(), restore.message());
+        assertEquals(2, extraPresentAtWrite.size(), "both captured files must be written");
+        assertTrue(extraPresentAtWrite.stream().allMatch(Boolean::booleanValue),
+                "extras must still exist while replacement writes are running");
+        assertTrue(ghostPresentAtWrite.stream().allMatch(Boolean::booleanValue),
+                "recorded-absent targets must still exist while replacement writes are running");
+        assertFalse(Files.exists(extra), "extras are deleted after the writes succeed");
+        assertFalse(Files.exists(ghost), "recorded-absent targets are deleted after the writes succeed");
+        assertEquals("a-before", Files.readString(workspace.resolve("assets/a.txt")));
+        assertEquals("b-before", Files.readString(workspace.resolve("assets/b.txt")));
+    }
+
     @Test
     void checkpointBlobCaptureUsesTempFileAndAtomicPromotion() throws Exception {
         String source = Files.readString(Path.of(
