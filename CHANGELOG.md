@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T1008] Named tool forcing now actually enforces on the managed backend.
+  llama-server (pinned b9918) parses tool_choice as a string only, and the
+  OpenAI named-function object form silently degraded to "auto", so every
+  NAMED enforcement was a no-op. Talos only selects NAMED when the visible
+  surface exposes exactly one tool, so the wire format now sends the
+  enforceable string "required", which the server honors and which makes
+  the tool grammar non-lazy from the first token.
 - [T1007] Surgical edits are now grammar-floored and idiom-taught for weak
   local models. The edit_file schema (and the compact retry spec, which
   previously stripped it) declares minLength 1 on old_string and path, which

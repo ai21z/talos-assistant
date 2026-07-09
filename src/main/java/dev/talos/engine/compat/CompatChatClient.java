@@ -265,14 +265,17 @@ public final class CompatChatClient {
             case AUTO -> null;
             case NONE -> "none";
             case REQUIRED -> "required";
-            case NAMED -> {
-                Map<String, Object> fn = new LinkedHashMap<>();
-                fn.put("name", req.controls.namedTool());
-                Map<String, Object> choice = new LinkedHashMap<>();
-                choice.put("type", "function");
-                choice.put("function", fn);
-                yield choice;
-            }
+            // T1008: llama-server (pinned b9918) parses tool_choice as a
+            // string only (auto, none, required). The OpenAI named-function
+            // object form hits a type mismatch in the server's json_value
+            // helper and silently degrades to "auto", so the named
+            // enforcement never happened on the managed backend. Talos only
+            // selects NAMED when the visible surface exposes exactly one
+            // tool (ProviderRequestControlPolicy and the write-repair
+            // planners), so the string "required" is an equivalent
+            // constraint that the server actually enforces, and it makes
+            // the tool grammar non-lazy from the first token.
+            case NAMED -> "required";
         };
     }
 

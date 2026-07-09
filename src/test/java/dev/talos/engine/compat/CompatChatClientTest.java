@@ -106,8 +106,17 @@ class CompatChatClientTest {
         }
     }
 
+    /**
+     * T1008: llama-server (pinned b9918) parses tool_choice as a STRING only
+     * (auto, none, required). The OpenAI named-function OBJECT form hits a
+     * type mismatch inside json_value and silently degrades to "auto", so
+     * every NAMED enforcement was a no-op on the managed backend. Talos only
+     * selects NAMED when the visible surface has exactly one tool, so the
+     * string "required" is an equivalent, actually-enforced constraint and
+     * makes the tool grammar non-lazy from the first token.
+     */
     @Test
-    void chatSerializesNamedToolChoiceAndJsonSchema() throws Exception {
+    void chatSerializesNamedToolChoiceAsEnforceableRequiredString() throws Exception {
         AtomicReference<String> bodyRef = new AtomicReference<>("");
         HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
                 {"choices":[{"message":{"role":"assistant","content":"ok"}}]}
@@ -133,9 +142,11 @@ class CompatChatClientTest {
             client.chat(request);
 
             JsonNode body = MAPPER.readTree(bodyRef.get());
-            assertEquals("function", body.path("tool_choice").path("type").asText());
-            assertEquals("talos.write_file",
-                    body.path("tool_choice").path("function").path("name").asText());
+            assertTrue(body.path("tool_choice").isTextual(),
+                    "tool_choice must be a string; llama-server silently degrades objects to auto: "
+                            + body.path("tool_choice"));
+            assertEquals("required", body.path("tool_choice").asText(),
+                    "NAMED must serialize to the enforceable string form");
             assertEquals("json_schema", body.path("response_format").path("type").asText());
             assertEquals("object", body.path("response_format").path("schema").path("type").asText());
             assertTrue(body.path("response_format").path("schema").path("properties").has("path"));
