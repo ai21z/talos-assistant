@@ -25,7 +25,8 @@ record LlamaCppConfig(
         boolean jinja,
         String chatTemplate,
         String chatTemplateFile,
-        List<String> serverArgs
+        List<String> serverArgs,
+        boolean verificationLogging
 ) {
     static final int DEFAULT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
     static final int MIN_MANAGED_AGENT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
@@ -57,6 +58,10 @@ record LlamaCppConfig(
         String chatTemplate = stringAt(block, "chat_template", "");
         String chatTemplateFile = stringAt(block, "chat_template_file", "");
         List<String> serverArgs = CfgUtil.strList(block.get("server_args"));
+        // Programmatic marker set by verification runs (doctor --start, tune),
+        // never part of the user's config file; see LlamaCppVerificationLaunch.
+        boolean verificationLogging = CfgUtil.boolAt(
+                block, LlamaCppVerificationLaunch.KEY, false);
 
         return new LlamaCppConfig(
                 mode,
@@ -73,7 +78,8 @@ record LlamaCppConfig(
                 jinja,
                 chatTemplate,
                 chatTemplateFile,
-                serverArgs);
+                serverArgs,
+                verificationLogging);
     }
 
     boolean managed() {

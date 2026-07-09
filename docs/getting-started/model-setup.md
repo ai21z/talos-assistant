@@ -30,7 +30,7 @@ The current pinned Ubuntu/WSL x64 CPU lane uses the llama.cpp `b9860` release, a
 - Windows x64 (CUDA 12.4, NVIDIA driver 551.61+): `llama-b9918-bin-win-cuda-12.4-x64.zip` plus `cudart-llama-bin-win-cuda-12.4-x64.zip`
 - Windows x64 (CUDA 13.3, NVIDIA driver 580+): `llama-b9918-bin-win-cuda-13.3-x64.zip` plus `cudart-llama-bin-win-cuda-13.3-x64.zip`
 
-The setup wizard selects the Windows lane from detected NVIDIA driver evidence and falls back to CPU when no compatible driver is detected. GPU offload is verified by `talos doctor --start` from the server log, not assumed from the binary name.
+The setup wizard selects the Windows lane from detected NVIDIA driver evidence and falls back to CPU when no compatible driver is detected. `talos doctor --start` verifies that the managed server starts, answers a smoke prompt, and reports measured rates. GPU offload is verified by `talos tune` from the server log before it keeps a GPU-lane config, not assumed from the binary name.
 
 The first accepted model to try is Qwen. It is a large CPU model, not a low-resource default:
 

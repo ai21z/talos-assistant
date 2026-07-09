@@ -31,7 +31,7 @@ For a manual install, download and extract the matching archives somewhere you c
 C:\Users\<you>\Tools\llama-b9918\
 ```
 
-The server path should point to `llama-server.exe` inside the extracted folder. Whether GPU offload is actually active is verified by `talos doctor --start` from the server log, not assumed from the binary name.
+The server path should point to `llama-server.exe` inside the extracted folder. `talos doctor --start` verifies that the managed server starts, answers a smoke prompt, and reports measured rates. Whether GPU offload is actually active is verified by `talos tune` from the server log before it keeps a GPU-lane config, not assumed from the binary name.
 
 ## 3. Download Qwen
 

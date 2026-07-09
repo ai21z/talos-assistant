@@ -120,7 +120,73 @@ class LlamaCppServerManagerTest {
             List<String> command = launcher.commands.get(0);
             assertContainsPair(command, "--parallel", "1");
             assertContainsPair(command, "--predict", "2048");
+            // Privacy: ordinary managed sessions must not run at debug log
+            // verbosity - llama.cpp debug logs write prompt and workspace
+            // content into the plaintext server log. Debug verbosity is
+            // scoped to verification launches (doctor --start, tune).
+            assertFalse(command.contains("-lv"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+            assertFalse(command.contains("--verbosity"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+            assertFalse(command.contains("--log-verbosity"),
+                    "ordinary managed launches must not enable debug logging: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void verificationLaunchAddsDebugVerbosityForLogEvidence() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "verification_logging", true));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
             assertContainsPair(command, "-lv", "4");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void verificationLaunchStillHonorsUserVerbosityOverride() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "verification_logging", true,
+                    "server_args", List.of("-lv", "1")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-lv", "1");
+            assertFalse(containsPair(command, "-lv", "4"),
+                    "user-configured verbosity must win over the verification default: " + command);
         } finally {
             server.stop(0);
         }

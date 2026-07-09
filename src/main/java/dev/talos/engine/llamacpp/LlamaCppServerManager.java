@@ -29,7 +29,7 @@ final class LlamaCppServerManager implements AutoCloseable {
     private static final int LOG_EXCERPT_BYTES = 1600;
     private static final String DEFAULT_AGENT_PARALLEL = "1";
     private static final String DEFAULT_AGENT_PREDICT = "2048";
-    private static final String DEFAULT_LOG_VERBOSITY = "4";
+    private static final String VERIFICATION_LOG_VERBOSITY = "4";
     private static final List<String> PARALLEL_FLAGS = List.of("--parallel", "-np");
     private static final List<String> PREDICT_FLAGS = List.of("--predict", "--n-predict", "-n");
     private static final List<String> VERBOSITY_FLAGS = List.of("-lv", "--verbosity", "--log-verbosity");
@@ -149,7 +149,14 @@ final class LlamaCppServerManager implements AutoCloseable {
         }
         appendManagedAgentDefault(command, config.serverArgs(), PARALLEL_FLAGS, "--parallel", DEFAULT_AGENT_PARALLEL);
         appendManagedAgentDefault(command, config.serverArgs(), PREDICT_FLAGS, "--predict", DEFAULT_AGENT_PREDICT);
-        appendManagedAgentDefault(command, config.serverArgs(), VERBOSITY_FLAGS, "-lv", DEFAULT_LOG_VERBOSITY);
+        // Debug log verbosity is scoped to verification launches (doctor
+        // --start, tune): it puts the offload and rate evidence lines in the
+        // server log, but it also writes prompt and workspace content there,
+        // so ordinary sessions stay at llama.cpp's normal verbosity. A
+        // user-configured verbosity in server_args always wins.
+        if (config.verificationLogging()) {
+            appendManagedAgentDefault(command, config.serverArgs(), VERBOSITY_FLAGS, "-lv", VERIFICATION_LOG_VERBOSITY);
+        }
         command.addAll(config.serverArgs());
         return command;
     }

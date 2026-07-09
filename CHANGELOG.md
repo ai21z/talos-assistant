@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Ordinary managed llama.cpp sessions no longer run at debug log verbosity.
+  The previous default `-lv 4` wrote prompt and workspace content into the
+  plaintext server log on every session. Debug verbosity is now scoped to
+  verification launches: `talos doctor --start` (and `talos tune` through
+  it) marks its in-memory config so offload and rate evidence still lands
+  in the server log, ordinary launches stay at llama.cpp's normal
+  verbosity, and a user-configured verbosity in `server_args` always wins.
+  Evidence stays honest when verbosity is insufficient: doctor reports
+  rates as not measured and tune refuses to verify a GPU lane without
+  offload evidence. Docs corrected to match: `doctor --start` verifies
+  start, smoke, and rates, `talos tune` verifies GPU offload, and a docs
+  test now pins that attribution.
 - Tool-outcome evidence summaries now key on the canonical tool name, so
   accepted list_dir aliases ("ls", "list_dir", "list_directory") carry the
   same full directory evidence as "talos.list_dir" instead of collapsing
