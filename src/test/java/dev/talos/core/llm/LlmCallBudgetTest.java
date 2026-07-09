@@ -44,6 +44,7 @@ class LlmCallBudgetTest {
             LlmClient.StreamResult result = budget.run(
                     ref -> OK, 5_000L, null, "test", null);
             assertSame(OK, result);
+            assertFalse(result.aborted(), "a completed generation must not carry abort metadata");
         }
     }
 
@@ -65,6 +66,7 @@ class LlmCallBudgetTest {
             }, 150L, null, "test", null);
 
             assertNotNull(result);
+            assertTrue(result.aborted(), "wall-clock abort must carry abort metadata");
             assertTrue(result.text().contains("[turn aborted"),
                     "expected abort marker, got: " + result.text());
             assertTrue(result.text().contains("wall-clock"),
@@ -119,6 +121,7 @@ class LlmCallBudgetTest {
             }, 10_000L, lastChunkAt, "test", null);
 
             assertNotNull(result);
+            assertTrue(result.aborted(), "idle abort must carry abort metadata");
             assertTrue(result.text().contains("[turn aborted"),
                     "expected abort marker, got: " + result.text());
             assertTrue(result.text().contains("no tokens"),
@@ -154,6 +157,7 @@ class LlmCallBudgetTest {
             }, 10_000L, null, "test", breaker);
 
             assertNotNull(result);
+            assertTrue(result.aborted(), "repetition abort must carry abort metadata");
             assertTrue(result.text().contains("[turn aborted"),
                     "expected abort marker, got: " + result.text());
             assertTrue(result.text().contains("repetition loop"),

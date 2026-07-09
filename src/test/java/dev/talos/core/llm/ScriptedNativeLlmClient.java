@@ -111,6 +111,27 @@ public final class ScriptedNativeLlmClient {
         return new LlmClient(config, new CompatRecoveryResolver(recovery, followups));
     }
 
+    /**
+     * Client whose first generation emits {@code partialText} as a visible
+     * chunk and then fails with an external {@link EngineException.Transient}
+     * (connection reset mid-stream). LlmClient converts that shape into an
+     * aborted result carrying the partial text plus the trailing abort
+     * marker - the exact shape the abort-truth paths must recognize. Any
+     * later generation returns {@code "retry-output"} so a caller that
+     * wrongly re-generates after the abort is observable.
+     */
+    public static LlmClient transientAfterPartialOutput(String partialText) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        return new LlmClient(config, new TransientAfterPartialResolver(partialText));
+    }
+
     public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs) {
         Config config = new Config();
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
@@ -395,6 +416,54 @@ public final class ScriptedNativeLlmClient {
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
                     .onClose(() -> streamClosed.set(true));
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static final class TransientAfterPartialResolver implements LlmEngineResolver {
+        private final String partialText;
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        private TransientAfterPartialResolver(String partialText) {
+            this.partialText = partialText == null ? "" : partialText;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, false, false, 0);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            if (chatCalls.incrementAndGet() > 1) {
+                return Stream.of(TokenChunk.of("retry-output"), TokenChunk.eos());
+            }
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    throw new EngineException.Transient(
+                            "external stream dropped after visible output",
+                            new java.io.IOException("connection reset after partial output"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    return TokenChunk.of(partialText);
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
         }
 
         @Override

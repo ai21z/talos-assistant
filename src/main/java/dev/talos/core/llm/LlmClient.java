@@ -617,22 +617,33 @@ public final class LlmClient implements AutoCloseable {
      * Result of a structured streaming chat, carrying both assembled text
      * and any native tool calls returned by the model.
      *
-     * @param text      assembled prose text (sanitized, think-tags stripped)
-     * @param toolCalls native tool calls from the model (empty if none)
+     * @param text        assembled prose text (sanitized, think-tags stripped)
+     * @param toolCalls   native tool calls from the model (empty if none)
+     * @param finishReason provider finish reason ("" when not reported)
+     * @param abortReason why Talos aborted the generation ("" when it
+     *                    completed normally) - explicit metadata so
+     *                    consumers never have to re-derive the abort from
+     *                    the marker text
      */
     public record StreamResult(
             String text,
             List<ChatMessage.NativeToolCall> toolCalls,
-            String finishReason
+            String finishReason,
+            String abortReason
     ) {
         public StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls) {
-            this(text, toolCalls, "");
+            this(text, toolCalls, "", "");
+        }
+
+        public StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls, String finishReason) {
+            this(text, toolCalls, finishReason, "");
         }
 
         public StreamResult {
             text = text == null ? "" : text;
             toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
             finishReason = finishReason == null ? "" : finishReason.strip();
+            abortReason = abortReason == null ? "" : abortReason.strip();
         }
 
         /** Returns true if the model returned native tool calls. */
@@ -643,6 +654,16 @@ public final class LlmClient implements AutoCloseable {
         /** Returns true when the provider stopped because the requested output cap was reached. */
         public boolean outputLimitReached() {
             return "length".equalsIgnoreCase(finishReason);
+        }
+
+        /**
+         * True when Talos aborted the generation (wall-clock, idle
+         * watchdog, repetition breaker, interrupt, or transport loss after
+         * partial output) instead of the model completing it. Any text is
+         * at best a partial answer and must not be treated as authoritative.
+         */
+        public boolean aborted() {
+            return !abortReason.isEmpty();
         }
     }
 
@@ -1033,12 +1054,11 @@ public final class LlmClient implements AutoCloseable {
     }
 
     private static StreamResult abortedStreamResult(String partialText, String reason) {
-        String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + Objects.toString(reason, "generation aborted") + "]";
+        String abortReason = Objects.toString(reason, "generation aborted");
+        String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + abortReason + "]";
         String partial = Objects.toString(partialText, "");
-        if (partial.isBlank()) {
-            return new StreamResult(marker, List.of());
-        }
-        return new StreamResult(partial + System.lineSeparator() + marker, List.of());
+        String text = partial.isBlank() ? marker : partial + System.lineSeparator() + marker;
+        return new StreamResult(text, List.of(), "", abortReason);
     }
 
     private static boolean streamWasLocallyClosed(

@@ -117,7 +117,7 @@ final class LlmCallBudget implements AutoCloseable {
                         + "the same " + repetition.substringLen + "-character pattern repeated "
                         + repetition.maxRepeats + "+ times in the streamed output. "
                         + "Try a smaller model, rephrase the prompt, or clear session memory with /clear.]";
-                return new LlmClient.StreamResult(msg, List.of());
+                return new LlmClient.StreamResult(msg, List.of(), "", "repetition loop");
             }
             if (cause instanceof RuntimeException runtimeException) throw runtimeException;
             if (cause instanceof Error error) throw error;
@@ -126,7 +126,8 @@ final class LlmCallBudget implements AutoCloseable {
             closeActiveStream(activeStream);
             future.cancel(true);
             Thread.currentThread().interrupt();
-            return new LlmClient.StreamResult(UiChrome.TURN_ABORTED_PREFIX + ": interrupted]", List.of());
+            return new LlmClient.StreamResult(
+                    UiChrome.TURN_ABORTED_PREFIX + ": interrupted]", List.of(), "", "interrupted");
         } finally {
             if (watchdog != null) watchdog.cancel(false);
         }
@@ -192,14 +193,14 @@ final class LlmCallBudget implements AutoCloseable {
                 + (wallClockMs / 1000) + "s wall-clock budget - model is hung "
                 + "or producing tokens too slowly. Try a smaller model, a shorter prompt, "
                 + "or raise limits.llm_timeout_ms in config.]";
-        return new LlmClient.StreamResult(msg, List.of());
+        return new LlmClient.StreamResult(msg, List.of(), "", "wall-clock budget exceeded");
     }
 
     private static LlmClient.StreamResult idleAbort(String label, long idleMs) {
         String msg = UiChrome.TURN_ABORTED_PREFIX + ": " + label + " produced no tokens for "
                 + (idleMs / 1000) + "s - model appears wedged. "
                 + "Try a smaller model or raise limits.llm_idle_ms in config.]";
-        return new LlmClient.StreamResult(msg, List.of());
+        return new LlmClient.StreamResult(msg, List.of(), "", "idle timeout - no tokens");
     }
 
     static void closeActiveStream(AtomicReference<AutoCloseable> ref) {

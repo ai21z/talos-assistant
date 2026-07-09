@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- Abort truth on both provider paths: aborted generations now carry explicit
+  abort metadata on the LLM result, and abort detection is line-anchored
+  instead of a prefix check, so a transport loss after partial output (the
+  marker lands AFTER the partial text) can no longer pass as a normal
+  answer. The streaming path records the FAILED / LLM_ABORTED outcome and
+  emits the abort marker to the terminal (it previously stayed silent
+  because the marker was appended after the stream closed), the buffered
+  path keeps recording it, aborted partial output is excluded from
+  conversation history instead of being persisted with only the marker line
+  stripped, and the turn log tags aborted bodies "aborted" on both the
+  streamed and buffered result shapes so cross-session replay refuses them.
 - [T1000] Explicit inline-output phrases ("output only the code", "just show
   me the code", "answer inline", "do not create any files") now classify as
   chat codegen instead of auto-routing to a file write with an invented

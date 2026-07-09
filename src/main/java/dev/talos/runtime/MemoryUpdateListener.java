@@ -72,6 +72,11 @@ public final class MemoryUpdateListener implements SessionListener {
 
         String answer = extractText(result.result());
         if (answer != null && !answer.isBlank()) {
+            // Aborted generations are not conversational history. Checked on
+            // the raw text BEFORE chrome stripping: the stripper removes the
+            // marker line, which would leave the unfinished partial output
+            // to persist as a clean, authoritative-looking answer.
+            if (UiChrome.containsTurnAbortMarker(answer)) return;
             // BUG #1 fix - strip Talos's UI status chrome before persisting
             // to history. Otherwise the model sees its own previous turn
             // decorated with "[Used N tool(s)…]" and "✓ Edited X…" status

@@ -262,6 +262,17 @@ public final class AssistantTurnExecutor {
                             // warning still records the truncation).
                             out.append(resolution.answer());
                         }
+                    } else if (isAbortedGeneration(streamResult, answer)) {
+                        // Aborted generation on the streaming path. The partial
+                        // prose already reached the terminal but the abort
+                        // marker was appended to the result text after the
+                        // stream ended, so without an explicit emit the abort
+                        // is silent to the user. The partial must not be
+                        // shaped or ground-retried as if it were an answer.
+                        streamed = true;
+                        recordLlmAbortOutcome();
+                        emitStreamingAbortNotice(answer, ctx);
+                        out.append(answer);
                     } else {
                         // No tool calls - content was streamed; record full text for memory.
                         // Streaming no-tool branch. We cannot silently retry here
@@ -316,7 +327,7 @@ public final class AssistantTurnExecutor {
                         // Grounding retry gate: if the user explicitly asked for evidence
                         // / reading / inspection and the answer is long-and-confident,
                         // re-prompt once asking the model to answer from workspace evidence.
-                        if (isTurnAbortMarker(answer)) {
+                        if (isAbortedGeneration(streamResult, answer)) {
                             recordLlmAbortOutcome();
                             answer = withOutputLimitNotice(answer, streamResult, ctx, false);
                         } else {
@@ -464,9 +475,35 @@ public final class AssistantTurnExecutor {
         recordBackendFailureOutcome("LLM_ABORTED");
     }
 
-    private static boolean isTurnAbortMarker(String answer) {
-        if (answer == null) return false;
-        return answer.stripLeading().startsWith(UiChrome.TURN_ABORTED_PREFIX);
+    /**
+     * Aborted-generation discriminator: the {@link LlmClient.StreamResult}
+     * abort metadata is authoritative; the shared line-anchored marker scan
+     * backstops results that were reassembled from plain text and lost the
+     * metadata. A plain startsWith is NOT enough - a transport abort after
+     * partial output appends the marker AFTER the partial text.
+     */
+    private static boolean isAbortedGeneration(LlmClient.StreamResult result, String answer) {
+        if (result != null && result.aborted()) return true;
+        return UiChrome.containsTurnAbortMarker(answer);
+    }
+
+    /**
+     * Makes a streaming-path abort honestly visible. The abort marker is
+     * appended to the result text after the stream closed, so it never
+     * traveled through the stream sink; without this emit the user sees
+     * prose stop mid-sentence with no explanation while the transcript
+     * records an abort.
+     */
+    private static void emitStreamingAbortNotice(String answer, Context ctx) {
+        if (ctx == null || ctx.streamSink() == null) return;
+        String marker = UiChrome.turnAbortMarkerLine(answer);
+        if (marker.isEmpty()) {
+            marker = UiChrome.TURN_ABORTED_PREFIX + ": generation aborted]";
+        }
+        ctx.streamSink().accept("\n\n" + marker);
+        if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+            filter.flush();
+        }
     }
 
     private static String engineFailureClassification(EngineException ex) {

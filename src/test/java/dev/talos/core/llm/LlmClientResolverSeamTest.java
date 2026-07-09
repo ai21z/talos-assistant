@@ -123,7 +123,11 @@ final class LlmClientResolverSeamTest {
         assertEquals(1, resolver.chatCalls.get(),
                 "retry after visible output would duplicate the streamed prefix");
         assertEquals("prefix", emitted.toString());
+        assertTrue(result.aborted(),
+                "a transport abort after partial output must carry abort metadata");
         assertTrue(result.text().contains("[turn aborted"), result.text());
+        assertTrue(result.text().contains("prefix"),
+                "the partial output must be preserved in the aborted result");
         assertFalse(result.text().contains("retry-output"), result.text());
     }
 
@@ -191,6 +195,7 @@ final class LlmClientResolverSeamTest {
 
         assertTrue(result.outputLimitReached());
         assertEquals("length", result.finishReason());
+        assertFalse(result.aborted(), "a length-capped completion is not an abort");
     }
 
     @Test
