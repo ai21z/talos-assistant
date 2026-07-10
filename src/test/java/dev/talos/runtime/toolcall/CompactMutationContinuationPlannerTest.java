@@ -75,13 +75,13 @@ class CompactMutationContinuationPlannerTest {
 
         assertTrue(plan.isPresent(), "source-derived write should keep exact source evidence in compact frame");
         String prompt = prompt(plan.get().messages());
-        assertTrue(prompt.contains("[RequiredSourceEvidence]"), prompt);
+        // T1011: the evidence rides as user-role JSON data, referenced from
+        // the system frame.
+        assertTrue(prompt.contains("[CompactMutationData]"), prompt);
         assertTrue(prompt.contains("office-summary.md"), prompt);
-        assertTrue(prompt.contains("board-brief.md: include exact phrase `Board brief marker: ORBITAL-DECK-71.`"),
-                prompt);
-        assertTrue(prompt.contains("client-notes.md: include exact phrase `Client note marker: NEON-RESPONSE-44.`"),
-                prompt);
-        assertTrue(prompt.contains("[SourceEvidenceReadbacks]"), prompt);
+        assertTrue(prompt.contains("\"requiredEvidencePhrase\":\"Board brief marker: ORBITAL-DECK-71.\""), prompt);
+        assertTrue(prompt.contains("\"requiredEvidencePhrase\":\"Client note marker: NEON-RESPONSE-44.\""), prompt);
+        assertTrue(prompt.contains("requiredEvidencePhrase must contribute"), prompt);
     }
 
     @Test
@@ -103,7 +103,7 @@ class CompactMutationContinuationPlannerTest {
         assertTrue(plan.isPresent(), "similar sibling readback should stay available for target disambiguation");
         String prompt = prompt(plan.get().messages());
         assertTrue(prompt.contains("script.js and scripts.js are different target paths"), prompt);
-        assertTrue(prompt.contains("Path: script.js"), prompt);
+        assertTrue(prompt.contains("\"path\":\"script.js\""), prompt);
         assertTrue(prompt.contains("similar wrong target"), prompt);
         assertTrue(prompt.contains("Cross-file coherence checklist"), prompt);
     }

@@ -2340,15 +2340,13 @@ class ToolCallLoopTest {
             String compactPrompt = recorded.requests().getFirst().messages.stream()
                     .map(ChatMessage::content)
                     .reduce("", (left, right) -> left + "\n" + right);
-            assertTrue(compactPrompt.contains("[RequiredSourceEvidence]"), compactPrompt);
-            assertTrue(compactPrompt.contains("Each listed source must contribute at least one exact copied phrase"),
-                    compactPrompt);
-            assertTrue(compactPrompt.contains("[SourceEvidenceReadbacks]"), compactPrompt);
-            assertTrue(compactPrompt.contains("Path: board-brief.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("[CompactMutationData]"), compactPrompt);
+            assertTrue(compactPrompt.contains("requiredEvidencePhrase must contribute"), compactPrompt);
+            assertTrue(compactPrompt.contains("\"path\":\"board-brief.md\""), compactPrompt);
             assertTrue(compactPrompt.contains("ORBITAL-DECK-71"), compactPrompt);
-            assertTrue(compactPrompt.contains("Path: client-notes.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("\"path\":\"client-notes.md\""), compactPrompt);
             assertTrue(compactPrompt.contains("NEON-RESPONSE-44"), compactPrompt);
-            assertTrue(compactPrompt.contains("Path: revenue.csv"), compactPrompt);
+            assertTrue(compactPrompt.contains("\"path\":\"revenue.csv\""), compactPrompt);
             assertTrue(compactPrompt.contains("LASER-LEDGER-19"), compactPrompt);
             assertFalse(compactPrompt.contains("Older unrelated turn"), compactPrompt);
             assertFalse(compactPrompt.contains("Older unrelated answer"), compactPrompt);

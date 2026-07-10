@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+- [T1011] The workspace-data role separation is now project-wide. A full
+  census of every system-message construction found four remaining
+  mechanisms that granted workspace bytes system-role authority, and all
+  are closed: the compact source-evidence repair frames and the compact
+  mutation continuation now carry readbacks and required evidence phrases
+  as structurally encoded JSON data inside the user message (and never
+  inside tool schema descriptions, which providers render into the prompt
+  template); the base-prompt workspace manifest lists paths only and no
+  longer inlines a README excerpt (the model reads the README on demand);
+  project-memory file content rides in user role with its untrusted
+  framing; and workspace-derived static selector facts are validated to a
+  strict selector-shaped charset before entering a system frame. Role
+  placement and JSON encoding are containment, not proof, so the enforced
+  boundary stays structural and outside the model: contract-derived tool
+  surfaces and expected targets, pre-approval target validation,
+  permission policy, and the approval gate - pinned by tests that inject
+  instruction-shaped file content and assert no system-role carriage, no
+  approval card for an unauthorized target, and no mutation outside the
+  contract.
 - [T1013] Read evidence is now a typed, ordered ledger bound to the
   effective execution path. The flattened `tool:key=value;` signature maps
   are gone: their unescaped substring identity let a hedged alias key

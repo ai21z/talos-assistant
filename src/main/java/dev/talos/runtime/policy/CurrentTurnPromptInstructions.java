@@ -38,7 +38,10 @@ public final class CurrentTurnPromptInstructions {
                 break;
             }
         }
-        messages.add(insertAt, ChatMessage.system(rendered));
+        // T1011: project-memory files live in the workspace, so their
+        // content is untrusted data and rides in USER role right after the
+        // system prompt; the [ProjectMemory] framing travels with it.
+        messages.add(insertAt, ChatMessage.user(rendered));
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
@@ -242,8 +245,11 @@ public final class CurrentTurnPromptInstructions {
     }
 
     private static boolean isProjectMemoryInstruction(ChatMessage message) {
+        // Matches both the current user-role block and any legacy
+        // system-role block from a restored older session, so re-injection
+        // always replaces rather than duplicates.
         return message != null
-                && "system".equals(message.role())
+                && ("user".equals(message.role()) || "system".equals(message.role()))
                 && message.content() != null
                 && message.content().startsWith("[ProjectMemory]");
     }

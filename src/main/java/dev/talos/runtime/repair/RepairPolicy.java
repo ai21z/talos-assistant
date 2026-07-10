@@ -166,6 +166,10 @@ public final class RepairPolicy {
         if (selectorFacts == null || selectorFacts.isBlank()) {
             return instruction;
         }
+        selectorFacts = sanitizeSelectorFactLines(selectorFacts);
+        if (selectorFacts.isBlank()) {
+            return instruction;
+        }
         selectorFacts = compactSelectorFacts(selectorFacts);
         return instruction
                 + "\n\n[Current static selector facts]\n"
@@ -569,6 +573,55 @@ public final class RepairPolicy {
                 out.add(target);
             }
         }
+    }
+
+    /**
+     * T1011: selector facts are workspace-derived tokens riding in a
+     * system-role instruction, so every word must stay selector-shaped.
+     * A line carrying any word longer than 64 characters or containing
+     * characters outside the selector/path alphabet is dropped whole
+     * (fail closed per line); the verifier's own template words are plain
+     * English and always pass. This bounds the injection bandwidth of
+     * crafted class/id names to short identifier tokens.
+     */
+    static String sanitizeSelectorFactLines(String selectorFacts) {
+        if (selectorFacts == null || selectorFacts.isBlank()) return "";
+        StringBuilder out = new StringBuilder();
+        for (String line : selectorFacts.split("\\R")) {
+            if (selectorFactLineIsSafe(line)) {
+                appendLine(out, line.stripTrailing());
+            }
+        }
+        return out.toString().stripTrailing();
+    }
+
+    private static boolean selectorFactLineIsSafe(String line) {
+        for (String rawWord : line.strip().split("\\s+")) {
+            String word = stripSelectorWordPunctuation(rawWord);
+            if (word.isEmpty()) continue;
+            if (word.length() > 64) return false;
+            for (int i = 0; i < word.length(); i++) {
+                char c = word.charAt(i);
+                boolean allowed = Character.isLetterOrDigit(c)
+                        || c == '_' || c == '-' || c == '.' || c == '#' || c == '/';
+                if (!allowed) return false;
+            }
+        }
+        return true;
+    }
+
+    private static String stripSelectorWordPunctuation(String word) {
+        int start = 0;
+        int end = word.length();
+        while (start < end && isSelectorWordEdgeChar(word.charAt(start))) start++;
+        while (end > start && isSelectorWordEdgeChar(word.charAt(end - 1))) end--;
+        return word.substring(start, end);
+    }
+
+    private static boolean isSelectorWordEdgeChar(char c) {
+        return c == '`' || c == '\'' || c == '"' || c == '(' || c == ')' || c == '['
+                || c == ']' || c == ',' || c == ';' || c == ':' || c == '.' || c == '!'
+                || c == '?' || c == '<' || c == '>';
     }
 
     private static String compactSelectorFacts(String selectorFacts) {

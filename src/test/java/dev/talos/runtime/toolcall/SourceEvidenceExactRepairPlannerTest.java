@@ -52,17 +52,18 @@ class SourceEvidenceExactRepairPlannerTest {
 
         String schema = schemaFor(repair.tools(), "talos.write_file");
         assertTrue(schema.contains("\"enum\":[\"office-summary.md\"]"), schema);
-        assertTrue(schema.contains("Board brief marker: ORBITAL-DECK-71."), schema);
-        assertTrue(schema.contains("Client note marker: NEON-RESPONSE-44."), schema);
-        assertTrue(schema.contains("Revenue marker: LASER-LEDGER-19"), schema);
+        // T1011: workspace bytes never ride in the tool schema; the schema
+        // references the user-role data block instead.
+        assertTrue(schema.contains("[SourceEvidenceData]"), schema);
+        assertFalse(schema.contains("ORBITAL-DECK-71"), schema);
 
         String prompt = prompt(repair.messages());
         assertTrue(prompt.contains("[SourceEvidenceExactRepair] Target: office-summary.md"), prompt);
         assertTrue(prompt.contains("Previous write was rejected before approval"), prompt);
-        assertTrue(prompt.contains("Required exact source evidence phrases:"), prompt);
-        assertTrue(prompt.contains("board-brief.md: `Board brief marker: ORBITAL-DECK-71.`"), prompt);
-        assertTrue(prompt.contains("client-notes.md: `Client note marker: NEON-RESPONSE-44.`"), prompt);
-        assertTrue(prompt.contains("revenue.csv: `Revenue marker: LASER-LEDGER-19`"), prompt);
+        assertTrue(prompt.contains("[SourceEvidenceData]"), prompt);
+        assertTrue(prompt.contains("Board brief marker: ORBITAL-DECK-71."), prompt);
+        assertTrue(prompt.contains("Client note marker: NEON-RESPONSE-44."), prompt);
+        assertTrue(prompt.contains("Revenue marker: LASER-LEDGER-19"), prompt);
         assertTrue(prompt.contains(request), prompt);
         assertFalse(prompt.contains("Older unrelated source task"), prompt);
         assertFalse(prompt.contains("Stale prior source answer"), prompt);
