@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1019] Read-only top-level directory listings remain directory listings
+  when the system prompt mentions static-web files. Contextual static-web
+  inheritance now consumes only prior user and assistant task history and
+  cannot upgrade a non-mutating turn without typed mutation intent.
 - [T1018] Explicit blanket instructions not to open, read, inspect, search,
   list, check, or use workspace files, including coordinated denials such as
   `do not inspect or change any files`, now project one direct-answer-only

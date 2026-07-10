@@ -692,6 +692,63 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
+    void directoryListingWithSystemStaticWebVocabularyNeverRequiresMutation(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Qualification fixture\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('fixture');\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ListDirTool());
+        var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor, 3);
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
+                        "Top-level entries include README.md and script.js.")))
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(
+                "Static web guidance may mention index.html, styles.css, and script.js."));
+        messages.add(ChatMessage.user(
+                "List the top-level files and folders in this workspace. Do not modify anything."));
+
+        LocalTurnTraceCapture.begin(
+                "trc-directory-listing-no-mutation",
+                "sid",
+                1,
+                "2026-07-10T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                messages.getLast().content());
+        TurnAuditCapture.begin();
+        try {
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(TaskType.DIRECTORY_LISTING.name(), audit.policyTrace().taskType());
+            assertEquals(TaskType.DIRECTORY_LISTING.name(), trace.taskContract().type());
+            assertFalse(trace.taskContract().mutationRequested());
+            assertFalse(trace.taskContract().mutationAllowed());
+            assertTrue(output.text().contains("README.md"), output.text());
+            assertFalse(output.text().contains("Action obligation failed"), output.text());
+            assertFalse(output.text().contains("required write/edit tool calls"), output.text());
+            assertTrue(trace.events().stream().noneMatch(event ->
+                            "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                                    && "MUTATING_TOOL_REQUIRED".equals(event.data().get("obligation"))),
+                    trace.events().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void deicticApplyReplacesStaleNativeSurfaceAndCapabilityFrame(@TempDir Path workspace)
             throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Old title\n");

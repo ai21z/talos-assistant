@@ -1383,6 +1383,26 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void systemStaticWebVocabularyCannotUpgradeReadOnlyDirectoryListing() {
+        String request =
+                "List the top-level files and folders in this workspace. Do not modify anything.";
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(
+                "Static web guidance may mention index.html, styles.css, and script.js."));
+        messages.add(ChatMessage.user(request));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract userOnly = TaskContractResolver.fromUserRequest(request);
+
+        assertEquals(TaskType.DIRECTORY_LISTING, contract.type());
+        assertEquals(TaskType.DIRECTORY_LISTING, userOnly.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertFalse("contextual-static-web-follow-up".equals(contract.classificationReason()));
+    }
+
+    @Test
     void listOnlyWithNegativeContentTargetsBecomesDirectoryListingContract() {
         for (String input : List.of(
                 "List files only; do not show content from README.md or notes.md.",

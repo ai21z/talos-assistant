@@ -187,6 +187,10 @@ public final class TaskContractResolver {
                     + "|show\\s+me\\s+(?:the\\s+)?(?:files|folders|directories|items|entries)\\s*"
                     + "(?:here|in\\s+(?:this|the|current)\\s+(?:folder|directory|workspace|repo|repository))?"
                     + ")[\\s.!?]*$");
+    private static final Pattern TOP_LEVEL_DIRECTORY_LISTING = Pattern.compile(
+            "(?i)\\b(?:list|show(?:\\s+me)?)\\s+(?:the\\s+)?top[-\\s]+level\\s+"
+                    + "(?:files|folders|directories|items|entries)"
+                    + "(?:\\s+and\\s+(?:files|folders|directories|items|entries))?\\b");
 
     private static final Set<String> SIMPLE_LISTING_EXCLUSION_MARKERS = Set.of(
             "read", "explain", "summarize", "summary", "inspect", "diagnose",
@@ -1279,7 +1283,8 @@ public final class TaskContractResolver {
             return false;
         }
         return containsAny(lower, DIRECTORY_LIST_ONLY_MARKERS)
-                || containsAny(lower, NEGATIVE_CONTENT_MARKERS);
+                || containsAny(lower, NEGATIVE_CONTENT_MARKERS)
+                || TOP_LEVEL_DIRECTORY_LISTING.matcher(lower).find();
     }
 
     private static boolean asksForDirectoryListing(String lower) {
@@ -1289,6 +1294,7 @@ public final class TaskContractResolver {
                 || lower.contains("show the files")
                 || lower.contains("what files")
                 || lower.contains("which files")
+                || TOP_LEVEL_DIRECTORY_LISTING.matcher(lower).find()
                 || SIMPLE_DIRECTORY_LISTING.matcher(lower).matches();
     }
 
@@ -1413,6 +1419,8 @@ public final class TaskContractResolver {
     ) {
         if (contract == null
                 || !contract.expectedTargets().isEmpty()
+                || (!contract.mutationAllowed()
+                        && !MutationIntent.looksExplicitMutationRequest(latestUserRequest))
                 || !looksContextualStaticWebAssetFollowUp(latestUserRequest)
                 || !priorMessagesMentionStaticWebSurface(messages, latestUserRequest)) {
             return contract;
@@ -1496,6 +1504,9 @@ public final class TaskContractResolver {
         for (int i = 0; i < endExclusive; i++) {
             ChatMessage message = messages.get(i);
             if (message == null || message.content() == null || message.content().isBlank()) {
+                continue;
+            }
+            if (!"user".equals(message.role()) && !"assistant".equals(message.role())) {
                 continue;
             }
             String lower = message.content().toLowerCase(Locale.ROOT);
