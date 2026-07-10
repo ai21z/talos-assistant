@@ -200,6 +200,60 @@ class WriteFormatFidelityTest {
     }
 
     @Test
+    void lineEndingOnlyNormalizationPreservesBomAndTerminalNewline() throws Exception {
+        Path workspace = workspace();
+        byte[] originalText = "alpha\r\nbeta\r\n".getBytes(StandardCharsets.UTF_8);
+        byte[] original = new byte[originalText.length + 3];
+        original[0] = (byte) 0xEF;
+        original[1] = (byte) 0xBB;
+        original[2] = (byte) 0xBF;
+        System.arraycopy(originalText, 0, original, 3, originalText.length);
+        Files.write(workspace.resolve("notes.txt"), original);
+        String[] detail = {null};
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Normalize notes.txt line endings to LF. Preserve the text exactly.",
+                new ToolCall("talos.write_file",
+                        Map.of("path", "notes.txt", "content", "alpha\nbeta")),
+                detail);
+
+        assertTrue(result.success(), result.errorMessage());
+        byte[] written = Files.readAllBytes(workspace.resolve("notes.txt"));
+        assertArrayEquals(
+                new byte[] {
+                        (byte) 0xEF, (byte) 0xBB, (byte) 0xBF,
+                        'a', 'l', 'p', 'h', 'a', '\n',
+                        'b', 'e', 't', 'a', '\n'
+                },
+                written,
+                "an EOL-only request must preserve the existing BOM and terminal newline");
+        assertTrue(detail[0].contains("line endings: CRLF -> LF"), detail[0]);
+        assertFalse(detail[0].contains("BOM:"), detail[0]);
+        assertFalse(detail[0].contains("terminal newline:"), detail[0]);
+    }
+
+    @Test
+    void lineEndingOnlyNormalizationDoesNotAddTerminalNewline() throws Exception {
+        Path workspace = workspace();
+        Files.write(workspace.resolve("notes.txt"),
+                "alpha\r\nbeta".getBytes(StandardCharsets.UTF_8));
+        String[] detail = {null};
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Normalize notes.txt line endings to LF. Preserve the text exactly.",
+                new ToolCall("talos.write_file",
+                        Map.of("path", "notes.txt", "content", "alpha\nbeta\n")),
+                detail);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("alpha\nbeta", Files.readString(workspace.resolve("notes.txt")));
+        assertTrue(detail[0].contains("line endings: CRLF -> LF"), detail[0]);
+        assertFalse(detail[0].contains("terminal newline:"), detail[0]);
+    }
+
+    @Test
     void formatOnlyWriteMustNotRenderNoChanges() throws Exception {
         Path workspace = workspace();
         Files.write(workspace.resolve("dos.txt"), "one\r\ntwo\r\n".getBytes(StandardCharsets.UTF_8));

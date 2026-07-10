@@ -200,12 +200,28 @@ public final class WriteFormatPolicy {
         if (proposed == null || proposed.isEmpty()) {
             return Preservation.unchanged(call);
         }
-        if (normalizationExplicitlyRequested(userRequest)
-                || hasExactLiteralContractForPath(contract, relPath)) {
+        if (hasExactLiteralContractForPath(contract, relPath)) {
             return Preservation.unchanged(call);
         }
         byte[] existing = existingFileBytes(workspace, relPath);
         TextFormat format = detect(existing);
+        Eol requestedEol = requestedEol(userRequest);
+        if (normalizationExplicitlyRequested(userRequest)) {
+            if (requestedEol == null || !format.exists() || format.binary() || !format.validUtf8()) {
+                return Preservation.unchanged(call);
+            }
+            String preservedMetadata = preserveBomAndTerminalNewline(format, proposed, requestedEol);
+            if (preservedMetadata.equals(proposed)) {
+                return Preservation.unchanged(call);
+            }
+            Map<String, String> params = new LinkedHashMap<>(call.parameters());
+            params.put(contentKey, preservedMetadata);
+            return new Preservation(
+                    new ToolCall(call.toolName(), params),
+                    true,
+                    "unrequested BOM and terminal-newline metadata preserved for " + relPath
+                            + " while allowing explicit " + requestedEol + " normalization");
+        }
         if (!format.supportedUniformText()) {
             return Preservation.unchanged(call);
         }
@@ -295,13 +311,8 @@ public final class WriteFormatPolicy {
     /** Validates an explicit target EOL against the final proposed content. */
     public static String requestedLineEndingError(String userRequest, String finalContent) {
         if (!normalizationExplicitlyRequested(userRequest) || finalContent == null) return null;
-        var matcher = REQUESTED_EOL_TARGET.matcher(userRequest);
-        if (!matcher.find()) return null;
-        Eol requested = switch (matcher.group(1).toLowerCase(Locale.ROOT)) {
-            case "crlf", "windows" -> Eol.CRLF;
-            case "cr" -> Eol.CR;
-            default -> Eol.LF;
-        };
+        Eol requested = requestedEol(userRequest);
+        if (requested == null) return null;
         TextFormat proposed = detect(finalContent.getBytes(StandardCharsets.UTF_8));
         if (proposed.eol() == Eol.NONE || proposed.eol() == requested) return null;
         return "Proposed talos.write_file content does not use the requested " + requested
@@ -370,6 +381,57 @@ public final class WriteFormatPolicy {
             joined = joined + eol;
         }
         return format.bom() ? BOM + joined : joined;
+    }
+
+    private static String preserveBomAndTerminalNewline(
+            TextFormat existing,
+            String proposed,
+            Eol requestedEol
+    ) {
+        String out = proposed == null ? "" : proposed;
+        boolean proposedBom = !out.isEmpty() && out.charAt(0) == BOM;
+        if (existing.bom() && !proposedBom) {
+            out = BOM + out;
+        } else if (!existing.bom() && proposedBom) {
+            out = out.substring(1);
+        }
+
+        boolean proposedTerminal = endsWithNewline(out);
+        if (existing.terminalNewline() && !proposedTerminal) {
+            out = out + eolString(requestedEol);
+        } else if (!existing.terminalNewline() && proposedTerminal) {
+            out = removeTerminalNewlines(out);
+        }
+        return out;
+    }
+
+    private static String removeTerminalNewlines(String text) {
+        int end = text == null ? 0 : text.length();
+        while (end > 0) {
+            char last = text.charAt(end - 1);
+            if (last != '\n' && last != '\r') break;
+            end--;
+        }
+        return text == null ? "" : text.substring(0, end);
+    }
+
+    private static String eolString(Eol eol) {
+        return switch (eol) {
+            case CRLF -> "\r\n";
+            case CR -> "\r";
+            default -> "\n";
+        };
+    }
+
+    private static Eol requestedEol(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return null;
+        var matcher = REQUESTED_EOL_TARGET.matcher(userRequest);
+        if (!matcher.find()) return null;
+        return switch (matcher.group(1).toLowerCase(Locale.ROOT)) {
+            case "crlf", "windows" -> Eol.CRLF;
+            case "cr" -> Eol.CR;
+            default -> Eol.LF;
+        };
     }
 
     private static boolean endsWithNewline(String text) {

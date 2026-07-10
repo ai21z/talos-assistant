@@ -22,8 +22,9 @@
 - [T1012 follow-up] Existing-file write fidelity now closes the remaining
   review gaps. The format policy recognizes filename-first requests such as
   `Normalize notes.txt line endings to LF` without treating the extension dot
-  as a sentence boundary; explicit LF/CRLF/CR targets are checked against the
-  final proposed content before approval; unsupported non-UTF-8 encoding
+  as a sentence boundary; EOL-only requests preserve unrequested BOM and
+  terminal-newline state before approval; explicit LF/CRLF/CR targets are
+  checked against the final proposed content before approval; unsupported non-UTF-8 encoding
   targets fail closed; MIXED-to-MIXED separator redistribution is detected
   by ordered EOL position rather than counts alone and therefore forces an
   approval even under AUTO_ALLOW; and whole-file replacement of an existing
