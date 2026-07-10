@@ -3,7 +3,8 @@
 ## [Unreleased]
 
 - [T1018] Explicit blanket instructions not to open, read, inspect, search,
-  list, check, or use workspace files now project one direct-answer-only
+  list, check, or use workspace files, including coordinated denials such as
+  `do not inspect or change any files`, now project one direct-answer-only
   capability with no inspection obligation and no prompt-visible or runtime
   tools. Positive workspace requests and mixed scoped restrictions retain
   their intended access. A stale caller-provided tool surface is cleared for

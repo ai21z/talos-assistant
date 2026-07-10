@@ -107,13 +107,27 @@ public final class ConversationBoundaryPolicy {
     private static final String WORKSPACE_ACCESS_VERB =
             "(?:access(?:ing)?|open(?:ing)?|read(?:ing)?|inspect(?:ing)?|search(?:ing)?|"
                     + "list(?:ing)?|check(?:ing)?|use|using|scan(?:ning)?|grep(?:ping)?)";
+    private static final String WORKSPACE_MUTATION_VERB =
+            "(?:chang(?:e|ing)|modif(?:y|ying)|edit(?:ing)?|alter(?:ing)?|"
+                    + "writ(?:e|ing)|delet(?:e|ing)|creat(?:e|ing)|mutat(?:e|ing))";
+    private static final String WORKSPACE_DENIED_ACTION_VERB =
+            "(?:" + WORKSPACE_ACCESS_VERB + "|" + WORKSPACE_MUTATION_VERB + ")";
+    private static final String WORKSPACE_DENIED_ACTIONS_WITH_ACCESS =
+            "(?:"
+                    + WORKSPACE_ACCESS_VERB
+                    + "(?:\\s+(?:or|and)\\s+" + WORKSPACE_DENIED_ACTION_VERB + ")*"
+                    + "|"
+                    + WORKSPACE_MUTATION_VERB
+                    + "(?:\\s+(?:or|and)\\s+" + WORKSPACE_MUTATION_VERB + ")*"
+                    + "\\s+(?:or|and)\\s+" + WORKSPACE_ACCESS_VERB
+                    + "(?:\\s+(?:or|and)\\s+" + WORKSPACE_DENIED_ACTION_VERB + ")*"
+                    + ")";
     private static final String GENERIC_WORKSPACE_OBJECT =
             "(?:(?:workspace|repo|repository|codebase|project|folder|directory)"
                     + "(?:\\s+(?:files?|contents?))?|files?)";
     private static final Pattern BLANKET_NO_WORKSPACE_ACCESS = Pattern.compile(
             "\\b(?:do\\s+not|don't|dont|without)\\s+(?:please\\s+)?"
-                    + WORKSPACE_ACCESS_VERB
-                    + "(?:\\s+(?:or|and)\\s+" + WORKSPACE_ACCESS_VERB + ")*\\s+"
+                    + WORKSPACE_DENIED_ACTIONS_WITH_ACCESS + "\\s+"
                     + "(?:(?:any|all|my|our|your|the|this|these|those|local)\\s+)?"
                     + GENERIC_WORKSPACE_OBJECT + "\\b");
 

@@ -60,6 +60,8 @@ class ConversationBoundaryPolicyTest {
                 "Without opening files, explain what JSON usually contains.",
                 "Do not open any workspace files, answer from general knowledge.",
                 "Do not inspect my files, explain entropy.",
+                "Do not inspect or change any files. Tell me one question you would ask before editing this project.",
+                "Do not change or inspect any files. Tell me what you need before editing.",
                 "Without searching the repo, explain what a repository is.",
                 "Do not list repository files, explain what a file tree is.",
                 "Answer from general knowledge without using this workspace.")) {
@@ -74,6 +76,7 @@ class ConversationBoundaryPolicyTest {
                 "Open README.md and summarize it.",
                 "Read this workspace and explain it.",
                 "List the workspace files.",
+                "Show me how to make one, do not edit files.",
                 "Do not open secrets.env; read README.md.",
                 "Do not open any workspace files except README.md; summarize README.md.",
                 "Without opening config.json, read README.md.")) {
