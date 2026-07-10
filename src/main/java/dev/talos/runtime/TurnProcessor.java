@@ -935,6 +935,24 @@ public final class TurnProcessor {
                 return unsupportedDocumentValidation;
             }
 
+            String unsupportedEncodingError = WriteFormatPolicy
+                    .unsupportedEncodingDirectiveError(TurnUserRequestCapture.get());
+            if (unsupportedEncodingError != null) {
+                return ToolResult.fail(ToolError.unsupportedFormat(unsupportedEncodingError));
+            }
+
+            String requestedLineEndingError = WriteFormatPolicy
+                    .requestedLineEndingError(TurnUserRequestCapture.get(), content);
+            if (requestedLineEndingError != null) {
+                return ToolResult.fail(ToolError.invalidParams(requestedLineEndingError));
+            }
+
+            String oversizedReplacementError = WriteFormatPolicy
+                    .oversizedExistingFileReplacementError(session.workspace(), path);
+            if (oversizedReplacementError != null) {
+                return ToolResult.fail(ToolError.invalidParams(oversizedReplacementError));
+            }
+
             return null;
         }
 

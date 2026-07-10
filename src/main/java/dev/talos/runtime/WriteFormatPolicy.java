@@ -45,8 +45,9 @@ public final class WriteFormatPolicy {
 
     /**
      * Matches the diffable-file cap in {@code ApprovalDiffPreview} and
-     * {@code FileEditTool} (2 MiB). Existing files above it skip
-     * preservation and disclosure entirely, like the diff preview does.
+     * {@code FileEditTool} (2 MiB). Existing files above it cannot be
+     * safely reviewed as whole-file replacements and are rejected before
+     * approval by {@link #oversizedExistingFileReplacementError(Path, String)}.
      */
     private static final long MAX_EXISTING_FILE_BYTES = 2 * 1024 * 1024L;
     private static final int MAX_CHANGE_LINES = 4;
@@ -65,16 +66,26 @@ public final class WriteFormatPolicy {
      * DIRECT OBJECT is a format token, or the participle form.
      */
     private static final Pattern EXPLICIT_FORMAT_DIRECTIVE = Pattern.compile(
-            "(?is)\\b(?:normali[sz]e|convert)\\b[^.!?]{0,40}?"
+            "(?is)\\b(?:normali[sz]e|convert)\\b(?:(?![.!?](?:\\s|$)).){0,80}?"
                     + "\\b(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|lf|cr|"
                     + "byte[- ]?order[- ]?marks?|boms?|encoding)\\b"
                     + "|\\b(?:change|switch|set|strip|remove|drop|add|keep|use)\\b"
                     + "\\s+(?:(?:the|all|any|every)\\s+)*"
+                    + "(?:(?:crlf|lf|cr|unix|windows)\\s+)?"
                     + "(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|"
                     + "byte[- ]?order[- ]?marks?|boms?)\\b"
                     + "|\\b(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|"
-                    + "byte[- ]?order[- ]?marks?|boms?)\\b[^.!?]{0,30}?"
+                    + "byte[- ]?order[- ]?marks?|boms?)\\b(?:(?![.!?](?:\\s|$)).){0,60}?"
                     + "\\b(?:normali[sz]ed|converted|stripped|removed|changed)\\b");
+
+    private static final Pattern UNSUPPORTED_ENCODING_TARGET = Pattern.compile(
+            "(?i)\\b(?:encoding\\s*(?:to|as|:)\\s*|(?:to|as|into|use)\\s+)"
+                    + "(utf[- ]?(?:16|32)(?:le|be)?|utf[- ]?7|ascii|latin[- ]?1|"
+                    + "iso[- ]?8859(?:-\\d+)?|windows[- ]?1252)\\b");
+
+    private static final Pattern REQUESTED_EOL_TARGET = Pattern.compile(
+            "(?i)\\b(?:to|as|use)\\s+(crlf|lf|cr|unix|windows)"
+                    + "(?:\\s+line[- ]?endings?)?\\b");
 
     private WriteFormatPolicy() {}
 
@@ -250,9 +261,8 @@ public final class WriteFormatPolicy {
                 && !(existingFormat.eol() == Eol.NONE || proposedFormat.eol() == Eol.NONE)) {
             changes.add("line endings: " + describeEol(existingFormat) + " -> " + describeEol(proposedFormat));
         } else if (existingFormat.eol() == Eol.MIXED && proposedFormat.eol() == Eol.MIXED
-                && (existingFormat.crlfCount() != proposedFormat.crlfCount()
-                        || existingFormat.lfCount() != proposedFormat.lfCount()
-                        || existingFormat.crCount() != proposedFormat.crCount())) {
+                && !orderedEolSequence(new String(existing, StandardCharsets.UTF_8))
+                        .equals(orderedEolSequence(finalContent))) {
             changes.add("line endings: " + describeEol(existingFormat)
                     + " -> " + describeEol(proposedFormat) + " (redistributed)");
         }
@@ -270,6 +280,55 @@ public final class WriteFormatPolicy {
     /** True when the user's own request asks for a line-ending/encoding change. */
     public static boolean normalizationExplicitlyRequested(String userRequest) {
         return userRequest != null && EXPLICIT_FORMAT_DIRECTIVE.matcher(userRequest).find();
+    }
+
+    /** Returns a fail-closed diagnostic for encodings write_file cannot emit. */
+    public static String unsupportedEncodingDirectiveError(String userRequest) {
+        if (!normalizationExplicitlyRequested(userRequest)) return null;
+        var matcher = UNSUPPORTED_ENCODING_TARGET.matcher(userRequest);
+        if (!matcher.find()) return null;
+        return "Requested encoding `" + matcher.group(1)
+                + "` is not supported by talos.write_file. Talos writes UTF-8 text only. "
+                + "No approval was requested and no file was changed.";
+    }
+
+    /** Validates an explicit target EOL against the final proposed content. */
+    public static String requestedLineEndingError(String userRequest, String finalContent) {
+        if (!normalizationExplicitlyRequested(userRequest) || finalContent == null) return null;
+        var matcher = REQUESTED_EOL_TARGET.matcher(userRequest);
+        if (!matcher.find()) return null;
+        Eol requested = switch (matcher.group(1).toLowerCase(Locale.ROOT)) {
+            case "crlf", "windows" -> Eol.CRLF;
+            case "cr" -> Eol.CR;
+            default -> Eol.LF;
+        };
+        TextFormat proposed = detect(finalContent.getBytes(StandardCharsets.UTF_8));
+        if (proposed.eol() == Eol.NONE || proposed.eol() == requested) return null;
+        return "Proposed talos.write_file content does not use the requested " + requested
+                + " line endings; observed " + describeEol(proposed) + ". Retry with content "
+                + "that satisfies the explicit format request. No approval was requested and no file was changed.";
+    }
+
+    /**
+     * Rejects whole-file replacement when the existing file is too large
+     * for Talos to render or verify an informed diff.
+     */
+    public static String oversizedExistingFileReplacementError(Path workspace, String relPath) {
+        if (workspace == null || relPath == null || relPath.isBlank()) return null;
+        try {
+            Path root = workspace.normalize();
+            Path target = root.resolve(relPath.strip()).normalize();
+            if (!target.startsWith(root) || !Files.isRegularFile(target)) return null;
+            long size = Files.size(target);
+            if (size <= MAX_EXISTING_FILE_BYTES) return null;
+            return "Invalid talos.write_file call: existing target `" + relPath
+                    + "` is " + size + " bytes and exceeds the 2 MiB review limit for "
+                    + "whole-file replacement. Talos cannot show or verify an informed full diff; "
+                    + "use a local editor and ask Talos to inspect the result. "
+                    + "No approval was requested and no file was changed.";
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ── internals ────────────────────────────────────────────────────────
@@ -341,6 +400,26 @@ public final class WriteFormatPolicy {
             lines.add(current.toString());
         }
         return lines;
+    }
+
+    /** Exact ordered line-ending sequence; content characters are omitted. */
+    private static String orderedEolSequence(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sequence = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\r') {
+                if (i + 1 < text.length() && text.charAt(i + 1) == '\n') {
+                    sequence.append('W');
+                    i++;
+                } else {
+                    sequence.append('C');
+                }
+            } else if (c == '\n') {
+                sequence.append('L');
+            }
+        }
+        return sequence.toString();
     }
 
     private static boolean hasExactLiteralContractForPath(TaskContract contract, String relPath) {

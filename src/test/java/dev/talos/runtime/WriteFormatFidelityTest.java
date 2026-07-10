@@ -180,6 +180,26 @@ class WriteFormatFidelityTest {
     }
 
     @Test
+    void filenameFirstExplicitNormalizationRequestIsHonoredAndDisclosed() throws Exception {
+        Path workspace = workspace();
+        Files.write(workspace.resolve("notes.txt"), "l1\r\nl2\r\n".getBytes(StandardCharsets.UTF_8));
+        String proposed = "l1\nl2\n";
+        String[] detail = {null};
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Rewrite notes.txt and normalize notes.txt line endings to LF.",
+                new ToolCall("talos.write_file", Map.of("path", "notes.txt", "content", proposed)),
+                detail);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(proposed, Files.readString(workspace.resolve("notes.txt")),
+                "a dot in the target filename must not hide the explicit LF request");
+        assertTrue(detail[0].contains("Format changes:"), detail[0]);
+        assertTrue(detail[0].contains("CRLF -> LF"), detail[0]);
+    }
+
+    @Test
     void formatOnlyWriteMustNotRenderNoChanges() throws Exception {
         Path workspace = workspace();
         Files.write(workspace.resolve("dos.txt"), "one\r\ntwo\r\n".getBytes(StandardCharsets.UTF_8));
@@ -322,6 +342,171 @@ class WriteFormatFidelityTest {
         assertEquals(1, gateCalls[0],
                 "a write whose format changes remain undisclosed must reach the approval window "
                         + "even when the permission policy would auto-allow it");
+    }
+
+    @Test
+    void equalCountMixedEndingRedistributionForcesApprovalAndNamesTheChange() throws Exception {
+        Path workspace = workspace();
+        String original = "a\r\nb\nc";
+        String proposed = "a\nb\r\nc";
+        Files.write(workspace.resolve("mixed.txt"), original.getBytes(StandardCharsets.UTF_8));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        final int[] gateCalls = {0};
+        String[] detail = {null};
+        ApprovalGate gate = (desc, approvalDetail) -> {
+            gateCalls[0]++;
+            detail[0] = approvalDetail;
+            return true;
+        };
+        Config config = checkpointConfig();
+        config.data.put("permissions", Map.of("rules", java.util.List.of(Map.of(
+                "effect", "allow",
+                "tools", java.util.List.of("talos.write_file"),
+                "risks", java.util.List.of("WRITE"),
+                "phases", java.util.List.of(),
+                "paths", java.util.List.of(),
+                "reason", "auto-allow writes for this test"))));
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(temp.resolve("checkpoints"))));
+        TurnUserRequestCapture.set("Rewrite mixed.txt with the supplied whole-file content.");
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "mixed.txt", "content", proposed)),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, gateCalls[0],
+                "byte-different mixed-EOL redistribution must override AUTO_ALLOW");
+        assertNotNull(detail[0]);
+        assertTrue(detail[0].contains("Format changes:"), detail[0]);
+        assertTrue(detail[0].contains("redistributed"), detail[0]);
+        assertEquals(proposed, Files.readString(workspace.resolve("mixed.txt")));
+    }
+
+    @Test
+    void oversizedExistingWholeFileWriteIsRejectedBeforeApproval() throws Exception {
+        Path workspace = workspace();
+        byte[] original = new byte[(2 * 1024 * 1024) + 1];
+        java.util.Arrays.fill(original, (byte) 'x');
+        Path target = workspace.resolve("large.txt");
+        Files.write(target, original);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        final int[] gateCalls = {0};
+        Config config = checkpointConfig();
+        config.data.put("checkpoint", Map.of(
+                "enabled", true,
+                "fail_closed", true,
+                "max_file_bytes", 4_000_000,
+                "max_turn_bytes", 5_000_000));
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                (desc, detail) -> {
+                    gateCalls[0]++;
+                    return true;
+                },
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(temp.resolve("checkpoints"))));
+        TurnUserRequestCapture.set("Replace large.txt with the word reset.");
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file", Map.of("path", "large.txt", "content", "reset\n")),
+                context(workspace, config));
+
+        assertFalse(result.success(), "an unreviewable whole-file replacement must fail closed");
+        assertEquals(0, gateCalls[0], "unsupported replacement must stop before approval");
+        assertTrue(result.errorMessage().contains("exceeds the 2 MiB review limit"), result.errorMessage());
+        assertArrayEquals(original, Files.readAllBytes(target), "the oversized file must remain byte-identical");
+    }
+
+    @Test
+    void unsupportedEncodingTargetIsRejectedBeforeApproval() throws Exception {
+        Path workspace = workspace();
+        byte[] original = "alpha\nbeta\n".getBytes(StandardCharsets.UTF_8);
+        Path target = workspace.resolve("notes.txt");
+        Files.write(target, original);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        final int[] gateCalls = {0};
+        Config config = checkpointConfig();
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                (desc, detail) -> {
+                    gateCalls[0]++;
+                    return true;
+                },
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(temp.resolve("checkpoints"))));
+        TurnUserRequestCapture.set("Rewrite notes.txt and convert its encoding to UTF-16.");
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file",
+                        Map.of("path", "notes.txt", "content", "alpha\nbeta\n")),
+                context(workspace, config));
+
+        assertFalse(result.success(), "write_file cannot produce UTF-16 bytes from a String payload");
+        assertEquals(0, gateCalls[0], "an unsupported encoding request must stop before approval");
+        assertTrue(result.errorMessage().contains("UTF-16"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("not supported"), result.errorMessage());
+        assertArrayEquals(original, Files.readAllBytes(target));
+    }
+
+    @Test
+    void requestedLineEndingMustMatchTheProposedContentBeforeApproval() throws Exception {
+        Path workspace = workspace();
+        byte[] original = "alpha\r\nbeta\r\n".getBytes(StandardCharsets.UTF_8);
+        Path target = workspace.resolve("notes.txt");
+        Files.write(target, original);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        final int[] gateCalls = {0};
+        Config config = checkpointConfig();
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                (desc, detail) -> {
+                    gateCalls[0]++;
+                    return true;
+                },
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(temp.resolve("checkpoints"))));
+        TurnUserRequestCapture.set("Rewrite notes.txt and normalize notes.txt line endings to LF.");
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.write_file",
+                        Map.of("path", "notes.txt", "content", "alpha\r\nbeta\r\n")),
+                context(workspace, config));
+
+        assertFalse(result.success(), "a CRLF proposal cannot satisfy an explicit LF request");
+        assertEquals(0, gateCalls[0], "mismatched requested format must stop before approval");
+        assertTrue(result.errorMessage().contains("requested LF line endings"), result.errorMessage());
+        assertArrayEquals(original, Files.readAllBytes(target));
+    }
+
+    @Test
+    void commonExplicitLineEndingPhrasingsAreRecognized() {
+        assertAll(
+                () -> assertTrue(WriteFormatPolicy.normalizationExplicitlyRequested(
+                        "Normalize notes.txt line endings to LF.")),
+                () -> assertTrue(WriteFormatPolicy.normalizationExplicitlyRequested(
+                        "Convert notes.txt to CRLF line endings.")),
+                () -> assertTrue(WriteFormatPolicy.normalizationExplicitlyRequested(
+                        "Rewrite notes.txt to use LF line endings.")),
+                () -> assertTrue(WriteFormatPolicy.normalizationExplicitlyRequested(
+                        "Set the line endings to CRLF in notes.txt.")),
+                () -> assertFalse(WriteFormatPolicy.normalizationExplicitlyRequested(
+                        "Update the encoding section heading in notes.txt.")));
     }
 
     @Test

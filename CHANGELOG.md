@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- [T1012 follow-up] Existing-file write fidelity now closes the remaining
+  review gaps. The format policy recognizes filename-first requests such as
+  `Normalize notes.txt line endings to LF` without treating the extension dot
+  as a sentence boundary; explicit LF/CRLF/CR targets are checked against the
+  final proposed content before approval; unsupported non-UTF-8 encoding
+  targets fail closed; MIXED-to-MIXED separator redistribution is detected
+  by ordered EOL position rather than counts alone and therefore forces an
+  approval even under AUTO_ALLOW; and whole-file replacement of an existing
+  file above the 2 MiB review limit is refused before approval because Talos
+  cannot render an informed full diff for that mutation.
 - [T1012/T1013/T1011/T1014] Adversarial-review hardening on the trust
   batch: files with no line-ending evidence (empty, BOM-only,
   single-line) are never re-joined to a fabricated style and a
