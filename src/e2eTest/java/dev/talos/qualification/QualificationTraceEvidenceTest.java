@@ -70,6 +70,12 @@ class QualificationTraceEvidenceTest {
                 "schemaVersion", 2,
                 "traceId", "trace-test",
                 "model", Map.of("backend", "llama_cpp", "model", "qwen14-runtime"),
+                "taskContract", Map.of(
+                        "type", "FILE_EDIT", "mutationAllowed", true, "verificationRequired", true),
+                "promptAudit", Map.of(
+                        "taskType", "FILE_EDIT",
+                        "mutationAllowed", true,
+                        "actionObligation", "MUTATING_TOOL_REQUIRED"),
                 "events", events,
                 "verification", Map.of("status", "PASSED"),
                 "outcome", Map.of("status", "COMPLETE", "classification", "COMPLETED_VERIFIED")));

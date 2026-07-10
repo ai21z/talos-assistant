@@ -232,6 +232,28 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void readOnlyScenarioWithMutationCapableTraceContractFailsClosed() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path trace = packet.runRoot().resolve("trace.json");
+        String content = Files.readString(trace, StandardCharsets.UTF_8)
+                .replace("\"type\" : \"READ_ONLY_QA\"", "\"type\" : \"FILE_EDIT\"")
+                .replace("\"taskType\" : \"READ_ONLY_QA\"", "\"taskType\" : \"FILE_EDIT\"")
+                .replace("\"mutationAllowed\" : false", "\"mutationAllowed\" : true")
+                .replace("\"actionObligation\" : \"DIRECT_ANSWER_ONLY\"",
+                        "\"actionObligation\" : \"MUTATING_TOOL_REQUIRED\"");
+        Files.writeString(trace, content, StandardCharsets.UTF_8);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("scenario/trace authority mismatch")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
     void changedFileOutsideScenarioTargetsFailsClosed() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);

@@ -102,6 +102,10 @@ final class QualificationTestPacket {
                 "model", java.util.Map.of("backend", "llama_cpp", "model", "qwen14-runtime"),
                 "taskContract", java.util.Map.of(
                         "type", "READ_ONLY_QA", "mutationAllowed", false, "verificationRequired", false),
+                "promptAudit", java.util.Map.of(
+                        "taskType", "READ_ONLY_QA",
+                        "mutationAllowed", false,
+                        "actionObligation", "DIRECT_ANSWER_ONLY"),
                 "events", List.of(java.util.Map.of(
                         "type", "OUTCOME_RENDERED", "timestamp", "2026-07-10T00:00:01Z",
                         "phase", "", "toolName", "",

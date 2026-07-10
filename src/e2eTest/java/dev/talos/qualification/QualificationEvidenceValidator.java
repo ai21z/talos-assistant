@@ -251,6 +251,12 @@ final class QualificationEvidenceValidator {
             }
             QualificationTraceEvidence.Facts trace =
                     QualificationTraceEvidence.read(runRoot.resolve("trace.json"), scenario);
+            QualificationAuthorityPolicy.mismatch(
+                            scenario,
+                            trace.taskType(),
+                            trace.mutationAllowed(),
+                            trace.actionObligation())
+                    .ifPresent(finding -> findings.add(finding + ": " + runRoot));
             QualificationRecords.TimingEvidence timings = QualificationJson.read(
                     runRoot.resolve("timings.json"), QualificationRecords.TimingEvidence.class);
             QualificationRecords.ResourceEvidence resources = QualificationJson.read(

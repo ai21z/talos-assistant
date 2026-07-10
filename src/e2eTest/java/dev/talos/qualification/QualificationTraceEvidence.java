@@ -26,6 +26,9 @@ final class QualificationTraceEvidence {
     record Facts(
             String traceId,
             String modelId,
+            String taskType,
+            boolean mutationAllowed,
+            String actionObligation,
             String terminalState,
             String outcomeStatus,
             String verificationStatus,
@@ -54,6 +57,21 @@ final class QualificationTraceEvidence {
         }
         String traceId = required(root.path("traceId").asText(""), "traceId");
         String modelId = required(root.path("model").path("model").asText(""), "trace model id");
+        JsonNode taskContract = requiredObject(root.path("taskContract"), "trace taskContract");
+        String taskType = required(taskContract.path("type").asText(""), "trace task type");
+        boolean mutationAllowed = requiredBoolean(
+                taskContract.path("mutationAllowed"), "trace taskContract mutationAllowed");
+        JsonNode promptAudit = requiredObject(root.path("promptAudit"), "trace promptAudit");
+        String promptTaskType = required(
+                promptAudit.path("taskType").asText(""), "trace promptAudit task type");
+        boolean promptMutationAllowed = requiredBoolean(
+                promptAudit.path("mutationAllowed"), "trace promptAudit mutationAllowed");
+        String actionObligation = required(
+                promptAudit.path("actionObligation").asText(""), "trace action obligation");
+        if (!taskType.equals(promptTaskType) || mutationAllowed != promptMutationAllowed) {
+            throw new IllegalArgumentException(
+                    "trace taskContract and promptAudit authority disagree");
+        }
         String terminalState = required(root.path("outcome").path("classification").asText(""),
                 "trace outcome classification");
         String outcomeStatus = required(root.path("outcome").path("status").asText(""),
@@ -96,7 +114,8 @@ final class QualificationTraceEvidence {
                         expectedTools.contains(call.toolName)
                                 || (mutationLike && MUTATION_INSPECTION_AUXILIARIES.contains(call.toolName))))
                 .toList();
-        return new Facts(traceId, modelId, terminalState, outcomeStatus, verificationStatus,
+        return new Facts(traceId, modelId, taskType, mutationAllowed, actionObligation,
+                terminalState, outcomeStatus, verificationStatus,
                 frozenCalls, decisions(scenario, frozenCalls), approvalGranted, approvalDenied);
     }
 
@@ -144,6 +163,20 @@ final class QualificationTraceEvidence {
     private static String required(String value, String label) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(label + " is missing");
         return value;
+    }
+
+    private static JsonNode requiredObject(JsonNode value, String label) {
+        if (value == null || !value.isObject()) {
+            throw new IllegalArgumentException(label + " is missing or invalid");
+        }
+        return value;
+    }
+
+    private static boolean requiredBoolean(JsonNode value, String label) {
+        if (value == null || !value.isBoolean()) {
+            throw new IllegalArgumentException(label + " is missing or invalid");
+        }
+        return value.booleanValue();
     }
 
     private static final class MutableCall {

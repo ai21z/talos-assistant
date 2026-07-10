@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1020] Model-qualification validation now derives task authority from
+  `trace.json` and rejects disagreement between the frozen scenario category,
+  the traced task contract, and the prompt action obligation. Read-only runs
+  cannot be scored as model failures when Talos granted mutation authority,
+  and mutation, repair, denial, and interruption runs must retain the
+  mutation authority required by their frozen scenarios.
 - [T1019] Read-only top-level directory listings remain directory listings
   when the system prompt mentions static-web files. Contextual static-web
   inheritance now consumes only prior user and assistant task history and
