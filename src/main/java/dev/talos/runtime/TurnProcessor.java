@@ -412,6 +412,22 @@ public final class TurnProcessor {
             }
             call = pathNormalization.call();
         }
+        // Byte-faithful existing-file writes (T1012): re-apply the target's
+        // BOM, line-ending style, and terminal-newline state to the proposed
+        // content BEFORE pre-approval validation, the approval preview,
+        // checkpoint capture, and execution, so the exact bytes approved are
+        // the exact bytes written. Runs after every other content rewrite
+        // (sanitizer, exact-literal corrector); idempotent by construction.
+        WriteFormatPolicy.Preservation formatPreservation =
+                WriteFormatPolicy.preserveWriteCall(session.workspace(), call, taskContract, userRequest);
+        if (formatPreservation.changed()) {
+            LocalTurnTraceCapture.recordActionObligation(
+                    "WRITE_FORMAT_PRESERVATION",
+                    "REPAIRED",
+                    formatPreservation.description(),
+                    "WRITE_FORMAT_PRESERVED_BEFORE_APPROVAL");
+            call = formatPreservation.call();
+        }
         String path = resolvePathParam(call);
 
         if (taskContract.type() == TaskType.DIRECTORY_LISTING && !isListDirTool(call.toolName())) {
@@ -1563,6 +1579,21 @@ public final class TurnProcessor {
             if (!diffPreview.text().isEmpty()) {
                 for (String line : diffPreview.text().split("\n", -1)) {
                     sb.append("\n    ").append(line);
+                }
+            }
+        }
+
+        // Format-change disclosure (T1012): any BOM, line-ending, or
+        // terminal-newline difference that remains after format
+        // preservation is a material byte change the line diff cannot
+        // show, so it must be visible before approval.
+        if (isWriteFileTool(call.toolName()) && content != null && path != null && !path.isBlank()) {
+            List<String> formatChanges =
+                    WriteFormatPolicy.remainingFormatChanges(workspace, path, content);
+            if (!formatChanges.isEmpty()) {
+                sb.append("\n    Format changes:");
+                for (String change : formatChanges) {
+                    sb.append("\n      ").append(sanitizeApprovalText(change));
                 }
             }
         }

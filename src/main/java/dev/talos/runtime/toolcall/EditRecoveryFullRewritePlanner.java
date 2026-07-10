@@ -95,17 +95,20 @@ final class EditRecoveryFullRewritePlanner {
 
     /**
      * The safe recovery source for a target, or null to refuse. This is the
-     * single content owner for both planning eligibility and the recovery
-     * prompt readback, so the instruction can never reference content the
-     * gates did not clear: the effective path must classify inside the
-     * workspace and non-protected, the same-turn read must be free of
-     * redaction sentinels, the content must come from a complete (unranged,
-     * untruncated, unambiguous) read under the size cap, and the current
-     * disk content must still agree with that read (workspace commands and
-     * external editors are not tracked by the read-cache accounting). The
-     * returned body is the exact disk bytes, because the line-numbered
-     * reconstruction cannot represent CRLF endings or a missing terminal
-     * newline and the injected readback claims to be the current content.
+     * eligibility gate for the recovery: the effective path must classify
+     * inside the workspace and non-protected, the same-turn read must be
+     * free of redaction sentinels, the content must come from a complete
+     * (unranged, untruncated, unambiguous) read under the size cap, and the
+     * current disk content must still agree with that read (workspace
+     * commands and external editors are not tracked by the read-cache
+     * accounting). The returned exact disk bytes are consumed as a non-null
+     * signal only; the model-visible content carrier is the line-numbered
+     * read_file tool result the overlay references, which is LF-normalized
+     * with a forced terminal newline. The write pipeline's format
+     * preservation (WriteFormatPolicy, T1012) restores the target's real
+     * line endings, BOM, and terminal-newline state before approval, so a
+     * recovery rewrite echoed from the normalized carrier still lands
+     * byte-faithfully.
      */
     static String recoverySourceBody(LoopState state, String path) {
         if (state == null || path == null || path.isBlank()) return null;

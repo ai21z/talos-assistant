@@ -60,9 +60,13 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
      * the failure persists.
      *
      * <p>Role separation: the temporary system message carries ONLY the
-     * recovery instruction. The file bytes stay in the real talos.read_file
-     * tool result, which is the lower-trust data carrier the model already
-     * grounds on. When tool-result compaction has summarized that result,
+     * recovery instruction. The file content stays in the real
+     * talos.read_file tool result, the lower-trust data carrier the model
+     * already grounds on. That carrier is the line-numbered LF-normalized
+     * read rendering, not raw disk bytes; the write pipeline's format
+     * preservation (WriteFormatPolicy, T1012) restores the target's real
+     * byte format before approval when the model echoes it back. When
+     * tool-result compaction has summarized that result,
      * its original content is temporarily restored into the same message
      * (same id, same position) for this request and re-compacted on
      * close(), so no readback persists in post-turn history and workspace

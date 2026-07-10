@@ -78,7 +78,16 @@ public final class ApprovalDiffPreview {
                 return new Preview("", lineCount(newContent), 0, 0, false, "", "new file");
             }
             String existing = readDiffableContent(target);
-            return render(existing, newContent == null ? "" : newContent);
+            String proposed = newContent == null ? "" : newContent;
+            Preview preview = render(existing, proposed);
+            // T1012: identical visible lines with different bytes means the
+            // change is format metadata (BOM, line endings, terminal
+            // newline). "no changes" would be untrue for such a write.
+            if ("no changes".equals(preview.note()) && !existing.equals(proposed)) {
+                return new Preview("", 0, 0, 0, false, "",
+                        "no visible line changes; format metadata differs (see Format changes)");
+            }
+            return preview;
         } catch (SkipException e) {
             return Preview.skippedBecause(e.reason);
         } catch (Exception e) {

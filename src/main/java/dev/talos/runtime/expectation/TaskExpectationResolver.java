@@ -288,13 +288,17 @@ public final class TaskExpectationResolver {
             return null;
         }
         String quoted = Pattern.quote(normalizedTarget);
+        // Natural quantifier forms (T1012): "exactly" composes with every
+        // line noun, so "append exactly the line X to FILE" (the live
+        // reproduction phrasing) resolves like "append the line X to FILE".
+        String lineNoun = "(?:exactly\\s+)?(?:this\\s+line|the\\s+line|one\\s+line|line)";
         Pattern appendLineAfterTarget = Pattern.compile(
-                "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|line)"
+                "(?is)\\bappend\\s+" + lineNoun
                         + "\\s+to\\s+`?" + quoted + "`?\\s*:\\s*(.+)");
         Matcher matcher = appendLineAfterTarget.matcher(request);
         if (!matcher.find()) {
             Pattern appendLineBeforeTarget = Pattern.compile(
-                    "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|the\\s+line|line)"
+                    "(?is)\\bappend\\s+" + lineNoun
                             + "\\s+(.+?)\\s+to\\s+`?" + quoted + "`?"
                             + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
             matcher = appendLineBeforeTarget.matcher(request);

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- [T1012] Approved existing-file writes are now byte-faithful and approvals
+  are format-honest. A whole-file write derived from the LF-normalized read
+  surface is re-joined to the existing file's format (uniform line-ending
+  style, terminal-newline state, UTF-8 BOM) before pre-approval validation,
+  the approval preview, checkpoint capture, and execution, so the exact
+  bytes approved are the exact bytes written. Mixed-ending sources,
+  malformed encodings, explicit user-requested normalization, and
+  exact-literal write contracts are never silently transformed; any format
+  change that remains is rendered in a bounded "Format changes:" section of
+  the approval window, and a byte-different write whose visible lines match
+  no longer renders as "no changes". Exact append requests now recognize
+  the natural "append exactly the line X to FILE" phrasing and steer to a
+  byte-preserving edit derived from the current disk bytes, which also
+  covers files without a terminal newline and refuses stale read evidence.
 - [T1011] Workspace file bytes no longer occupy system-role messages on
   either readback path. System messages carry policy and recovery
   instructions only. The invalid-edit recovery references the real

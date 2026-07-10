@@ -349,19 +349,34 @@ class JsonScenarioPackTest {
 
         try (var result = ScenarioRunner.run(loaded.definition())) {
             // T755: the raw emission carries trailing markdown commentary.
-            // The approval window must describe the sanitized payload
-            // (40 bytes / 2 lines - the raw payload is 89 bytes / 6 lines),
-            // and the written file must equal those approved bytes exactly.
+            // The approval window must describe the sanitized payload (the
+            // raw payload is 89 bytes / 6 lines), and the written file must
+            // equal those approved bytes exactly. The byte count is derived
+            // from the written file rather than pinned literally because
+            // format preservation (T1012) re-joins the sanitized payload to
+            // the existing fixture's checkout-dependent line-ending style.
             // The trace-level hash equality (TOOL_CONTENT_SANITIZED.afterHash
             // == APPROVAL_REQUIRED.contentHash) is pinned in TurnProcessorTest.
             result.assertUsedTool("talos.write_file")
                     .assertNoFailedCalls()
                     .assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnyApprovalDetailContains("(40 bytes, 2 lines)")
                     .assertAnyApprovalDetailContains("diff (+")
                     .assertFileContains("style.css", "background: #222")
                     .assertFileNotContains("style.css", "## Summary")
                     .assertFileNotContains("style.css", "```");
+            long writtenBytes;
+            try {
+                writtenBytes = java.nio.file.Files.size(result.workspace().resolve("style.css"));
+            } catch (java.io.IOException e) {
+                throw new AssertionError("Scenario 'trailing markdown commentary stripped before approval': "
+                        + "could not size the written file", e);
+            }
+            if (writtenBytes >= 89) {
+                throw new AssertionError("Scenario 'trailing markdown commentary stripped before approval': "
+                        + "expected the sanitized payload to be smaller than the raw 89-byte emission, "
+                        + "but style.css is " + writtenBytes + " bytes");
+            }
+            result.assertAnyApprovalDetailContains("(" + writtenBytes + " bytes, 2 lines)");
         }
     }
 

@@ -468,6 +468,12 @@ final class ToolCallPreExecutionGuardChain {
             return Result.blocked(effective, pathContext, failures, false);
         }
 
+        // Byte-faithful existing-file writes (T1012) run inside
+        // TurnProcessor.executeTool, AFTER the markdown-commentary
+        // sanitizer and the exact-literal corrector: preserving format
+        // before sanitization would treat trailing commentary as file
+        // lines and distort the sanitized payload (scenario 88 pins the
+        // sanitize-once approved-bytes == written-bytes invariant).
         return Result.allowed(effective, pathContext);
     }
 
