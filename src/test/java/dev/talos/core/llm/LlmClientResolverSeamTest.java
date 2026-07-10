@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Spliterators;
 import java.util.concurrent.CountDownLatch;
@@ -129,6 +130,57 @@ final class LlmClientResolverSeamTest {
         assertTrue(result.text().contains("prefix"),
                 "the partial output must be preserved in the aborted result");
         assertFalse(result.text().contains("retry-output"), result.text());
+    }
+
+    @Test
+    void user_cancel_before_native_tool_chunk_returns_abort_without_tool_or_retry() {
+        NativeToolThenRetryResolver resolver = new NativeToolThenRetryResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        AtomicBoolean cancelled = new AtomicBoolean(true);
+        client.setCancelSupplier(cancelled::get);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("create interrupted.txt")),
+                5_000L,
+                writeToolSpecs(),
+                cappedRequiredControls(1024));
+
+        assertTrue(result.aborted(), "observed user cancellation must be a terminal abort");
+        assertTrue(result.text().contains("interrupted"), result.text());
+        assertTrue(result.toolCalls().isEmpty(), "cancelled tool calls must never reach approval");
+        assertEquals(1, resolver.chatCalls.get(),
+                "user cancellation must not start a retry or obligation generation");
+    }
+
+    @Test
+    void user_cancel_closes_no_chunk_stream_before_wall_clock_budget() throws Exception {
+        CancelableNoChunkResolver resolver = new CancelableNoChunkResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        client.setCancelSupplier(cancelled::get);
+        Thread cancelThread = Thread.ofPlatform().start(() -> {
+            try {
+                assertTrue(resolver.started.await(2, TimeUnit.SECONDS), "stream did not start");
+                cancelled.set(true);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        long startedAt = System.nanoTime();
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("wait for a slow model")),
+                5_000L,
+                List.of());
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+        cancelThread.join(2_000L);
+
+        assertTrue(result.aborted(), result.text());
+        assertTrue(result.text().contains("interrupted"), result.text());
+        assertTrue(elapsedMillis < 2_000L,
+                "cancel must not wait for the 5s wall-clock budget; elapsed=" + elapsedMillis);
+        assertTrue(resolver.streamClosed.get(), "cancel watchdog must close the active stream");
+        assertEquals(1, resolver.chatCalls.get(), "cancelled request must not retry");
     }
 
     @Test
@@ -422,6 +474,76 @@ final class LlmClientResolverSeamTest {
             this.requests.add(request);
             chatCalls.incrementAndGet();
             return Stream.of(TokenChunk.of("reply"), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class NativeToolThenRetryResolver implements LlmEngineResolver {
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            if (chatCalls.incrementAndGet() > 1) {
+                return Stream.of(TokenChunk.of("retry-output"), TokenChunk.eos());
+            }
+            return Stream.of(
+                    TokenChunk.ofToolCalls(List.of(new ChatMessage.NativeToolCall(
+                            "call-1",
+                            "talos.write_file",
+                            Map.of("path", "interrupted.txt", "content", "unfinished")))),
+                    TokenChunk.eos("tool_calls"));
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class CancelableNoChunkResolver implements LlmEngineResolver {
+        private final CountDownLatch started = new CountDownLatch(1);
+        private final AtomicBoolean streamClosed = new AtomicBoolean();
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            chatCalls.incrementAndGet();
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    started.countDown();
+                    while (!streamClosed.get()) {
+                        try {
+                            Thread.sleep(10L);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return false;
+                        }
+                    }
+                    return false;
+                }
+
+                @Override
+                public TokenChunk next() {
+                    throw new NoSuchElementException();
+                }
+            };
+            return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
+                    .onClose(() -> streamClosed.set(true));
         }
 
         @Override

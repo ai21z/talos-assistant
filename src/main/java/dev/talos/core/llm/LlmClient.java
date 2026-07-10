@@ -778,7 +778,8 @@ public final class LlmClient implements AutoCloseable {
                 wallClockMs,
                 lastChunkAt,
                 "streaming chat",
-                breaker);
+                breaker,
+                cancel);
     }
 
     /**
@@ -851,7 +852,8 @@ public final class LlmClient implements AutoCloseable {
                 wallClockMs,
                 lastChunkAt,
                 "non-streaming chat",
-                breaker);
+                breaker,
+                cancel);
     }
 
     /**
@@ -1020,8 +1022,13 @@ public final class LlmClient implements AutoCloseable {
             boolean visibleOutputEmitted = false;
             String finishReason = "";
             try {
+                if (isCancelled(cancelled)) {
+                    return abortedStreamResult("", "interrupted");
+                }
                 for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
-                    if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
+                    if (isCancelled(cancelled)) {
+                        return abortedStreamResult(acc.toString(), "interrupted");
+                    }
                     if (ch == null) break;
                     if (Boolean.TRUE.equals(ch.done())) {
                         finishReason = Objects.toString(ch.finishReason(), "").strip();
@@ -1076,12 +1083,16 @@ public final class LlmClient implements AutoCloseable {
         }
     }
 
-    private static StreamResult abortedStreamResult(String partialText, String reason) {
+    static StreamResult abortedStreamResult(String partialText, String reason) {
         String abortReason = Objects.toString(reason, "generation aborted");
         String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + abortReason + "]";
         String partial = Objects.toString(partialText, "");
         String text = partial.isBlank() ? marker : partial + System.lineSeparator() + marker;
         return new StreamResult(text, List.of(), "", abortReason);
+    }
+
+    private static boolean isCancelled(Supplier<Boolean> cancelled) {
+        return cancelled != null && Boolean.TRUE.equals(cancelled.get());
     }
 
     private static boolean streamWasLocallyClosed(

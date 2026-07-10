@@ -13,6 +13,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 final class LlmCallBudget implements AutoCloseable {
 
@@ -39,6 +40,15 @@ final class LlmCallBudget implements AutoCloseable {
                                AtomicLong lastChunkAt,
                                String label,
                                RepetitionBreaker breaker) {
+        return run(work, wallClockMs, lastChunkAt, label, breaker, null);
+    }
+
+    LlmClient.StreamResult run(Function<AtomicReference<AutoCloseable>, LlmClient.StreamResult> work,
+                               long wallClockMs,
+                               AtomicLong lastChunkAt,
+                               String label,
+                               RepetitionBreaker breaker,
+                               Supplier<Boolean> cancelled) {
         final AtomicReference<AutoCloseable> activeStream = new AtomicReference<>();
         java.util.concurrent.ScheduledFuture<?> watchdog = null;
         CompletableFuture<LlmClient.StreamResult> future;
@@ -54,6 +64,7 @@ final class LlmCallBudget implements AutoCloseable {
         }
 
         if (wallClockMs <= 0) {
+            if (isCancelled(cancelled)) return LlmClient.abortedStreamResult("", "interrupted");
             return work.apply(activeStream);
         }
 
@@ -61,13 +72,22 @@ final class LlmCallBudget implements AutoCloseable {
 
         boolean wantIdleWatchdog = defaultIdleMs > 0 && lastChunkAt != null;
         boolean wantRepetitionWatchdog = breaker != null;
-        if (wantIdleWatchdog || wantRepetitionWatchdog) {
-            long tickMs = wantIdleWatchdog
+        boolean wantCancelWatchdog = cancelled != null;
+        if (wantIdleWatchdog || wantRepetitionWatchdog || wantCancelWatchdog) {
+            long tickMs = wantCancelWatchdog
+                    ? 100L
+                    : wantIdleWatchdog
                     ? Math.max(500L, Math.min(defaultIdleMs / 4L, 5_000L))
                     : 500L;
             final CompletableFuture<LlmClient.StreamResult> futureRef = future;
             watchdog = watchdogExecutor.scheduleAtFixedRate(() -> {
                 if (futureRef.isDone()) return;
+                if (wantCancelWatchdog && isCancelled(cancelled)) {
+                    if (futureRef.complete(LlmClient.abortedStreamResult("", "interrupted"))) {
+                        closeActiveStream(activeStream);
+                    }
+                    return;
+                }
                 if (wantRepetitionWatchdog && breaker.tripped()) {
                     if (futureRef.completeExceptionally(new RepetitionException(
                             breaker.substringLen(), breaker.maxRepeats()))) {
@@ -201,6 +221,10 @@ final class LlmCallBudget implements AutoCloseable {
                 + (idleMs / 1000) + "s - model appears wedged. "
                 + "Try a smaller model or raise limits.llm_idle_ms in config.]";
         return new LlmClient.StreamResult(msg, List.of(), "", "idle timeout - no tokens");
+    }
+
+    private static boolean isCancelled(Supplier<Boolean> cancelled) {
+        return cancelled != null && Boolean.TRUE.equals(cancelled.get());
     }
 
     static void closeActiveStream(AtomicReference<AutoCloseable> ref) {

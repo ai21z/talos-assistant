@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1024] Ctrl-C during a model generation is now a terminal user abort.
+  Cancellation is polled independently of token arrival, closes a blocked
+  engine stream, returns canonical abort metadata without tool calls, and
+  cannot fall through into a transport retry or required-tool continuation.
 - [T1023] Colon-delimited exact-create requests now derive a deterministic
   literal-content expectation without dropping requested punctuation. A
   recognized trailing scope restriction is excluded from file content, while
