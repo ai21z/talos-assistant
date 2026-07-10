@@ -26,6 +26,7 @@ public final class LocalTurnTraceCapture {
         final String traceId;
         final int turnNumber;
         boolean outcomeRecorded;
+        boolean verificationRecorded;
 
         Bag(LocalTurnTrace.Builder builder, String traceId, int turnNumber) {
             this.builder = builder;
@@ -467,6 +468,7 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         VerificationTraceRecorder.record(bag.builder, status, summary, problems);
+        bag.verificationRecorded = true;
     }
 
     public static void recordVerification(
@@ -478,6 +480,7 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         VerificationTraceRecorder.record(bag.builder, status, summary, problems, report);
+        bag.verificationRecorded = true;
     }
 
     public static void recordExpectationVerified(
@@ -520,6 +523,7 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
+        recordVerificationFromOutcomeIfAbsent(bag, verificationStatus);
         OutcomeTraceRecorder.record(
                 bag.builder,
                 status,
@@ -528,6 +532,17 @@ public final class LocalTurnTraceCapture {
                 mutationStatus,
                 classification);
         bag.outcomeRecorded = true;
+    }
+
+    private static void recordVerificationFromOutcomeIfAbsent(Bag bag, String verificationStatus) {
+        if (bag.verificationRecorded) return;
+        String status = safe(verificationStatus);
+        if (status.isBlank()) return;
+        String summary = "NOT_RUN".equalsIgnoreCase(status)
+                ? "Post-apply verification was not applicable."
+                : "";
+        VerificationTraceRecorder.record(bag.builder, status, summary, List.of());
+        bag.verificationRecorded = true;
     }
 
     public static void recordOutcomeIfAbsent(

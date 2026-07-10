@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1021] Outcome-only traces now carry their known verification status into
+  the first-class verification summary. Read-only tool turns record `NOT_RUN`
+  instead of an empty status, while explicit verifier evidence remains
+  authoritative and is never overwritten by outcome fallback.
 - [T1020] Model-qualification validation now derives task authority from
   `trace.json` and rejects disagreement between the frozen scenario category,
   the traced task contract, and the prompt action obligation. Read-only runs

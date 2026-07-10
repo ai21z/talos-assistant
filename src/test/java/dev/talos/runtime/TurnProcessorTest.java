@@ -88,6 +88,22 @@ class TurnProcessorTest {
         assertFalse(r.elapsed().isNegative());
     }
 
+    @Test
+    void outcomeBackfillsNotRunVerificationInCompletedTrace() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true));
+        var processor = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult result = processor.process(session, "test", ctx);
+        LocalTurnTrace trace = result.audit().localTrace();
+
+        assertEquals("NOT_RUN", trace.outcome().verificationStatus());
+        assertEquals("NOT_RUN", trace.verification().status());
+        assertEquals("Post-apply verification was not applicable.", trace.verification().summary());
+    }
+
     @Test void noModeHandlesReturnsNull() throws Exception {
         // Empty controller - no modes registered
         var tp = new TurnProcessor(new ModeController());

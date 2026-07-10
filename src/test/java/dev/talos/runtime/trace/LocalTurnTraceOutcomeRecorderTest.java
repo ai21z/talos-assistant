@@ -34,6 +34,7 @@ class LocalTurnTraceOutcomeRecorderTest {
 
         assertEquals("  COMPLETE  ", trace.outcome().status());
         assertEquals("PASSED", trace.outcome().verificationStatus());
+        assertEquals("PASSED", trace.verification().status());
         assertEquals("GRANTED_OR_NOT_REQUIRED", trace.outcome().approvalStatus());
         assertEquals("SUCCEEDED", trace.outcome().mutationStatus());
         assertEquals("  TASK_COMPLETE  ", trace.outcome().classification());
@@ -57,6 +58,7 @@ class LocalTurnTraceOutcomeRecorderTest {
 
         assertEquals("COMPLETE", trace.outcome().status());
         assertEquals("PASSED", trace.outcome().verificationStatus());
+        assertEquals("PASSED", trace.verification().status());
         assertEquals("NONE", trace.outcome().approvalStatus());
         assertEquals("NOT_REQUESTED", trace.outcome().mutationStatus());
         assertEquals("READ_ONLY_ANSWERED", trace.outcome().classification());
@@ -67,6 +69,22 @@ class LocalTurnTraceOutcomeRecorderTest {
         assertEquals(Map.of(
                 "status", "COMPLETE",
                 "classification", "READ_ONLY_ANSWERED"), outcomeEvents.getFirst().data());
+    }
+
+    @Test
+    void outcomeDoesNotOverwriteExplicitVerificationEvidence() {
+        beginTrace();
+        LocalTurnTraceCapture.recordVerification(
+                "FAILED", "Static verification failed.", List.of("Missing expected content"));
+
+        LocalTurnTraceCapture.recordOutcome(
+                "FAILED", "NOT_RUN", "NONE", "NOT_REQUESTED", "TASK_INCOMPLETE");
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+        assertEquals("FAILED", trace.verification().status());
+        assertEquals("Static verification failed.", trace.verification().summary());
+        assertEquals(List.of("Missing expected content"), trace.verification().problems());
     }
 
     @Test
