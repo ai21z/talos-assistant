@@ -3887,6 +3887,46 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void colonDelimitedExactCreateIsVerifiedComplete() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-colon-literal-");
+        try {
+            Files.writeString(ws.resolve("todo.md"), "Review the local setup.");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create todo.md containing exactly: Review the local setup. "
+                            + "Do not change any other file."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created todo.md.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "todo.md", true, true, false,
+                            "wrote todo.md", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created todo.md.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification passed"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void pathExistenceAnswerWithOnlyIrrelevantReadEvidenceRemainsContained() throws Exception {
         Path ws = Files.createTempDirectory("talos-path-existence-irrelevant-read-");
         try {

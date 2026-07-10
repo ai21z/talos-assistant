@@ -37,6 +37,21 @@ public final class TaskExpectationResolver {
                     + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
                     + "|\\bwithout\\s+changing\\s+"
                     + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b");
+    private static final Pattern EXACT_CONTENT_TRAILING_SCOPE = Pattern.compile(
+            "(?is)\\s+(?:"
+                    + "(?:do\\s+not|don'?t)\\s+(?:change|edit|modify|touch)\\s+"
+                    + "(?:anything\\s+else|any\\s+other\\s+files?|the\\s+rest|"
+                    + "everything\\s+else|other\\s+content|other\\s+files?)"
+                    + "|(?:change|edit|modify|touch)\\s+no\\s+other\\s+files?"
+                    + "|only\\s+(?:change|edit|modify|write|create)\\s+"
+                    + "`?[A-Za-z0-9_./\\\\-]+`?"
+                    + "|(?:preserve|keep|leave)\\s+(?:the\\s+)?"
+                    + "(?:rest|remainder|remaining\\s+content|everything\\s+else|"
+                    + "other\\s+content|other\\s+files?)"
+                    + "|without\\s+(?:changing|editing|modifying|touching)\\s+"
+                    + "(?:anything\\s+else|any\\s+other\\s+files?|the\\s+rest|"
+                    + "everything\\s+else|other\\s+content|other\\s+files?)"
+                    + ")\\s*[.!?]?\\s*$");
     private static final Pattern SELECTOR_CHANGE_TO = Pattern.compile(
             "(?is)\\b(?:change|changing|update|updating)\\s+"
                     + "([#.][A-Za-z_][A-Za-z0-9_-]*)\\s+to\\s+"
@@ -179,6 +194,20 @@ public final class TaskExpectationResolver {
             List<Candidate> candidates
     ) {
         String quoted = Pattern.quote(target);
+        Pattern createContainingExactlyColon = Pattern.compile(
+                "(?is)\\b(?:create|write|add)\\s+`?" + quoted
+                        + "`?\\s+(?:with\\s+content\\s+)?containing\\s+exactly\\s*:\\s*");
+        Matcher colonMatcher = createContainingExactlyColon.matcher(request);
+        while (colonMatcher.find()) {
+            String literal = exactLiteralBeforeTrailingScope(request.substring(colonMatcher.end()));
+            if (!literal.isBlank()) {
+                candidates.add(new Candidate(
+                        literal,
+                        "literal-create-containing-exactly-colon",
+                        true));
+            }
+        }
+
         Pattern createContainingExactly = Pattern.compile(
                 "(?is)\\b(?:create|write|add)\\s+`?" + quoted
                         + "`?\\s+(?:with\\s+content\\s+)?containing\\s+exactly\\s+(.+)");
@@ -186,6 +215,15 @@ public final class TaskExpectationResolver {
         while (matcher.find()) {
             candidates.add(new Candidate(matcher.group(1), "literal-create-containing-exactly"));
         }
+    }
+
+    private static String exactLiteralBeforeTrailingScope(String raw) {
+        String literal = raw == null ? "" : raw.strip();
+        Matcher scope = EXACT_CONTENT_TRAILING_SCOPE.matcher(literal);
+        if (scope.find()) {
+            literal = literal.substring(0, scope.start()).stripTrailing();
+        }
+        return literal;
     }
 
     private static void addCompleteFileTwoLineCandidate(String request, List<Candidate> candidates) {

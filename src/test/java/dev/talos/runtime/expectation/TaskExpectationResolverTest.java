@@ -101,6 +101,36 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsColonDelimitedExactCreateAndExcludesTrailingScopeRestriction() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create todo.md containing exactly: Review the local setup. "
+                        + "Do not change any other file.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        LiteralContentExpectation literal = (LiteralContentExpectation) expectations.getFirst();
+        assertEquals("todo.md", literal.targetPath());
+        assertEquals("Review the local setup.", literal.expectedContent());
+        assertEquals(LiteralContentExpectation.MatchMode.EXACT, literal.matchMode());
+        assertEquals("literal-create-containing-exactly-colon", literal.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void colonDelimitedExactCreatePreservesMultipleSentencesWithoutScopeClause() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create todo.md containing exactly: First sentence. Second sentence.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        LiteralContentExpectation literal = (LiteralContentExpectation) expectations.getFirst();
+        assertEquals("First sentence. Second sentence.", literal.expectedContent());
+        assertEquals("literal-create-containing-exactly-colon", literal.sourcePattern());
+    }
+
+    @Test
     void extractsExactBulletCountForSingleTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create notes/generated-summary.md with exactly three bullet points.");

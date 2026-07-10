@@ -81,6 +81,40 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void colonDelimitedExactCreatePassesTaskVerificationWithTerminalPunctuation() throws Exception {
+        Files.writeString(workspace.resolve("todo.md"), "Review the local setup.");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create todo.md containing exactly: Review the local setup. "
+                        + "Do not change any other file.",
+                loopResult(List.of(successfulWrite("todo.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Exact content verification passed"), result.summary());
+        assertTrue(result.facts().stream().anyMatch(f -> f.contains("todo.md: literal content matched")),
+                result.facts().toString());
+    }
+
+    @Test
+    void colonDelimitedExactCreateMismatchFailsTaskVerification() throws Exception {
+        Files.writeString(workspace.resolve("todo.md"), "Review the local setup");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create todo.md containing exactly: Review the local setup. "
+                        + "Do not change any other file.",
+                loopResult(List.of(successfulWrite("todo.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Exact content verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("todo.md: exact content mismatch")), result.problems().toString());
+    }
+
+    @Test
     void scriptImportInspectionReportsScriptsJsWhenCurrentIndexImportsScriptsJs() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <html><body><script src="scripts.js"></script></body></html>

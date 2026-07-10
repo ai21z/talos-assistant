@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1023] Colon-delimited exact-create requests now derive a deterministic
+  literal-content expectation without dropping requested punctuation. A
+  recognized trailing scope restriction is excluded from file content, while
+  matching bytes become statically verified and mismatches fail exact-content
+  verification instead of degrading to readback-only evidence.
 - [T1022] Successful tool-backed read-only turns now use the existing
   `READ_ONLY_ANSWERED` terminal state instead of the generic `TURN_RECORDED`
   fallback. Mutation-capable, unresolved, and non-OK fallback outcomes remain
