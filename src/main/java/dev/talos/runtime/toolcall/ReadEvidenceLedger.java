@@ -4,6 +4,8 @@ import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -32,9 +34,14 @@ import java.util.Map;
  */
 public final class ReadEvidenceLedger {
 
+    private final Path workspaceRoot;
     private final List<ReadEvidence> entries = new ArrayList<>();
     private long nextSequence = 1;
     private long reusableWatermark = 1;
+
+    ReadEvidenceLedger(Path workspace) {
+        this.workspaceRoot = normalizeWorkspace(workspace);
+    }
 
     /** Records one successful read-only tool result. Sole writer: ReadEvidenceStateAccounting. */
     ReadEvidence record(ToolCall call, String pathHint, String body) {
@@ -74,11 +81,11 @@ public final class ReadEvidenceLedger {
     }
 
     /**
-     * Newest-first read_file entries for a canonical path. Path identity
-     * is case-insensitive, matching every same-path comparison in the
-     * runtime: Talos is Windows-first, and on a case-sensitive filesystem
-     * two files differing only by case would share evidence - a known,
-     * documented trade-off rather than an accident.
+     * Newest-first read_file entries for one filesystem path. Existing
+     * paths use the provider's same-file identity, so Windows casing aliases
+     * share evidence while case-distinct Linux/WSL files do not. Provider
+     * path equality is the conservative fallback when same-file identity
+     * cannot be observed.
      */
     public List<ReadEvidence> readFileEntriesForPath(String path, boolean reusableOnly) {
         String target = ToolCallSupport.canonicalizeReadPath(path == null ? "" : path);
@@ -88,7 +95,7 @@ public final class ReadEvidenceLedger {
             ReadEvidence e = entries.get(i);
             if (!e.readFile()) continue;
             if (reusableOnly && e.sequence() < reusableWatermark) continue;
-            if (!e.canonicalPathKey().equalsIgnoreCase(target)) continue;
+            if (!sameEffectivePath(e.effectivePath(), target)) continue;
             out.add(e);
         }
         return List.copyOf(out);
@@ -165,6 +172,44 @@ public final class ReadEvidenceLedger {
             out.put(ToolCallSupport.normalizePath(e.effectivePath()), e.body());
         }
         return Map.copyOf(out);
+    }
+
+    private boolean sameEffectivePath(String evidencePath, String requestedPath) {
+        String leftKey = ToolCallSupport.canonicalizeReadPath(evidencePath);
+        String rightKey = ToolCallSupport.canonicalizeReadPath(requestedPath);
+        if (leftKey.isBlank() || rightKey.isBlank()) return false;
+        if (workspaceRoot == null) {
+            return leftKey.equals(rightKey);
+        }
+        Path left = resolveInsideWorkspace(leftKey);
+        Path right = resolveInsideWorkspace(rightKey);
+        if (left == null || right == null) return false;
+        try {
+            if (Files.exists(left) && Files.exists(right)) {
+                return Files.isSameFile(left, right);
+            }
+        } catch (Exception ignored) {
+            // Fall through to provider-native path equality.
+        }
+        return left.equals(right);
+    }
+
+    private Path resolveInsideWorkspace(String path) {
+        try {
+            Path resolved = workspaceRoot.resolve(path).normalize();
+            return resolved.startsWith(workspaceRoot) ? resolved : null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static Path normalizeWorkspace(Path workspace) {
+        if (workspace == null) return null;
+        try {
+            return workspace.toAbsolutePath().normalize();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     private static boolean looksTruncated(String body) {

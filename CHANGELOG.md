@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1013 follow-up] Read evidence now uses filesystem-aware path identity.
+  Existing paths use the filesystem provider's same-file result, preserving
+  Windows casing aliases without binding case-distinct Linux/WSL files such
+  as `A.md` and `a.md` to the same read content. Unknown or unresolvable
+  workspace paths fall back conservatively instead of global case folding.
 - [T1012 follow-up] Existing-file write fidelity now closes the remaining
   review gaps. The format policy recognizes filename-first requests such as
   `Normalize notes.txt line endings to LF` without treating the extension dot

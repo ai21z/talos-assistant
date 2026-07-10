@@ -8,8 +8,14 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +36,53 @@ class ReadEvidenceLedgerTest {
 
     @TempDir
     Path workspace;
+
+    @Test
+    void caseDistinctFilesDoNotShareEvidenceOnCaseSensitiveFilesystem() throws Exception {
+        Path archive = workspace.resolve("case-sensitive.zip");
+        URI uri = URI.create("jar:" + archive.toUri());
+        try (FileSystem fs = FileSystems.newFileSystem(uri, Map.of("create", "true"))) {
+            Path root = fs.getPath("/");
+            Files.writeString(root.resolve("A.md"), "upper\n");
+            Files.writeString(root.resolve("a.md"), "lower\n");
+            LoopState state = new LoopState("", List.of(), List.of(), root, null, null, 5, 0);
+
+            ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                    state,
+                    new ToolCall("talos.read_file", Map.of("path", "A.md")),
+                    "A.md",
+                    ToolResult.ok("1 | upper\n"));
+            ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                    state,
+                    new ToolCall("talos.read_file", Map.of("path", "a.md")),
+                    "a.md",
+                    ToolResult.ok("1 | lower\n"));
+
+            assertEquals("1 | upper\n",
+                    state.readEvidence.latestReadFileForPath("A.md", true).body(),
+                    "A.md must retain only evidence from the file the filesystem identifies as A.md");
+            assertEquals("1 | lower\n",
+                    state.readEvidence.latestReadFileForPath("a.md", true).body(),
+                    "a.md must retain only evidence from the file the filesystem identifies as a.md");
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void casingAliasesShareEvidenceOnWindowsFilesystem() throws Exception {
+        Files.writeString(workspace.resolve("Notes.md"), "content\n");
+        LoopState state = loopState();
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "Notes.md")),
+                "Notes.md",
+                ToolResult.ok("1 | content\n"));
+
+        ReadEvidence evidence = state.readEvidence.latestReadFileForPath("notes.md", true);
+
+        assertNotNull(evidence, "Windows casing aliases must resolve to the same file evidence");
+        assertEquals("1 | content\n", evidence.body());
+    }
 
     @Test
     void hedgedAliasReadNeverBindsContentToTheAliasPath() {

@@ -78,7 +78,7 @@ public final class LoopState {
      * path. Replaces the flattened-signature maps (successfulReadCalls /
      * successfulReadCallBodies) and the path-keyed readFileBodiesThisTurn.
      */
-    public final ReadEvidenceLedger readEvidence = new ReadEvidenceLedger();
+    public final ReadEvidenceLedger readEvidence;
     public boolean mutationSinceStart;
     public boolean contentWithheldFromModelContext;
     public final List<String> userVisiblePrivacyNotices = new ArrayList<>();
@@ -92,6 +92,7 @@ public final class LoopState {
         this.currentNativeCalls = initialNativeCalls;
         this.messages = messages;
         this.workspace = workspace;
+        this.readEvidence = new ReadEvidenceLedger(workspace);
         this.ctx = ctx;
         this.toolSession = toolSession;
         this.maxIterations = maxIterations;
