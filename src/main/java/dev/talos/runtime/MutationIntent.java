@@ -191,9 +191,14 @@ public final class MutationIntent {
             "(?:[a-z0-9_.$-]+[\\\\/][a-z0-9_.$\\\\/-]+"
                     + "|[a-z0-9_$-]+\\.(?:" + FILE_TARGET_EXTENSIONS + "))";
 
+    // Clause starts admit sentence boundaries ([.!?]), assistant-directed
+    // fillers, and a concrete file-scope anchor. Bare commas, colons, and
+    // semicolons are NOT clause starts: they introduce reported speech
+    // ("the guide says,") and advisory framing ("For readability,"), which
+    // stay read-only no matter how identifier-shaped the operands are.
     private static final Pattern MID_SENTENCE_RENAME_REQUEST = Pattern.compile(
-            "(?:[.!?;:,]\\s+|\\b(?:please|then|and|now|just)\\s+"
-                    + "|\\bin\\s+(" + RENAME_FILE_SCOPE_TOKEN + ")\\s+)"
+            "(?:[.!?]\\s+|\\b(?:please|then|and|now|just)\\s+"
+                    + "|\\b(?:in|inside|within)\\s+(" + RENAME_FILE_SCOPE_TOKEN + ")\\s+)"
                     + "(?:please\\s+)?rename\\s+(?:(?:the|a|an)\\s+)?"
                     + "(?:(?:function|method|file|variable|class|constant|field|folder"
                     + "|directory|module|component|script|page)\\s+)?"
@@ -215,6 +220,25 @@ public final class MutationIntent {
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
+    /**
+     * Scoped-prefix imperative: "In SCOPE, VERB ..." (also inside/within,
+     * sentence-initial or after a sentence boundary). The comma after the
+     * scope is the imperative signal here because the clause OPENS with a
+     * concrete scope - a file path or a typed scope noun ("the tracker
+     * module"); contrast the reported/advisory clauses handled by the
+     * rename shape, where the pre-comma clause is prose ("In general,",
+     * "the docs recommend,").
+     */
+    private static final String TYPED_SCOPE_NOUN_PHRASE =
+            "(?:(?:the|a|an|this|that)\\s+)?[a-z0-9_.$-]+\\s+"
+                    + "(?:module|file|class|component|package|folder|directory|script|page|section)";
+
+    private static final Pattern SCOPED_PREFIX_MUTATION_REQUEST = Pattern.compile(
+            "(?:^|[.!?]\\s+)(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + "(?:" + EXPLICIT_FILE_TARGET + "|[a-z0-9_.$-]+[\\\\/][a-z0-9_.$\\\\/-]+"
+                    + "|" + TYPED_SCOPE_NOUN_PHRASE + ")"
+                    + "\\s*[,:]\\s*(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b");
 
     private static final Pattern SINGLE_LETTER_C_SOURCE_TARGET_AFTER_MUTATION = Pattern.compile(
             "\\b(?i:" + CORE_MUTATION_VERBS + ")\\s+(?i:only\\s+)?[A-Za-z0-9_-]\\.c"
@@ -365,12 +389,49 @@ public final class MutationIntent {
         return isExplicitMutationClassificationReason(classificationReason(userRequest));
     }
 
+    /** Typed request-shape decision for the current turn (T1014). */
+    public enum Decision { EXECUTE_MUTATION, READ_ONLY, AMBIGUOUS }
+
+    /**
+     * Typed classification: the decision, the stable reason string the
+     * runtime already stores on the task contract, and the matched
+     * evidence span for trace/debug (best-effort empty for default
+     * routes). AMBIGUOUS marks a mutation-shaped request under an explicit
+     * global read-only negation; it keeps the read-only tool surface, and
+     * the runtime's read-only denial asks the user for an explicit change
+     * request rather than silently mutating or silently dropping the edit.
+     */
+    public record RequestShape(Decision decision, String reason, String evidenceSpan) {}
+
+    public static RequestShape classifyShape(String userRequest) {
+        String reason = classificationReason(userRequest);
+        String original = userRequest == null ? "" : userRequest.trim();
+        String lower = original.toLowerCase(Locale.ROOT);
+        Decision decision;
+        if (isExplicitMutationClassificationReason(reason)) {
+            decision = Decision.EXECUTE_MUTATION;
+        } else if ("global-read-only-negation".equals(reason)
+                && isExplicitMutationClassificationReason(
+                        classificationReason(userRequest, false))) {
+            decision = Decision.AMBIGUOUS;
+        } else {
+            decision = Decision.READ_ONLY;
+        }
+        return new RequestShape(decision, reason, evidenceSpanFor(reason, original, lower));
+    }
+
     public static String classificationReason(String userRequest) {
+        return classificationReason(userRequest, true);
+    }
+
+    private static String classificationReason(String userRequest, boolean honorGlobalNegation) {
         if (userRequest == null || userRequest.isBlank()) return "empty-user-request";
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return "synthetic-tool-result";
         String original = userRequest.trim();
         String lower = original.toLowerCase(Locale.ROOT);
-        if (containsGlobalReadOnlyNegation(lower)) return "global-read-only-negation";
+        if (honorGlobalNegation && containsGlobalReadOnlyNegation(lower)) {
+            return "global-read-only-negation";
+        }
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         // A sentence-initial imperative mutation request outranks a trailing
@@ -389,6 +450,9 @@ public final class MutationIntent {
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
         if (looksReadThenMutationRequest(lower)) return "explicit-read-then-mutation-request";
+        if (SCOPED_PREFIX_MUTATION_REQUEST.matcher(lower).find()) {
+            return "explicit-scoped-mutation-request";
+        }
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
@@ -462,6 +526,53 @@ public final class MutationIntent {
     public static boolean isExplicitMutationClassificationReason(String reason) {
         if (reason == null || reason.isBlank()) return false;
         return reason.startsWith("explicit-") || "natural-artifact-request".equals(reason);
+    }
+
+    /**
+     * Best-effort matched span for trace/debug. The span re-derives from
+     * the same deterministic patterns that produced the reason; routes
+     * decided by structural predicates rather than a single regex return
+     * an empty span.
+     */
+    private static String evidenceSpanFor(String reason, String original, String lower) {
+        try {
+            switch (reason == null ? "" : reason) {
+                case "explicit-scoped-mutation-request" -> {
+                    Matcher m = SCOPED_PREFIX_MUTATION_REQUEST.matcher(lower);
+                    if (m.find()) return m.group().strip();
+                }
+                case "explicit-request-pattern" -> {
+                    for (Pattern pattern : REQUEST_PATTERNS) {
+                        Matcher m = pattern.matcher(lower);
+                        if (m.find()) return m.group().strip();
+                    }
+                }
+                case "explicit-rename-request" -> {
+                    Matcher m = MID_SENTENCE_RENAME_REQUEST.matcher(original);
+                    if (m.find()) return m.group().strip();
+                }
+                case "explicit-mutation-verb-with-file-target" -> {
+                    Matcher m = MUTATION_VERB_WITH_FILE_TARGET.matcher(lower);
+                    if (m.find()) return m.group().strip();
+                }
+                case "explicit-mutation-marker" -> {
+                    for (String marker : MARKERS) {
+                        if (lower.contains(marker)) return marker.strip();
+                    }
+                }
+                case "global-read-only-negation" -> {
+                    for (String marker : READ_ONLY_NEGATIONS) {
+                        if (lower.contains(marker)) return marker;
+                    }
+                }
+                default -> {
+                    return "";
+                }
+            }
+        } catch (RuntimeException e) {
+            return "";
+        }
+        return "";
     }
 
     public static Optional<SourceToTargetArtifact> sourceToTargetArtifact(String userRequest) {

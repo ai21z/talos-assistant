@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+- [T1014] Mutation-request classification is shape-based and typed. A
+  scoped-prefix imperative ("In notes.md, replace beta with BETA.",
+  "Inside src/app.js, rename reset to resetAll.", "In the tracker module,
+  rename shippedCount to shippedTotal.") now classifies as an explicit
+  mutation for every canonical mutation verb, closing the false negative
+  where the model printed the corrected content as prose because the turn
+  stayed read-only. Reported speech and advisory framing ("The migration
+  guide says, rename oldName to newName.", "The docs recommend, ...",
+  "For readability, ...") no longer classify as rename requests: a bare
+  comma, colon, or semicolon is not an imperative clause start, so the
+  clause must open with a sentence boundary, an assistant-directed
+  filler, or a concrete file or typed scope anchor. The classifier also
+  exposes a typed surface (EXECUTE_MUTATION / READ_ONLY / AMBIGUOUS with
+  the stable reason string and the matched evidence span for trace);
+  AMBIGUOUS marks a mutation-shaped request under an explicit global
+  read-only negation and keeps the read-only tool surface, so the runtime
+  asks for an explicit change request instead of silently mutating or
+  silently dropping the edit. A scope restriction such as "Change nothing
+  else." keeps the mutation classification.
 - [T1011] The workspace-data role separation is now project-wide. A full
   census of every system-message construction found four remaining
   mechanisms that granted workspace bytes system-role authority, and all
