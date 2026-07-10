@@ -67,17 +67,21 @@
 - [T1009] Mid-sentence rename requests ("In src/app.js, rename the function
   reset to resetAll.") now classify as mutation like their fix/change/update
   siblings, so the model gets edit tools instead of running read-only and
-  printing the corrected file as prose. The recognition is request-shaped
-  (a clause-start imperative with an explicit "rename X to Y" relationship
-  over identifier-shaped tokens), not a bare substring, so explanatory,
-  definitional, declarative, and historical discussion such as "What does
-  rename mean in Git?", "In Git, rename detection compares blobs to find
-  moves.", and API mentions like os.rename stays read-only. Question and
-  how-to forms stay read-only, the instructional-question guard now also
-  covers the "how do I" and "how would I" phrasings for every mutation
-  verb, and a sentence-initial imperative mutation request outranks a
-  trailing instructional question so compound prompts keep their mutation
-  contract.
+  printing the corrected file as prose. The recognition is request-shaped,
+  not a bare substring: a mid-sentence rename classifies as mutation only
+  through a concrete file/scope anchor ("in src/app.js rename reset to
+  resetAll") or an identifier-shaped X or Y in the "rename X to Y" pair
+  (mixed case, separators, digits, or an extension, checked against the
+  original casing), so generic advice built from plain prose words ("In
+  general, rename variables to improve readability.", "As a rule, rename
+  methods to match their behavior.") stays read-only along with
+  explanatory, definitional, declarative, quoted, and historical
+  discussion such as "What does rename mean in Git?" and API mentions like
+  os.rename. Question and how-to forms stay read-only, the
+  instructional-question guard now also covers the "how do I" and "how
+  would I" phrasings for every mutation verb, and a sentence-initial
+  imperative mutation request outranks a trailing instructional question
+  so compound prompts keep their mutation contract.
 - [T1008] Named tool forcing now actually enforces on the managed backend.
   llama-server (pinned b9918) parses tool_choice as a string only, and the
   OpenAI named-function object form silently degraded to "auto", so every

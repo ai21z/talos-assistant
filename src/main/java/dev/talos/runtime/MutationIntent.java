@@ -112,29 +112,6 @@ public final class MutationIntent {
             "darker and more minimal"
     );
 
-    /**
-     * T1009: request-shaped mid-sentence rename recognition. Sentence-initial
-     * and please/can-you forms are already covered by REQUEST_PATTERNS
-     * because rename is a CORE_MUTATION_VERB. This pattern adds only the
-     * clause-start imperative with an explicit "rename X to Y" relationship
-     * ("In src/app.js, rename the function reset to resetAll."). The
-     * clause-start requires whitespace after punctuation so API identifiers
-     * like os.rename never qualify through their own dot, the "in path"
-     * branch covers the comma-less field shape, and the object is at most
-     * an article plus one typed noun before the X-to-Y pair, so declarative
-     * prose ("rename detection compares blobs to find moves") never
-     * matches.
-     */
-    private static final String RENAME_TARGET_TOKEN = "[a-z0-9_.$\\\\/-]+";
-
-    private static final Pattern MID_SENTENCE_RENAME_REQUEST = Pattern.compile(
-            "(?:[.!?;:,]\\s+|\\b(?:please|then|and|now|just)\\s+"
-                    + "|\\bin\\s+" + RENAME_TARGET_TOKEN + "\\s+)"
-                    + "(?:please\\s+)?rename\\s+(?:(?:the|a|an)\\s+)?"
-                    + "(?:(?:function|method|file|variable|class|constant|field|folder"
-                    + "|directory|module|component|script|page)\\s+)?"
-                    + RENAME_TARGET_TOKEN + "\\s+to\\s+" + RENAME_TARGET_TOKEN);
-
     private static final Set<String> READ_ONLY_NEGATIONS = Set.of(
             "do not change", "do not edit", "do not modify", "do not write",
             "do not create", "do not save", "do not apply", "do not touch",
@@ -188,6 +165,40 @@ public final class MutationIntent {
             "(?i)(?<![A-Za-z0-9_./\\\\-])((?:" + NAMED_C_SOURCE_FILE_TARGET + ")"
                     + "|(?:[A-Za-z0-9_.\\\\/-]+\\.(?:" + NAMED_FILE_TARGET_EXTENSIONS + ")))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
+    /**
+     * T1009: request-shaped mid-sentence rename recognition. Sentence-initial
+     * and please/can-you forms are already covered by REQUEST_PATTERNS
+     * because rename is a CORE_MUTATION_VERB. This pattern adds only the
+     * clause-start imperative with an explicit "rename X to Y" relationship
+     * ("In src/app.js, rename the function reset to resetAll."). The
+     * clause-start requires whitespace after punctuation so API identifiers
+     * like os.rename never qualify through their own dot, the "in path"
+     * branch covers the comma-less field shape and only accepts file-shaped
+     * anchors, and the object is at most an article plus one typed noun
+     * before the X-to-Y pair.
+     *
+     * <p>The structural shape alone is not enough: generic advice ("In
+     * general, rename variables to improve readability.") builds the same
+     * shape from plain prose words. A match classifies as mutation only
+     * with a concrete file/scope anchor (group 1) or an identifier-shaped X
+     * or Y (mixed case, separators, digits, or an extension), checked
+     * against the original casing.
+     */
+    private static final String RENAME_TARGET_TOKEN = "[a-z0-9_.$\\\\/-]+";
+
+    private static final String RENAME_FILE_SCOPE_TOKEN =
+            "(?:[a-z0-9_.$-]+[\\\\/][a-z0-9_.$\\\\/-]+"
+                    + "|[a-z0-9_$-]+\\.(?:" + FILE_TARGET_EXTENSIONS + "))";
+
+    private static final Pattern MID_SENTENCE_RENAME_REQUEST = Pattern.compile(
+            "(?:[.!?;:,]\\s+|\\b(?:please|then|and|now|just)\\s+"
+                    + "|\\bin\\s+(" + RENAME_FILE_SCOPE_TOKEN + ")\\s+)"
+                    + "(?:please\\s+)?rename\\s+(?:(?:the|a|an)\\s+)?"
+                    + "(?:(?:function|method|file|variable|class|constant|field|folder"
+                    + "|directory|module|component|script|page)\\s+)?"
+                    + "(" + RENAME_TARGET_TOKEN + ")\\s+to\\s+(" + RENAME_TARGET_TOKEN + ")",
+            Pattern.CASE_INSENSITIVE);
 
     private static final String EXPLICIT_FILE_TARGET =
             "(?:`?(?:(?:" + FILE_TARGET_WITH_EXTENSION + ")"
@@ -384,7 +395,7 @@ public final class MutationIntent {
         if (looksTerminalBuildArtifactRequest(lower)) return "explicit-terminal-build-artifact-request";
         if (looksNaturalMakeItArtifactRequest(lower)) return "natural-artifact-request";
         if (looksExplicitFileTargetMutation(lower)) return "explicit-mutation-verb-with-file-target";
-        if (MID_SENTENCE_RENAME_REQUEST.matcher(lower).find()) return "explicit-rename-request";
+        if (looksMidSentenceRenameRequest(original)) return "explicit-rename-request";
         for (String marker : MARKERS) {
             if (lower.contains(marker)) return "explicit-mutation-marker";
         }
@@ -663,6 +674,50 @@ public final class MutationIntent {
             if (pattern.matcher(lower).find()) return true;
         }
         return false;
+    }
+
+    /**
+     * Matched against the ORIGINAL request so identifier casing survives:
+     * the structural "rename X to Y" shape counts as a request only with a
+     * concrete file/scope anchor or an identifier-shaped X or Y.
+     */
+    private static boolean looksMidSentenceRenameRequest(String original) {
+        if (original == null || original.isBlank()) return false;
+        Matcher matcher = MID_SENTENCE_RENAME_REQUEST.matcher(original);
+        while (matcher.find()) {
+            if (matcher.group(1) != null) return true;
+            if (looksRenameIdentifier(matcher.group(2))
+                    || looksRenameIdentifier(matcher.group(3))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Identifier-shaped: mixed case, separators, digits, or an extension.
+     * Plain prose words ("variables", "improve") never qualify. Trailing
+     * sentence punctuation is stripped first so a clause-final word does
+     * not qualify through its own full stop.
+     */
+    private static boolean looksRenameIdentifier(String token) {
+        if (token == null) return false;
+        String stripped = token;
+        while (!stripped.isEmpty()
+                && ".,;:!?".indexOf(stripped.charAt(stripped.length() - 1)) >= 0) {
+            stripped = stripped.substring(0, stripped.length() - 1);
+        }
+        if (stripped.isBlank()) return false;
+        boolean upper = false;
+        boolean lower = false;
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
+            if (c == '_' || c == '.' || c == '/' || c == '\\' || c == '$') return true;
+            if (Character.isDigit(c)) return true;
+            if (Character.isUpperCase(c)) upper = true;
+            if (Character.isLowerCase(c)) lower = true;
+        }
+        return upper && lower;
     }
 
     private static boolean containsGlobalReadOnlyNegation(String lower) {

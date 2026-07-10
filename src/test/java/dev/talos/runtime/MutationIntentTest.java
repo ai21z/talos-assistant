@@ -353,6 +353,34 @@ class MutationIntentTest {
     }
 
     /**
+     * T1009 third pass: generic advice, best-practice statements, quoted
+     * documentation, and historical discussion contain "rename X to Y"
+     * shapes built from plain prose words. Those must never classify as
+     * mutation: a mid-sentence rename needs a concrete file/scope anchor or
+     * an identifier-shaped X or Y, not just the structural shape.
+     */
+    @org.junit.jupiter.api.Test
+    void genericRenameAdviceStaysReadOnly() {
+        for (String input : java.util.List.of(
+                "In general, rename variables to improve readability.",
+                "As a rule, rename methods to match their behavior.",
+                "In Java, rename refactoring to improve clarity is common.",
+                "As a rule, rename methods to match.",
+                "By convention, rename handlers to reflect intent.",
+                // Note: a quoted example WITH a file extension ("rename
+                // foo.txt to bar.txt") classifies through the pre-existing
+                // base verb-with-file-target route, which is out of this
+                // pattern's scope. The quote character is not a clause
+                // starter for the rename pattern itself.
+                "The tutorial says \"rename foo to bar\" in step 3.",
+                "Chapter 2 explains why teams rename modules to align with domains.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    /**
      * Reopened T1009: a sentence-initial imperative mutation request must
      * keep its mutation classification even when a trailing how-do-I
      * question would otherwise trip the widened instructional guard.
