@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1022] Successful tool-backed read-only turns now use the existing
+  `READ_ONLY_ANSWERED` terminal state instead of the generic `TURN_RECORDED`
+  fallback. Mutation-capable, unresolved, and non-OK fallback outcomes remain
+  conservative, and explicit outcome classifications still take precedence.
 - [T1021] Outcome-only traces now carry their known verification status into
   the first-class verification summary. Read-only tool turns record `NOT_RUN`
   instead of an empty status, while explicit verifier evidence remains

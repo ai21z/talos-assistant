@@ -18,6 +18,7 @@ import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.intent.TargetRole;
+import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -226,12 +227,14 @@ public final class TurnProcessor {
             }
             String assistantText = MemoryUpdateListener.extractText(result.get());
             LocalTurnTraceCapture.recordModelResponseReceived(assistantText);
+            String resultStatus = JsonTurnLogAppender.statusOf(result.get())
+                    .toUpperCase(java.util.Locale.ROOT);
             LocalTurnTraceCapture.recordOutcomeIfAbsent(
-                    JsonTurnLogAppender.statusOf(result.get()).toUpperCase(java.util.Locale.ROOT),
+                    resultStatus,
                     "NOT_RUN",
                     "UNKNOWN",
                     "UNKNOWN",
-                    "TURN_RECORDED");
+                    fallbackOutcomeClassification(resultStatus, TurnAuditCapture.currentPolicyTrace()));
             LocalTurnTrace localTrace = LocalTurnTraceCapture.complete();
             TurnAudit audit = TurnAuditCapture.end().withLocalTrace(localTrace);
 
@@ -262,6 +265,16 @@ public final class TurnProcessor {
         }
 
         return turnResult;
+    }
+
+    private static String fallbackOutcomeClassification(String resultStatus, TurnPolicyTrace policyTrace) {
+        if ("OK".equals(resultStatus)
+                && policyTrace != null
+                && policyTrace.hasPolicyData()
+                && !policyTrace.mutationAllowed()) {
+            return TaskCompletionStatus.READ_ONLY_ANSWERED.name();
+        }
+        return "TURN_RECORDED";
     }
 
     private static String modelBackend(String model) {

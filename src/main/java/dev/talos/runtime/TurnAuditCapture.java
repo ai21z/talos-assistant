@@ -49,6 +49,11 @@ public final class TurnAuditCapture {
         return HOLDER.get() != null;
     }
 
+    static TurnPolicyTrace currentPolicyTrace() {
+        Bag bag = HOLDER.get();
+        return bag == null ? TurnPolicyTrace.empty() : bag.policyTrace;
+    }
+
     /** Append a tool-call summary to the current audit (no-op if none active). */
     public static void recordToolCall(String name, String pathHint, boolean success) {
         recordToolCall(name, pathHint, success, "");

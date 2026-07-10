@@ -104,6 +104,48 @@ class TurnProcessorTest {
         assertEquals("Post-apply verification was not applicable.", trace.verification().summary());
     }
 
+    @Test
+    void successfulReadOnlyFallbackUsesReadOnlyAnsweredTerminalState() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override
+            public Optional<Result> handle(String raw, Path ws, Context ctx) throws Exception {
+                var contract = TaskContractResolver.fromUserRequest(
+                        "List the top-level files and folders in this workspace. Do not modify anything.");
+                TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                        contract, "INSPECT", List.of("talos.list_dir"), List.of("talos.list_dir")));
+                return Optional.of(new Result.Ok("README.md"));
+            }
+        });
+        var processor = new TurnProcessor(modes);
+
+        TurnResult result = processor.process(
+                new Session(WS, new Config()), "list the files", Context.builder(new Config()).build());
+
+        assertEquals("READ_ONLY_ANSWERED", result.audit().localTrace().outcome().classification());
+    }
+
+    @Test
+    void mutationCapableFallbackRemainsConservative() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override
+            public Optional<Result> handle(String raw, Path ws, Context ctx) throws Exception {
+                var contract = TaskContractResolver.fromUserRequest(
+                        "Create todo.md containing exactly: Review the local setup.");
+                TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                        contract, "APPLY", List.of("talos.write_file"), List.of("talos.write_file")));
+                return Optional.of(new Result.Ok("proposal recorded"));
+            }
+        });
+        var processor = new TurnProcessor(modes);
+
+        TurnResult result = processor.process(
+                new Session(WS, new Config()), "create todo.md", Context.builder(new Config()).build());
+
+        assertEquals("TURN_RECORDED", result.audit().localTrace().outcome().classification());
+    }
+
     @Test void noModeHandlesReturnsNull() throws Exception {
         // Empty controller - no modes registered
         var tp = new TurnProcessor(new ModeController());
