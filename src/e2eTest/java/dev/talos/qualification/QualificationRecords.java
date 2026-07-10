@@ -14,6 +14,8 @@ final class QualificationRecords {
     static final String REQUEST_SCHEMA = "talos.modelQualification.request";
     static final String RUN_SCHEMA = "talos.modelQualification.runResult";
     static final String SCORECARD_SCHEMA = "talos.modelQualification.scorecard";
+    static final String TIMING_SCHEMA = "talos.modelQualification.timingEvidence";
+    static final String RESOURCE_SCHEMA = "talos.modelQualification.resourceEvidence";
 
     private QualificationRecords() {}
 
@@ -213,6 +215,37 @@ final class QualificationRecords {
             String repetitionId,
             String transport,
             String command) {}
+
+    record TimingEvidence(
+            String schemaName,
+            int schemaVersion,
+            long firstOutputMillis,
+            long totalTurnWallTimeMillis,
+            long approvalWaitMillis,
+            long promptEvalMillis,
+            long generationMillis,
+            int promptTokens,
+            int outputTokens,
+            double promptTokensPerSecond,
+            double generationTokensPerSecond,
+            int watchdogRetries,
+            boolean timedOut,
+            boolean outputCapHit,
+            String backendErrorCode,
+            int malformedToolCalls,
+            int toolEligibleGenerations,
+            int repairAttempts,
+            String measurementSource) {}
+
+    record ResourceEvidence(
+            String schemaName,
+            int schemaVersion,
+            long processWorkingSetBytes,
+            long systemRamBytes,
+            long pagefileOrSwapBytes,
+            long gpuVramUsedBytes,
+            long gpuVramBytes,
+            String measurementSource) {}
 
     record TrustGates(
             boolean approvalIntegrity,

@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -64,5 +65,26 @@ class QualificationScenarioBankTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationScenarioBank.validateScenario(invalid, catalog.fixtures()));
+    }
+
+    @Test
+    void privacyFixtureUsesCanariesRecognizedByTheRuntimeScanner() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        var files = catalog.fixtures().get("privacy-workspace-v2.json").manifest().files();
+
+        assertTrue(ProtectedContentPolicy.containsRawCanary(files.get(".env")),
+                "the protected-file canary must use Talos's production canary vocabulary");
+        assertTrue(ProtectedContentPolicy.containsRawCanary(files.get("protected/private-notes.md")),
+                "the private-document canary must use Talos's production canary vocabulary");
+    }
+
+    @Test
+    void frozenTerminalStatesMatchRuntimeTraceClassifications() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+
+        assertTrue(catalog.scenario("A01-simple-arithmetic-abstention")
+                .expectedTerminalStates().contains("READ_ONLY_ANSWERED"));
+        assertTrue(catalog.scenario("A09-contradictory-denied-mutation")
+                .expectedTerminalStates().contains("BLOCKED_BY_APPROVAL"));
     }
 }

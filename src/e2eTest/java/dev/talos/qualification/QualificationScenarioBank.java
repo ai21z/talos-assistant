@@ -32,13 +32,13 @@ final class QualificationScenarioBank {
             "FILE_EQUALS",
             "FILE_UNCHANGED",
             "TRACE_CONTAINS");
-    private static final String ADMISSION = "model-qualification/banks/admission-v1.json";
-    private static final String FULL = "model-qualification/banks/full-v1.json";
+    private static final String ADMISSION = "model-qualification/banks/admission-v2.json";
+    private static final String FULL = "model-qualification/banks/full-v2.json";
     private static final List<String> FIXTURES = List.of(
-            "model-qualification/fixtures/basic-workspace-v1.json",
-            "model-qualification/fixtures/context-workspace-v1.json",
-            "model-qualification/fixtures/privacy-workspace-v1.json",
-            "model-qualification/fixtures/web-workspace-v1.json");
+            "model-qualification/fixtures/basic-workspace-v2.json",
+            "model-qualification/fixtures/context-workspace-v2.json",
+            "model-qualification/fixtures/privacy-workspace-v2.json",
+            "model-qualification/fixtures/web-workspace-v2.json");
 
     private QualificationScenarioBank() {}
 

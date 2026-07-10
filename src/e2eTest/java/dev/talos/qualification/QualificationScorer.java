@@ -23,7 +23,12 @@ final class QualificationScorer {
             List<QualificationRecords.RunResult> inputRuns,
             PerformanceEnvelope performance) {
         QualificationProtocol.ScenarioBank bank = catalog.bank(bankKind);
-        List<QualificationRecords.RunResult> runs = inputRuns == null ? List.of() : List.copyOf(inputRuns);
+        Set<String> scenarioIds = bank.scenarios().stream()
+                .map(QualificationProtocol.Scenario::id)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        List<QualificationRecords.RunResult> runs = inputRuns == null
+                ? List.of()
+                : inputRuns.stream().filter(run -> scenarioIds.contains(run.scenarioId())).toList();
         List<String> findings = new ArrayList<>();
         if (performance == null || !Double.isFinite(performance.doctorProjectionSeconds())
                 || !Double.isFinite(performance.configuredTimeoutSeconds())
@@ -32,7 +37,7 @@ final class QualificationScorer {
             findings.add("INVALID_PERFORMANCE_ENVELOPE");
             return scorecard(bankKind, QualificationRecords.Disposition.BLOCKED_INCOMPLETE,
                     bankKind == QualificationProtocol.BankKind.ADMISSION ? ADMISSION_TRIALS : FULL_TRIALS,
-                    inputRuns == null ? List.of() : List.copyOf(inputRuns), catalog.bank(bankKind),
+                    runs, catalog.bank(bankKind),
                     new PerformanceEnvelope(0.0, 1.0), findings);
         }
         int expectedTrials = bankKind == QualificationProtocol.BankKind.ADMISSION
@@ -322,7 +327,9 @@ final class QualificationScorer {
                     if (!call.allowed()) unnecessary++;
                 }
             }
-            malformed += Math.max(0, run.malformedToolCalls());
+            int malformedAttempts = Math.max(0, run.malformedToolCalls());
+            nativeAttempts += malformedAttempts;
+            malformed += malformedAttempts;
             toolEligibleGenerations += Math.max(0, run.toolEligibleGenerations());
             if (run.outputCapHit()) capHits++;
             if (run.timedOut()) timeoutCount++;

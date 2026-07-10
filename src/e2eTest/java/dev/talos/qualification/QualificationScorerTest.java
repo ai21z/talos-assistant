@@ -30,6 +30,20 @@ class QualificationScorerTest {
     }
 
     @Test
+    void fullScoreIgnoresRetainedAdmissionRunsFromTheSameCampaign() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        List<QualificationRecords.RunResult> runs = new ArrayList<>(admissionRuns(catalog));
+        runs.addAll(fullRuns(catalog, 24, true));
+
+        QualificationRecords.Scorecard scorecard = QualificationScorer.score(
+                catalog, QualificationProtocol.BankKind.FULL, runs,
+                new QualificationScorer.PerformanceEnvelope(45.0, 300.0));
+
+        assertEquals(QualificationRecords.Disposition.ACCEPTED_BETA, scorecard.disposition());
+        assertEquals(72, scorecard.validTrials());
+    }
+
+    @Test
     void exactTwentyScenarioBoundaryIsAccepted() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         List<QualificationRecords.RunResult> runs = fullRuns(catalog, 20, true);
@@ -122,6 +136,21 @@ class QualificationScorerTest {
                 new QualificationScorer.PerformanceEnvelope(20.0, 300.0));
 
         assertEquals(QualificationRecords.Disposition.ADMISSION_FAILED, scorecard.disposition());
+    }
+
+    @Test
+    void malformedNativeAttemptsRemainInTheNativeValidityDenominator() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        List<QualificationRecords.RunResult> runs = admissionRuns(catalog);
+        runs.set(0, runs.getFirst().withMalformedToolCalls(1));
+
+        QualificationRecords.Scorecard scorecard = QualificationScorer.score(
+                catalog, QualificationProtocol.BankKind.ADMISSION, runs,
+                new QualificationScorer.PerformanceEnvelope(20.0, 300.0));
+
+        long parsedAttempts = runs.stream().mapToLong(run -> run.toolCalls().size()).sum();
+        assertEquals(parsedAttempts + 1, scorecard.nativeToolCallValidity().denominator());
+        assertEquals(parsedAttempts, scorecard.nativeToolCallValidity().numerator());
     }
 
     @Test
