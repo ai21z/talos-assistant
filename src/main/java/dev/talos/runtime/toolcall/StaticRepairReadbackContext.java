@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.ResourceDecision;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,8 +23,22 @@ final class StaticRepairReadbackContext {
         for (String target : remainingRepairTargets) {
             String normalized = ToolCallSupport.normalizePath(target);
             if (normalized.isBlank() || !StaticWebCapabilityProfile.isSmallWebFile(normalized)) continue;
+            // This block elevates file content into a system-role message,
+            // so it is gated like every other readback: protected paths and
+            // workspace escapes never inline (the cached branch used to
+            // bypass all path gates), and bodies colliding with the block's
+            // own framing are skipped so file content cannot forge entries.
+            // A skipped target keeps the existing behavior of simply not
+            // being inlined.
+            ResourceDecision decision = ProtectedPathPolicy.classify(state.workspace, normalized);
+            if (!decision.hasPath()
+                    || !decision.insideWorkspace()
+                    || decision.workspaceEscape()
+                    || decision.protectedPath()) {
+                continue;
+            }
             String body = currentReadbackForPath(state, normalized);
-            if (body.isBlank()) continue;
+            if (body.isBlank() || collidesWithReadbackFraming(body)) continue;
             if (out.isEmpty()) {
                 out.append("[StaticRepairReadbacks]\n")
                         .append("Use these current file contents while rewriting the static-web repair targets. ")
@@ -33,6 +49,18 @@ final class StaticRepairReadbackContext {
                     .append("\n---\n");
         }
         return out.isEmpty() ? Optional.empty() : Optional.of(out.toString().strip());
+    }
+
+    private static boolean collidesWithReadbackFraming(String body) {
+        for (String line : body.split("\\R", -1)) {
+            String stripped = line.strip();
+            if (stripped.equals("---")
+                    || stripped.startsWith("Path: ")
+                    || stripped.equals("[StaticRepairReadbacks]")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String currentReadbackForPath(LoopState state, String normalizedPath) {
