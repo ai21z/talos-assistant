@@ -9,6 +9,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,9 +32,7 @@ class CompactMutationContinuationPlannerTest {
         String request = "Rewrite README.md with a short project note.";
         LoopState state = state(request);
         state.toolOutcomes.add(readOutcome("README.md"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=readme.md;",
-                "1 | # Old\n2 | Existing README content.");
+        addReadback(state, "README.md", "1 | # Old\n2 | Existing README content.");
 
         Optional<CompactMutationContinuationPlanner.Plan> plan =
                 CompactMutationContinuationPlanner.planForContextBudget(
@@ -64,12 +64,8 @@ class CompactMutationContinuationPlannerTest {
         LoopState state = state(request);
         state.toolOutcomes.add(readOutcome("board-brief.md"));
         state.toolOutcomes.add(readOutcome("client-notes.md"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=board-brief.md;",
-                "1 | Board brief marker: ORBITAL-DECK-71.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=client-notes.md;",
-                "1 | Client note marker: NEON-RESPONSE-44.");
+        addReadback(state, "board-brief.md", "1 | Board brief marker: ORBITAL-DECK-71.");
+        addReadback(state, "client-notes.md", "1 | Client note marker: NEON-RESPONSE-44.");
 
         Optional<CompactMutationContinuationPlanner.Plan> plan =
                 CompactMutationContinuationPlanner.planForContextBudget(
@@ -95,12 +91,8 @@ class CompactMutationContinuationPlannerTest {
         LoopState state = state(request);
         state.toolOutcomes.add(readOutcome("index.html"));
         state.toolOutcomes.add(readOutcome("script.js"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=index.html;",
-                "1 | <html><script src=\"scripts.js\"></script></html>");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=script.js;",
-                "1 | console.log('similar wrong target');");
+        addReadback(state, "index.html", "1 | <html><script src=\"scripts.js\"></script></html>");
+        addReadback(state, "script.js", "1 | console.log('similar wrong target');");
 
         Optional<CompactMutationContinuationPlanner.Plan> plan =
                 CompactMutationContinuationPlanner.planForContextBudget(
@@ -188,6 +180,14 @@ class CompactMutationContinuationPlannerTest {
                 false,
                 "Read " + path,
                 "");
+    }
+
+    private static void addReadback(LoopState state, String path, String readback) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static List<ToolSpec> baseTools() {

@@ -73,9 +73,12 @@ public final class LoopState {
      */
     public final Map<Integer, String> compactedToolResultOriginals = new HashMap<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
-    public final Map<String, String> successfulReadCalls = new HashMap<>();
-    public final Map<String, String> successfulReadCallBodies = new HashMap<>();
-    public final Map<String, String> readFileBodiesThisTurn = new HashMap<>();
+    /**
+     * T1013: typed, ordered read evidence bound to the effective execution
+     * path. Replaces the flattened-signature maps (successfulReadCalls /
+     * successfulReadCallBodies) and the path-keyed readFileBodiesThisTurn.
+     */
+    public final ReadEvidenceLedger readEvidence = new ReadEvidenceLedger();
     public boolean mutationSinceStart;
     public boolean contentWithheldFromModelContext;
     public final List<String> userVisiblePrivacyNotices = new ArrayList<>();

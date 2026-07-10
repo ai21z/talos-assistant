@@ -6,6 +6,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -25,14 +26,15 @@ class RedundantReadSuppressionGuardTest {
     void duplicateReadOnlyCallReturnsExactNudgeAndSignature() {
         LoopState state = loopState();
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
-        String signature = ToolCallSupport.buildReadCallSignature(read);
-        state.successfulReadCalls.put(signature, "1 | # Demo");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, read, "README.md", ToolResult.ok("1 | # Demo"));
 
         RedundantReadSuppressionGuard.Decision decision =
                 RedundantReadSuppressionGuard.decision(read, state, false);
 
         assertNotNull(decision);
-        assertEquals(signature, decision.readSignature());
+        assertNotNull(decision.readSignature());
+        assertTrue(decision.readSignature().contains("talos.read_file"), decision.readSignature());
         assertEquals(
                 "You already gathered this information and the workspace has not changed since then. "
                         + "Answer the user's question now using the evidence you already have.",
@@ -43,7 +45,8 @@ class RedundantReadSuppressionGuardTest {
     void strictModeAndMutationSinceStartReturnNoDecision() {
         LoopState state = loopState();
         ToolCall read = new ToolCall("talos.read_file", Map.of("path", "README.md"));
-        state.successfulReadCalls.put(ToolCallSupport.buildReadCallSignature(read), "1 | # Demo");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, read, "README.md", ToolResult.ok("1 | # Demo"));
 
         assertNull(RedundantReadSuppressionGuard.decision(read, state, true));
 

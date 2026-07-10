@@ -196,7 +196,7 @@ class ToolCallExecutionStageCharacterizationTest {
                 () -> assertTrue(result.content().contains(
                         "outside the current requested private document target set"), result.content()),
                 () -> assertFalse(result.content().contains("Sibling DOCX fact"), result.content()),
-                () -> assertTrue(harness.state().readFileBodiesThisTurn.isEmpty()),
+                () -> assertTrue(harness.state().readEvidence.latestReadFileBodiesByNormalizedPath().isEmpty()),
                 () -> assertTrue(trace.events().stream().anyMatch(event ->
                         "TOOL_CALL_BLOCKED".equals(event.type())
                                 && "talos.read_file".equals(event.toolName())

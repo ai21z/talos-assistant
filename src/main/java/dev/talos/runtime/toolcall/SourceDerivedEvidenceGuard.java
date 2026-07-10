@@ -246,32 +246,10 @@ final class SourceDerivedEvidenceGuard {
     }
 
     private static String latestSuccessfulReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null || normalizedPath == null || normalizedPath.isBlank()) {
-            return null;
-        }
-        String target = ToolCallSupport.canonicalizeReadPath(normalizedPath)
-                .toLowerCase(Locale.ROOT);
-        String fullBody = latestSuccessfulReadbackForPath(state.successfulReadCallBodies, target);
-        if (fullBody != null) return fullBody;
-        return latestSuccessfulReadbackForPath(state.successfulReadCalls, target);
-    }
-
-    private static String latestSuccessfulReadbackForPath(java.util.Map<String, String> readbacksBySignature,
-                                                          String target) {
-        if (readbacksBySignature == null || readbacksBySignature.isEmpty()
-                || target == null || target.isBlank()) {
-            return null;
-        }
-        for (var entry : readbacksBySignature.entrySet()) {
-            String signature = entry.getKey() == null
-                    ? ""
-                    : entry.getKey().replace('\\', '/').toLowerCase(Locale.ROOT);
-            if (signature.startsWith("talos.read_file:")
-                    && signature.contains("path=" + target + ";")) {
-                return entry.getValue();
-            }
-        }
-        return null;
+        if (state == null) return null;
+        // T1013: deterministic latest read_file body for the effective path.
+        ReadEvidence read = state.readEvidence.latestReadFileForPath(normalizedPath, true);
+        return read == null ? null : read.body();
     }
 
     private static String evidencePathKey(String pathHint) {

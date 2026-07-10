@@ -7,6 +7,8 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.LoopState;
+import dev.talos.runtime.toolcall.ReadEvidenceStateAccounting;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -27,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -5337,21 +5340,34 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void buildReadCallSignature_stableForSameParams() {
-        var call1 = new ToolCall("talos.read_file", Map.of("path", "index.html"));
-        var call2 = new ToolCall("talos.read_file", Map.of("path", "index.html"));
-        assertEquals(
-                ToolCallLoop.buildReadCallSignature(call1),
-                ToolCallLoop.buildReadCallSignature(call2));
+    void readEvidenceIdentity_stableForSameParams() {
+        var state = new LoopState("", List.of(), List.of(), null, null, null, 5, 0);
+        var params1 = new LinkedHashMap<String, String>();
+        params1.put("path", "index.html");
+        params1.put("max_lines", "10");
+        var params2 = new LinkedHashMap<String, String>();
+        params2.put("max_lines", "10");
+        params2.put("path", "index.html");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", params1),
+                "index.html",
+                ToolResult.ok("1 | <html>"));
+        assertNotNull(
+                state.readEvidence.latestIdenticalCall(new ToolCall("talos.read_file", params2), true),
+                "the same params in a different insertion order are the same call identity");
     }
 
     @Test
-    void buildReadCallSignature_differentForDifferentParams() {
-        var call1 = new ToolCall("talos.read_file", Map.of("path", "a.txt"));
-        var call2 = new ToolCall("talos.read_file", Map.of("path", "b.txt"));
-        assertNotEquals(
-                ToolCallLoop.buildReadCallSignature(call1),
-                ToolCallLoop.buildReadCallSignature(call2));
+    void readEvidenceIdentity_differentForDifferentParams() {
+        var state = new LoopState("", List.of(), List.of(), null, null, null, 5, 0);
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "a.txt")),
+                "a.txt",
+                ToolResult.ok("1 | alpha"));
+        assertNull(state.readEvidence.latestIdenticalCall(
+                new ToolCall("talos.read_file", Map.of("path", "b.txt")), true));
     }
 
     // ── Path canonicalization for read-only redundancy ────────────────
@@ -5387,14 +5403,28 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void buildReadCallSignature_listDirDotAndDotSlashAreEquivalent() {
+    void readEvidenceIdentity_listDirDotAndDotSlashAreEquivalent() {
         // This is the exact transcript failure: list_dir with "." vs "./"
+        // must stay ONE redundancy identity (path-canonicalized values),
+        // even though the stored raw call preserves the model's spelling.
+        var state = new LoopState("", List.of(), List.of(), null, null, null, 5, 0);
         var callDot = new ToolCall("talos.list_dir", Map.of("path", "."));
         var callDotSlash = new ToolCall("talos.list_dir", Map.of("path", "./"));
-        assertEquals(
-                ToolCallLoop.buildReadCallSignature(callDot),
-                ToolCallLoop.buildReadCallSignature(callDotSlash),
-                "list_dir '.' and './' must produce identical signatures");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, callDot, ".", ToolResult.ok("src"));
+        assertNotNull(state.readEvidence.latestIdenticalCall(callDotSlash, true),
+                "list_dir '.' and './' must resolve to one call identity");
+
+        var readPlain = new ToolCall("talos.read_file", Map.of("path", "index.html"));
+        var readDotSlash = new ToolCall("talos.read_file", Map.of("path", "./index.html"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, readPlain, "index.html", ToolResult.ok("1 | <html>"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, readDotSlash, "index.html", ToolResult.ok("1 | <html>"));
+        assertEquals(1, state.readEvidence.readFileEntriesForPath("./index.html", true).size(),
+                "spelling variants of one read replace each other in the ledger");
+        assertNotNull(state.readEvidence.latestReadFileForPath("index.html", true),
+                "both spellings resolve to the same evidence path");
     }
 }
 

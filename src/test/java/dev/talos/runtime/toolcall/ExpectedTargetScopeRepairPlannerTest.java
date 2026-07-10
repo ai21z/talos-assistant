@@ -10,8 +10,10 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
+import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -154,7 +156,11 @@ class ExpectedTargetScopeRepairPlannerTest {
                 false,
                 "Read " + path,
                 ""));
-        state.successfulReadCallBodies.put("talos.read_file:path=" + path + ";", readback);
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCallLoop.ToolOutcome expectedTargetFailure(String path) {

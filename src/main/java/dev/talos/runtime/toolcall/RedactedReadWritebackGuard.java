@@ -70,23 +70,20 @@ final class RedactedReadWritebackGuard {
 
     /** Package-visible: the T1003 recovery planner excludes redacted reads. */
     static boolean hasSameTurnRedactedReadForPath(LoopState state, String pathHint) {
-        String target = ToolCallSupport.canonicalizeReadPath(pathHint);
-        if (target.isBlank()) return false;
-        for (Map.Entry<String, String> entry : state.readFileBodiesThisTurn.entrySet()) {
-            if (samePath(entry.getKey(), target) && containsRedactionSentinel(entry.getValue())) {
-                return true;
-            }
-        }
-        for (Map.Entry<String, String> entry : state.successfulReadCallBodies.entrySet()) {
-            if (readSignatureMatchesPath(entry.getKey(), target)
-                    && containsRedactionSentinel(entry.getValue())) {
+        // T1013: whole-turn evidence (a redacted read stays disqualifying
+        // even after later mutations, matching the previous never-cleared
+        // path-keyed map), bound to the effective execution path so hedged
+        // alias keys can neither hide nor misattribute a redacted body.
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(pathHint, false)) {
+            if (read.redacted()) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean containsRedactionSentinel(String value) {
+    /** Package-visible: the read-evidence ledger types redaction state with this single owner. */
+    static boolean containsRedactionSentinel(String value) {
         if (value == null || value.isBlank()) return false;
         for (String sentinel : REDACTION_SENTINELS) {
             if (value.contains(sentinel)) {
@@ -94,26 +91,6 @@ final class RedactedReadWritebackGuard {
             }
         }
         return false;
-    }
-
-    private static boolean readSignatureMatchesPath(String signature, String target) {
-        if (signature == null || target == null || target.isBlank()) return false;
-        int separator = signature.indexOf(':');
-        if (separator <= 0) return false;
-        String toolName = signature.substring(0, separator);
-        if (!"read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))) {
-            return false;
-        }
-        // Segment-aware lookup: an indexOf("path=") scan lands inside hedged
-        // alias keys like "file_path=", attributing a redacted body to the
-        // wrong file and missing the redaction for the real one.
-        String path = ToolCallSupport.readCallSignatureParam(signature, "path");
-        return path != null && samePath(path, target);
-    }
-
-    private static boolean samePath(String left, String right) {
-        return ToolCallSupport.canonicalizeReadPath(left)
-                .equalsIgnoreCase(ToolCallSupport.canonicalizeReadPath(right));
     }
 
     private static boolean literalSentinelsWereRequested(LoopState state) {

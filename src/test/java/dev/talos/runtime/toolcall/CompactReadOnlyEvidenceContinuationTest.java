@@ -6,6 +6,8 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -51,9 +53,11 @@ class CompactReadOnlyEvidenceContinuationTest {
                 false,
                 "read README.md",
                 ""));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=readme.md;",
-                "1 | # Fixture\n2 | README evidence belongs in the compact answer.");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", java.util.Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Fixture\n2 | README evidence belongs in the compact answer."));
 
         boolean answered = CompactReadOnlyEvidenceContinuation.tryAnswer(
                 state,

@@ -373,10 +373,6 @@ public final class ToolCallLoop {
         return ToolCallSupport.isMutatingTool(toolName);
     }
 
-    static String buildReadCallSignature(ToolCall call) {
-        return ToolCallSupport.buildReadCallSignature(call);
-    }
-
     static ToolCall repairMissingPath(ToolCall call) {
         return ToolCallSupport.repairMissingPath(call);
     }

@@ -112,12 +112,14 @@ final class AppendLinePreApprovalGuard {
     /**
      * The single complete-read evidence owner shared by the append-line
      * guard and the T1003 invalid-edit recovery planner. Content is only
-     * ever taken from a successful read_file signature for the same
-     * canonical path without an {@code offset} parameter and without
-     * explicit or implicit truncation, so an offset read that reaches EOF
-     * can never masquerade as the whole file. When multiple complete reads
-     * of the same path disagree in content the evidence is ambiguous and
-     * null is returned (fail closed).
+     * ever taken from the latest complete (unranged, untruncated,
+     * numbered) read_file entry for the effective path, so an offset read
+     * that reaches EOF can never masquerade as the whole file and a
+     * hedged alias key can never satisfy the lookup. Recency is the
+     * ledger's deterministic sequence order: a later fresh complete read
+     * supersedes an older one, and consumers that need exact source
+     * agreement (recovery, steering) keep their disk-agreement gate as
+     * the fail-closed arbiter.
      */
     static String completeReadBodyForPath(LoopState state, String pathHint) {
         QualifiedRead read = qualifiedCompleteRead(state, pathHint);
@@ -125,8 +127,8 @@ final class AppendLinePreApprovalGuard {
     }
 
     /**
-     * The RAW (line-numbered) body of the single qualifying complete read
-     * for the path, under the same qualification and ambiguity rules as
+     * The RAW (line-numbered) body of the qualifying complete read for
+     * the path, under the same qualification rules as
      * {@link #completeReadBodyForPath}. The T1011 recovery overlay uses it
      * to locate the real read tool-result message, which carries the file
      * bytes so they never occupy a system-role message.
@@ -140,37 +142,11 @@ final class AppendLinePreApprovalGuard {
 
     private static QualifiedRead qualifiedCompleteRead(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return null;
-        String target = ToolCallSupport.canonicalizeReadPath(pathHint);
-        if (target.isBlank() || state.successfulReadCallBodies.isEmpty()) return null;
-        QualifiedRead out = null;
-        for (var entry : state.successfulReadCallBodies.entrySet()) {
-            String signature = entry.getKey();
-            if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
-            String parsed = parseCompleteReadFileBody(entry.getValue());
-            if (parsed == null) continue;
-            if (out != null && !out.parsed().equals(parsed)) return null;
-            out = new QualifiedRead(entry.getValue(), parsed);
-        }
-        return out;
-    }
-
-    private static boolean readSignatureIsCompleteReadForPath(String signature, String target) {
-        if (signature == null || target == null || target.isBlank()) return false;
-        int separator = signature.indexOf(':');
-        if (separator <= 0) return false;
-        String toolName = signature.substring(0, separator);
-        if (!"read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))) return false;
-        // Segment-aware key lookups: a hedged alias key ("file_path=a.md")
-        // must never satisfy the "path" lookup through substring overlap,
-        // and a ranged read is identified by its exact "offset" key. The
-        // value comparison is case-insensitive like every other same-path
-        // check, so case-variant reads of one file compare against each
-        // other and can trip the ambiguity refusal.
-        if (ToolCallSupport.readCallSignatureParam(signature, "offset") != null) return false;
-        String pathValue = ToolCallSupport.readCallSignatureParam(signature, "path");
-        return pathValue != null
-                && ToolCallSupport.canonicalizeReadPath(pathValue)
-                        .equalsIgnoreCase(ToolCallSupport.canonicalizeReadPath(target));
+        ReadEvidence read = state.readEvidence.latestCompleteReadFileForPath(pathHint, true);
+        if (read == null) return null;
+        String parsed = parseCompleteReadFileBody(read.body());
+        if (parsed == null) return null;
+        return new QualifiedRead(read.body(), parsed);
     }
 
     /**

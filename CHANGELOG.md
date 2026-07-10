@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+- [T1013] Read evidence is now a typed, ordered ledger bound to the
+  effective execution path. The flattened `tool:key=value;` signature maps
+  are gone: their unescaped substring identity let a hedged alias key
+  (`file_path=a.md` beside `path=b.md`) or a legal filename containing `;`
+  or `=` bind one file's content to another path, and their HashMap storage
+  made "latest readback" hash-order dependent across seven consumers.
+  Every consumer (mutation evidence, named-target existence, source
+  evidence, compact repair and continuation readbacks, read-display
+  containment, redaction writeback, redundant-read suppression) now
+  queries the ledger: identity is the effective path, recency is a
+  monotonic sequence, a later fresh complete read supersedes an older one
+  deterministically, a ranged read never displaces complete-read
+  evidence, and exact-source consumers keep disk agreement as the
+  fail-closed arbiter. Raw call names and parameters are preserved on
+  each entry for trace and redundancy identity (path-canonicalized, so
+  spelling variants of one call stay one identity) but are never parsed
+  for policy path decisions. Redaction state is typed on the entry, and
+  the truncated-log fallback that could serve 80-character log lines as
+  readback evidence is removed.
 - [T1012] Approved existing-file writes are now byte-faithful and approvals
   are format-honest. A whole-file write derived from the LF-normalized read
   surface is re-joined to the existing file's format (uniform line-ending

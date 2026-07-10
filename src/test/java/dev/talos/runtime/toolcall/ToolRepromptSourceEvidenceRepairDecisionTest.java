@@ -8,6 +8,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -128,9 +130,7 @@ class ToolRepromptSourceEvidenceRepairDecisionTest {
         state.toolOutcomes.add(failedSourceEvidenceReadBeforeWrite("dijkstra.py"));
         state.toolOutcomes.add(failedSourceEvidenceReadBeforeWrite("test_dijkstra.py"));
         state.toolOutcomes.add(readOutcome("problem.md"));
-        state.pathsReadThisTurn.add("problem.md");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=problem.md;",
+        addReadback(state, "problem.md",
                 "1 | Implement Dijkstra shortest path for a small weighted directed graph.\n"
                         + "2 | Sample graph A->B cost 2, B->C cost 3, A->C cost 10; expected A to C distance is 5.");
 
@@ -183,15 +183,17 @@ class ToolRepromptSourceEvidenceRepairDecisionTest {
         state.toolOutcomes.add(readOutcome("board-brief.md"));
         state.toolOutcomes.add(readOutcome("client-notes.md"));
         state.toolOutcomes.add(readOutcome("revenue.csv"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=board-brief.md;",
-                "1 | Board brief marker: ORBITAL-DECK-71.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=client-notes.md;",
-                "1 | Client note marker: NEON-RESPONSE-44.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=revenue.csv;",
-                "1 | Revenue marker: LASER-LEDGER-19");
+        addReadback(state, "board-brief.md", "1 | Board brief marker: ORBITAL-DECK-71.");
+        addReadback(state, "client-notes.md", "1 | Client note marker: NEON-RESPONSE-44.");
+        addReadback(state, "revenue.csv", "1 | Revenue marker: LASER-LEDGER-19");
+    }
+
+    private static void addReadback(LoopState state, String path, String readback) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCallLoop.ToolOutcome readOutcome(String path) {

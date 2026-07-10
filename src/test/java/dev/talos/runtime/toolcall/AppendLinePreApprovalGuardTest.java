@@ -7,6 +7,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -279,7 +280,11 @@ class AppendLinePreApprovalGuardTest {
     }
 
     private static void addReadback(LoopState state, String path, String readback) {
-        state.successfulReadCallBodies.put("talos.read_file:path=" + path + ";", readback);
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCall writeFile(String path, String content) {

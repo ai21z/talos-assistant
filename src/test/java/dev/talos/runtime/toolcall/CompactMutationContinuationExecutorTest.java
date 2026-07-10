@@ -9,6 +9,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -86,9 +88,11 @@ class CompactMutationContinuationExecutorTest {
                 false,
                 "Read README.md",
                 ""));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=README.md;",
-                "1 | # Old\n");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Old\n"));
         return state;
     }
 

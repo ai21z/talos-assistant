@@ -108,10 +108,12 @@ class EditRecoveryFullRewritePlannerTest {
     }
 
     @Test
-    void twoCompleteReadsWithDisagreeingContentFailClosed(@TempDir Path workspace) throws IOException {
-        // Ambiguous complete-read evidence (same path, different bytes, e.g.
-        // different max_lines large enough to cover the file at different
-        // moments) must refuse recovery instead of picking a map-order winner.
+    void aLaterDisagreeingCompleteReadWinsAndDiskAgreementRefuses(@TempDir Path workspace)
+            throws IOException {
+        // Two complete reads of the same path with different params are no
+        // longer ambiguous: the ledger's later entry wins deterministically.
+        // When that winning content does not match current disk, the
+        // disk-agreement gate still refuses the recovery.
         LoopState state = mutationState(workspace);
         writeWorkspaceFile(workspace, "README.md", "one\n");
         recordRead(state, "talos.read_file", Map.of("path", "README.md"),
@@ -122,7 +124,31 @@ class EditRecoveryFullRewritePlannerTest {
 
         EditRecoveryFullRewritePlanner.plan(state);
 
-        assertTrue(state.editRecoveryFullRewriteTargets.isEmpty());
+        assertTrue(state.editRecoveryFullRewriteTargets.isEmpty(),
+                "a winning later read that disagrees with disk must refuse recovery");
+    }
+
+    @Test
+    void aLaterCompleteReadSupersedesTheEarlierOneDeterministically(@TempDir Path workspace)
+            throws IOException {
+        // The positive half of the supersession rule: when the later read
+        // reflects current disk, its content is the recovery source even
+        // though an older complete read of the same path disagrees.
+        LoopState state = mutationState(workspace);
+        writeWorkspaceFile(workspace, "README.md", "one\n");
+        recordRead(state, "talos.read_file", Map.of("path", "README.md"),
+                numberedBody(1, "one"));
+        writeWorkspaceFile(workspace, "README.md", "one\ntwo\n");
+        recordRead(state, "talos.read_file", Map.of("path", "README.md", "max_lines", "50"),
+                numberedBody(1, "one", "two"));
+        state.emptyEditArgumentFailuresByPath.put("README.md", 2);
+
+        EditRecoveryFullRewritePlanner.plan(state);
+
+        assertTrue(state.editRecoveryFullRewriteTargets.contains("README.md"));
+        assertEquals("one\ntwo\n",
+                EditRecoveryFullRewritePlanner.recoverySourceBody(state, "README.md"),
+                "the later complete read's content wins deterministically");
     }
 
     @Test

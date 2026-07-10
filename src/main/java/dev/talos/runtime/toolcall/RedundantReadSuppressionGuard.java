@@ -27,10 +27,13 @@ final class RedundantReadSuppressionGuard {
                 ToolCallSupport.normalizePath(pathHint))) {
             return null;
         }
-        String readSignature = ToolCallSupport.buildReadCallSignature(call);
-        if (!state.successfulReadCalls.containsKey(readSignature)) {
+        // T1013: identical-call redundancy via the ledger (same canonical
+        // tool, equal raw parameters), reusable entries only so a mutation
+        // re-opens re-reads exactly like the previous cache clear did.
+        ReadEvidence identical = state.readEvidence.latestIdenticalCall(call, true);
+        if (identical == null) {
             return null;
         }
-        return new Decision(readSignature, DIAGNOSTIC);
+        return new Decision(identical.rawTool() + ":" + identical.rawParams(), DIAGNOSTIC);
     }
 }

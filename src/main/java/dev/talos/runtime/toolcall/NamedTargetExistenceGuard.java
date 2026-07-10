@@ -69,36 +69,17 @@ final class NamedTargetExistenceGuard {
     }
 
     private static String latestCompleteReadbackForPath(LoopState state, String path) {
-        if (state == null || path == null || path.isBlank()) return null;
-        String target = ToolCallSupport.canonicalizeReadPath(path);
-        if (target.isBlank()) return null;
-
-        String out = null;
-        for (var entry : state.successfulReadCallBodies.entrySet()) {
-            String signature = entry.getKey();
-            if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
-            String parsed = parseCompleteReadFileBody(entry.getValue());
-            if (parsed != null) {
-                out = parsed;
-            }
+        if (state == null) return null;
+        // T1013: deterministic latest complete read for the effective path;
+        // fall back to the latest read of any range for the whole turn,
+        // matching the previous never-cleared path-keyed fallback.
+        ReadEvidence complete = state.readEvidence.latestCompleteReadFileForPath(path, true);
+        if (complete != null) {
+            String parsed = parseCompleteReadFileBody(complete.body());
+            if (parsed != null) return parsed;
         }
-        if (out != null) return out;
-
-        String body = state.readFileBodiesThisTurn.get(target);
-        if (body == null) {
-            body = state.readFileBodiesThisTurn.get(ToolCallSupport.normalizePath(target));
-        }
-        return parseCompleteReadFileBody(body);
-    }
-
-    private static boolean readSignatureIsCompleteReadForPath(String signature, String target) {
-        if (signature == null || target == null || target.isBlank()) return false;
-        int separator = signature.indexOf(':');
-        if (separator <= 0) return false;
-        String toolName = signature.substring(0, separator);
-        return "read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))
-                && signature.contains("path=" + target + ";")
-                && !signature.contains("offset=");
+        ReadEvidence any = state.readEvidence.latestReadFileForPath(path, false);
+        return any == null ? null : parseCompleteReadFileBody(any.body());
     }
 
     private static String parseCompleteReadFileBody(String body) {

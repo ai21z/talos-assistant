@@ -134,6 +134,6 @@ final class ToolCallLoopEngine {
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes),
-                Map.copyOf(state.readFileBodiesThisTurn));
+                state.readEvidence.latestReadFileBodiesByNormalizedPath());
     }
 }

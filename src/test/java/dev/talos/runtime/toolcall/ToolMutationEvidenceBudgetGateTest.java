@@ -8,6 +8,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -168,9 +170,11 @@ class ToolMutationEvidenceBudgetGateTest {
                     "Read script.js",
                     ""));
         }
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=script.js;",
-                "1 | document.querySelector('.missing-button');\n");
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "script.js")),
+                "script.js",
+                ToolResult.ok("1 | document.querySelector('.missing-button');\n"));
         return state;
     }
 

@@ -9,6 +9,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -146,15 +148,17 @@ class SourceEvidenceExactRepairPlannerTest {
         state.toolOutcomes.add(readOutcome("board-brief.md"));
         state.toolOutcomes.add(readOutcome("client-notes.md"));
         state.toolOutcomes.add(readOutcome("revenue.csv"));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=board-brief.md;",
-                "1 | Board brief marker: ORBITAL-DECK-71.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=client-notes.md;",
-                "1 | Client note marker: NEON-RESPONSE-44.");
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=revenue.csv;",
-                "1 | Revenue marker: LASER-LEDGER-19");
+        addReadback(state, "board-brief.md", "1 | Board brief marker: ORBITAL-DECK-71.");
+        addReadback(state, "client-notes.md", "1 | Client note marker: NEON-RESPONSE-44.");
+        addReadback(state, "revenue.csv", "1 | Revenue marker: LASER-LEDGER-19");
+    }
+
+    private static void addReadback(LoopState state, String path, String readback) {
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", path)),
+                path,
+                ToolResult.ok(readback));
     }
 
     private static ToolCallLoop.ToolOutcome readOutcome(String path) {
