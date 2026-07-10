@@ -19,6 +19,7 @@ import dev.talos.runtime.policy.CapabilityPosturePolicy;
 import dev.talos.runtime.policy.CurrentTurnPromptInstructions;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.CanonicalToolDescriptors;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
@@ -112,7 +113,11 @@ final class AssistantTurnPreparation {
     }
 
     private static Context withNativeToolSurface(Context ctx, TaskContract contract, boolean forceRecompute) {
-        if (ctx == null || (ctx.hasNativeToolSpecOverride() && !forceRecompute)) return ctx;
+        boolean contractRemovesToolAuthority = contract != null && contract.type() == TaskType.SMALL_TALK;
+        if (ctx == null
+                || (ctx.hasNativeToolSpecOverride() && !forceRecompute && !contractRemovesToolAuthority)) {
+            return ctx;
+        }
         ExecutionPhase phase = ctx.executionPhaseState() == null
                 ? ExecutionPhase.APPLY
                 : ctx.executionPhaseState().phase();

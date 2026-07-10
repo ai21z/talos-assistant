@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- [T1018] Explicit blanket instructions not to open, read, inspect, search,
+  list, check, or use workspace files now project one direct-answer-only
+  capability with no inspection obligation and no prompt-visible or runtime
+  tools. Positive workspace requests and mixed scoped restrictions retain
+  their intended access. A stale caller-provided tool surface is cleared for
+  direct-answer turns, and backend-supplied out-of-surface calls cannot reach
+  tool execution.
 - [T1014 follow-up] Mutation authority now consumes the typed request-shape
   decision in production. Contradictory change and read-only instructions
   stop before model or tool execution with a deterministic clarification,

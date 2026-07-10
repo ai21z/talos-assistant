@@ -97,8 +97,25 @@ public final class ConversationBoundaryPolicy {
                     + "yaml|yml|xml|properties|gradle|kts|toml|ini|env|csv)\\b.*");
 
     private static final Pattern POSITIVE_WORKSPACE_INSPECTION = Pattern.compile(
-            ".*\\b(?:read|inspect|diagnose)\\b.{0,80}\\b(?:this\\s+)?"
+            ".*\\b(?:read|open|inspect|diagnose|search|grep|find|list|show)\\b"
+                    + ".{0,80}\\b(?:this\\s+|the\\s+|my\\s+)?"
                     + "(?:repo|repository|workspace|project)\\b.*");
+    private static final Pattern POSITIVE_WORKSPACE_EXPLANATION = Pattern.compile(
+            ".*\\b(?:explain|summarize|describe)\\b.{0,80}\\b(?:this|the|my)\\s+"
+                    + "(?:repo|repository|workspace|project)\\b.*");
+
+    private static final String WORKSPACE_ACCESS_VERB =
+            "(?:access(?:ing)?|open(?:ing)?|read(?:ing)?|inspect(?:ing)?|search(?:ing)?|"
+                    + "list(?:ing)?|check(?:ing)?|use|using|scan(?:ning)?|grep(?:ping)?)";
+    private static final String GENERIC_WORKSPACE_OBJECT =
+            "(?:(?:workspace|repo|repository|codebase|project|folder|directory)"
+                    + "(?:\\s+(?:files?|contents?))?|files?)";
+    private static final Pattern BLANKET_NO_WORKSPACE_ACCESS = Pattern.compile(
+            "\\b(?:do\\s+not|don't|dont|without)\\s+(?:please\\s+)?"
+                    + WORKSPACE_ACCESS_VERB
+                    + "(?:\\s+(?:or|and)\\s+" + WORKSPACE_ACCESS_VERB + ")*\\s+"
+                    + "(?:(?:any|all|my|our|your|the|this|these|those|local)\\s+)?"
+                    + GENERIC_WORKSPACE_OBJECT + "\\b");
 
     private static final Pattern NEAR_SLASH_COMMAND = Pattern.compile(
             "(?:"
@@ -111,16 +128,6 @@ public final class ConversationBoundaryPolicy {
 
     private static final Pattern FRIENDLY_HOW_ARE_YOU = Pattern.compile(
             "^\\s*(?:hi|hello|hey|hey\\s+there|hello\\s+there|yo)\\b.{0,120}\\bhow\\s+are\\s+you\\b.*");
-
-    private static final Pattern POSITIVE_WORKSPACE_QUERY = Pattern.compile(
-            ".*(?:"
-                    + "\\bwhat(?:'s|\\s+is)\\s+in\\s+(?:this\\s+|the\\s+)?"
-                    + "(?:repo|repository|workspace|project|folder|directory)\\b"
-                    + "|\\bshow\\b.{0,80}\\b(?:repo|repository|workspace|project|folder|directory)\\b"
-                    + ".{0,80}\\b(?:structure|tree|files|contents|entries)\\b"
-                    + "|\\b(?:read|inspect|diagnose|explain|summarize|search|grep|find|list|show)\\b"
-                    + ".{0,80}\\b(?:repo|repository|workspace|project|folder|directory|files?)\\b"
-                    + ").*");
 
     private ConversationBoundaryPolicy() {}
 
@@ -135,10 +142,7 @@ public final class ConversationBoundaryPolicy {
         String normalized = normalize(userRequest);
         if (normalized.isEmpty()) return Classification.NONE;
         boolean explicitMutation = MutationIntent.looksExplicitMutationRequest(userRequest);
-        boolean positiveWorkspaceAction = hasPositiveWorkspaceAction(normalized);
-        if (containsAny(normalized, PRIVACY_NO_WORKSPACE_MARKERS)
-                && !explicitMutation
-                && !positiveWorkspaceAction) {
+        if (isBlanketNoWorkspaceRequest(normalized) && !explicitMutation) {
             return Classification.PRIVACY_NO_WORKSPACE;
         }
         if (NEAR_SLASH_COMMAND.matcher(stripTerminalPunctuation(normalized)).matches()) {
@@ -156,6 +160,15 @@ public final class ConversationBoundaryPolicy {
 
     public static boolean isDirectAnswerOnly(String userRequest) {
         return classification(userRequest) != Classification.NONE;
+    }
+
+    /** Returns true only when the request denies workspace access as a whole. */
+    public static boolean isBlanketNoWorkspaceRequest(String userRequest) {
+        String normalized = normalize(userRequest);
+        if (normalized.isEmpty() || MutationIntent.looksExplicitMutationRequest(userRequest)) return false;
+        String residual = removeBlanketNoWorkspaceClauses(normalized);
+        if (residual.equals(normalized)) return false;
+        return !hasPositiveWorkspaceAction(residual);
     }
 
     public static String deterministicAnswer(String userRequest) {
@@ -181,18 +194,18 @@ public final class ConversationBoundaryPolicy {
     }
 
     private static boolean hasPositiveWorkspaceAction(String normalized) {
-        String positiveSpan = removePrivacyNoWorkspaceMarkers(normalized);
-        return containsAny(positiveSpan, POSITIVE_WORKSPACE_ACTION_MARKERS)
-                || POSITIVE_FILE_ACTION.matcher(positiveSpan).matches()
-                || POSITIVE_WORKSPACE_INSPECTION.matcher(positiveSpan).matches()
-                || POSITIVE_WORKSPACE_QUERY.matcher(positiveSpan).matches();
+        return containsAny(normalized, POSITIVE_WORKSPACE_ACTION_MARKERS)
+                || POSITIVE_FILE_ACTION.matcher(normalized).matches()
+                || POSITIVE_WORKSPACE_INSPECTION.matcher(normalized).matches()
+                || POSITIVE_WORKSPACE_EXPLANATION.matcher(normalized).matches();
     }
 
-    private static String removePrivacyNoWorkspaceMarkers(String normalized) {
+    private static String removeBlanketNoWorkspaceClauses(String normalized) {
         String out = normalized == null ? "" : normalized;
         for (String marker : PRIVACY_NO_WORKSPACE_MARKERS) {
             out = out.replace(marker, " ");
         }
+        out = BLANKET_NO_WORKSPACE_ACCESS.matcher(out).replaceAll(" ");
         return out.replaceAll("\\s+", " ").strip();
     }
 

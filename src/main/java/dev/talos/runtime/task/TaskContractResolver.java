@@ -231,66 +231,6 @@ public final class TaskContractResolver {
             "no content"
     );
 
-    private static final Set<String> NO_INSPECTION_MARKERS = Set.of(
-            "do not inspect this workspace",
-            "do not inspect the workspace",
-            "do not inspect workspace",
-            "don't inspect this workspace",
-            "don't inspect the workspace",
-            "don't inspect workspace",
-            "dont inspect this workspace",
-            "dont inspect the workspace",
-            "dont inspect workspace",
-            "do not read this workspace",
-            "do not read the workspace",
-            "do not read workspace",
-            "don't read this workspace",
-            "don't read the workspace",
-            "don't read workspace",
-            "do not check this workspace",
-            "do not check the workspace",
-            "do not check workspace",
-            "do not inspect my files",
-            "don't inspect my files",
-            "dont inspect my files",
-            "without inspecting the workspace",
-            "without inspecting workspace",
-            "without checking the workspace",
-            "without checking workspace",
-            "without reading the workspace",
-            "without reading workspace",
-            "without using this workspace",
-            "without using the workspace",
-            "without using workspace",
-            "without inspecting or using this workspace",
-            "without inspecting or using the workspace",
-            "without inspecting or using workspace",
-            "without inspecting the repo",
-            "without inspecting repo",
-            "without checking the repo",
-            "without checking repo",
-            "without reading the repo",
-            "without reading repo",
-            "without inspecting the repository",
-            "without checking the repository",
-            "without reading the repository",
-            "without inspecting the codebase",
-            "without checking the codebase",
-            "without reading the codebase"
-    );
-
-    private static final Set<String> NO_INSPECTION_DIRECT_ANSWER_MARKERS = Set.of(
-            "how you would approach",
-            "how would you approach",
-            "how you would review",
-            "how would you review",
-            "approach reviewing",
-            "approach review",
-            "reviewing a",
-            "methodology",
-            "general approach"
-    );
-
     private static final Pattern SOURCE_EVIDENCE_SPAN = Pattern.compile(
             "(?i)\\b(according\\s+to|based\\s+on|summari[sz]ing|summary\\s+of|from|using)\\b\\s+(.{1,320})");
 
@@ -1167,9 +1107,6 @@ public final class TaskContractResolver {
             }
             return TaskType.FILE_EDIT;
         }
-        if (looksExplicitNoInspectionDirectAnswer(lower)) {
-            return TaskType.SMALL_TALK;
-        }
         if (ConversationBoundaryPolicy.isDirectAnswerOnly(lower)
                 || looksConversationalGreetingRequest(lower)
                 || looksAssistantIdentityQuestion(lower)) {
@@ -1353,17 +1290,6 @@ public final class TaskContractResolver {
                 || lower.contains("what files")
                 || lower.contains("which files")
                 || SIMPLE_DIRECTORY_LISTING.matcher(lower).matches();
-    }
-
-    private static boolean looksExplicitNoInspectionDirectAnswer(String lower) {
-        if (lower == null || lower.isBlank()) return false;
-        if (!containsAny(lower, NO_INSPECTION_MARKERS)) return false;
-        if (asksForDirectoryListing(lower)) return false;
-        return !(lower.contains("search")
-                || lower.contains("grep")
-                || lower.contains("read ")
-                || lower.contains("show me the files")
-                || lower.contains("what files"));
     }
 
     private static boolean looksConversationalGreetingRequest(String lower) {

@@ -39,6 +39,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -600,6 +601,93 @@ class AssistantTurnExecutorTest {
                 if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
                 LocalTurnTraceCapture.clear();
             }
+        }
+    }
+
+    @Test
+    void blanketNoWorkspaceTurnRejectsBackendSuppliedReadBeforeExecution(@TempDir Path workspace) {
+        AtomicInteger executions = new AtomicInteger();
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.TalosTool() {
+            @Override public String name() { return "talos.read_file"; }
+            @Override public String description() { return "Counting workspace read"; }
+            @Override public dev.talos.tools.ToolDescriptor descriptor() {
+                return new dev.talos.tools.ToolDescriptor(
+                        name(),
+                        description(),
+                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}",
+                        dev.talos.tools.ToolRiskLevel.READ_ONLY);
+            }
+            @Override public dev.talos.tools.ToolResult execute(
+                    dev.talos.tools.ToolCall call,
+                    dev.talos.tools.ToolContext context) {
+                executions.incrementAndGet();
+                return dev.talos.tools.ToolResult.ok("should never execute");
+            }
+        });
+        var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor, 3);
+        ToolSpec staleRead = new ToolSpec(
+                "talos.read_file",
+                "Read a file.",
+                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_read", "talos.read_file", java.util.Map.of("path", "README.md")))),
+                        new LlmClient.StreamResult("I will answer without workspace access.", List.of())),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .nativeToolSpecs(List.of(staleRead))
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Without opening any workspace file, explain in one sentence what a JSON configuration file usually contains."));
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-no-workspace-authority",
+                "sid",
+                1,
+                "2026-07-10T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                messages.getLast().content());
+        try {
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(0, executions.get(), "out-of-surface read must fail before tool execution");
+            assertFalse(recorded.requests().isEmpty());
+            assertTrue(recorded.requests().getFirst().tools.isEmpty(),
+                    recorded.requests().getFirst().tools.toString());
+            assertFalse(output.text().contains("should never execute"), output.text());
+            assertEquals(TaskType.SMALL_TALK.name(), audit.policyTrace().taskType());
+            assertTrue(audit.policyTrace().nativeTools().isEmpty(), audit.policyTrace().nativeTools().toString());
+            assertTrue(audit.toolCalls().isEmpty(), audit.toolCalls().toString());
+            assertNotNull(trace.promptAudit());
+            assertEquals(TaskType.SMALL_TALK.name(), trace.taskContract().type());
+            assertTrue(trace.toolSurface().nativeTools().isEmpty(), trace.toolSurface().nativeTools().toString());
+            assertTrue(trace.toolSurface().promptTools().isEmpty(), trace.toolSurface().promptTools().toString());
+            assertEquals("DIRECT_ANSWER_ONLY", trace.promptAudit().actionObligation());
+            assertEquals("NONE", trace.promptAudit().evidenceObligation());
+            assertTrue(trace.promptAudit().nativeTools().isEmpty(), trace.promptAudit().nativeTools().toString());
+            assertTrue(trace.promptAudit().promptTools().isEmpty(), trace.promptAudit().promptTools().toString());
+            assertTrue(trace.events().stream().noneMatch(event ->
+                            "TOOL_CALL_PARSED".equals(event.type()) || "TOOL_EXECUTED".equals(event.type())),
+                    trace.events().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
         }
     }
 
