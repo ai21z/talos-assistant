@@ -1,0 +1,10 @@
+{
+  "schemaName" : "talos.modelQualification.fixture",
+  "schemaVersion" : 1,
+  "id" : "web-workspace-v1",
+  "files" : {
+    "index.html" : "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <title>Atlas</title>\n  <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <main>\n    <h1>Atlas workspace</h1>\n    <button id=\"status\">Check status</button>\n    <p id=\"message\">Waiting</p>\n  </main>\n  <script src=\"script.js\"></script>\n</body>\n</html>\n",
+    "styles.css" : "body { font-family: sans-serif; margin: 2rem; }\nbutton { padding: 0.5rem 1rem; }\n",
+    "script.js" : "const button = document.querySelector('#status');\nconst message = document.querySelector('#message');\nbutton.addEventListener('click', () => {\n  message.textContent = 'Ready';\n});\n"
+  }
+}

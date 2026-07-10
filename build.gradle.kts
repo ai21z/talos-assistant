@@ -707,6 +707,64 @@ val e2eTest by tasks.registering(Test::class) {
     shouldRunAfter(tasks.test)
 }
 
+tasks.register<JavaExec>("modelQualificationBankHash") {
+    description = "Prints the frozen Talos model-qualification scenario and fixture bank SHA-256."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    args("bank-hash")
+}
+
+tasks.register<JavaExec>("validateModelQualificationEvidence") {
+    description = "Validates a local model-qualification packet before scoring."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        listOf("validate", "--root", root)
+    })
+}
+
+tasks.register<JavaExec>("validateModelQualificationCalibration") {
+    description = "Validates frozen model calibration metadata before the first trial and requires zero run results."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        listOf("preflight", "--root", root)
+    })
+}
+
+tasks.register<JavaExec>("scoreModelQualificationEvidence") {
+    description = "Validates and mechanically scores a local admission or full qualification packet."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val bank = providers.gradleProperty("qualificationBank").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (bank.lowercase() !in setOf("admission", "full")) {
+            throw GradleException("-PqualificationBank=admission|full is required")
+        }
+        listOf("score", "--root", root, "--bank", bank)
+    })
+}
+
 val candidateTest by tasks.registering(Test::class) {
     description = "Runs the candidate unit-test lane and preserves results even when tests fail."
     group = "verification"
