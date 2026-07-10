@@ -18,6 +18,15 @@ final class RedundantReadSuppressionGuard {
         if (!ToolCallSupport.isReadOnlyTool(call.toolName())) {
             return null;
         }
+        // Empty-argument edit failures no longer clear the read caches (the
+        // failure never touches disk), so the re-read that the empty-edit
+        // repair instruction itself demands must not be short-circuited:
+        // the prior read may already be compacted out of provider context.
+        String pathHint = ToolCallSupport.resolvePathHint(call);
+        if (pathHint != null && state.emptyEditArgumentFailuresByPath.containsKey(
+                ToolCallSupport.normalizePath(pathHint))) {
+            return null;
+        }
         String readSignature = ToolCallSupport.buildReadCallSignature(call);
         if (!state.successfulReadCalls.containsKey(readSignature)) {
             return null;

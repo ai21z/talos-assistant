@@ -33,9 +33,18 @@ final class EditFilePreApprovalGuard {
         if (call == null || strict || !"talos.edit_file".equals(call.canonicalToolName())) return null;
         String normalizedPath = normalizePath(pathHint);
         if (fullRewriteRepairTargets != null && fullRewriteRepairTargets.contains(normalizedPath)) {
+            // The redirect set merges static-web repair targets and T1003
+            // invalid-edit recovery targets; the blocked-edit reason must
+            // name the actual mechanism because it is rendered verbatim in
+            // the terminal answer.
+            boolean editRecoveryTarget = state != null
+                    && state.editRecoveryFullRewriteTargets.contains(normalizedPath)
+                    && !state.staticWebFullRewriteRequiredTargets.contains(normalizedPath);
             return new Decision(
                     Kind.FULL_REWRITE_REPAIR_REQUIRED,
-                    fullRewriteRepairRequiredDiagnostic(pathHint),
+                    editRecoveryTarget
+                            ? editRecoveryFullRewriteRequiredDiagnostic(pathHint)
+                            : fullRewriteRepairRequiredDiagnostic(pathHint),
                     normalizedPath,
                     false,
                     "");
@@ -113,6 +122,16 @@ final class EditFilePreApprovalGuard {
                 + "Call talos.read_file for " + target
                 + " in a separate follow-up step before attempting another talos.edit_file. "
                 + "No approval was requested and no additional file change was made.";
+    }
+
+    private static String editRecoveryFullRewriteRequiredDiagnostic(String pathHint) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the target file"
+                : "`" + pathHint + "`";
+        return "The bounded invalid-edit recovery requires a complete talos.write_file "
+                + "replacement for " + target + ". This talos.edit_file call was not executed, "
+                + "no approval was requested, and no file was changed. Use talos.write_file "
+                + "with the full corrected file content.";
     }
 
     private static String fullRewriteRepairRequiredDiagnostic(String pathHint) {

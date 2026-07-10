@@ -96,6 +96,24 @@ class FailurePolicyTest {
     }
 
     @Test
+    void anIneligibleSiblingDoesNotConsumeTheRecoveryDeferral() {
+        // T1003: while ANY planned recovery is still unprompted, the whole
+        // empty-edit stop defers for the pass. A sibling path with two
+        // strikes but no recovery eligibility must not stop the turn before
+        // the eligible path's only recovery generation runs.
+        LoopState state = state();
+        state.pathsReadThisTurn.add("README.md");
+        state.pathsReadThisTurn.add("logo.png");
+        state.emptyEditArgumentFailuresByPath.put("README.md", 2);
+        state.emptyEditArgumentFailuresByPath.put("logo.png", 2);
+        state.editRecoveryFullRewriteTargets.add("README.md");
+
+        FailureDecision decision = policy().afterIteration(state, failedIteration());
+
+        assertFalse(decision.shouldStop());
+    }
+
+    @Test
     void repeatedEmptyEditArgsStopAgainOnceTheRecoveryWasPrompted() {
         // T1003: the recovery is one-shot. After the prompt was issued, the
         // normal truthful stop applies again if the failures persist.

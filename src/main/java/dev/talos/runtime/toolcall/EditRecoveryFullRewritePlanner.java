@@ -1,10 +1,14 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.ResourceDecision;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ToolSpec;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -22,15 +26,25 @@ import java.util.Set;
  * talos.write_file with the complete corrected content: the approval card
  * shows the full diff, and verification/readback run unchanged.
  *
- * <p>Every condition fails closed: unread, truncated, redacted, oversized,
- * or non-text targets keep the existing truthful stop, and so do turns whose
- * native tool surface does not expose talos.write_file (the recovery
- * instruction and the narrowed retry surface only work on the native path).
+ * <p>Every condition fails closed. Targets are excluded when the read is
+ * missing, ranged (offset), truncated, ambiguous, redacted, oversized, or
+ * non-text, when the effective path is protected, escapes the workspace, or
+ * cannot be classified, when the contract is read-only, and when the native
+ * tool surface does not expose talos.write_file (the recovery instruction
+ * and the narrowed retry surface only work on the native path).
  */
 final class EditRecoveryFullRewritePlanner {
 
     /** Conservative cap on the reconstructed read body for a full rewrite. */
     static final int MAX_RECOVERY_BODY_CHARS = 32_768;
+
+    /**
+     * Framing tokens for the readback injected by the recovery overlay. A
+     * body that already contains them could break out of the framed block
+     * inside the temporary system message, so such bodies are refused.
+     */
+    static final String READBACK_BEGIN_MARKER = "<<<BEGIN FILE";
+    static final String READBACK_END_MARKER = "<<<END FILE";
 
     private static final Set<String> SMALL_TEXT_EXTENSIONS = Set.of(
             "md", "txt", "css", "html", "htm", "js", "jsx", "ts", "tsx",
@@ -45,7 +59,23 @@ final class EditRecoveryFullRewritePlanner {
      * batch as the read (the observed QA shape) can still recover.
      */
     static void plan(LoopState state) {
-        if (state == null || state.emptyEditArgumentFailuresByPath.isEmpty()) return;
+        if (state == null) return;
+        // Re-validate previously planned, not-yet-prompted targets: read
+        // evidence can be cleared between iterations (for example after a
+        // successful mutation elsewhere). Refusing here restores the normal
+        // truthful stop instead of prompting a rewrite without safe source.
+        state.editRecoveryFullRewriteTargets.removeIf(path -> {
+            boolean refuse = !state.editRecoveryPromptedPaths.contains(path)
+                    && recoverySourceBody(state, path) == null;
+            if (refuse) {
+                LocalTurnTraceCapture.recordRepair(
+                        "REFUSED",
+                        "edit-recovery-full-rewrite target=" + path
+                                + " reason=safe-source-no-longer-derivable");
+            }
+            return refuse;
+        });
+        if (state.emptyEditArgumentFailuresByPath.isEmpty()) return;
         for (var entry : state.emptyEditArgumentFailuresByPath.entrySet()) {
             String path = entry.getKey();
             int failures = entry.getValue() == null ? 0 : entry.getValue();
@@ -64,15 +94,87 @@ final class EditRecoveryFullRewritePlanner {
     private static boolean eligible(LoopState state, String path) {
         if (path == null || path.isBlank()) return false;
         if (!writeFileOnNativeSurface(state)) return false;
-        if (!state.pathsReadThisTurn.contains(path)) return false;
+        if (!wasReadThisTurn(state, path)) return false;
         if (!hasSmallTextExtension(path)) return false;
-        if (RedactedReadWritebackGuard.hasSameTurnRedactedReadForPath(state, path)) return false;
-        String rawBody = state.readFileBodiesThisTurn.get(path);
-        String completeBody = AppendLinePreApprovalGuard.parseCompleteReadFileBody(rawBody);
-        if (completeBody == null) return false;
-        if (completeBody.length() > MAX_RECOVERY_BODY_CHARS) return false;
+        if (recoverySourceBody(state, path) == null) return false;
         TaskContract contract = TaskContractResolver.fromMessages(state.messages);
         return contract != null && contract.mutationAllowed();
+    }
+
+    /**
+     * The safe recovery source for a target, or null to refuse. This is the
+     * single content owner for both planning eligibility and the recovery
+     * prompt readback, so the instruction can never reference content the
+     * gates did not clear: the effective path must classify inside the
+     * workspace and non-protected, the same-turn read must be free of
+     * redaction sentinels, the content must come from a complete (unranged,
+     * untruncated, unambiguous) read under the size cap, and the current
+     * disk content must still agree with that read (workspace commands and
+     * external editors are not tracked by the read-cache accounting). The
+     * returned body is the exact disk bytes, because the line-numbered
+     * reconstruction cannot represent CRLF endings or a missing terminal
+     * newline and the injected readback claims to be the current content.
+     */
+    static String recoverySourceBody(LoopState state, String path) {
+        if (state == null || path == null || path.isBlank()) return null;
+        if (!pathClassifiesSafeForRecovery(state, path)) return null;
+        if (RedactedReadWritebackGuard.hasSameTurnRedactedReadForPath(state, path)) return null;
+        String body = AppendLinePreApprovalGuard.completeReadBodyForPath(state, path);
+        if (body == null || body.length() > MAX_RECOVERY_BODY_CHARS) return null;
+        String disk = currentDiskContent(state, path);
+        if (disk == null || disk.length() > MAX_RECOVERY_BODY_CHARS) return null;
+        if (!normalizedForComparison(disk).equals(normalizedForComparison(body))) return null;
+        if (disk.contains(READBACK_BEGIN_MARKER) || disk.contains(READBACK_END_MARKER)) return null;
+        return disk;
+    }
+
+    private static String currentDiskContent(LoopState state, String path) {
+        try {
+            Path root = state.workspace.toAbsolutePath().normalize();
+            Path resolved = root.resolve(ToolCallSupport.canonicalizeReadPath(path))
+                    .toAbsolutePath().normalize();
+            if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) return null;
+            if (Files.size(resolved) > MAX_RECOVERY_BODY_CHARS) return null;
+            return Files.readString(resolved);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Comparison basis for disk-vs-read agreement: the numbered read output
+     * is LF-normalized with a forced trailing newline, so those two
+     * differences (and only those) are tolerated.
+     */
+    private static String normalizedForComparison(String value) {
+        String normalized = value.replace("\r\n", "\n").replace('\r', '\n');
+        return normalized.endsWith("\n") ? normalized : normalized + "\n";
+    }
+
+    /**
+     * Protected-path classification is its own gate, independent of the
+     * redaction-sentinel check: in default developer mode an approved
+     * protected read can reach the model unredacted, and the later write
+     * approval is the last gate, not the boundary that keeps protected
+     * files out of broad full-rewrite recovery.
+     */
+    private static boolean pathClassifiesSafeForRecovery(LoopState state, String path) {
+        ResourceDecision decision = ProtectedPathPolicy.classify(state.workspace, path);
+        return decision.hasPath()
+                && decision.insideWorkspace()
+                && !decision.workspaceEscape()
+                && !decision.protectedPath();
+    }
+
+    private static boolean wasReadThisTurn(LoopState state, String path) {
+        if (state.pathsReadThisTurn.contains(path)) return true;
+        String canonical = ToolCallSupport.canonicalizeReadPath(path);
+        for (String read : state.pathsReadThisTurn) {
+            if (ToolCallSupport.canonicalizeReadPath(read).equalsIgnoreCase(canonical)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

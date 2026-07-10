@@ -104,13 +104,11 @@ final class RedactedReadWritebackGuard {
         if (!"read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))) {
             return false;
         }
-        String pathMarker = "path=";
-        int start = signature.indexOf(pathMarker, separator + 1);
-        if (start < 0) return false;
-        start += pathMarker.length();
-        int end = signature.indexOf(';', start);
-        String path = end >= 0 ? signature.substring(start, end) : signature.substring(start);
-        return samePath(path, target);
+        // Segment-aware lookup: an indexOf("path=") scan lands inside hedged
+        // alias keys like "file_path=", attributing a redacted body to the
+        // wrong file and missing the redaction for the real one.
+        String path = ToolCallSupport.readCallSignatureParam(signature, "path");
+        return path != null && samePath(path, target);
     }
 
     private static boolean samePath(String left, String right) {

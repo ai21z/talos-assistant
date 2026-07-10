@@ -112,14 +112,17 @@ public record FailurePolicy(
         if (state.emptyEditArgumentFailuresByPath.isEmpty()) {
             return FailureDecision.continueLoop();
         }
+        // T1003: while ANY planned recovery is still unprompted, the whole
+        // empty-edit stop defers for this pass so the bounded write_file
+        // recovery generation can run (an ineligible sibling path must not
+        // consume the eligible path's only shot). Once every planned
+        // recovery has been prompted, the stop applies again.
+        if (hasAnyPendingUnpromptedRecovery(state)) {
+            return FailureDecision.continueLoop();
+        }
         return state.emptyEditArgumentFailuresByPath.entrySet().stream()
                 .filter(entry -> entry.getValue() >= 2)
                 .filter(entry -> state.pathsReadThisTurn.contains(entry.getKey()))
-                // T1003: a planned, not-yet-prompted full-rewrite recovery
-                // defers this stop exactly once so the bounded write_file
-                // recovery generation can run. Once prompted, the stop
-                // applies again if the failures persist.
-                .filter(entry -> !hasPendingUnpromptedRecovery(state, entry.getKey()))
                 .max(Comparator.comparingInt(Map.Entry::getValue))
                 .map(entry -> FailureDecision.stop(
                         FailureAction.ASK_USER,
@@ -132,15 +135,16 @@ public record FailurePolicy(
                 .orElseGet(() -> repeatedEmptyEditArgumentAcrossPathsDecision(state));
     }
 
-    private static boolean hasPendingUnpromptedRecovery(LoopState state, String path) {
-        return state.editRecoveryFullRewriteTargets.contains(path)
-                && !state.editRecoveryPromptedPaths.contains(path);
+    private static boolean hasAnyPendingUnpromptedRecovery(LoopState state) {
+        for (String path : state.editRecoveryFullRewriteTargets) {
+            if (!state.editRecoveryPromptedPaths.contains(path)) return true;
+        }
+        return false;
     }
 
     private static FailureDecision repeatedEmptyEditArgumentAcrossPathsDecision(LoopState state) {
-        int total = state.emptyEditArgumentFailuresByPath.entrySet().stream()
-                .filter(entry -> !hasPendingUnpromptedRecovery(state, entry.getKey()))
-                .mapToInt(Map.Entry::getValue)
+        int total = state.emptyEditArgumentFailuresByPath.values().stream()
+                .mapToInt(Integer::intValue)
                 .sum();
         if (total < 3 || state.pathsReadThisTurn.isEmpty()) {
             return FailureDecision.continueLoop();

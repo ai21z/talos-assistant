@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.spi.types.ToolSpec;
 
+import java.util.ArrayList;
 import java.util.List;
 
 final class ToolRepromptObligationSelector {
@@ -43,15 +44,29 @@ final class ToolRepromptObligationSelector {
             state.setPendingActionObligation(
                     PendingActionObligation.staticRepairTargets(remainingRepairTargets));
         } else if (editRecoveryObligationActive) {
+            // One recovery target per generation, aligned with the overlay's
+            // prompting order. Remaining expected targets join the
+            // obligation's target list so a legitimate write to another
+            // still-expected target is never assessed as a breach.
+            String recoveryTarget = editRecoveryTargets.get(0);
+            List<String> obligationTargets = new ArrayList<>();
+            obligationTargets.add(recoveryTarget);
+            if (expectedTargetObligationActive) {
+                for (String target : remainingExpectedTargets) {
+                    if (!obligationTargets.contains(target)) {
+                        obligationTargets.add(target);
+                    }
+                }
+            }
             state.setPendingActionObligation(
                     PendingActionObligation.expectedTargets(
-                            editRecoveryTargets,
+                            obligationTargets,
                             PendingActionObligation.EDIT_RECOVERY_FAILURE_MARKER
                                     + " talos.edit_file was repeatedly called with an empty "
-                                    + "old_string for " + String.join(", ", editRecoveryTargets)
+                                    + "old_string for " + recoveryTarget
                                     + " and the recovery generation did not produce the required "
                                     + "talos.write_file call. The requested edit was not applied to "
-                                    + "these target(s)."));
+                                    + "this target."));
         } else if (expectedTargetObligationActive) {
             state.setPendingActionObligation(
                     PendingActionObligation.expectedTargets(remainingExpectedTargets));

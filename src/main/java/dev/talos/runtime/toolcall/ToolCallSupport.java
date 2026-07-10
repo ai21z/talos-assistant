@@ -205,6 +205,30 @@ public final class ToolCallSupport {
         return sb.toString();
     }
 
+    /**
+     * Extracts one exact key's value from a {@code tool:key=value;...} read
+     * signature built by {@link #buildReadCallSignature}. Segment-aware, so
+     * a hedged alias key like {@code file_path} can never satisfy a lookup
+     * for {@code path} through substring overlap.
+     */
+    public static String readCallSignatureParam(String signature, String key) {
+        if (signature == null || key == null || key.isBlank()) return null;
+        int separator = signature.indexOf(':');
+        if (separator < 0) return null;
+        int cursor = separator + 1;
+        while (cursor < signature.length()) {
+            int eq = signature.indexOf('=', cursor);
+            if (eq < 0) return null;
+            int end = signature.indexOf(';', eq + 1);
+            if (end < 0) end = signature.length();
+            if (signature.substring(cursor, eq).equals(key)) {
+                return signature.substring(eq + 1, end);
+            }
+            cursor = end + 1;
+        }
+        return null;
+    }
+
     public static ToolCall repairMissingPath(ToolCall call) {
         if (!PATH_REQUIRED_TOOLS.contains(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             return call;

@@ -9,6 +9,7 @@ import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
@@ -93,6 +94,128 @@ class EditRecoveryFullRewriteTest {
                 "the safe stop must be replaced by the bounded recovery: " + out.text());
         assertFalse(out.text().contains("no file was changed"),
                 "the turn must not end with the invalid-edit truth stop: " + out.text());
+    }
+
+    @Test
+    void recoverySurvivesToolResultCompactionByInjectingTheReadback(@TempDir Path workspace)
+            throws Exception {
+        // Read in iteration 1, one empty edit each in iterations 2 and 3:
+        // by the reprompt that plans the recovery, three tool results exist
+        // and compaction (keep 2) summarizes the read out of provider
+        // context. The temporary recovery overlay must therefore carry the
+        // complete safe readback itself, and must not persist afterwards.
+        Files.writeString(workspace.resolve("README.md"), README_BEFORE);
+        var registry = registry();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_read",
+                                "talos.read_file",
+                                Map.of("path", "README.md")))),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_edit_1",
+                                "talos.edit_file",
+                                Map.of("path", "README.md",
+                                        "old_string", "",
+                                        "new_string", "## Contributing\n")))),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_edit_2",
+                                "talos.edit_file",
+                                Map.of("path", "README.md",
+                                        "old_string", "",
+                                        "new_string", "## Contributing (second attempt)\n")))),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_write",
+                                "talos.write_file",
+                                Map.of("path", "README.md", "content", README_CORRECTED)))),
+                        new LlmClient.StreamResult("Added the Contributing section to README.md.", List.of())),
+                16_384);
+        recorded.client().setToolSpecs(specs(registry));
+        Context ctx = context(workspace, registry, recorded.client());
+
+        AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                messages("Append a short Contributing section to README.md that says: "
+                        + "Contributions welcome via pull request."),
+                workspace,
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        String readme = Files.readString(workspace.resolve("README.md"));
+        assertTrue(readme.contains("Contributions welcome via pull request"),
+                "recovery must still succeed after the read was compacted; README:\n" + readme
+                        + "\nanswer:\n" + out.text()
+                        + "\nrequests=" + recorded.requests().size());
+
+        List<ChatRequest> requests = recorded.requests();
+        assertEquals(4, requests.size(),
+                "read, edit, edit, recovery write (the final answer is synthesized "
+                        + "after the successful mutation without another generation)");
+        ChatRequest recoveryRequest = requests.get(3);
+        assertTrue(requestText(recoveryRequest).contains("<<<BEGIN FILE README.md>>>"),
+                "the recovery request must carry the complete readback");
+        assertTrue(requestText(recoveryRequest).contains("Open site/index.html in a browser."),
+                "the injected readback must be the complete file content");
+        assertTrue(requestText(recoveryRequest).contains("[compacted:"),
+                "the original read tool result must already be compacted in this request, "
+                        + "otherwise this scenario does not exercise the hardening");
+    }
+
+    private static String requestText(ChatRequest request) {
+        if (request == null || request.messages == null) return "";
+        StringBuilder out = new StringBuilder();
+        for (ChatMessage message : request.messages) {
+            if (message != null && message.content() != null) {
+                out.append(message.content()).append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    @Test
+    void aFailureAfterASuccessfulRecoveryDoesNotClaimNoFileWasChanged(@TempDir Path workspace)
+            throws Exception {
+        // After the approved recovery write, the empty-edit strike ledger
+        // for that path must reset: a later failing call in the same turn
+        // must not stop with the hardcoded (now false) claim that no
+        // approval was requested and no file was changed.
+        Files.writeString(workspace.resolve("README.md"), README_BEFORE);
+        var registry = registry();
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(
+                                emptyEdit("call_edit_1"),
+                                emptyEdit("call_edit_2"),
+                                new ChatMessage.NativeToolCall(
+                                        "call_read",
+                                        "talos.read_file",
+                                        Map.of("path", "README.md")))),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_write",
+                                "talos.write_file",
+                                Map.of("path", "README.md", "content", README_CORRECTED)))),
+                        // The model wastes one more call with an empty edit
+                        // after the successful recovery.
+                        new LlmClient.StreamResult("", List.of(emptyEdit("call_edit_3"))),
+                        new LlmClient.StreamResult(
+                                "Added the Contributing section to README.md.", List.of())),
+                16_384);
+        recorded.client().setToolSpecs(specs(registry));
+        Context ctx = context(workspace, registry, recorded.client());
+
+        AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                messages("Append a short Contributing section to README.md that says: "
+                        + "Contributions welcome via pull request."),
+                workspace,
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        String readme = Files.readString(workspace.resolve("README.md"));
+        assertTrue(readme.contains("Contributions welcome via pull request"),
+                "the approved recovery write must persist; README:\n" + readme);
+        assertFalse(out.text().contains("no file was changed"),
+                "a post-recovery failure must not deny the approved change: " + out.text());
+        assertFalse(out.text().contains("No approval was requested"),
+                "approval was requested and granted: " + out.text());
     }
 
     @Test

@@ -14,7 +14,7 @@ import dev.talos.tools.ToolResult;
  */
 final class ToolExecutionFailureClassifier {
     private static final Classification NOT_FAILED =
-            new Classification(false, false, false, false, false, false, "", false);
+            new Classification(false, false, false, false, false, false, "", false, false);
 
     private ToolExecutionFailureClassifier() {}
 
@@ -26,7 +26,8 @@ final class ToolExecutionFailureClassifier {
             boolean preApprovalPathPolicyBlock,
             boolean expectedTargetScopeBlock,
             String unsupportedReadPath,
-            boolean oldStringNotFound
+            boolean oldStringNotFound,
+            boolean emptyEditArguments
     ) {
         Classification {
             unsupportedReadPath = unsupportedReadPath == null ? "" : unsupportedReadPath;
@@ -56,6 +57,8 @@ final class ToolExecutionFailureClassifier {
         String unsupportedReadPath = unsupportedReadPath(call, error, pathHint);
         boolean oldStringNotFound = invalidParams
                 && reason == ToolFailureReason.EDIT_OLD_STRING_NOT_FOUND;
+        boolean emptyEditArguments = invalidParams
+                && reason == ToolFailureReason.EDIT_EMPTY_ARGUMENTS;
 
         return new Classification(
                 failed,
@@ -65,7 +68,8 @@ final class ToolExecutionFailureClassifier {
                 preApprovalPathPolicyBlock,
                 expectedTargetScopeBlock,
                 unsupportedReadPath,
-                oldStringNotFound);
+                oldStringNotFound,
+                emptyEditArguments);
     }
 
     private static String unsupportedReadPath(ToolCall call, ToolError error, String pathHint) {

@@ -30,7 +30,8 @@ final class ToolRepromptOverlayContinuation {
                 state,
                 remainingRepairTargets,
                 remainingExpectedTargets,
-                userTask)) {
+                userTask,
+                staticRepairObligationActive)) {
             requestMessages = new ArrayList<>(ToolRepromptRequestBuilder.messages(
                     state,
                     staticRepairObligationActive,

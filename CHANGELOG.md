@@ -2,25 +2,60 @@
 
 ## [Unreleased]
 
+- [T1010] Static-repair readbacks are now gated like every other elevation
+  of file content into system context: protected paths and workspace
+  escapes never inline (the cached-read branch previously bypassed all path
+  gates), and bodies that collide with the readback block's own framing
+  tokens are skipped so file content cannot forge additional readback
+  entries. Skipped targets keep the existing behavior of simply not being
+  inlined; the repair instruction itself is unchanged.
 - [T1003] Repeated invalid edit_file calls on a small, completely read text
   file now recover through one bounded full-rewrite instead of ending the
   turn with only "copy the exact old_string". When a weak model spends both
   empty-old_string strikes (even inside the same generation batch as the
   read), Talos plans a deterministic recovery: the retry surface narrows to
-  talos.write_file for that exact path, the model is instructed to produce
-  the complete corrected content from the same-turn read, and the write goes
-  through the normal approval card with a full diff plus unchanged
-  verification and readback. Every gate fails closed: unread, truncated,
-  redacted, oversized, or non-text targets, read-only contracts, and turns
-  whose native tool surface does not expose talos.write_file keep the
-  existing truthful stop, and the recovery is one-shot per path so a failed
-  recovery still ends truthfully.
+  talos.write_file for that exact path, the temporary recovery prompt
+  carries the complete safe readback from the same-turn read (so the
+  instruction stays valid even after tool-result compaction), and the write
+  goes through the normal approval card with a full diff plus unchanged
+  verification and readback. Every gate fails closed: recovery source
+  content only ever comes from a complete read signature (offset or
+  truncated reads never count, and disagreeing complete reads refuse),
+  protected paths and workspace escapes are excluded by path classification
+  independent of redaction sentinels, redacted, oversized, or non-text
+  targets, read-only contracts, and turns whose native tool surface does
+  not expose talos.write_file keep the existing truthful stop, and the
+  recovery is one-shot per path so a failed recovery still ends truthfully.
+  Bodies that already contain the recovery readback's own framing markers
+  are refused so file content cannot break out of the framed block.
+  Read-signature matching is segment-aware and case-insensitive, so a
+  hedged alias key (file_path=a.md on a read of b.md) can never make
+  another file's content count as evidence, and the current disk content
+  must still agree with the read before recovery is offered, so approved
+  workspace commands or external edits between the read and the recovery
+  refuse instead of steering a reverting rewrite. The injected readback is
+  the exact disk bytes (CRLF endings and missing terminal newlines are
+  represented faithfully). Recoveries prompt one target per generation,
+  never during an active static-repair continuation, and an approved
+  recovery write settles the strike ledger so later failures cannot claim
+  no file was changed. Trace records now cover PLANNED, PROMPTED, and
+  REFUSED so the turn evidence never claims a recovery that did not run,
+  and a blocked edit on a recovery target names the recovery, not
+  static-web repair.
 - [T1009] Mid-sentence rename requests ("In src/app.js, rename the function
   reset to resetAll.") now classify as mutation like their fix/change/update
   siblings, so the model gets edit tools instead of running read-only and
-  printing the corrected file as prose. Question and how-to forms stay
-  read-only, and the instructional-question guard now also covers the
-  "how do I" and "how would I" phrasings for every mutation verb.
+  printing the corrected file as prose. The recognition is request-shaped
+  (a clause-start imperative with an explicit "rename X to Y" relationship
+  over identifier-shaped tokens), not a bare substring, so explanatory,
+  definitional, declarative, and historical discussion such as "What does
+  rename mean in Git?", "In Git, rename detection compares blobs to find
+  moves.", and API mentions like os.rename stays read-only. Question and
+  how-to forms stay read-only, the instructional-question guard now also
+  covers the "how do I" and "how would I" phrasings for every mutation
+  verb, and a sentence-initial imperative mutation request outranks a
+  trailing instructional question so compound prompts keep their mutation
+  contract.
 - [T1008] Named tool forcing now actually enforces on the managed backend.
   llama-server (pinned b9918) parses tool_choice as a string only, and the
   OpenAI named-function object form silently degraded to "auto", so every

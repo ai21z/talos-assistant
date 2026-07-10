@@ -53,5 +53,12 @@ final class ToolMutationStateAccounting {
         String path = ToolCallSupport.normalizePath(pathHint);
         state.pathsMutatedSinceRead.add(path);
         state.staticWebFullRewriteRequiredTargets.remove(path);
+        // T1003: the approved write settles the invalid-edit history for
+        // this path. Stale strikes would otherwise feed a later stop that
+        // falsely claims no approval was requested and no file was changed,
+        // and a lingering recovery target would keep blocking legitimate
+        // surgical edits of the just-rewritten file.
+        state.emptyEditArgumentFailuresByPath.remove(path);
+        state.editRecoveryFullRewriteTargets.remove(path);
     }
 }

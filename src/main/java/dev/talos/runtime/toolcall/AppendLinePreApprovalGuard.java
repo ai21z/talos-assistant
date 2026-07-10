@@ -92,6 +92,20 @@ final class AppendLinePreApprovalGuard {
     }
 
     private static String priorReadContentForPath(LoopState state, String pathHint) {
+        return completeReadBodyForPath(state, pathHint);
+    }
+
+    /**
+     * The single complete-read evidence owner shared by the append-line
+     * guard and the T1003 invalid-edit recovery planner. Content is only
+     * ever taken from a successful read_file signature for the same
+     * canonical path without an {@code offset} parameter and without
+     * explicit or implicit truncation, so an offset read that reaches EOF
+     * can never masquerade as the whole file. When multiple complete reads
+     * of the same path disagree in content the evidence is ambiguous and
+     * null is returned (fail closed).
+     */
+    static String completeReadBodyForPath(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return null;
         String target = ToolCallSupport.canonicalizeReadPath(pathHint);
         if (target.isBlank() || state.successfulReadCallBodies.isEmpty()) return null;
@@ -100,22 +114,30 @@ final class AppendLinePreApprovalGuard {
             String signature = entry.getKey();
             if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
             String parsed = parseCompleteReadFileBody(entry.getValue());
-            if (parsed != null) {
-                out = parsed;
-            }
+            if (parsed == null) continue;
+            if (out != null && !out.equals(parsed)) return null;
+            out = parsed;
         }
         return out;
     }
 
     private static boolean readSignatureIsCompleteReadForPath(String signature, String target) {
         if (signature == null || target == null || target.isBlank()) return false;
-        String normalized = target.replace('\\', '/');
         int separator = signature.indexOf(':');
         if (separator <= 0) return false;
         String toolName = signature.substring(0, separator);
-        return "read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))
-                && signature.contains("path=" + normalized + ";")
-                && !signature.contains("offset=");
+        if (!"read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))) return false;
+        // Segment-aware key lookups: a hedged alias key ("file_path=a.md")
+        // must never satisfy the "path" lookup through substring overlap,
+        // and a ranged read is identified by its exact "offset" key. The
+        // value comparison is case-insensitive like every other same-path
+        // check, so case-variant reads of one file compare against each
+        // other and can trip the ambiguity refusal.
+        if (ToolCallSupport.readCallSignatureParam(signature, "offset") != null) return false;
+        String pathValue = ToolCallSupport.readCallSignatureParam(signature, "path");
+        return pathValue != null
+                && ToolCallSupport.canonicalizeReadPath(pathValue)
+                        .equalsIgnoreCase(ToolCallSupport.canonicalizeReadPath(target));
     }
 
     /**

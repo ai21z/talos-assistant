@@ -48,6 +48,34 @@ class EditFilePreApprovalGuardTest {
     }
 
     @Test
+    void anEditRecoveryTargetGetsARecoveryDiagnosticNotStaticWebWording() {
+        // T1003 targets are merged into the same redirect set as static-web
+        // repair targets, but the blocked-edit reason must name the actual
+        // mechanism: claiming "Static verification repair ... small web
+        // file" for a Markdown recovery target is false and that false
+        // reason is rendered verbatim in the terminal answer.
+        LoopState state = loopState();
+        state.editRecoveryFullRewriteTargets.add("README.md");
+        ToolCall edit = editFile("README.md", "old", "new");
+
+        EditFilePreApprovalGuard.Decision decision = EditFilePreApprovalGuard.decision(
+                edit,
+                state,
+                "README.md",
+                false,
+                Set.of(),
+                Set.of("README.md"));
+
+        assertNotNull(decision);
+        assertEquals(EditFilePreApprovalGuard.Kind.FULL_REWRITE_REPAIR_REQUIRED, decision.kind());
+        assertFalse(decision.diagnostic().contains("Static verification repair"),
+                decision.diagnostic());
+        assertFalse(decision.diagnostic().contains("small web file"), decision.diagnostic());
+        assertTrue(decision.diagnostic().contains("invalid-edit recovery"), decision.diagnostic());
+        assertTrue(decision.diagnostic().contains("no file was changed"), decision.diagnostic());
+    }
+
+    @Test
     void fullRewriteRepairTargetRecognizesEditFileAlias() {
         LoopState state = loopState();
         ToolCall edit = new ToolCall("file_utils:edit_file", Map.of(
