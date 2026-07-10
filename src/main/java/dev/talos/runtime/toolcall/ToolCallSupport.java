@@ -127,12 +127,21 @@ public final class ToolCallSupport {
         return ToolResultFormatter.firstSentenceSummary(output);
     }
 
+    /**
+     * Duplicate-failed-edit identity. Canonical tool name and canonicalized
+     * path, so an alias respelling or a "./"-prefixed retry of the exact
+     * failing edit cannot escape the duplicate block; the old_string
+     * component carries its length alongside the hash so a 32-bit
+     * collision alone cannot falsely block a different edit.
+     */
     public static String buildCallSignature(ToolCall call) {
         String path = resolvePathHint(call);
         String oldStr = call.param("old_string");
         if (oldStr == null) oldStr = call.param("oldString");
         int oldHash = oldStr != null ? oldStr.hashCode() : 0;
-        return call.toolName() + ":" + (path != null ? path : "") + ":" + oldHash;
+        int oldLength = oldStr != null ? oldStr.length() : 0;
+        return call.canonicalToolName() + ":" + canonicalizeReadPath(path != null ? path : "")
+                + ":" + oldLength + ":" + oldHash;
     }
 
     public static boolean hasEmptyEditArguments(ToolCall call) {

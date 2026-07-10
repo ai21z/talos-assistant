@@ -605,6 +605,23 @@ public final class TurnProcessor {
                     "Scope warning requires approval before running " + call.toolName() + ".");
         }
 
+        // Format-change override (T1012): a BOM, line-ending, or
+        // terminal-newline change that remains after preservation is a
+        // material byte change the user must SEE; a remembered or
+        // configured ALLOW would bypass the Format changes section.
+        if (permissionDecision.action() == PermissionAction.ALLOW
+                && isWriteFileTool(call.toolName())
+                && path != null && !path.isBlank()) {
+            String pendingContent = resolveParam(call, "content", "text", "body", "data", "file_content");
+            if (pendingContent != null && !WriteFormatPolicy
+                    .remainingFormatChanges(session.workspace(), path, pendingContent)
+                    .isEmpty()) {
+                permissionDecision = permissionDecision.forceAsk(
+                        "FORMAT_CHANGE_ASK",
+                        "Format changes require approval before running " + call.toolName() + ".");
+            }
+        }
+
         LocalTurnTraceCapture.recordPermissionDecision(
                 tracePhase,
                 call,
@@ -1537,7 +1554,7 @@ public final class TurnProcessor {
 
         if (content != null && !content.isEmpty()) {
             long bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-            long lines = content.chars().filter(c -> c == '\n').count() + 1;
+            long lines = countLineSeparators(content) + 1;
             sb.append(" (").append(bytes).append(" bytes, ").append(lines).append(" lines)");
 
             // Show first 5 lines as preview
@@ -1603,6 +1620,23 @@ public final class TurnProcessor {
 
     private static String sanitizeApprovalText(String text) {
         return ProtectedContentPolicy.sanitizeText(text);
+    }
+
+    /** Counts logical line separators (CRLF, lone CR, lone LF each count once). */
+    private static long countLineSeparators(String content) {
+        long count = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c == '\r') {
+                count++;
+                if (i + 1 < content.length() && content.charAt(i + 1) == '\n') {
+                    i++;
+                }
+            } else if (c == '\n') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private record PathParam(String name, String value) { }

@@ -112,14 +112,15 @@ final class AppendLinePreApprovalGuard {
     /**
      * The single complete-read evidence owner shared by the append-line
      * guard and the T1003 invalid-edit recovery planner. Content is only
-     * ever taken from the latest complete (unranged, untruncated,
-     * numbered) read_file entry for the effective path, so an offset read
-     * that reaches EOF can never masquerade as the whole file and a
-     * hedged alias key can never satisfy the lookup. Recency is the
-     * ledger's deterministic sequence order: a later fresh complete read
-     * supersedes an older one, and consumers that need exact source
-     * agreement (recovery, steering) keep their disk-agreement gate as
-     * the fail-closed arbiter.
+     * ever taken from the newest PARSEABLE complete (unranged, numbered)
+     * read_file entry for the effective path, so an offset read that
+     * reaches EOF can never masquerade as the whole file, a hedged alias
+     * key can never satisfy the lookup, and a truncated re-read cannot
+     * poison evidence an earlier complete read established. Recency is
+     * the ledger's deterministic sequence order: a later fresh parseable
+     * complete read supersedes an older one, and consumers that need
+     * exact source agreement (recovery, steering) keep their
+     * disk-agreement gate as the fail-closed arbiter.
      */
     static String completeReadBodyForPath(LoopState state, String pathHint) {
         QualifiedRead read = qualifiedCompleteRead(state, pathHint);
@@ -142,11 +143,19 @@ final class AppendLinePreApprovalGuard {
 
     private static QualifiedRead qualifiedCompleteRead(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return null;
-        ReadEvidence read = state.readEvidence.latestCompleteReadFileForPath(pathHint, true);
-        if (read == null) return null;
-        String parsed = parseCompleteReadFileBody(read.body());
-        if (parsed == null) return null;
-        return new QualifiedRead(read.body(), parsed);
+        // Newest-first, first PARSEABLE complete read wins: a truncated or
+        // otherwise unparseable re-read (the empty-edit repair flow itself
+        // demands one) must not poison the evidence an earlier complete
+        // read established. Exact-source consumers still gate on current
+        // disk agreement on top of this recency rule.
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(pathHint, true)) {
+            if (read.ranged()) continue;
+            String parsed = parseCompleteReadFileBody(read.body());
+            if (parsed != null) {
+                return new QualifiedRead(read.body(), parsed);
+            }
+        }
+        return null;
     }
 
     /**

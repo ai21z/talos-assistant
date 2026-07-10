@@ -1780,6 +1780,10 @@ public final class TaskContractResolver {
             String content = message.content();
             if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
             if (content == null || content.isBlank()) continue;
+            // Runtime-injected user-role data blocks (project memory rides
+            // in user role since T1011) are workspace bytes, not user
+            // requests: they must never seed inherited contracts.
+            if (content.startsWith("[ProjectMemory]") || content.startsWith("[PinnedFiles]")) continue;
             if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
                 skippedLatest = true;
                 continue;

@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+- [T1012/T1013/T1011/T1014] Adversarial-review hardening on the trust
+  batch: files with no line-ending evidence (empty, BOM-only,
+  single-line) are never re-joined to a fabricated style and a
+  newline-only proposal no longer collapses to an empty write; a write
+  whose format changes remain undisclosed is forced to the approval
+  window even when a permission rule or remembered approval would
+  auto-allow it; post-write verification parses BOM-prefixed
+  JSON/YAML/XML byte-faithfully instead of reporting a standing false
+  failure; the format-directive detection no longer treats a casual
+  "encoding" mention as a normalization request; redundancy identity
+  canonicalizes only path-valued parameters so two different grep
+  patterns are never one search; the newest PARSEABLE complete read is
+  the evidence owner so a truncated re-read cannot poison the append
+  guard, named-target guard, recovery, or mutation evidence; the
+  old-string-not-found repair frame carries a bounded failure reason
+  (the edit tool's file snippet stays out of system role) and skips
+  sensitive paths; scoped-prefix classification requires an imperative
+  verb clause (verbs as nouns, passives, and question sentences stay
+  read-only) and a definite typed scope ("a large module" is guidance);
+  the scoped-prefix phrasing now resolves the same deterministic
+  replacement and append expectations as the trailing form so
+  preserve-rest and steering engage for both; the [ProjectMemory]
+  user-role block is never scanned as a prior user request; the
+  duplicate-failed-edit signature uses canonical tool and path identity;
+  and approval line counts handle CR-only content.
 - [T1014] Mutation-request classification is shape-based and typed. A
   scoped-prefix imperative ("In notes.md, replace beta with BETA.",
   "Inside src/app.js, rename reset to resetAll.", "In the tracker module,
@@ -21,10 +46,12 @@
   asks for an explicit change request instead of silently mutating or
   silently dropping the edit. A scope restriction such as "Change nothing
   else." keeps the mutation classification.
-- [T1011] The workspace-data role separation is now project-wide. A full
-  census of every system-message construction found four remaining
-  mechanisms that granted workspace bytes system-role authority, and all
-  are closed: the compact source-evidence repair frames and the compact
+- [T1011] The workspace-data role separation now covers every censused
+  system-message construction. A full census found four remaining
+  mechanisms that granted raw workspace bytes system-role authority, and
+  all four are closed (bounded verifier-authored diagnostic strings and
+  charset-validated selector tokens remain in system frames as bounded
+  metadata by design): the compact source-evidence repair frames and the compact
   mutation continuation now carry readbacks and required evidence phrases
   as structurally encoded JSON data inside the user message (and never
   inside tool schema descriptions, which providers render into the prompt
@@ -108,27 +135,29 @@
   empty-old_string strikes (even inside the same generation batch as the
   read), Talos plans a deterministic recovery: the retry surface narrows to
   talos.write_file for that exact path, the temporary recovery prompt
-  carries the complete safe readback from the same-turn read (so the
-  instruction stays valid even after tool-result compaction), and the write
-  goes through the normal approval card with a full diff plus unchanged
-  verification and readback. Every gate fails closed: recovery source
-  content only ever comes from a complete read signature (offset or
-  truncated reads never count, and disagreeing complete reads refuse),
-  protected paths and workspace escapes are excluded by path classification
-  independent of redaction sentinels, redacted, oversized, or non-text
-  targets, read-only contracts, and turns whose native tool surface does
-  not expose talos.write_file keep the existing truthful stop, and the
-  recovery is one-shot per path so a failed recovery still ends truthfully.
-  Bodies that already contain the recovery readback's own framing markers
-  are refused so file content cannot break out of the framed block.
-  Read-signature matching is segment-aware and case-insensitive, so a
+  references the real same-turn read result as the content carrier (later
+  amended by T1011: bytes stay in the restored tool result, never in a
+  system message), and the write goes through the normal approval card
+  with a full diff plus unchanged verification and readback. Every gate
+  fails closed: recovery source content only ever comes from a complete
+  read (offset or truncated reads never count; per T1013, the newest
+  parseable complete read is the evidence and current disk agreement
+  remains the arbiter), protected paths and workspace escapes are excluded
+  by path classification independent of redaction sentinels, redacted,
+  oversized, or non-text targets, read-only contracts, and turns whose
+  native tool surface does not expose talos.write_file keep the existing
+  truthful stop, and the recovery is one-shot per path so a failed
+  recovery still ends truthfully. (The framing-marker refusal this entry
+  originally added was removed by T1011: JSON-encoded user-role data made
+  it obsolete.) Read evidence binds to the effective execution path, so a
   hedged alias key (file_path=a.md on a read of b.md) can never make
   another file's content count as evidence, and the current disk content
   must still agree with the read before recovery is offered, so approved
   workspace commands or external edits between the read and the recovery
-  refuse instead of steering a reverting rewrite. The injected readback is
-  the exact disk bytes (CRLF endings and missing terminal newlines are
-  represented faithfully). Recoveries prompt one target per generation,
+  refuse instead of steering a reverting rewrite. The model-visible
+  carrier is the line-numbered read rendering; the write pipeline's
+  format preservation (T1012) restores the target's real byte format
+  before approval. Recoveries prompt one target per generation,
   never during an active static-repair continuation, and an approved
   recovery write settles the strike ledger so later failures cannot claim
   no file was changed. Trace records now cover PLANNED, PROMPTED, and

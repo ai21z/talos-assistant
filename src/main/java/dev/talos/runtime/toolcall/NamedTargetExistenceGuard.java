@@ -70,16 +70,20 @@ final class NamedTargetExistenceGuard {
 
     private static String latestCompleteReadbackForPath(LoopState state, String path) {
         if (state == null) return null;
-        // T1013: deterministic latest complete read for the effective path;
-        // fall back to the latest read of any range for the whole turn,
+        // T1013: newest-first, first PARSEABLE complete read wins (a
+        // truncated re-read must not poison earlier evidence); fall back
+        // to the newest parseable read of any range for the whole turn,
         // matching the previous never-cleared path-keyed fallback.
-        ReadEvidence complete = state.readEvidence.latestCompleteReadFileForPath(path, true);
-        if (complete != null) {
-            String parsed = parseCompleteReadFileBody(complete.body());
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(path, true)) {
+            if (read.ranged()) continue;
+            String parsed = parseCompleteReadFileBody(read.body());
             if (parsed != null) return parsed;
         }
-        ReadEvidence any = state.readEvidence.latestReadFileForPath(path, false);
-        return any == null ? null : parseCompleteReadFileBody(any.body());
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(path, false)) {
+            String parsed = parseCompleteReadFileBody(read.body());
+            if (parsed != null) return parsed;
+        }
+        return null;
     }
 
     private static String parseCompleteReadFileBody(String body) {

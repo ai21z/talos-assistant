@@ -108,7 +108,7 @@ public final class MutationIntent {
             "apply the", "apply these", "apply those",
             "append ", "append exactly", "append line", "append one line",
             "add a ", "add the ", "remove the ", "delete the ",
-            "refactor ",
+            "refactor the ", "refactor this ", "refactor it",
             "darker and more minimal"
     );
 
@@ -167,16 +167,18 @@ public final class MutationIntent {
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     /**
-     * T1009: request-shaped mid-sentence rename recognition. Sentence-initial
-     * and please/can-you forms are already covered by REQUEST_PATTERNS
-     * because rename is a CORE_MUTATION_VERB. This pattern adds only the
-     * clause-start imperative with an explicit "rename X to Y" relationship
-     * ("In src/app.js, rename the function reset to resetAll."). The
-     * clause-start requires whitespace after punctuation so API identifiers
-     * like os.rename never qualify through their own dot, the "in path"
-     * branch covers the comma-less field shape and only accepts file-shaped
-     * anchors, and the object is at most an article plus one typed noun
-     * before the X-to-Y pair.
+     * T1009/T1014: request-shaped mid-sentence rename recognition.
+     * Sentence-initial and please/can-you forms are already covered by
+     * REQUEST_PATTERNS because rename is a CORE_MUTATION_VERB, and the
+     * comma-scoped form ("In src/app.js, rename reset to resetAll.") is
+     * covered by SCOPED_PREFIX_MUTATION_REQUEST. This pattern adds the
+     * remaining clause starts with an explicit "rename X to Y"
+     * relationship: after sentence punctuation, after an assistant-directed
+     * filler ("then rename reset to resetAll"), or after a comma-less
+     * file-shaped anchor ("in src/app.js rename reset to resetAll"). The
+     * sentence-punctuation branch requires whitespace so API identifiers
+     * like os.rename never qualify through their own dot, and the object
+     * is at most an article plus one typed noun before the X-to-Y pair.
      *
      * <p>The structural shape alone is not enough: generic advice ("In
      * general, rename variables to improve readability.") builds the same
@@ -225,20 +227,29 @@ public final class MutationIntent {
      * Scoped-prefix imperative: "In SCOPE, VERB ..." (also inside/within,
      * sentence-initial or after a sentence boundary). The comma after the
      * scope is the imperative signal here because the clause OPENS with a
-     * concrete scope - a file path or a typed scope noun ("the tracker
-     * module"); contrast the reported/advisory clauses handled by the
-     * rename shape, where the pre-comma clause is prose ("In general,",
-     * "the docs recommend,").
+     * concrete scope - a file path or a DEFINITE typed scope noun ("the
+     * tracker module"; indefinite scopes like "a large module" are
+     * generic guidance) - and the verb must head an imperative clause: a
+     * verb used as a noun or in the passive ("replace is called twice",
+     * "copy of the header", "move semantics") is descriptive prose, and a
+     * sentence that ends in a question mark is a question about the file,
+     * not an instruction to change it.
      */
     private static final String TYPED_SCOPE_NOUN_PHRASE =
-            "(?:(?:the|a|an|this|that)\\s+)?[a-z0-9_.$-]+\\s+"
+            "(?:the|this|that)\\s+[a-z0-9_.$-]+\\s+"
                     + "(?:module|file|class|component|package|folder|directory|script|page|section)";
+
+    private static final String NON_IMPERATIVE_VERB_CONTINUATION =
+            "(?!\\s+(?:is|are|was|were|has|have|had|does|did|will|would|can|could|"
+                    + "may|might|should|must|of|seems?|appears?|happens?|means?|matters?|"
+                    + "semantics|operations?|instructions?|frequency|behaviou?rs?|detection|calls?)\\b)";
 
     private static final Pattern SCOPED_PREFIX_MUTATION_REQUEST = Pattern.compile(
             "(?:^|[.!?]\\s+)(?:in|inside|within)\\s+(?:the\\s+)?(?:file\\s+)?"
                     + "(?:" + EXPLICIT_FILE_TARGET + "|[a-z0-9_.$-]+[\\\\/][a-z0-9_.$\\\\/-]+"
                     + "|" + TYPED_SCOPE_NOUN_PHRASE + ")"
-                    + "\\s*[,:]\\s*(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b");
+                    + "\\s*[,:]\\s*(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b"
+                    + NON_IMPERATIVE_VERB_CONTINUATION);
 
     private static final Pattern SINGLE_LETTER_C_SOURCE_TARGET_AFTER_MUTATION = Pattern.compile(
             "\\b(?i:" + CORE_MUTATION_VERBS + ")\\s+(?i:only\\s+)?[A-Za-z0-9_-]\\.c"
@@ -400,6 +411,10 @@ public final class MutationIntent {
      * global read-only negation; it keeps the read-only tool surface, and
      * the runtime's read-only denial asks the user for an explicit change
      * request rather than silently mutating or silently dropping the edit.
+     * The decision reflects this classifier only: TaskContractResolver may
+     * layer its own reason overrides (session-meta, command-verification)
+     * on top of the stored reason string, so the effective contract is
+     * always the resolver's output, with this shape as its input.
      */
     public record RequestShape(Decision decision, String reason, String evidenceSpan) {}
 
@@ -450,7 +465,7 @@ public final class MutationIntent {
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
         if (looksReadThenMutationRequest(lower)) return "explicit-read-then-mutation-request";
-        if (SCOPED_PREFIX_MUTATION_REQUEST.matcher(lower).find()) {
+        if (looksScopedPrefixMutationRequest(lower)) {
             return "explicit-scoped-mutation-request";
         }
         for (Pattern pattern : REQUEST_PATTERNS) {
@@ -529,6 +544,33 @@ public final class MutationIntent {
     }
 
     /**
+     * A scoped-prefix match classifies as mutation only when its sentence
+     * is not a question: "In app.js, replace is called twice, is that a
+     * problem?" is a question about the file. The sentence is the span
+     * from the match start to the next terminal punctuation.
+     */
+    private static boolean looksScopedPrefixMutationRequest(String lower) {
+        Matcher matcher = SCOPED_PREFIX_MUTATION_REQUEST.matcher(lower);
+        while (matcher.find()) {
+            boolean question = false;
+            for (int i = matcher.end(); i < lower.length(); i++) {
+                char c = lower.charAt(i);
+                if (c == '.' || c == '!') {
+                    break;
+                }
+                if (c == '?') {
+                    question = true;
+                    break;
+                }
+            }
+            if (!question) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Best-effort matched span for trace/debug. The span re-derives from
      * the same deterministic patterns that produced the reason; routes
      * decided by structural predicates rather than a single regex return
@@ -562,7 +604,11 @@ public final class MutationIntent {
                 }
                 case "global-read-only-negation" -> {
                     for (String marker : READ_ONLY_NEGATIONS) {
-                        if (lower.contains(marker)) return marker;
+                        int start = lower.indexOf(marker);
+                        while (start >= 0) {
+                            if (!isScopedLimiter(lower, start, marker)) return marker;
+                            start = lower.indexOf(marker, start + marker.length());
+                        }
                     }
                 }
                 default -> {

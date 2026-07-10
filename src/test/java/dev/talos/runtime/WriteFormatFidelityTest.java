@@ -205,6 +205,145 @@ class WriteFormatFidelityTest {
                 "removing the terminal newline is a byte change and must not render as no changes");
     }
 
+    // ── files with no format evidence pass through verbatim ─────────────
+
+    @Test
+    void anEmptyExistingFileTakesTheProposalVerbatim() throws Exception {
+        Path workspace = workspace();
+        Files.write(workspace.resolve("empty.txt"), new byte[0]);
+        String proposed = "hello\r\nworld\r\n";
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Rewrite empty.txt with the greeting lines.",
+                new ToolCall("talos.write_file", Map.of("path", "empty.txt", "content", proposed)),
+                new String[1]);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(proposed, Files.readString(workspace.resolve("empty.txt")),
+                "an empty file expressed no format preference; the proposal lands byte-exact");
+    }
+
+    @Test
+    void aBomOnlyFileKeepsItsBomAndTheProposalBytes() throws Exception {
+        Path workspace = workspace();
+        Files.write(workspace.resolve("bomonly.txt"), new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+        String proposed = "data\r\n";
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Rewrite bomonly.txt with the data line.",
+                new ToolCall("talos.write_file", Map.of("path", "bomonly.txt", "content", proposed)),
+                new String[1]);
+
+        assertTrue(result.success(), result.errorMessage());
+        byte[] written = Files.readAllBytes(workspace.resolve("bomonly.txt"));
+        assertEquals("\uFEFF" + proposed, new String(written, StandardCharsets.UTF_8),
+                "the BOM is the only format evidence; the proposal's own bytes are kept");
+    }
+
+    @Test
+    void aNewlineOnlyProposalDoesNotCollapseToAnEmptyWrite() throws Exception {
+        Path workspace = workspace();
+        Files.write(workspace.resolve("single.txt"), "x\n".getBytes(StandardCharsets.UTF_8));
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Rewrite single.txt so it is one blank line.",
+                new ToolCall("talos.write_file", Map.of("path", "single.txt", "content", "\n")),
+                new String[1]);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("\n", Files.readString(workspace.resolve("single.txt")),
+                "a newline-only proposal is one empty line, not an empty file");
+    }
+
+    // ── disclosure cannot be bypassed ────────────────────────────────────
+
+    @Test
+    void aCasualEncodingMentionDoesNotDisablePreservation() throws Exception {
+        Path workspace = workspace();
+        String original = "l1\r\nl2\r\n";
+        Files.write(workspace.resolve("notes.txt"), original.getBytes(StandardCharsets.UTF_8));
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Rewrite notes.txt and update the encoding section heading to Encodings.",
+                new ToolCall("talos.write_file",
+                        Map.of("path", "notes.txt", "content", "l1\nl2 Encodings\n")),
+                new String[1]);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("l1\r\nl2 Encodings\r\n", Files.readString(workspace.resolve("notes.txt")),
+                "mentioning the word encoding is not a format directive; CRLF must be preserved");
+    }
+
+    @Test
+    void remainingFormatChangesForceApprovalEvenWhenPolicyWouldAutoAllow() throws Exception {
+        Path workspace = workspace();
+        Files.write(workspace.resolve("clean.txt"), "a\nb\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(workspace.resolve("data.txt"), "a\r\nb\nc\r\n".getBytes(StandardCharsets.UTF_8));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        Config config = checkpointConfig();
+        config.data.put("permissions", Map.of("rules", java.util.List.of(Map.of(
+                "effect", "allow",
+                "tools", java.util.List.of("talos.write_file"),
+                "risks", java.util.List.of("WRITE"),
+                "phases", java.util.List.of(),
+                "paths", java.util.List.of(),
+                "reason", "auto-allow writes for this test"))));
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(temp.resolve("checkpoints"))));
+        Session session = new Session(workspace, config);
+        Context ctx = context(workspace, config);
+        TurnUserRequestCapture.set("Rewrite clean.txt and data.txt so every line is uppercase.");
+
+        ToolResult clean = processor.executeTool(session,
+                new ToolCall("talos.write_file", Map.of("path", "clean.txt", "content", "A\nB\n")),
+                ctx);
+        assertTrue(clean.success(), clean.errorMessage());
+        assertEquals(0, gateCalls[0],
+                "control: a format-preserving write really is auto-allowed under this policy");
+
+        ToolResult mixed = processor.executeTool(session,
+                new ToolCall("talos.write_file", Map.of("path", "data.txt", "content", "A\nB\nC\n")),
+                ctx);
+        assertTrue(mixed.success(), mixed.errorMessage());
+        assertEquals(1, gateCalls[0],
+                "a write whose format changes remain undisclosed must reach the approval window "
+                        + "even when the permission policy would auto-allow it");
+    }
+
+    @Test
+    void bomPrefixedJsonWritesVerifyAsPass() throws Exception {
+        Path workspace = workspace();
+        byte[] original = ("\uFEFF" + "{\"a\": 1}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(workspace.resolve("config.json"), original);
+
+        ToolResult result = executeWrite(
+                workspace,
+                "Rewrite config.json so a becomes 2.",
+                new ToolCall("talos.write_file",
+                        Map.of("path", "config.json", "content", "{\"a\": 2}\n")),
+                new String[1]);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertFalse(result.output().contains("JSON parse failed"),
+                "a byte-faithful BOM-preserving write of valid JSON must not report a parse failure: "
+                        + result.output());
+        assertFalse(result.output().contains("[verification: FAIL]"), result.output());
+    }
+
     // ── unchanged behavior controls ─────────────────────────────────────
 
     @Test

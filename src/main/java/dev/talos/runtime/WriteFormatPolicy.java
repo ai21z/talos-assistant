@@ -43,7 +43,11 @@ import java.util.regex.Pattern;
  */
 public final class WriteFormatPolicy {
 
-    /** Matches the write-content cap in {@code FileWriteTool}. */
+    /**
+     * Matches the diffable-file cap in {@code ApprovalDiffPreview} and
+     * {@code FileEditTool} (2 MiB). Existing files above it skip
+     * preservation and disclosure entirely, like the diff preview does.
+     */
     private static final long MAX_EXISTING_FILE_BYTES = 2 * 1024 * 1024L;
     private static final int MAX_CHANGE_LINES = 4;
     private static final char BOM = '\uFEFF';
@@ -54,16 +58,23 @@ public final class WriteFormatPolicy {
             List.of("content", "text", "body", "data", "file_content");
 
     /**
-     * An explicit format directive in the user's own words. Kept narrow:
-     * a format keyword and a change verb in the same sentence.
+     * An explicit format directive in the user's own words. Kept narrow so
+     * a casual mention ("update the encoding section heading") never
+     * disables preservation: a strongly format-directive verb
+     * (normalize/convert) near a format noun, a generic change verb whose
+     * DIRECT OBJECT is a format token, or the participle form.
      */
     private static final Pattern EXPLICIT_FORMAT_DIRECTIVE = Pattern.compile(
-            "(?is)\\b(?:normali[sz]e|convert|change|switch|set|strip|remove|drop|add|use)\\b"
-                    + "[^.!?]*\\b(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|"
-                    + "\\blf\\b|byte[- ]?order[- ]?mark|bom|encoding)\\b"
+            "(?is)\\b(?:normali[sz]e|convert)\\b[^.!?]{0,40}?"
+                    + "\\b(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|lf|cr|"
+                    + "byte[- ]?order[- ]?marks?|boms?|encoding)\\b"
+                    + "|\\b(?:change|switch|set|strip|remove|drop|add|keep|use)\\b"
+                    + "\\s+(?:(?:the|all|any|every)\\s+)*"
+                    + "(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|"
+                    + "byte[- ]?order[- ]?marks?|boms?)\\b"
                     + "|\\b(?:line[- ]?endings?|line[- ]?terminators?|eol|crlf|"
-                    + "byte[- ]?order[- ]?mark|bom|encoding)\\b"
-                    + "[^.!?]*\\b(?:normali[sz]ed?|converted|changed|switched|stripped|removed|dropped|added)\\b");
+                    + "byte[- ]?order[- ]?marks?|boms?)\\b[^.!?]{0,30}?"
+                    + "\\b(?:normali[sz]ed|converted|stripped|removed|changed)\\b");
 
     private WriteFormatPolicy() {}
 
@@ -80,7 +91,8 @@ public final class WriteFormatPolicy {
             boolean terminalNewline,
             int crlfCount,
             int lfCount,
-            int crCount
+            int crCount,
+            boolean textHasContent
     ) {
         public boolean supportedUniformText() {
             return exists && !binary && validUtf8 && eol != Eol.MIXED;
@@ -97,7 +109,7 @@ public final class WriteFormatPolicy {
     /** Detect the text format of raw file bytes. */
     public static TextFormat detect(byte[] bytes) {
         if (bytes == null) {
-            return new TextFormat(false, false, false, false, Eol.NONE, false, 0, 0, 0);
+            return new TextFormat(false, false, false, false, Eol.NONE, false, 0, 0, 0, false);
         }
         boolean bom = bytes.length >= 3
                 && (bytes[0] & 0xFF) == 0xEF
@@ -105,12 +117,12 @@ public final class WriteFormatPolicy {
                 && (bytes[2] & 0xFF) == 0xBF;
         for (byte b : bytes) {
             if (b == 0) {
-                return new TextFormat(true, true, false, bom, Eol.NONE, false, 0, 0, 0);
+                return new TextFormat(true, true, false, bom, Eol.NONE, false, 0, 0, 0, false);
             }
         }
         boolean validUtf8 = isValidUtf8(bytes);
         if (!validUtf8) {
-            return new TextFormat(true, false, false, bom, Eol.NONE, false, 0, 0, 0);
+            return new TextFormat(true, false, false, bom, Eol.NONE, false, 0, 0, 0, false);
         }
         String text = new String(bytes, StandardCharsets.UTF_8);
         if (bom && !text.isEmpty() && text.charAt(0) == BOM) {
@@ -147,7 +159,7 @@ public final class WriteFormatPolicy {
         }
         boolean terminal = !text.isEmpty()
                 && (text.charAt(text.length() - 1) == '\n' || text.charAt(text.length() - 1) == '\r');
-        return new TextFormat(true, false, true, bom, eol, terminal, crlf, lf, cr);
+        return new TextFormat(true, false, true, bom, eol, terminal, crlf, lf, cr, !text.isEmpty());
     }
 
     /**
@@ -237,6 +249,12 @@ public final class WriteFormatPolicy {
         if (existingFormat.eol() != proposedFormat.eol()
                 && !(existingFormat.eol() == Eol.NONE || proposedFormat.eol() == Eol.NONE)) {
             changes.add("line endings: " + describeEol(existingFormat) + " -> " + describeEol(proposedFormat));
+        } else if (existingFormat.eol() == Eol.MIXED && proposedFormat.eol() == Eol.MIXED
+                && (existingFormat.crlfCount() != proposedFormat.crlfCount()
+                        || existingFormat.lfCount() != proposedFormat.lfCount()
+                        || existingFormat.crCount() != proposedFormat.crCount())) {
+            changes.add("line endings: " + describeEol(existingFormat)
+                    + " -> " + describeEol(proposedFormat) + " (redistributed)");
         }
         boolean existingEmpty = existing != null && existing.length == (existingFormat.bom() ? 3 : 0);
         if (!existingEmpty && !finalContent.isEmpty()
@@ -261,6 +279,23 @@ public final class WriteFormatPolicy {
         if (!body.isEmpty() && body.charAt(0) == BOM) {
             body = body.substring(1);
         }
+        // A file with no line terminators expressed no line-ending
+        // preference, so the proposal's own endings pass through; an empty
+        // or BOM-only file expressed no terminal-newline preference either
+        // (only the BOM itself is format evidence). Never fabricate a
+        // style from absent evidence.
+        if (format.eol() == Eol.NONE) {
+            if (!format.textHasContent()) {
+                return format.bom() ? BOM + body : body;
+            }
+            // Single-line-no-newline evidence: keep the proposal's own
+            // endings, preserve only the absent terminal newline.
+            String kept = body;
+            if (endsWithNewline(kept)) {
+                kept = kept.substring(0, kept.length() - (kept.endsWith("\r\n") ? 2 : 1));
+            }
+            return format.bom() ? BOM + kept : kept;
+        }
         String eol = switch (format.eol()) {
             case CRLF -> "\r\n";
             case CR -> "\r";
@@ -269,11 +304,19 @@ public final class WriteFormatPolicy {
         String joined = String.join(eol, splitLogicalLines(body));
         // Terminal-newline state follows the existing file; a proposed
         // terminal newline on a no-terminal file is dropped, a missing one
-        // on a terminated file is restored. Empty content stays empty.
-        if (format.terminalNewline() && !joined.isEmpty()) {
+        // on a terminated file is restored. A proposal made only of
+        // newlines keeps one terminal ending instead of collapsing to an
+        // empty write; empty content stays empty.
+        if (format.terminalNewline() && (!joined.isEmpty() || !body.isEmpty())) {
             joined = joined + eol;
         }
         return format.bom() ? BOM + joined : joined;
+    }
+
+    private static boolean endsWithNewline(String text) {
+        if (text.isEmpty()) return false;
+        char last = text.charAt(text.length() - 1);
+        return last == '\n' || last == '\r';
     }
 
     private static List<String> splitLogicalLines(String text) {

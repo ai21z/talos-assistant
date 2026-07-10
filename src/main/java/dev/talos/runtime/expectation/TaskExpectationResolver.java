@@ -297,6 +297,14 @@ public final class TaskExpectationResolver {
                         + "\\s+to\\s+`?" + quoted + "`?\\s*:\\s*(.+)");
         Matcher matcher = appendLineAfterTarget.matcher(request);
         if (!matcher.find()) {
+            // Scoped-prefix form (T1014): "In FILE, append the line: X".
+            Pattern scopedPrefixAppendLine = Pattern.compile(
+                    "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
+                            + "`?\\s*[,:]\\s*(?:please\\s+)?append\\s+" + lineNoun
+                            + "\\s*:?\\s*(.+)");
+            matcher = scopedPrefixAppendLine.matcher(request);
+        }
+        if (!matcher.hasMatch() && !matcher.find()) {
             Pattern appendLineBeforeTarget = Pattern.compile(
                     "(?is)\\bappend\\s+" + lineNoun
                             + "\\s+(.+?)\\s+to\\s+`?" + quoted + "`?"
@@ -323,11 +331,28 @@ public final class TaskExpectationResolver {
         }
         String quoted = Pattern.quote(normalizedTarget);
         boolean preserveRest = preserveRestRequested(request);
+        // Scoped-prefix form (T1014): "In FILE, replace X with Y." carries
+        // the same deterministic expectation as the trailing form, so the
+        // preserve-rest verifier and exact guards engage for both.
+        Pattern scopedPrefixReplaceWith = Pattern.compile(
+                "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
+                        + "`?\\s*[,:]\\s*(?:please\\s+)?replace\\s+(" + REPLACEMENT_TEXT
+                        + ")\\s+with\\s+(" + REPLACEMENT_TEXT
+                        + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
+        Matcher matcher = scopedPrefixReplaceWith.matcher(request);
+        if (matcher.find()) {
+            return replacementExpectation(
+                    normalizedTarget,
+                    matcher.group(1),
+                    matcher.group(2),
+                    "replacement-scoped-prefix-replace-with",
+                    preserveRest);
+        }
         Pattern replaceWithInTarget = Pattern.compile(
                 "(?is)\\breplace\\s+(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
                         + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
-        Matcher matcher = replaceWithInTarget.matcher(request);
+        matcher = replaceWithInTarget.matcher(request);
         if (matcher.find()) {
             return replacementExpectation(
                     normalizedTarget,

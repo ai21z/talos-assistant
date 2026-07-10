@@ -39,11 +39,15 @@ final class ToolMutationEvidenceFactory {
     private static String priorReadContentForPath(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return null;
         // T1013: the ledger binds evidence to the effective execution path
-        // and "latest" is deterministic sequence order, so a hedged alias
-        // key or hash order can never decide the previous content.
-        ReadEvidence read = state.readEvidence.latestCompleteReadFileForPath(pathHint, true);
-        if (read == null) return null;
-        return AppendLinePreApprovalGuard.parseCompleteReadFileBody(read.body());
+        // and "latest" is deterministic sequence order; the newest
+        // PARSEABLE complete read wins so a truncated re-read cannot
+        // poison the evidence.
+        for (ReadEvidence read : state.readEvidence.readFileEntriesForPath(pathHint, true)) {
+            if (read.ranged()) continue;
+            String parsed = AppendLinePreApprovalGuard.parseCompleteReadFileBody(read.body());
+            if (parsed != null) return parsed;
+        }
+        return null;
     }
 
     private static String firstParam(ToolCall call, String... keys) {

@@ -73,7 +73,13 @@ public final class ReadEvidenceLedger {
         return entries.isEmpty();
     }
 
-    /** Newest-first read_file entries for a canonical path. */
+    /**
+     * Newest-first read_file entries for a canonical path. Path identity
+     * is case-insensitive, matching every same-path comparison in the
+     * runtime: Talos is Windows-first, and on a case-sensitive filesystem
+     * two files differing only by case would share evidence - a known,
+     * documented trade-off rather than an accident.
+     */
     public List<ReadEvidence> readFileEntriesForPath(String path, boolean reusableOnly) {
         String target = ToolCallSupport.canonicalizeReadPath(path == null ? "" : path);
         if (target.isBlank()) return List.of();
@@ -110,10 +116,11 @@ public final class ReadEvidenceLedger {
 
     /**
      * Latest entry recorded for an identical call, or null. Identity is
-     * the canonical tool plus the parameter map with path-canonicalized
-     * values, so spelling variants of one call (list_dir "." vs "./")
-     * stay one redundancy identity exactly as before, while the stored
-     * rawParams keep the model's exact call for trace/debug.
+     * the canonical tool plus the parameter map with PATH-KEYED values
+     * canonicalized, so spelling variants of one call (list_dir "." vs
+     * "./") stay one redundancy identity while content-valued parameters
+     * (a grep pattern of "a/b" vs "a\\b") stay distinct searches. The
+     * stored rawParams keep the model's exact call for trace/debug.
      */
     public ReadEvidence latestIdenticalCall(ToolCall call, boolean reusableOnly) {
         if (call == null) return null;
@@ -131,10 +138,18 @@ public final class ReadEvidenceLedger {
         return null;
     }
 
+    /** Parameter keys whose values are workspace paths, not content. */
+    private static final java.util.Set<String> PATH_VALUED_KEYS = java.util.Set.of(
+            "path", "file_path", "filepath", "file", "filename",
+            "from", "to", "source", "source_path", "destination", "destination_path",
+            "dir", "directory");
+
     private static Map<String, String> identityParams(Map<String, String> params) {
         Map<String, String> out = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : params.entrySet()) {
-            out.put(entry.getKey(), ToolCallSupport.canonicalizeReadPath(entry.getValue()));
+            out.put(entry.getKey(), PATH_VALUED_KEYS.contains(entry.getKey())
+                    ? ToolCallSupport.canonicalizeReadPath(entry.getValue())
+                    : entry.getValue());
         }
         return out;
     }

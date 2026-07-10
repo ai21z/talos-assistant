@@ -58,15 +58,27 @@ final class ContentVerifier {
                     + " chars, read " + readBack.length() + " chars)");
         }
         String ext = getExtension(file);
+        // Format parsers see the content without a leading UTF-8 BOM: the
+        // BOM is byte-level file format (preserved by the write path), not
+        // part of the JSON/YAML/XML document, and Jackson's String reader
+        // rejects it even though the byte-level document is valid.
+        String parseable = stripLeadingBom(readBack);
         return switch (ext) {
-            case "json"         -> verifyJson(readBack);
-            case "html", "htm"  -> verifyHtml(readBack);
-            case "yaml", "yml"  -> verifyYaml(readBack);
-            case "xml"          -> verifyXml(readBack);
-            case "css"          -> verifyCss(readBack);
-            case "js", "jsx", "mjs" -> verifyJs(readBack);
+            case "json"         -> verifyJson(parseable);
+            case "html", "htm"  -> verifyHtml(parseable);
+            case "yaml", "yml"  -> verifyYaml(parseable);
+            case "xml"          -> verifyXml(parseable);
+            case "css"          -> verifyCss(parseable);
+            case "js", "jsx", "mjs" -> verifyJs(parseable);
             default             -> new VerifyResult(VerificationStatus.UNKNOWN, "read-back OK");
         };
+    }
+
+    private static String stripLeadingBom(String content) {
+        if (content != null && !content.isEmpty() && content.charAt(0) == '\uFEFF') {
+            return content.substring(1);
+        }
+        return content;
     }
 
     private static VerifyResult verifyJson(String content) {

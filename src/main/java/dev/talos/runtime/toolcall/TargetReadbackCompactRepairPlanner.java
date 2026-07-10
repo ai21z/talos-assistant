@@ -114,6 +114,7 @@ final class TargetReadbackCompactRepairPlanner {
             if (path.isBlank()) {
                 path = ToolCallSupport.normalizePath(outcome.pathHint());
             }
+            if (dev.talos.safety.ProtectedPathTokens.isSensitiveReadbackPath(path)) continue;
             if (!successfulReadbackForPath(state, path)) continue;
             String readback = latestSuccessfulReadbackForPath(state, path);
             if (readback == null || readback.isBlank()) continue;
@@ -274,7 +275,24 @@ final class TargetReadbackCompactRepairPlanner {
 
     private static String safeRepairReason(String reason) {
         if (reason == null || reason.isBlank()) return "old_string not found";
-        return reason.strip();
+        // The edit tool's old-string-not-found error embeds the first
+        // lines of the target file after this marker; that snippet is
+        // workspace data and must never gain system-role authority. The
+        // readback itself rides in the user-role message.
+        String bounded = reason;
+        int snippetStart = bounded.indexOf("File begins with:");
+        if (snippetStart >= 0) {
+            bounded = bounded.substring(0, snippetStart);
+        }
+        int newline = bounded.indexOf('\n');
+        if (newline >= 0) {
+            bounded = bounded.substring(0, newline);
+        }
+        if (bounded.length() > 300) {
+            bounded = bounded.substring(0, 300);
+        }
+        bounded = bounded.strip();
+        return bounded.isBlank() ? "old_string not found" : bounded;
     }
 
     private static String safeAppendLineRepairReason(String reason) {

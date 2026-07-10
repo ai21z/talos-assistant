@@ -83,6 +83,45 @@ class MutationRequestGrammarTest {
                 request + " -> " + MutationIntent.classificationReason(request));
     }
 
+    // ── scoped prefixes over descriptive prose stay read-only ───────────
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "In app.js, replace is called twice.",
+            "In build.gradle, apply is deprecated in favor of the plugins block.",
+            "In utils.py, update is imported from datetime.",
+            "In app.js, replace is called twice, is that a problem?",
+            "In README.md, update instructions are outdated, right?",
+            "In notes.md, copy of the header appears twice?",
+            "In src/main.rs, move semantics confuse me, can you explain?",
+    })
+    void scopedPrefixesOverDescriptiveProseStayReadOnly(String request) {
+        assertFalse(MutationIntent.isExplicitMutationClassificationReason(
+                        MutationIntent.classificationReason(request)),
+                request + " -> " + MutationIntent.classificationReason(request));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "In a large module, rename variables carefully.",
+            "In any file, delete trailing whitespace before committing.",
+            "In a legacy class, refactor slowly.",
+            "In a shared component, remove dead code only after checking usages.",
+    })
+    void indefinitelyScopedGuidanceStaysReadOnly(String request) {
+        assertFalse(MutationIntent.isExplicitMutationClassificationReason(
+                        MutationIntent.classificationReason(request)),
+                request + " -> " + MutationIntent.classificationReason(request));
+    }
+
+    @Test
+    void definiteTypedScopeImperativesStillExecute() {
+        String request = "In the tracker module, rename shippedCount to shippedTotal.";
+        assertTrue(MutationIntent.isExplicitMutationClassificationReason(
+                        MutationIntent.classificationReason(request)),
+                request + " -> " + MutationIntent.classificationReason(request));
+    }
+
     // ── typed classifier surface ─────────────────────────────────────────
     // (added in the green phase; the behavioral shapes above are the
     // red-first evidence because a new API cannot fail behaviorally

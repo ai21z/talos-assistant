@@ -26,12 +26,15 @@ import java.util.Set;
  * talos.write_file with the complete corrected content: the approval card
  * shows the full diff, and verification/readback run unchanged.
  *
- * <p>Every condition fails closed. Targets are excluded when the read is
- * missing, ranged (offset), truncated, ambiguous, redacted, oversized, or
- * non-text, when the effective path is protected, escapes the workspace, or
- * cannot be classified, when the contract is read-only, and when the native
- * tool surface does not expose talos.write_file (the recovery instruction
- * and the narrowed retry surface only work on the native path).
+ * <p>Every condition fails closed. Targets are excluded when no parseable
+ * complete read exists for the path (ranged and truncated reads never
+ * qualify; when several complete reads exist the newest parseable one is
+ * the evidence, and it must still agree with current disk), when the read
+ * was redacted, when the body is oversized or non-text, when the effective
+ * path is protected, escapes the workspace, or cannot be classified, when
+ * the contract is read-only, and when the native tool surface does not
+ * expose talos.write_file (the recovery instruction and the narrowed retry
+ * surface only work on the native path).
  */
 final class EditRecoveryFullRewritePlanner {
 

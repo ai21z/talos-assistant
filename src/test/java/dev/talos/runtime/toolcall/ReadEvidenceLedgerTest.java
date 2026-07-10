@@ -152,6 +152,62 @@ class ReadEvidenceLedgerTest {
                 "a ranged read is never complete-source evidence and cannot displace the complete read");
     }
 
+    @Test
+    void differentGrepPatternsAreDifferentCallIdentities() {
+        LoopState state = loopState();
+        // Pattern values are content, not paths: the two searches below are
+        // genuinely different queries and must never collapse into one
+        // redundancy identity through path canonicalization.
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.grep", Map.of("pattern", "C:/Users/arisz")),
+                null,
+                ToolResult.ok("no matches"));
+
+        assertNull(state.readEvidence.latestIdenticalCall(
+                        new ToolCall("talos.grep", Map.of("pattern", "C:\\Users\\arisz")), true),
+                "a backslash-spelled grep is a different content search, not a repeat");
+        assertNotNull(state.readEvidence.latestIdenticalCall(
+                        new ToolCall("talos.grep", Map.of("pattern", "C:/Users/arisz")), true),
+                "the genuinely identical search stays one identity");
+    }
+
+    @Test
+    void pathSpellingVariantsOfOneReadStayOneIdentity() {
+        LoopState state = loopState();
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "./index.html")),
+                "index.html",
+                ToolResult.ok("1 | <html>"));
+
+        assertNotNull(state.readEvidence.latestIdenticalCall(
+                        new ToolCall("talos.read_file", Map.of("path", "index.html")), true),
+                "path parameter spelling variants stay one redundancy identity");
+    }
+
+    @Test
+    void aTruncatedReReadDoesNotPoisonCompleteReadEvidence() {
+        LoopState state = loopState();
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "big.md", "max_lines", "1000")),
+                "big.md",
+                ToolResult.ok("1 | line one\n2 | line two\n"));
+        // The empty-edit repair flow itself demands a re-read; with default
+        // params the output truncates. That newer complete-but-unparseable
+        // entry must not displace the older parseable complete read.
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", Map.of("path", "big.md")),
+                "big.md",
+                ToolResult.ok("1 | line one\n... (600 more lines)\n"));
+
+        assertEquals("line one\nline two\n",
+                AppendLinePreApprovalGuard.completeReadBodyForPath(state, "big.md"),
+                "the newest parseable complete read is the evidence, not the truncated one");
+    }
+
     private LoopState loopState() {
         List<ChatMessage> messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),

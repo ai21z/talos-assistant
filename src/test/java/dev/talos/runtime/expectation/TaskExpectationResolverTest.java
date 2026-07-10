@@ -164,6 +164,37 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsReplacementExpectationForScopedPrefixForm() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, replace beta with BETA. Do not change anything else.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("notes.md", replacement.targetPath());
+        assertEquals("beta", replacement.oldText());
+        assertEquals("BETA", replacement.newText());
+        assertTrue(replacement.preserveRest(),
+                "the explicit scope restriction must reach the preserve-rest verifier");
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsAppendLineExpectationForScopedPrefixForm() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In notes.md, append the line: DONE");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        AppendLineExpectation appendLine = (AppendLineExpectation) expectations.getFirst();
+        assertEquals("notes.md", appendLine.targetPath());
+        assertEquals("DONE", appendLine.expectedLine());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
     void extractsReplacementExpectationForSingleTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Replace .missing-button with #submit in script.js.");
