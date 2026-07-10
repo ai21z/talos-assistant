@@ -41,6 +41,67 @@ class StaticRepairReadbackContextTest {
     }
 
     @Test
+    void aHedgedAliasKeyNeverBindsAnotherFilesBytes(@TempDir Path workspace) throws IOException {
+        // A read of b.css hedged with file_path=a.css must never render as
+        // "Path: a.css" carrying b.css bytes. The readback owner binds
+        // content to the exact effective canonical path (current disk
+        // bytes), never to substring matches over flattened signatures.
+        LoopState state = state(workspace);
+        writeWorkspaceFile(workspace, "a.css", "body { color: alpha; }\n");
+        writeWorkspaceFile(workspace, "b.css", "body { color: bravo; }\n");
+        ToolCall hedged = new ToolCall("talos.read_file",
+                Map.of("path", "b.css", "file_path", "a.css"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, hedged, "b.css", ToolResult.ok("1 | body { color: bravo; }\n"));
+
+        Optional<String> rendered =
+                StaticRepairReadbackContext.render(state, List.of("a.css"));
+
+        assertTrue(rendered.isPresent());
+        assertTrue(rendered.get().contains("alpha"),
+                "the a.css readback must carry a.css disk bytes:\n" + rendered.get());
+        assertFalse(rendered.get().contains("bravo"),
+                "another file's bytes must never bind to this target:\n" + rendered.get());
+    }
+
+    @Test
+    void cachedContentNeverOverridesNewerDiskBytes(@TempDir Path workspace) throws IOException {
+        // Disk is the current truth for a repair readback. A same-turn read
+        // that predates a later change must not shadow the newer bytes.
+        LoopState state = state(workspace);
+        writeWorkspaceFile(workspace, "style.css", "body { margin: 0; }\n");
+        ToolCall read = new ToolCall("talos.read_file", Map.of("path", "style.css"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, read, "style.css", ToolResult.ok("1 | body { margin: 0; }\n"));
+        writeWorkspaceFile(workspace, "style.css", "body { margin: 8px; }\n");
+
+        Optional<String> rendered =
+                StaticRepairReadbackContext.render(state, List.of("style.css"));
+
+        assertTrue(rendered.isPresent());
+        assertTrue(rendered.get().contains("margin: 8px"),
+                "the readback must be the current disk bytes:\n" + rendered.get());
+        assertFalse(rendered.get().contains("margin: 0"),
+                "stale cached content must never override newer disk bytes");
+    }
+
+    @Test
+    void aMissingTargetFailsClosedInsteadOfUsingCachedAliasEvidence(@TempDir Path workspace) {
+        // No disk file and only hedged cached evidence: nothing renders.
+        LoopState state = state(workspace);
+        ToolCall hedged = new ToolCall("talos.read_file",
+                Map.of("path", "b.css", "file_path", "a.css"));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state, hedged, "b.css", ToolResult.ok("1 | body { color: bravo; }\n"));
+
+        Optional<String> rendered =
+                StaticRepairReadbackContext.render(state, List.of("a.css"));
+
+        assertTrue(rendered.isEmpty(),
+                "missing disk evidence must fail closed, not fall back to alias-bound cache");
+    }
+
+    @Test
     void aProtectedWebPathIsNeverInlined(@TempDir Path workspace) throws IOException {
         LoopState state = state(workspace);
         writeWorkspaceFile(workspace, "secrets/site.css", "body { color: red; }\n");

@@ -3,12 +3,17 @@
 ## [Unreleased]
 
 - [T1010] Static-repair readbacks are now gated like every other elevation
-  of file content into system context: protected paths and workspace
-  escapes never inline (the cached-read branch previously bypassed all path
-  gates), and bodies that collide with the readback block's own framing
-  tokens are skipped so file content cannot forge additional readback
-  entries. Skipped targets keep the existing behavior of simply not being
-  inlined; the repair instruction itself is unchanged.
+  of file content into model context: protected paths and workspace
+  escapes never inline, and bodies that collide with the readback block's
+  own framing tokens are skipped so file content cannot forge additional
+  readback entries. Readback content binds to the exact effective target:
+  the current classified disk bytes are the single owner, replacing a
+  cached-read branch that matched flattened call signatures by substring
+  (a hedged alias key such as file_path=a.css on a read of b.css could
+  render another file's bytes under this target's label) and that let a
+  stale same-turn read shadow newer disk bytes. Missing or unreadable disk
+  evidence fails closed. Skipped targets keep the existing behavior of
+  simply not being inlined; the repair instruction itself is unchanged.
 - [T1003] Repeated invalid edit_file calls on a small, completely read text
   file now recover through one bounded full-rewrite instead of ending the
   turn with only "copy the exact old_string". When a weak model spends both

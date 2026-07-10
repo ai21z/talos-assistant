@@ -7,7 +7,6 @@ import dev.talos.runtime.policy.ResourceDecision;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 final class StaticRepairReadbackContext {
@@ -23,10 +22,9 @@ final class StaticRepairReadbackContext {
         for (String target : remainingRepairTargets) {
             String normalized = ToolCallSupport.normalizePath(target);
             if (normalized.isBlank() || !StaticWebCapabilityProfile.isSmallWebFile(normalized)) continue;
-            // This block elevates file content into a system-role message,
-            // so it is gated like every other readback: protected paths and
-            // workspace escapes never inline (the cached branch used to
-            // bypass all path gates), and bodies colliding with the block's
+            // This block elevates file content into model context, so it is
+            // gated like every other readback: protected paths and workspace
+            // escapes never inline, and bodies colliding with the block's
             // own framing are skipped so file content cannot forge entries.
             // A skipped target keeps the existing behavior of simply not
             // being inlined.
@@ -41,8 +39,7 @@ final class StaticRepairReadbackContext {
             if (body.isBlank() || collidesWithReadbackFraming(body)) continue;
             if (out.isEmpty()) {
                 out.append("[StaticRepairReadbacks]\n")
-                        .append("Use these current file contents while rewriting the static-web repair targets. ")
-                        .append("Line-number prefixes are display-only; do not copy them into files.\n");
+                        .append("Use these current file contents while rewriting the static-web repair targets.\n");
             }
             out.append("Path: ").append(normalized).append('\n')
                     .append(body.strip())
@@ -63,22 +60,17 @@ final class StaticRepairReadbackContext {
         return false;
     }
 
+    /**
+     * The current disk bytes of the classified target are the single
+     * truthful readback owner. The previous cached-read branch bound
+     * content to targets through substring matches over flattened call
+     * signatures, so a hedged alias key (path=b.css, file_path=a.css)
+     * could render another file's bytes under this target's label, and a
+     * same-turn read could shadow newer disk bytes. Missing or unreadable
+     * disk evidence fails closed (the target is simply not inlined).
+     */
     private static String currentReadbackForPath(LoopState state, String normalizedPath) {
-        String cached = successfulReadbackForPath(state, normalizedPath);
-        if (!cached.isBlank()) return cached;
         return workspaceFileReadbackForPath(state, normalizedPath);
-    }
-
-    private static String successfulReadbackForPath(LoopState state, String normalizedPath) {
-        if (state == null || normalizedPath == null || normalizedPath.isBlank()) return "";
-        String keyNeedle = "path=" + normalizedPath.toLowerCase(Locale.ROOT) + ";";
-        for (var entry : state.successfulReadCallBodies.entrySet()) {
-            String key = entry.getKey() == null ? "" : entry.getKey().toLowerCase(Locale.ROOT);
-            if (key.contains(keyNeedle)) {
-                return entry.getValue() == null ? "" : entry.getValue();
-            }
-        }
-        return "";
     }
 
     private static String workspaceFileReadbackForPath(LoopState state, String normalizedPath) {
