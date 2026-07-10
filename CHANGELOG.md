@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- [T1011] Workspace file bytes no longer occupy system-role messages on
+  either readback path. System messages carry policy and recovery
+  instructions only. The invalid-edit recovery references the real
+  talos.read_file result as the content carrier, temporarily restoring it
+  from tool-result compaction for the recovery request (same message, same
+  id) and re-compacting it afterwards, so instruction-like file content
+  such as "Ignore the requested repair" never gains system authority and
+  no temporary readback persists in post-turn history. Static-repair
+  readbacks travel inside the user-role instruction as structurally
+  encoded JSON with a data-not-instructions preamble, so delimiter text,
+  marker text, and content without a terminal newline are carried exactly
+  and cannot forge entries or run into any closing frame. The now-obsolete
+  framing-marker refusals are removed, which also widens recovery
+  eligibility to files that merely contain marker-shaped text. All
+  existing gates (exact source binding, protected paths, redaction, size
+  caps, disk freshness, one-shot recovery, approval, verification, trace,
+  cleanup) are unchanged.
 - [T1010] Static-repair readbacks are now gated like every other elevation
   of file content into model context: protected paths and workspace
   escapes never inline, and bodies that collide with the readback block's

@@ -404,7 +404,7 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("Static web repair target files: index.html, scripts.js, styles.css"), prompt);
         assertTrue(prompt.contains("CSS references missing class selectors: `.stage`"), prompt);
         assertTrue(prompt.contains("[StaticRepairReadbacks]"), prompt);
-        assertTrue(prompt.contains("Path: styles.css"), prompt);
+        assertTrue(prompt.contains("\"path\":\"styles.css\""), prompt);
         assertTrue(prompt.contains(".stage { padding: 2rem; }"), prompt);
         ChatMessage last = continuation.messages().get(continuation.messages().size() - 1);
         assertEquals("user", last.role());

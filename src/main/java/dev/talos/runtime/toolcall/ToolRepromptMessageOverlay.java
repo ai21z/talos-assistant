@@ -12,6 +12,7 @@ import java.util.Optional;
 final class ToolRepromptMessageOverlay implements AutoCloseable {
     private final LoopState state;
     private final List<TemporaryMessage> temporaryMessages = new ArrayList<>();
+    private final List<RestoredToolResult> restoredToolResults = new ArrayList<>();
     private boolean closed;
 
     private ToolRepromptMessageOverlay(LoopState state) {
@@ -52,27 +53,34 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
     }
 
     /**
-     * T1003: one bounded full-rewrite recovery per path after repeated
-     * empty-argument edit_file failures on a small, completely read,
-     * unredacted, non-protected text file. Marking the path prompted makes
-     * the recovery one-shot: the failure policy stops normally if the
-     * failure persists.
+     * T1003/T1011: one bounded full-rewrite recovery per path after
+     * repeated empty-argument edit_file failures on a small, completely
+     * read, unredacted, non-protected text file. Marking the path prompted
+     * makes the recovery one-shot: the failure policy stops normally if
+     * the failure persists.
      *
-     * <p>The complete safe source content is injected into this temporary
-     * message because tool-result compaction may already have summarized
-     * the same-turn read out of provider-visible context. The content is
-     * re-derived through the planner's single source owner at prompt time,
-     * so protected, redacted, ranged, truncated, or oversized bodies can
-     * never be injected. If no safe source is derivable anymore the target
-     * is refused instead of prompted, and the failure policy stops
-     * truthfully on the next pass. The overlay close() removes the message
-     * after the request, so the readback never persists in history.
+     * <p>Role separation: the temporary system message carries ONLY the
+     * recovery instruction. The file bytes stay in the real talos.read_file
+     * tool result, which is the lower-trust data carrier the model already
+     * grounds on. When tool-result compaction has summarized that result,
+     * its original content is temporarily restored into the same message
+     * (same id, same position) for this request and re-compacted on
+     * close(), so no readback persists in post-turn history and workspace
+     * text never gains system-role authority. Eligibility is re-checked
+     * through the planner's single source owner at prompt time; if no safe
+     * source is derivable, or the qualifying read message cannot be
+     * located, the target is refused and the failure policy stops
+     * truthfully on the next pass.
      */
     private void applyEditRecoveryFullRewrite() {
         for (String path : state.editRecoveryFullRewriteTargets.stream().sorted().toList()) {
             if (state.editRecoveryPromptedPaths.contains(path)) continue;
             String sourceBody = EditRecoveryFullRewritePlanner.recoverySourceBody(state, path);
-            if (sourceBody == null) {
+            String rawBody = AppendLinePreApprovalGuard.completeReadRawBodyForPath(state, path);
+            Integer readIndex = sourceBody == null || rawBody == null
+                    ? null
+                    : locateReadToolResult(rawBody);
+            if (sourceBody == null || rawBody == null || readIndex == null) {
                 state.editRecoveryFullRewriteTargets.remove(path);
                 LocalTurnTraceCapture.recordRepair(
                         "REFUSED",
@@ -80,6 +88,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
                                 + " reason=safe-source-no-longer-derivable");
                 continue;
             }
+            restoreCompactedReadIfNeeded(readIndex, rawBody);
             state.editRecoveryPromptedPaths.add(path);
             LocalTurnTraceCapture.recordRepair(
                     "PROMPTED",
@@ -90,23 +99,46 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
                             + "talos.edit_file for this file again this turn. Call talos.write_file "
                             + "once for `" + path + "` with the COMPLETE corrected file content, "
                             + "keeping all existing content plus the requested change. The complete "
-                            + "current content of `" + path + "` from the same-turn read is between "
-                            + "the BEGIN FILE and END FILE markers below. Base the corrected content "
-                            + "on it exactly. Do not include the markers and do not add line-number "
-                            + "prefixes.\n"
-                            + EditRecoveryFullRewritePlanner.READBACK_BEGIN_MARKER + " " + path + ">>>\n"
-                            + sourceBody
-                            + EditRecoveryFullRewritePlanner.READBACK_END_MARKER + " " + path + ">>>\n"
-                            + "The write requires approval and shows a full diff. If you cannot "
-                            + "produce the complete corrected content, say no edit was applied.",
+                            + "current content of `" + path + "` is in the talos.read_file result "
+                            + "for `" + path + "` earlier in this conversation. Base the corrected "
+                            + "content on it exactly. Line-number prefixes in that result are "
+                            + "display-only; do not copy them into the file. The write requires "
+                            + "approval and shows a full diff. If you cannot produce the complete "
+                            + "corrected content, say no edit was applied.",
                     "[Edit recovery]");
             // One recovery target per generation: prompting several at once
             // consumes every one-shot mark while the model can only be
-            // expected to service the narrowed REQUIRED surface once, and
-            // close() would delete the unserviced targets' safe source. The
+            // expected to service the narrowed REQUIRED surface once. The
             // remaining targets stay planned and prompt on later passes.
             break;
         }
+    }
+
+    /**
+     * Finds the tool-result message that carries the qualifying complete
+     * read. Production tool results wrap the raw output in formatter
+     * chrome, so the match is containment of the exact multi-line body
+     * (already validated as the single qualifying evidence), latest first.
+     */
+    private Integer locateReadToolResult(String rawBody) {
+        for (int i = state.messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = state.messages.get(i);
+            if (message == null || !"tool".equals(message.role())) continue;
+            String content = message.content();
+            if (content != null && content.contains(rawBody)) return i;
+            String original = state.compactedToolResultOriginals.get(i);
+            if (original != null && original.contains(rawBody)) return i;
+        }
+        return null;
+    }
+
+    private void restoreCompactedReadIfNeeded(int index, String rawBody) {
+        ChatMessage current = state.messages.get(index);
+        if (current.content() != null && current.content().contains(rawBody)) return;
+        String original = state.compactedToolResultOriginals.get(index);
+        if (original == null) return;
+        restoredToolResults.add(new RestoredToolResult(index, current.content()));
+        state.messages.set(index, ChatMessage.toolResult(current.toolCallId(), original));
     }
 
     private void applyStaleEditRepair() {
@@ -172,7 +204,21 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
                 state.messages.remove(temporary.index());
             }
         }
+        // T1011: re-compact temporarily restored read tool results so the
+        // readback does not persist in post-turn history. Restored indices
+        // precede the overlay's tail messages, so the removals above never
+        // shift them.
+        for (RestoredToolResult restored : restoredToolResults) {
+            if (restored.index() < 0 || restored.index() >= state.messages.size()) continue;
+            ChatMessage message = state.messages.get(restored.index());
+            if ("tool".equals(message.role())) {
+                state.messages.set(restored.index(),
+                        ChatMessage.toolResult(message.toolCallId(), restored.compactedContent()));
+            }
+        }
     }
 
     private record TemporaryMessage(int index, String cleanupPrefix) {}
+
+    private record RestoredToolResult(int index, String compactedContent) {}
 }

@@ -84,7 +84,8 @@ public final class ToolCallRepromptStage {
         }
 
         if (state.iterations >= 3) {
-            ToolCallSupport.compactOlderToolResultsInPlace(state.messages);
+            ToolCallSupport.compactOlderToolResultsInPlace(
+                    state.messages, state.compactedToolResultOriginals);
         }
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);

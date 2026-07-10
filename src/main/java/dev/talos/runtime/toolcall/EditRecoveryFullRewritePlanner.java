@@ -38,14 +38,6 @@ final class EditRecoveryFullRewritePlanner {
     /** Conservative cap on the reconstructed read body for a full rewrite. */
     static final int MAX_RECOVERY_BODY_CHARS = 32_768;
 
-    /**
-     * Framing tokens for the readback injected by the recovery overlay. A
-     * body that already contains them could break out of the framed block
-     * inside the temporary system message, so such bodies are refused.
-     */
-    static final String READBACK_BEGIN_MARKER = "<<<BEGIN FILE";
-    static final String READBACK_END_MARKER = "<<<END FILE";
-
     private static final Set<String> SMALL_TEXT_EXTENSIONS = Set.of(
             "md", "txt", "css", "html", "htm", "js", "jsx", "ts", "tsx",
             "json", "yaml", "yml", "xml", "csv", "ini", "toml", "properties",
@@ -124,7 +116,6 @@ final class EditRecoveryFullRewritePlanner {
         String disk = currentDiskContent(state, path);
         if (disk == null || disk.length() > MAX_RECOVERY_BODY_CHARS) return null;
         if (!normalizedForComparison(disk).equals(normalizedForComparison(body))) return null;
-        if (disk.contains(READBACK_BEGIN_MARKER) || disk.contains(READBACK_END_MARKER)) return null;
         return disk;
     }
 

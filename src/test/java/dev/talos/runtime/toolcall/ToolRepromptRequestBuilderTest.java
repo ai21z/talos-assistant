@@ -103,13 +103,16 @@ class ToolRepromptRequestBuilderTest {
     }
 
     @Test
-    void staticRepairMessagesIncludeReadbackForRemainingRepairTarget() {
+    void staticRepairMessagesIncludeReadbackForRemainingRepairTarget() throws Exception {
+        // T1010/T1011: the readback binds to the current disk bytes of the
+        // exact target and travels as structured data, never keyed off
+        // cached read signatures.
+        Files.writeString(tempDir.resolve("styles.css"),
+                "body { color: #fff; }\n.stage { padding: 3rem; }\n");
         LoopState state = loopState(
                 broadTools(),
-                List.of(ChatMessage.user("Adjust styles.css as needed.")));
-        state.successfulReadCallBodies.put(
-                "talos.read_file:path=styles.css;",
-                "1 | body { color: #fff; }\n2 | .stage { padding: 3rem; }");
+                List.of(ChatMessage.user("Adjust styles.css as needed.")),
+                tempDir);
 
         List<ChatMessage> messages =
                 ToolRepromptRequestBuilder.messages(
@@ -123,7 +126,7 @@ class ToolRepromptRequestBuilderTest {
                 .filter(content -> content != null)
                 .reduce("", (left, right) -> left + "\n" + right);
         assertTrue(payload.contains("[StaticRepairReadbacks]"), payload);
-        assertTrue(payload.contains("Path: styles.css"), payload);
+        assertTrue(payload.contains("\"path\":\"styles.css\""), payload);
         assertTrue(payload.contains(".stage { padding: 3rem; }"), payload);
     }
 
@@ -155,7 +158,7 @@ class ToolRepromptRequestBuilderTest {
                 .filter(content -> content != null)
                 .reduce("", (left, right) -> left + "\n" + right);
         assertTrue(payload.contains("[StaticRepairReadbacks]"), payload);
-        assertTrue(payload.contains("Path: styles.css"), payload);
+        assertTrue(payload.contains("\"path\":\"styles.css\""), payload);
         assertTrue(payload.contains("background: #14061f;"), payload);
         assertTrue(payload.contains(".stage"), payload);
     }

@@ -70,12 +70,18 @@ final class ToolRepromptRequestBuilder {
                         + "replacement targets: " + String.join(", ", remainingRepairTargets)
                         + ". Use talos.write_file with complete corrected file content for each remaining target. "
                         + "Do not claim completion until static verification passes."));
-        StaticRepairReadbackContext.render(state, remainingRepairTargets)
-                .ifPresent(readbacks -> out.add(ChatMessage.system(readbacks)));
         String currentTask = userTask == null || userTask.isBlank()
                 ? "Continue the bounded static repair."
                 : userTask.strip();
-        out.add(ChatMessage.user(staticRepairUserInstruction(remainingRepairTargets, currentTask)));
+        // T1011: workspace bytes are data, not policy. The readbacks travel
+        // inside the user-role instruction as structured JSON, never in a
+        // system-role message.
+        String instruction = staticRepairUserInstruction(remainingRepairTargets, currentTask);
+        String readbacks = StaticRepairReadbackContext.render(state, remainingRepairTargets)
+                .orElse("");
+        out.add(ChatMessage.user(readbacks.isBlank()
+                ? instruction
+                : instruction + "\n\n" + readbacks));
         return out;
     }
 

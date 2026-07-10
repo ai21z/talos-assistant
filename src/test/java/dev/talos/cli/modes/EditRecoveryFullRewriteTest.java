@@ -151,20 +151,23 @@ class EditRecoveryFullRewriteTest {
                 "read, edit, edit, recovery write (the final answer is synthesized "
                         + "after the successful mutation without another generation)");
         ChatRequest recoveryRequest = requests.get(3);
-        assertTrue(requestText(recoveryRequest).contains("<<<BEGIN FILE README.md>>>"),
-                "the recovery request must carry the complete readback");
-        assertTrue(requestText(recoveryRequest).contains("Open site/index.html in a browser."),
-                "the injected readback must be the complete file content");
-        assertTrue(requestText(recoveryRequest).contains("[compacted:"),
-                "the original read tool result must already be compacted in this request, "
-                        + "otherwise this scenario does not exercise the hardening");
+        String systemText = roleText(recoveryRequest, "system");
+        String toolText = roleText(recoveryRequest, "tool");
+        assertTrue(systemText.contains("[Edit recovery]"),
+                "the recovery instruction must be present:\n" + systemText);
+        assertFalse(systemText.contains("Open site/index.html in a browser."),
+                "workspace bytes must never occupy a system-role message:\n" + systemText);
+        assertTrue(toolText.contains("Open site/index.html in a browser."),
+                "the complete content must be carried by the read tool result, restored "
+                        + "from compaction for this request (three tool results existed and "
+                        + "only the two most recent survive compaction):\n" + toolText);
     }
 
-    private static String requestText(ChatRequest request) {
+    private static String roleText(ChatRequest request, String role) {
         if (request == null || request.messages == null) return "";
         StringBuilder out = new StringBuilder();
         for (ChatMessage message : request.messages) {
-            if (message != null && message.content() != null) {
+            if (message != null && role.equals(message.role()) && message.content() != null) {
                 out.append(message.content()).append('\n');
             }
         }

@@ -259,9 +259,14 @@ final class StaticWebContinuationPlanner {
                 Use the visible file mutation tool(s) now. Do not claim completion until tool-backed changes have executed.
                 """));
         messages.add(ChatMessage.system(frame.toString().stripTrailing()));
-        StaticRepairReadbackContext.render(state, targets)
-                .ifPresent(readbacks -> messages.add(ChatMessage.system(readbacks)));
-        messages.add(ChatMessage.user(staticWebVerificationUserInstruction(targets, toolInstruction, userTask)));
+        // T1011: workspace bytes are data, not policy. The readbacks travel
+        // inside the user-role instruction as structured JSON, never in a
+        // system-role message.
+        String instruction = staticWebVerificationUserInstruction(targets, toolInstruction, userTask);
+        String readbacks = StaticRepairReadbackContext.render(state, targets).orElse("");
+        messages.add(ChatMessage.user(readbacks.isBlank()
+                ? instruction
+                : instruction + "\n\n" + readbacks));
         return messages;
     }
 

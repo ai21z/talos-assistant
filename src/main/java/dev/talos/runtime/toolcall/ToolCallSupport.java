@@ -245,6 +245,19 @@ public final class ToolCallSupport {
     }
 
     public static void compactOlderToolResultsInPlace(List<ChatMessage> messages) {
+        compactOlderToolResultsInPlace(messages, null);
+    }
+
+    /**
+     * T1011: when {@code originalsOut} is provided, the pre-compaction
+     * content of each summarized tool result is recorded under its message
+     * index, so the recovery overlay can temporarily restore the real read
+     * tool result instead of granting file bytes system-role authority.
+     */
+    public static void compactOlderToolResultsInPlace(
+            List<ChatMessage> messages,
+            Map<Integer, String> originalsOut
+    ) {
         if (messages == null || messages.size() < 4) return;
         List<Integer> toolResultIndices = new ArrayList<>();
         for (int i = 0; i < messages.size(); i++) {
@@ -260,6 +273,9 @@ public final class ToolCallSupport {
             String content = m.content();
             if (content == null || content.isBlank()) continue;
             if (content.startsWith("[compacted:")) continue;
+            if (originalsOut != null) {
+                originalsOut.putIfAbsent(idx, content);
+            }
             String summary = summarizeToolResult(content);
             messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary));
         }

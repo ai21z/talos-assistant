@@ -63,6 +63,15 @@ public final class LoopState {
     public final Set<String> editRecoveryFullRewriteTargets = new HashSet<>();
     /** T1003: recovery is one-shot per path; prompted paths stop deferring the failure policy. */
     public final Set<String> editRecoveryPromptedPaths = new HashSet<>();
+    /**
+     * T1011: original contents of tool-result messages that compaction
+     * summarized in place, keyed by message index (indices stay stable
+     * within a turn: messages are appended or rewritten in place, and only
+     * overlay-owned tail messages are ever removed). Lets the recovery
+     * overlay temporarily restore the real read tool result for one
+     * request and re-compact it afterwards.
+     */
+    public final Map<Integer, String> compactedToolResultOriginals = new HashMap<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
     public final Map<String, String> successfulReadCalls = new HashMap<>();
     public final Map<String, String> successfulReadCallBodies = new HashMap<>();

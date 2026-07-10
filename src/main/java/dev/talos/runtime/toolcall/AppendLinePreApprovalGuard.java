@@ -106,17 +106,36 @@ final class AppendLinePreApprovalGuard {
      * null is returned (fail closed).
      */
     static String completeReadBodyForPath(LoopState state, String pathHint) {
+        QualifiedRead read = qualifiedCompleteRead(state, pathHint);
+        return read == null ? null : read.parsed();
+    }
+
+    /**
+     * The RAW (line-numbered) body of the single qualifying complete read
+     * for the path, under the same qualification and ambiguity rules as
+     * {@link #completeReadBodyForPath}. The T1011 recovery overlay uses it
+     * to locate the real read tool-result message, which carries the file
+     * bytes so they never occupy a system-role message.
+     */
+    static String completeReadRawBodyForPath(LoopState state, String pathHint) {
+        QualifiedRead read = qualifiedCompleteRead(state, pathHint);
+        return read == null ? null : read.raw();
+    }
+
+    private record QualifiedRead(String raw, String parsed) {}
+
+    private static QualifiedRead qualifiedCompleteRead(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return null;
         String target = ToolCallSupport.canonicalizeReadPath(pathHint);
         if (target.isBlank() || state.successfulReadCallBodies.isEmpty()) return null;
-        String out = null;
+        QualifiedRead out = null;
         for (var entry : state.successfulReadCallBodies.entrySet()) {
             String signature = entry.getKey();
             if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
             String parsed = parseCompleteReadFileBody(entry.getValue());
             if (parsed == null) continue;
-            if (out != null && !out.equals(parsed)) return null;
-            out = parsed;
+            if (out != null && !out.parsed().equals(parsed)) return null;
+            out = new QualifiedRead(entry.getValue(), parsed);
         }
         return out;
     }
