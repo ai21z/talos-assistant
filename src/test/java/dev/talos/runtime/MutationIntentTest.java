@@ -313,24 +313,72 @@ class MutationIntentTest {
 
     /**
      * T1009: rename is a CORE_MUTATION_VERB, so sentence-initial rename
-     * classifies correctly, but the mid-sentence MARKERS net had no rename
-     * entry, unlike fix/change/update. The live probe showed the model
-     * running read-only and printing the corrected file as prose instead.
+     * classifies correctly, but the mid-sentence net had no rename coverage,
+     * unlike fix/change/update. The live probe showed the model running
+     * read-only and printing the corrected file as prose instead. The
+     * recognition must be request-shaped (clause-start imperative with an
+     * explicit "rename X to Y" relationship), not a bare substring.
      */
     @org.junit.jupiter.api.Test
     void midSentenceRenameRequestsClassifyAsMutation() {
         for (String input : java.util.List.of(
                 "In src/app.js, rename the function reset to resetAll.",
-                "In the tracker module, rename shippedCount to shippedTotal.")) {
+                "In the tracker module, rename shippedCount to shippedTotal.",
+                "Please rename reset to resetAll in src/app.js.",
+                "Rename the file old.txt to new.txt.",
+                "Open the tracker file and rename shippedCount to shippedTotal.",
+                "In src/app.js rename reset to resetAll.")) {
             org.junit.jupiter.api.Assertions.assertTrue(
                     MutationIntent.looksExplicitMutationRequest(input),
                     input + " -> " + MutationIntent.classificationReason(input));
         }
     }
 
+    /**
+     * Reopened T1009 hardening: declarative prose where "rename" is a noun
+     * or third-person verb followed by an incidental "to" must not match
+     * the request-shaped pattern, and API identifiers like os.rename must
+     * not satisfy the clause-start branch through their own dot.
+     */
+    @org.junit.jupiter.api.Test
+    void declarativeAndApiRenameMentionsStayReadOnly() {
+        for (String input : java.util.List.of(
+                "In Git, rename detection compares blobs to find moves.",
+                "What does os.rename do compared to shutil.move?",
+                "Historically, rename operations mapped to unlink and link.")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    MutationIntent.looksExplicitMutationRequest(input),
+                    input + " -> " + MutationIntent.classificationReason(input));
+        }
+    }
+
+    /**
+     * Reopened T1009: a sentence-initial imperative mutation request must
+     * keep its mutation classification even when a trailing how-do-I
+     * question would otherwise trip the widened instructional guard.
+     */
+    @org.junit.jupiter.api.Test
+    void aLeadingImperativeOutranksATrailingInstructionalQuestion() {
+        String input = "Update README.md with the new badge. Also, how do I create a release tag?";
+        org.junit.jupiter.api.Assertions.assertTrue(
+                MutationIntent.looksExplicitMutationRequest(input),
+                input + " -> " + MutationIntent.classificationReason(input));
+    }
+
+    /**
+     * T1009 reopen: explanatory, definitional, hypothetical, advisory, and
+     * historical discussion of renaming must never become a mutation turn.
+     * The 2026-07-09 review confirmed the bare "rename " marker converted
+     * the first three prompts below into write-capable contracts.
+     */
     @org.junit.jupiter.api.Test
     void renameQuestionsAndAdvisoryFormsStayReadOnly() {
         for (String input : java.util.List.of(
+                "Explain why we rename local variables in Java.",
+                "What does rename mean in Git?",
+                "Describe when teams rename a public API.",
+                "Why would someone rename this method?",
+                "Should I rename this function?",
                 "Should I rename the function reset to resetAll?",
                 "How do I rename a function in Java?",
                 "Can you explain how to rename the reset function?")) {

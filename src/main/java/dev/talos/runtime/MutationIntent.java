@@ -108,9 +108,32 @@ public final class MutationIntent {
             "apply the", "apply these", "apply those",
             "append ", "append exactly", "append line", "append one line",
             "add a ", "add the ", "remove the ", "delete the ",
-            "refactor ", "rename ",
+            "refactor ",
             "darker and more minimal"
     );
+
+    /**
+     * T1009: request-shaped mid-sentence rename recognition. Sentence-initial
+     * and please/can-you forms are already covered by REQUEST_PATTERNS
+     * because rename is a CORE_MUTATION_VERB. This pattern adds only the
+     * clause-start imperative with an explicit "rename X to Y" relationship
+     * ("In src/app.js, rename the function reset to resetAll."). The
+     * clause-start requires whitespace after punctuation so API identifiers
+     * like os.rename never qualify through their own dot, the "in path"
+     * branch covers the comma-less field shape, and the object is at most
+     * an article plus one typed noun before the X-to-Y pair, so declarative
+     * prose ("rename detection compares blobs to find moves") never
+     * matches.
+     */
+    private static final String RENAME_TARGET_TOKEN = "[a-z0-9_.$\\\\/-]+";
+
+    private static final Pattern MID_SENTENCE_RENAME_REQUEST = Pattern.compile(
+            "(?:[.!?;:,]\\s+|\\b(?:please|then|and|now|just)\\s+"
+                    + "|\\bin\\s+" + RENAME_TARGET_TOKEN + "\\s+)"
+                    + "(?:please\\s+)?rename\\s+(?:(?:the|a|an)\\s+)?"
+                    + "(?:(?:function|method|file|variable|class|constant|field|folder"
+                    + "|directory|module|component|script|page)\\s+)?"
+                    + RENAME_TARGET_TOKEN + "\\s+to\\s+" + RENAME_TARGET_TOKEN);
 
     private static final Set<String> READ_ONLY_NEGATIONS = Set.of(
             "do not change", "do not edit", "do not modify", "do not write",
@@ -339,7 +362,14 @@ public final class MutationIntent {
         if (containsGlobalReadOnlyNegation(lower)) return "global-read-only-negation";
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
-        if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
+        // A sentence-initial imperative mutation request outranks a trailing
+        // instructional question ("Update README.md ... Also, how do I
+        // create a release tag?" stays a mutation turn); pure how-to
+        // questions have no initial imperative and keep the guard.
+        if (!looksSentenceInitialMutationImperative(lower)
+                && looksInstructionalMutationQuestion(lower)) {
+            return "instructional-mutation-question";
+        }
         if (looksCapabilityOnlyArtifactQuestion(lower)) return "capability-only-artifact-question";
         if (looksInlineOutputOnlyRequest(original, lower)) return "inline-output-request";
         if (looksFileScopedDefectFixRequest(lower)) return "explicit-file-scoped-defect-fix-request";
@@ -354,6 +384,7 @@ public final class MutationIntent {
         if (looksTerminalBuildArtifactRequest(lower)) return "explicit-terminal-build-artifact-request";
         if (looksNaturalMakeItArtifactRequest(lower)) return "natural-artifact-request";
         if (looksExplicitFileTargetMutation(lower)) return "explicit-mutation-verb-with-file-target";
+        if (MID_SENTENCE_RENAME_REQUEST.matcher(lower).find()) return "explicit-rename-request";
         for (String marker : MARKERS) {
             if (lower.contains(marker)) return "explicit-mutation-marker";
         }
@@ -624,6 +655,14 @@ public final class MutationIntent {
 
     private static boolean looksInstructionalMutationQuestion(String lower) {
         return lower != null && INSTRUCTIONAL_MUTATION_QUESTION.matcher(lower).find();
+    }
+
+    private static boolean looksSentenceInitialMutationImperative(String lower) {
+        if (lower == null) return false;
+        for (Pattern pattern : REQUEST_PATTERNS) {
+            if (pattern.matcher(lower).find()) return true;
+        }
+        return false;
     }
 
     private static boolean containsGlobalReadOnlyNegation(String lower) {
