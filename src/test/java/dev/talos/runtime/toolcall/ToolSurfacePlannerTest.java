@@ -539,6 +539,19 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void explicitTextFormatRequestExposesReadAndWholeFileWriteOnly() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Normalize notes.txt line endings to LF. Preserve the text exactly."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        assertEquals("text format apply surface", plan.reason());
+        assertEquals(List.of("talos.read_file", "talos.write_file"), plan.nativeToolNames());
+        assertFalse(plan.nativeToolNames().contains("talos.edit_file"), plan.nativeToolNames().toString());
+    }
+
+    @Test
     void directoryListingSurfaceUsesDirectoryTargetMetadata() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest("What files are in this folder?"),

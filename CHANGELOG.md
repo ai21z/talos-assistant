@@ -11,6 +11,9 @@
   documentation or how-to questions as mutation authority. Scoped limits
   such as `do not create extra files` remain limits, and no downstream
   intent layer upgrades a read-only classifier decision into mutation.
+  Ambiguous turns prepare as target-free read-only QA instead of unrelated
+  static-web diagnosis. Explicit text-format turns expose only read_file and
+  whole-file write_file, with read-then-complete-write prompt guidance.
 - [T1013 follow-up] Read evidence now uses filesystem-aware path identity.
   Existing paths use the filesystem provider's same-file result, preserving
   Windows casing aliases without binding case-distinct Linux/WSL files such

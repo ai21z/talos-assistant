@@ -443,6 +443,7 @@ public final class TaskContractResolver {
         boolean sessionUncertaintyQuestion = looksLikeSessionUncertaintyQuestion(lower);
         boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
         MutationIntent.RequestShape mutationShape = MutationIntent.classifyShape(original);
+        boolean ambiguousMutationRequest = mutationShape.decision() == MutationIntent.Decision.AMBIGUOUS;
         String classificationReason = mutationShape.reason();
         boolean mutationRequested = !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
@@ -469,6 +470,8 @@ public final class TaskContractResolver {
                 ? TaskType.VERIFY_ONLY
                 : unsupportedCommandVerificationRequest
                 ? TaskType.VERIFY_ONLY
+                : ambiguousMutationRequest
+                ? TaskType.READ_ONLY_QA
                 : classify(lower, mutationRequested, classificationReason);
         boolean mutationAllowed = mutationRequested
                 && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
@@ -556,6 +559,11 @@ public final class TaskContractResolver {
         if (!ignoredInstructionOutputTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, ignoredInstructionOutputTargets);
             sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, ignoredInstructionOutputTargets);
+        }
+        if (ambiguousMutationRequest) {
+            expectedTargets = Set.of();
+            sourceEvidenceTargets = Set.of();
+            forbiddenTargets = Set.of();
         }
 
         return new TaskContract(

@@ -93,6 +93,14 @@ public final class ToolSurfacePlanner {
                 && phase == ExecutionPhase.APPLY;
 
         if (mutationAllowed) {
+            if (explicitTextFormatRequest(contract)) {
+                return select(
+                        registry,
+                        descriptor -> isFileReadTool(descriptor)
+                                || "talos.write_file".equals(descriptor.name()),
+                        safeAvailability,
+                        "text format apply surface");
+            }
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
             if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 WorkspaceOperationIntent.Intent intent = workspaceOperation.get();
@@ -183,6 +191,11 @@ public final class ToolSurfacePlanner {
             }
         }
         return true;
+    }
+
+    private static boolean explicitTextFormatRequest(TaskContract contract) {
+        return contract != null
+                && "explicit-text-format-request".equals(contract.classificationReason());
     }
 
     private static boolean sourceDerivedFileCreateTargets(TaskContract contract) {

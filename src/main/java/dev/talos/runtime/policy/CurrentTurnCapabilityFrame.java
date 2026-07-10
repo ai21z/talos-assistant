@@ -79,6 +79,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
+        appendTextFormatChangeGuidance(frame, contract, mutationAllowed, visibleTools);
         appendSourceEvidenceTargets(frame, contract, mutationAllowed);
         appendStaticWebRequirements(frame, contract, mutationAllowed);
         appendStaticWebRewriteGroundingGuidance(frame, contract, mutationAllowed, visibleTools);
@@ -153,6 +154,26 @@ public final class CurrentTurnCapabilityFrame {
             return "(none visible)";
         }
         return String.join(", ", available);
+    }
+
+    private static void appendTextFormatChangeGuidance(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed,
+            List<String> visibleTools
+    ) {
+        if (!mutationAllowed
+                || contract == null
+                || !"explicit-text-format-request".equals(contract.classificationReason())
+                || visibleTools == null
+                || !visibleTools.contains("talos.read_file")
+                || !visibleTools.contains("talos.write_file")) {
+            return;
+        }
+        frame.append("[TextFormatChange]\n")
+                .append("Read the exact target first with talos.read_file.\n")
+                .append("Use talos.write_file with the complete text for that same path.\n")
+                .append("Change only the requested text format and preserve the file's text content.\n");
     }
 
     private static void appendDirectoryAwareVerificationGuidance(

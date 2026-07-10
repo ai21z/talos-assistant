@@ -20,6 +20,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CurrentTurnCapabilityFrameTest {
 
     @Test
+    void textFormatRequestRequiresReadThenCompleteWrite() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Normalize notes.txt line endings to LF. Preserve the text exactly.");
+
+        String frame = CurrentTurnCapabilityFrame.render(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file"));
+
+        assertTrue(frame.contains("[TextFormatChange]"), frame);
+        assertTrue(frame.contains("Read the exact target first"), frame);
+        assertTrue(frame.contains("Use talos.write_file with the complete text"), frame);
+        assertTrue(frame.contains("Change only the requested text format"), frame);
+        assertFalse(frame.contains("talos.edit_file"), frame);
+    }
+
+    @Test
     void rendersActiveTaskContextGuidanceWhenPresent() {
         TaskContract contract = new TaskContract(
                 TaskType.FILE_EDIT,

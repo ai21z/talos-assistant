@@ -447,13 +447,29 @@ public final class MutationIntent {
         if (isExplicitMutationClassificationReason(reason)) {
             decision = Decision.EXECUTE_MUTATION;
         } else if ("global-read-only-negation".equals(reason)
-                && isExplicitMutationClassificationReason(
-                        classificationReason(userRequest, false))) {
+                && hasDirectMutationRequestShape(userRequest, original, lower)) {
             decision = Decision.AMBIGUOUS;
         } else {
             decision = Decision.READ_ONLY;
         }
         return new RequestShape(decision, reason, evidenceSpanFor(reason, original, lower));
+    }
+
+    private static boolean hasDirectMutationRequestShape(
+            String userRequest,
+            String original,
+            String lower
+    ) {
+        return looksSentenceInitialMutationImperative(lower)
+                || looksScopedPrefixMutationRequest(lower)
+                || looksMidSentenceRenameRequest(original)
+                || looksReviewThenMutationRequest(lower)
+                || looksReadThenMutationRequest(lower)
+                || looksExplicitBatchWorkspaceApplyRequest(lower)
+                || sourceToTargetArtifact(userRequest).isPresent()
+                || looksTextFormatMutationRequest(lower)
+                || looksTerminalBuildArtifactRequest(lower)
+                || looksNaturalMakeItArtifactRequest(lower);
     }
 
     public static String classificationReason(String userRequest) {

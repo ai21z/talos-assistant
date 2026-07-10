@@ -69,6 +69,8 @@ class TaskContractResolverTest {
 
         assertFalse(contract.mutationRequested());
         assertFalse(contract.mutationAllowed());
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertTrue(contract.expectedTargets().isEmpty());
         assertEquals("global-read-only-negation", contract.classificationReason());
     }
 
