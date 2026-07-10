@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- [T1014 follow-up] Mutation authority now consumes the typed request-shape
+  decision in production. Contradictory change and read-only instructions
+  stop before model or tool execution with a deterministic clarification,
+  and the local trace records the decision, stable reason, and only a hash
+  and size summary of matched evidence. Direct normalize/convert requests
+  for named text files now route as mutations without treating reported
+  documentation or how-to questions as mutation authority. Scoped limits
+  such as `do not create extra files` remain limits, and no downstream
+  intent layer upgrades a read-only classifier decision into mutation.
 - [T1013 follow-up] Read evidence now uses filesystem-aware path identity.
   Existing paths use the filesystem provider's same-file result, preserving
   Windows casing aliases without binding case-distinct Linux/WSL files such

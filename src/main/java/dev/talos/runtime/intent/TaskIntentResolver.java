@@ -30,37 +30,23 @@ public final class TaskIntentResolver {
         }
         Set<String> verifyOnlyTargets = explicitVerifyOnlyTargets(userRequest, legacyContract);
         Set<String> forbiddenTargets = explicitForbiddenTargets(userRequest, legacyContract);
-        if (!shouldTreatExtraFileConstraintAsScoped(userRequest, legacyContract, mutationTargets)) {
-            if (!shouldTreatConstraintTargetsAsVerifyOnly(legacyContract, mutationTargets, verifyOnlyTargets)
-                    && !shouldApplyExplicitForbiddenTargets(legacyContract, mutationTargets, forbiddenTargets)
-                    && optionalMutationTargets.isEmpty()) {
-                return parityIntent;
-            }
-            return rolefulIntent(
-                    legacyContract.type(),
-                    legacyContract.mutationRequested(),
-                    legacyContract.mutationAllowed(),
-                    legacyContract.verificationRequired(),
-                    mutationTargets,
-                    optionalMutationTargets,
-                    verifyOnlyTargets,
-                    forbiddenTargets,
-                    legacyContract.sourceEvidenceTargets(),
-                    legacyContract.originalUserRequest(),
-                    legacyContract.classificationReason());
+        if (!shouldTreatConstraintTargetsAsVerifyOnly(legacyContract, mutationTargets, verifyOnlyTargets)
+                && !shouldApplyExplicitForbiddenTargets(legacyContract, mutationTargets, forbiddenTargets)
+                && optionalMutationTargets.isEmpty()) {
+            return parityIntent;
         }
         return rolefulIntent(
-                TaskType.FILE_EDIT,
-                true,
-                true,
-                true,
+                legacyContract.type(),
+                legacyContract.mutationRequested(),
+                legacyContract.mutationAllowed(),
+                legacyContract.verificationRequired(),
                 mutationTargets,
                 optionalMutationTargets,
                 verifyOnlyTargets,
                 forbiddenTargets,
                 legacyContract.sourceEvidenceTargets(),
                 legacyContract.originalUserRequest(),
-                "explicit-mutation-with-scoped-output-constraint");
+                legacyContract.classificationReason());
     }
 
     public static TaskIntent fromLegacyContract(TaskContract contract) {
@@ -153,17 +139,6 @@ public final class TaskIntentResolver {
                 IntentDerivation.UNKNOWN_OFFSET,
                 sourceTextForTarget(userRequest, target),
                 1.0);
-    }
-
-    private static boolean shouldTreatExtraFileConstraintAsScoped(
-            String userRequest,
-            TaskContract legacyContract,
-            Set<String> mutationTargets
-    ) {
-        return legacyContract != null
-                && "global-read-only-negation".equals(legacyContract.classificationReason())
-                && containsExtraFileCreationConstraint(userRequest)
-                && !mutationTargets.isEmpty();
     }
 
     private static boolean shouldTreatConstraintTargetsAsVerifyOnly(
@@ -312,12 +287,6 @@ public final class TaskIntentResolver {
             }
         }
         return first;
-    }
-
-    private static boolean containsExtraFileCreationConstraint(String userRequest) {
-        String lower = userRequest == null ? "" : userRequest.toLowerCase(Locale.ROOT);
-        return lower.matches("(?s).*\\b(?:do\\s+not|don't|dont)\\s+"
-                + "(?:create|add|write|save)\\s+(?:any\\s+)?extra\\s+files?\\b.*");
     }
 
     private static boolean hasExactStaticWebFileList(String userRequest) {

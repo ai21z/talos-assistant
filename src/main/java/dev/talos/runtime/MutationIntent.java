@@ -213,6 +213,27 @@ public final class MutationIntent {
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
 
+    private static final String TEXT_FORMAT_MUTATION_VERBS = "(?:normali[sz]e|convert)";
+
+    private static final String TEXT_FORMAT_TARGET_REQUEST =
+            TEXT_FORMAT_MUTATION_VERBS + "\\s+(?:the\\s+)?(?:file\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))";
+
+    /**
+     * Text-format operations are deliberately request-shaped rather than
+     * added to the unanchored mutation-mention inventory. This recognizes
+     * direct and assistant-directed commands without granting mutation
+     * authority to documentation such as "the guide says to normalize...".
+     */
+    private static final List<Pattern> TEXT_FORMAT_REQUEST_PATTERNS = List.of(
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + TEXT_FORMAT_TARGET_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:can|could|would|will)\\s+you\\s+"
+                    + "(?:please\\s+)?" + TEXT_FORMAT_TARGET_REQUEST),
+            Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+"
+                    + TEXT_FORMAT_TARGET_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+"
+                    + TEXT_FORMAT_TARGET_REQUEST));
+
     private static final String CAPTURED_FILE_TARGET =
             "`?((?:(?:" + FILE_TARGET_WITH_EXTENSION + ")"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
@@ -397,7 +418,7 @@ public final class MutationIntent {
     }
 
     public static boolean looksExplicitMutationRequest(String userRequest) {
-        return isExplicitMutationClassificationReason(classificationReason(userRequest));
+        return classifyShape(userRequest).decision() == Decision.EXECUTE_MUTATION;
     }
 
     /** Typed request-shape decision for the current turn (T1014). */
@@ -465,6 +486,7 @@ public final class MutationIntent {
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
         if (looksReadThenMutationRequest(lower)) return "explicit-read-then-mutation-request";
+        if (looksTextFormatMutationRequest(lower)) return "explicit-text-format-request";
         if (looksScopedPrefixMutationRequest(lower)) {
             return "explicit-scoped-mutation-request";
         }
@@ -602,6 +624,12 @@ public final class MutationIntent {
                         if (lower.contains(marker)) return marker.strip();
                     }
                 }
+                case "explicit-text-format-request" -> {
+                    for (Pattern pattern : TEXT_FORMAT_REQUEST_PATTERNS) {
+                        Matcher m = pattern.matcher(lower);
+                        if (m.find()) return m.group().strip();
+                    }
+                }
                 case "global-read-only-negation" -> {
                     for (String marker : READ_ONLY_NEGATIONS) {
                         int start = lower.indexOf(marker);
@@ -687,6 +715,14 @@ public final class MutationIntent {
 
     private static boolean looksExplicitFileTargetMutation(String lower) {
         return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    }
+
+    private static boolean looksTextFormatMutationRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        for (Pattern pattern : TEXT_FORMAT_REQUEST_PATTERNS) {
+            if (pattern.matcher(lower).find()) return true;
+        }
+        return false;
     }
 
     private static boolean looksFixProblemInFileTarget(String lower) {
@@ -903,6 +939,7 @@ public final class MutationIntent {
         tail = tail.replaceFirst("^[\\p{Punct}\\s]+", "").stripLeading();
         return tail.startsWith("anything else")
                 || tail.startsWith("everything else")
+                || tail.matches("^(?:any\\s+)?extra\\s+files?\\b.*")
                 || tail.startsWith("anything outside")
                 || tail.startsWith("anything beyond")
                 || tail.startsWith("any other")

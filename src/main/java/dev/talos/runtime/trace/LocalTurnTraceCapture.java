@@ -1,5 +1,6 @@
 package dev.talos.runtime.trace;
 
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
@@ -11,6 +12,7 @@ import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolCall;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -79,6 +81,23 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null || trace == null || !trace.hasPolicyData()) return;
         PolicyTraceRecorder.record(bag.builder, trace);
+    }
+
+    /** Records the typed request decision without persisting matched prompt text. */
+    public static void recordMutationRequestDecision(MutationIntent.RequestShape shape) {
+        Bag bag = HOLDER.get();
+        if (bag == null || shape == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("decision", shape.decision().name());
+        data.put("reason", safe(shape.reason()));
+        String evidence = safe(shape.evidenceSpan());
+        data.put("evidencePresent", !evidence.isBlank());
+        if (!evidence.isBlank()) {
+            data.put("evidenceHash", TraceRedactor.hash(evidence));
+            data.put("evidenceChars", evidence.length());
+            data.put("evidenceBytes", TraceRedactor.bytes(evidence));
+        }
+        bag.builder.event(TurnTraceEvent.simple("MUTATION_REQUEST_DECIDED", now(), data));
     }
 
     public static void recordModelResponseReceived(String assistantText) {

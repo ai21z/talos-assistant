@@ -60,6 +60,64 @@ class AssistantTurnExecutorTest {
                 .build();
     }
 
+    @Test
+    void ambiguousMutationRequestClarifiesWithoutModelToolsOrRawTraceEvidence(@TempDir Path workspace) {
+        String request = "Rename reset to resetAll in app.js, but do not change any files yet.";
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(request));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(
+                        new IllegalStateException("ambiguous request must not call the model")))
+                .build();
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-ambiguous-mutation",
+                "sid",
+                1,
+                "2026-07-10T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "test-backend",
+                "test-model",
+                request);
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(
+                    "Your request asks for a file change and also says not to change files. "
+                            + "I did not modify anything. Please clarify whether Talos should apply "
+                            + "the requested change or keep this turn read-only.",
+                    out.text());
+            assertFalse(audit.policyTrace().mutationAllowed(), audit.policyTrace().toString());
+            assertTrue(audit.policyTrace().nativeTools().stream()
+                            .noneMatch(dev.talos.tools.ToolAliasPolicy::isMutating),
+                    audit.policyTrace().nativeTools().toString());
+            assertTrue(audit.policyTrace().promptTools().stream()
+                            .noneMatch(dev.talos.tools.ToolAliasPolicy::isMutating),
+                    audit.policyTrace().promptTools().toString());
+            assertTrue(audit.toolCalls().isEmpty(), audit.toolCalls().toString());
+            assertEquals(0, audit.approvalsRequired());
+
+            var decision = trace.events().stream()
+                    .filter(event -> "MUTATION_REQUEST_DECIDED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("AMBIGUOUS", decision.data().get("decision"));
+            assertEquals("global-read-only-negation", decision.data().get("reason"));
+            assertTrue(decision.data().containsKey("evidenceHash"), decision.data().toString());
+            assertFalse(decision.data().toString().contains("resetAll"), decision.data().toString());
+            assertFalse(decision.data().toString().contains("do not change"), decision.data().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     private static int countOccurrences(String text, String needle) {
         if (text == null || text.isEmpty() || needle == null || needle.isEmpty()) return 0;
         int count = 0;

@@ -15,6 +15,43 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class MutationRequestGrammarTest {
 
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "Normalize notes.txt line endings to LF.",
+            "Normalise notes.txt line endings to LF.",
+            "Convert notes.txt to CRLF line endings.",
+            "Please normalize notes.txt line endings to LF.",
+            "Could you convert notes.txt to Windows line endings?",
+    })
+    void explicitTextFormatRequestsExecute(String request) {
+        var shape = MutationIntent.classifyShape(request);
+        assertEquals(MutationIntent.Decision.EXECUTE_MUTATION, shape.decision(),
+                request + " -> " + shape);
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "The guide says to normalize notes.txt line endings to LF.",
+            "The tutorial shows how to convert notes.txt to CRLF line endings.",
+            "How do I normalize notes.txt line endings to LF?",
+    })
+    void reportedAndInstructionalTextFormatMentionsStayReadOnly(String request) {
+        var shape = MutationIntent.classifyShape(request);
+        assertEquals(MutationIntent.Decision.READ_ONLY, shape.decision(),
+                request + " -> " + shape);
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "Improve only styles.css. Do not create extra files. Do not modify index.html.",
+            "Improve only styles.css. Do not create any extra file. Do not modify index.html.",
+    })
+    void extraFileConstraintsLimitScopeWithoutCancellingMutation(String request) {
+        var shape = MutationIntent.classifyShape(request);
+        assertEquals(MutationIntent.Decision.EXECUTE_MUTATION, shape.decision(),
+                request + " -> " + shape);
+    }
+
     // ── the live installed false negative: scoped prefix ────────────────
 
     @ParameterizedTest

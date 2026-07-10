@@ -304,7 +304,8 @@ public final class TaskContractResolver {
     // named file ("Edit index.html to add a Contact section") classifies FILE_EDIT even though
     // "add a" is a CREATE_MARKER describing content to add INSIDE the file.
     private static final Pattern EDIT_LEADING_VERB = Pattern.compile(
-            "(?i)\\b(?:edit|modify|change|update|fix|rewrite|replace|append|remove|delete|adjust|tweak|restyle|redesign|refactor)\\b");
+            "(?i)\\b(?:edit|modify|change|update|fix|rewrite|replace|append|remove|delete|adjust|tweak|"
+                    + "improve|polish|restyle|redesign|refactor)\\b");
     private static final Pattern CREATE_LEADING_VERB = Pattern.compile(
             "(?i)\\b(?:create|write|build|generate|scaffold|make|add)\\b");
 
@@ -441,11 +442,12 @@ public final class TaskContractResolver {
         boolean sessionMetaEvidenceQuestion = looksLikeSessionMetaEvidenceQuestion(lower);
         boolean sessionUncertaintyQuestion = looksLikeSessionUncertaintyQuestion(lower);
         boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
-        String classificationReason = MutationIntent.classificationReason(original);
+        MutationIntent.RequestShape mutationShape = MutationIntent.classifyShape(original);
+        String classificationReason = mutationShape.reason();
         boolean mutationRequested = !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
-                && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
+                && mutationShape.decision() == MutationIntent.Decision.EXECUTE_MUTATION;
         boolean commandVerificationRequest = !sessionMetaEvidenceQuestion
                 && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion

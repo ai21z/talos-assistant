@@ -63,6 +63,29 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void ambiguousMutationRequestKeepsReadOnlyContractUntilClarified() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Rename reset to resetAll in app.js, but do not change any files yet.");
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertEquals("global-read-only-negation", contract.classificationReason());
+    }
+
+    @Test
+    void explicitTextFormatRequestBecomesNamedFileEditContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Normalize notes.txt line endings to LF.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("notes.txt"), contract.expectedTargets());
+        assertEquals("explicit-text-format-request", contract.classificationReason());
+    }
+
+    @Test
     void fixProblemInNamedFileBecomesFileEditContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Fix the bug in calc.py.");

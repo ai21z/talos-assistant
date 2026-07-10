@@ -965,6 +965,11 @@ public final class AssistantTurnExecutor {
             Context ctx
     ) {
         String userRequest = latestUserRequest(messages);
+        if (MutationIntent.classifyShape(userRequest).decision() == MutationIntent.Decision.AMBIGUOUS) {
+            return "Your request asks for a file change and also says not to change files. "
+                    + "I did not modify anything. Please clarify whether Talos should apply "
+                    + "the requested change or keep this turn read-only.";
+        }
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             String conversationBoundaryAnswer = ConversationBoundaryPolicy.deterministicAnswer(userRequest);
             if (conversationBoundaryAnswer != null) {

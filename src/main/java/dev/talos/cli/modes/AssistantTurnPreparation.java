@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
 import dev.talos.runtime.SessionMemory;
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.context.ActiveTaskContext;
@@ -90,6 +91,8 @@ final class AssistantTurnPreparation {
                         || effectiveTurn.forceNativeSurfaceRecompute());
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(effectiveTaskContract, turnContext, activeDecision);
         recordPolicyTrace(currentTurnPlan, turnContext);
+        LocalTurnTraceCapture.recordMutationRequestDecision(MutationIntent.classifyShape(
+                AssistantTurnExecutor.latestUserRequest(messages)));
         ProjectMemoryContext projectMemory = loadProjectMemory(workspace, currentTurnPlan.taskContract());
         CurrentTurnPromptInstructions.injectProjectMemoryInstruction(messages, projectMemory);
         CurrentTurnPromptInstructions.replaceTaskContractInstruction(messages, currentTurnPlan);
