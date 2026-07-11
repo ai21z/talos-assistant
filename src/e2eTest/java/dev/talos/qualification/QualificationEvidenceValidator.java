@@ -264,7 +264,7 @@ final class QualificationEvidenceValidator {
             validateTimingEvidence(runRoot, run, timings, findings);
             validateResourceEvidence(runRoot, run, resources, findings);
             validateApprovals(runRoot, scenario, trace, findings);
-            validatePtyCapture(runRoot, request, findings);
+            validatePtyCapture(runRoot, request, catalog.protocolVersion(), findings);
 
             QualificationFixtureMaterializer.Snapshot before =
                     QualificationFixtureMaterializer.snapshot(runRoot.resolve("before-files"));
@@ -447,6 +447,7 @@ final class QualificationEvidenceValidator {
     private static void validatePtyCapture(
             Path runRoot,
             QualificationRecords.RequestRecord request,
+            int protocolVersion,
             List<String> findings) throws IOException {
         var capture = QualificationJson.readTree(runRoot.resolve("transcript.raw.json"));
         String transport = capture.path("transport").asText("");
@@ -455,7 +456,7 @@ final class QualificationEvidenceValidator {
                 ? "" : request.command().replace('\\', '/');
         boolean valid = capture.isObject()
                 && "talos.modelQualification.ptyCapture".equals(capture.path("schemaName").asText(""))
-                && capture.path("schemaVersion").asInt(-1) == QualificationProtocol.VERSION
+                && capture.path("schemaVersion").asInt(-1) == protocolVersion
                 && capture.path("tty").asBoolean(false)
                 && Set.of("WINDOWS_PTY", "UNIX_PTY", "TEST_PTY").contains(transport)
                 && !capture.path("rawOutput").asText("").isBlank()
@@ -693,8 +694,8 @@ final class QualificationEvidenceValidator {
         if (campaign.endedAt() != null && !campaign.endedAt().isBlank()) {
             validateInstant(campaign.endedAt(), "endedAt", findings);
         }
-        if (campaign.protocolVersion() != QualificationProtocol.VERSION) {
-            findings.add("Unsupported protocolVersion: " + campaign.protocolVersion());
+        if (campaign.protocolVersion() != catalog.protocolVersion()) {
+            findings.add("Campaign protocolVersion differs from selected qualification catalog");
         }
         if (!catalog.sha256().equalsIgnoreCase(campaign.scenarioBankSha256())) {
             findings.add("Campaign scenarioBankSha256 differs from frozen resources");

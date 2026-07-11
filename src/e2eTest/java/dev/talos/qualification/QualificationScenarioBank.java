@@ -32,13 +32,9 @@ final class QualificationScenarioBank {
             "FILE_EQUALS",
             "FILE_UNCHANGED",
             "TRACE_CONTAINS");
-    private static final String ADMISSION = "model-qualification/banks/admission-v2.json";
-    private static final String FULL = "model-qualification/banks/full-v2.json";
-    private static final List<String> FIXTURES = List.of(
-            "model-qualification/fixtures/basic-workspace-v2.json",
-            "model-qualification/fixtures/context-workspace-v2.json",
-            "model-qualification/fixtures/privacy-workspace-v2.json",
-            "model-qualification/fixtures/web-workspace-v2.json");
+    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3);
+    private static final List<String> FIXTURE_NAMES = List.of(
+            "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
 
     private QualificationScenarioBank() {}
 
@@ -70,6 +66,7 @@ final class QualificationScenarioBank {
     }
 
     record Catalog(
+            int protocolVersion,
             QualificationProtocol.ScenarioBank admission,
             QualificationProtocol.ScenarioBank full,
             Map<String, FixtureResource> fixtures,
@@ -91,10 +88,18 @@ final class QualificationScenarioBank {
     }
 
     static Catalog loadDefault() {
+        return load(QualificationProtocol.VERSION);
+    }
+
+    static Catalog load(int protocolVersion) {
+        if (!SUPPORTED_VERSIONS.contains(protocolVersion)) {
+            throw new IllegalArgumentException(
+                    "Unsupported qualification protocol version: " + protocolVersion);
+        }
         try {
             List<NamedBytes> resources = new ArrayList<>();
-            NamedBytes admissionBytes = resource(ADMISSION);
-            NamedBytes fullBytes = resource(FULL);
+            NamedBytes admissionBytes = resource(bankPath("admission", protocolVersion));
+            NamedBytes fullBytes = resource(bankPath("full", protocolVersion));
             resources.add(admissionBytes);
             resources.add(fullBytes);
 
@@ -103,7 +108,8 @@ final class QualificationScenarioBank {
             QualificationProtocol.ScenarioBank full =
                     QualificationJson.read(fullBytes.bytes(), QualificationProtocol.ScenarioBank.class);
             Map<String, FixtureResource> fixtures = new LinkedHashMap<>();
-            for (String fixturePath : FIXTURES) {
+            for (String fixtureName : FIXTURE_NAMES) {
+                String fixturePath = fixturePath(fixtureName, protocolVersion);
                 NamedBytes fixtureBytes = resource(fixturePath);
                 resources.add(fixtureBytes);
                 QualificationProtocol.FixtureManifest manifest = QualificationJson.read(
@@ -114,15 +120,23 @@ final class QualificationScenarioBank {
                 if (fixtures.putIfAbsent(fileName, fixture) != null) {
                     throw new IllegalArgumentException("Duplicate fixture resource: " + fileName);
                 }
-                validateFixture(fixture);
+                validateFixture(fixture, protocolVersion);
             }
-            validateBank(admission, QualificationProtocol.BankKind.ADMISSION, 12, fixtures);
-            validateBank(full, QualificationProtocol.BankKind.FULL, 24, fixtures);
+            validateBank(admission, QualificationProtocol.BankKind.ADMISSION, 12, fixtures, protocolVersion);
+            validateBank(full, QualificationProtocol.BankKind.FULL, 24, fixtures, protocolVersion);
             validateCatalogShape(admission, full);
-            return new Catalog(admission, full, fixtures, hash(resources));
+            return new Catalog(protocolVersion, admission, full, fixtures, hash(resources));
         } catch (IOException e) {
             throw new IllegalStateException("Unable to load frozen qualification resources", e);
         }
+    }
+
+    private static String bankPath(String kind, int protocolVersion) {
+        return "model-qualification/banks/" + kind + "-v" + protocolVersion + ".json";
+    }
+
+    private static String fixturePath(String name, int protocolVersion) {
+        return "model-qualification/fixtures/" + name + "-v" + protocolVersion + ".json";
     }
 
     static void validateScenario(QualificationProtocol.Scenario scenario, Map<String, FixtureResource> fixtures) {
@@ -213,10 +227,10 @@ final class QualificationScenarioBank {
         }
     }
 
-    private static void validateFixture(FixtureResource fixture) {
+    private static void validateFixture(FixtureResource fixture, int protocolVersion) {
         QualificationProtocol.FixtureManifest manifest = fixture.manifest();
         if (!QualificationProtocol.FIXTURE_SCHEMA.equals(manifest.schemaName())
-                || manifest.schemaVersion() != QualificationProtocol.VERSION) {
+                || manifest.schemaVersion() != protocolVersion) {
             throw new IllegalArgumentException("Unsupported fixture schema: " + fixture.name());
         }
         if (!fixture.name().equals(manifest.id() + ".json")) {
@@ -229,9 +243,10 @@ final class QualificationScenarioBank {
             QualificationProtocol.ScenarioBank bank,
             QualificationProtocol.BankKind expectedKind,
             int expectedCount,
-            Map<String, FixtureResource> fixtures) {
+            Map<String, FixtureResource> fixtures,
+            int protocolVersion) {
         if (!QualificationProtocol.BANK_SCHEMA.equals(bank.schemaName())
-                || bank.schemaVersion() != QualificationProtocol.VERSION) {
+                || bank.schemaVersion() != protocolVersion) {
             throw new IllegalArgumentException("Unsupported qualification bank schema: " + bank.id());
         }
         if (bank.kind() != expectedKind || bank.scenarios().size() != expectedCount) {

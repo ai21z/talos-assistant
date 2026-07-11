@@ -47,7 +47,8 @@ final class QualificationTestPacket {
 
         Path rules = candidateDir.resolve("calibration-rules.json");
         Path guide = candidateDir.resolve("calibration-guide.md");
-        QualificationJson.write(rules, calibrationRules(modelPath, modelSha256, executableSha256));
+        QualificationJson.write(rules, calibrationRules(
+                modelPath, modelSha256, executableSha256, catalog.protocolVersion()));
         Files.writeString(guide, """
                 # Qwen14 calibration
 
@@ -63,7 +64,7 @@ final class QualificationTestPacket {
 
         QualificationRecords.CampaignManifest campaign = new QualificationRecords.CampaignManifest(
                 QualificationRecords.CAMPAIGN_SCHEMA, QualificationRecords.SCHEMA_VERSION,
-                "test-campaign", "0.10.8", "a".repeat(40), QualificationProtocol.VERSION,
+                "test-campaign", "0.10.8", "a".repeat(40), catalog.protocolVersion(),
                 catalog.sha256(), "qwen14", "reference", "cuda", "standard",
                 List.of("r1", "r2", "r3"), "uncontrolled-repetitions",
                 QualificationScenarioBank.sha256(Files.readAllBytes(rules)),
@@ -118,7 +119,7 @@ final class QualificationTestPacket {
         QualificationJson.write(runDir.resolve("approvals.json"), java.util.Map.of("events", List.of()));
         QualificationJson.write(runDir.resolve("transcript.raw.json"), java.util.Map.of(
                 "schemaName", "talos.modelQualification.ptyCapture",
-                "schemaVersion", QualificationProtocol.VERSION,
+                "schemaVersion", catalog.protocolVersion(),
                 "transport", "TEST_PTY",
                 "tty", true,
                 "captureStartedAt", "2026-07-10T00:00:00Z",
@@ -190,14 +191,15 @@ final class QualificationTestPacket {
     private static QualificationRecords.CalibrationRules calibrationRules(
             Path modelPath,
             String modelSha256,
-            String executableSha256) {
+            String executableSha256,
+            int protocolVersion) {
         return new QualificationRecords.CalibrationRules(
                 QualificationRecords.CALIBRATION_SCHEMA, QualificationRecords.SCHEMA_VERSION,
                 "standard", "STANDARD", "", "qwen14",
                 "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "b".repeat(40), "model.gguf",
                 size(modelPath), modelSha256, "Apache-2.0", "official",
                 "qwen2-dense", 14_700_000_000L, 14_700_000_000L,
-                "a".repeat(40), QualificationProtocol.VERSION, "b9918", executableSha256,
+                "a".repeat(40), protocolVersion, "b9918", executableSha256,
                 "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime"),
                 List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "-lv", "4"), "native",
                 "embedded-jinja", "standard-instruct", 16384,

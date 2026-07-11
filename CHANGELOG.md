@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1031] Model-qualification banks are now selected by the immutable campaign
+  protocol version. Protocol v3 permits read-only directory discovery in the
+  F04 locate-file scenario, while hash-pinned v1 and v2 banks remain
+  byte-identical and independently revalidatable. New PTY captures inherit the
+  campaign protocol version, unknown versions fail closed, and the latest bank
+  hash remains the default only for new campaigns.
 - [T1030] The model-qualification Windows PTY capture now races expected
   approval, an idle returned REPL prompt, process exit, and a bounded timeout
   from a post-submission anchor. Echoed prompt text cannot impersonate turn

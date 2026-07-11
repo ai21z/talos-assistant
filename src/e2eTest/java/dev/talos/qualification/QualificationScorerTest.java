@@ -184,7 +184,8 @@ class QualificationScorerTest {
                 QualificationProtocol.BANK_SCHEMA, QualificationProtocol.VERSION,
                 "full-no-decisions", QualificationProtocol.BankKind.FULL, scenarios);
         QualificationScenarioBank.Catalog invalidCatalog = new QualificationScenarioBank.Catalog(
-                catalog.admission(), noDecisions, catalog.fixtures(), catalog.sha256());
+                catalog.protocolVersion(), catalog.admission(), noDecisions,
+                catalog.fixtures(), catalog.sha256());
 
         QualificationRecords.Scorecard scorecard = QualificationScorer.score(
                 invalidCatalog, QualificationProtocol.BankKind.FULL,

@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -17,15 +18,15 @@ public final class ModelQualificationMain {
     static int run(String[] args, PrintStream out, PrintStream err) {
         try {
             Arguments parsed = Arguments.parse(args);
-            QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
             return switch (parsed.command()) {
                 case "bank-hash" -> {
+                    QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
                     out.println(catalog.sha256());
                     yield 0;
                 }
-                case "preflight" -> preflight(parsed.root(), catalog, out, err);
-                case "validate" -> validate(parsed.root(), catalog, out, err);
-                case "score" -> score(parsed.root(), parsed.bank(), catalog, out, err);
+                case "preflight" -> preflight(parsed.root(), catalogForPacket(parsed.root()), out, err);
+                case "validate" -> validate(parsed.root(), catalogForPacket(parsed.root()), out, err);
+                case "score" -> score(parsed.root(), parsed.bank(), catalogForPacket(parsed.root()), out, err);
                 default -> throw new IllegalArgumentException("Unknown command: " + parsed.command());
             };
         } catch (IllegalArgumentException e) {
@@ -36,6 +37,16 @@ public final class ModelQualificationMain {
             err.println("Qualification command failed: " + e.getMessage());
             return 3;
         }
+    }
+
+    private static QualificationScenarioBank.Catalog catalogForPacket(Path root) throws Exception {
+        Path campaignPath = root.toAbsolutePath().normalize().resolve("campaign.json");
+        if (!Files.isRegularFile(campaignPath)) {
+            return QualificationScenarioBank.loadDefault();
+        }
+        int protocolVersion = QualificationJson.readTree(campaignPath)
+                .path("protocolVersion").asInt(-1);
+        return QualificationScenarioBank.load(protocolVersion);
     }
 
     private static int preflight(

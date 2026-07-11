@@ -38,6 +38,7 @@ public final class QualificationPtyCaptureMain {
     private final Path installedTalos;
     private final String prompt;
     private final String approvalBehavior;
+    private final int protocolVersion;
     private final CaptureBuffer capture = new CaptureBuffer();
     private final List<Map<String, Object>> events = new ArrayList<>();
     private int cursor;
@@ -55,6 +56,10 @@ public final class QualificationPtyCaptureMain {
         String candidateAlias = requiredText(campaign, "candidateAlias");
         String machineId = requiredText(campaign, "machineId");
         String configId = requiredText(campaign, "configId");
+        this.protocolVersion = campaign.path("protocolVersion").asInt(-1);
+        if (protocolVersion <= 0) {
+            throw new IllegalStateException("campaign protocolVersion is missing or invalid");
+        }
         JsonNode calibration = JSON.readTree(this.campaignRoot.resolve(Path.of(
                 "candidates", candidateAlias, "calibration-rules.json")).toFile());
         String serverPort = argumentValue(calibration.path("launchArguments"), "--port");
@@ -325,7 +330,7 @@ public final class QualificationPtyCaptureMain {
         try {
             Map<String, Object> packet = new LinkedHashMap<>();
             packet.put("schemaName", "talos.modelQualification.ptyCapture");
-            packet.put("schemaVersion", QualificationProtocol.VERSION);
+            packet.put("schemaVersion", protocolVersion);
             packet.put("transport", "WINDOWS_PTY");
             packet.put("tty", true);
             packet.put("captureStartedAt", started.toString());

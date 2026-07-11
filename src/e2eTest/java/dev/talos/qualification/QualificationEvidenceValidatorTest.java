@@ -305,6 +305,23 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void ptyCaptureSchemaMustMatchTheCampaignProtocolVersion() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(2);
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path capture = packet.runRoot().resolve("transcript.raw.json");
+        String content = Files.readString(capture, StandardCharsets.UTF_8)
+                .replace("\"schemaVersion\" : 2", "\"schemaVersion\" : 3");
+        Files.writeString(capture, content, StandardCharsets.UTF_8);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("PTY")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
     void modelBytesCannotDriftAfterCalibrationPreflight() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);

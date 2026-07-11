@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,6 +47,32 @@ class ModelQualificationMainTest {
 
         assertEquals(0, capture.exit(), capture.err());
         assertTrue(capture.out().contains(catalog.sha256()));
+    }
+
+    @Test
+    void validateSelectsTheHistoricalV2CatalogFromCampaignMetadata() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(2);
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+
+        Capture capture = run("validate", "--root", packet.root().toString());
+
+        assertEquals(0, capture.exit(), capture.err());
+        assertTrue(capture.out().contains("Validated runs: 1"));
+    }
+
+    @Test
+    void validateRejectsAnUnknownCampaignProtocolBeforeUsingLatestResources() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path campaign = packet.root().resolve("campaign.json");
+        String changed = Files.readString(campaign, StandardCharsets.UTF_8)
+                .replace("\"protocolVersion\" : 3", "\"protocolVersion\" : 99");
+        Files.writeString(campaign, changed, StandardCharsets.UTF_8);
+
+        Capture capture = run("validate", "--root", packet.root().toString());
+
+        assertEquals(2, capture.exit());
+        assertTrue(capture.err().contains("Unsupported qualification protocol version: 99"), capture.err());
     }
 
     private static Capture run(String... args) {
