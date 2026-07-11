@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1026] `talos doctor --start` now consumes the representative rate
+  sample's provider finish metadata. A sample that reaches
+  `finish_reason=length`, fails, or returns no recognized finish reason is
+  disclosed as a warning instead of an unqualified pass, while any measured
+  throughput remains visible as bounded diagnostic evidence.
 - [T1024] Ctrl-C during a model generation is now a terminal user abort.
   Cancellation is polled independently of token arrival, closes a blocked
   engine stream, returns canonical abort metadata without tool calls, and

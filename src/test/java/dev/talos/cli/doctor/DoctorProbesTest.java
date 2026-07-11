@@ -485,6 +485,141 @@ class DoctorProbesTest {
     }
 
     @Test
+    void startModeWarnsWhenBoundedRateSampleHitsOutputCapEvenWhenRatesAreFast() throws IOException {
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startChatServer(
+                MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls, null, "length");
+        AtomicInteger evidenceReads = new AtomicInteger();
+        LlamaCppLogEvidence fastRates = LlamaCppLogEvidence.parse("""
+                0.01.000.000 I slot print_timing: id  0 | task 7 | prompt eval time =     200.00 ms /   640 tokens (    0.31 ms per token,  3200.00 tokens per second)
+                0.01.400.000 I slot print_timing: id  0 | task 7 |        eval time =     400.00 ms /    80 tokens (    5.00 ms per token,   200.00 tokens per second)
+                """);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "gpt-oss-20b"));
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    new ServerProbe.TimingEvidenceSource() {
+                        @Override
+                        public LlamaCppLogEvidence read(
+                                DoctorContext ctx,
+                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return evidenceReads.incrementAndGet() == 1
+                                    ? LlamaCppLogEvidence.parse("")
+                                    : fastRates;
+                        }
+
+                        @Override
+                        public boolean canImproveAfterSample(
+                                DoctorContext ctx,
+                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return true;
+                        }
+                    }).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("rate sample reached the provider output limit"), result.detail());
+            assertTrue(result.detail().contains("finish_reason=length"), result.detail());
+            assertTrue(result.detail().contains("prompt eval 3200.0 tok/s"), result.detail());
+            assertEquals(2, chatCalls.get(), "doctor should run only smoke plus one bounded rate sample");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModePassesWhenBoundedRateSampleStopsNormallyAndRatesAreFast() throws IOException {
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startChatServer(
+                MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls, null, "stop");
+        AtomicInteger evidenceReads = new AtomicInteger();
+        LlamaCppLogEvidence fastRates = LlamaCppLogEvidence.parse("""
+                0.01.000.000 I slot print_timing: id  0 | task 7 | prompt eval time =     200.00 ms /   640 tokens (    0.31 ms per token,  3200.00 tokens per second)
+                0.01.400.000 I slot print_timing: id  0 | task 7 |        eval time =     400.00 ms /    80 tokens (    5.00 ms per token,   200.00 tokens per second)
+                """);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "gpt-oss-20b"));
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    new ServerProbe.TimingEvidenceSource() {
+                        @Override
+                        public LlamaCppLogEvidence read(
+                                DoctorContext ctx,
+                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return evidenceReads.incrementAndGet() == 1
+                                    ? LlamaCppLogEvidence.parse("")
+                                    : fastRates;
+                        }
+
+                        @Override
+                        public boolean canImproveAfterSample(
+                                DoctorContext ctx,
+                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return true;
+                        }
+                    }).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertTrue(result.detail().contains("prompt eval 3200.0 tok/s"), result.detail());
+            assertFalse(result.detail().contains("output limit"), result.detail());
+            assertEquals(2, chatCalls.get(), "doctor should run only smoke plus one bounded rate sample");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void startModeWarnsRatherThanFailsWhenOptionalRateSampleRequestFails() throws IOException {
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startChatServer(
+                MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls, null, "stop", 500);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "gpt-oss-20b"));
+
+            ProbeResult result = new ServerProbe(
+                    true,
+                    Duration.ofSeconds(60),
+                    new ServerProbe.TimingEvidenceSource() {
+                        @Override
+                        public LlamaCppLogEvidence read(
+                                DoctorContext ctx,
+                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return LlamaCppLogEvidence.parse("");
+                        }
+
+                        @Override
+                        public boolean canImproveAfterSample(
+                                DoctorContext ctx,
+                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
+                            return true;
+                        }
+                    }).run(ctx(cfg));
+
+            assertEquals(ProbeResult.Status.WARN, result.status());
+            assertTrue(result.detail().contains("rate sample completion could not be verified"), result.detail());
+            assertTrue(result.detail().contains("rates unmeasured"), result.detail());
+            assertEquals(2, chatCalls.get(), "doctor should not retry an optional failed rate sample");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void boundedRateSamplePromptHasWideNeutralContextMargin() throws IOException {
         AtomicInteger chatCalls = new AtomicInteger();
         List<String> requestBodies = new CopyOnWriteArrayList<>();
@@ -768,11 +903,28 @@ class DoctorProbesTest {
             Duration responseDelay,
             AtomicInteger calls,
             List<String> requestBodies) throws IOException {
+        return startChatServer(reply, responseDelay, calls, requestBodies, "stop");
+    }
+
+    private static HttpServer startChatServer(
+            String reply,
+            Duration responseDelay,
+            AtomicInteger calls,
+            List<String> requestBodies,
+            String rateSampleFinishReason) throws IOException {
+        return startChatServer(reply, responseDelay, calls, requestBodies, rateSampleFinishReason, 200);
+    }
+
+    private static HttpServer startChatServer(
+            String reply,
+            Duration responseDelay,
+            AtomicInteger calls,
+            List<String> requestBodies,
+            String rateSampleFinishReason,
+            int rateSampleStatus) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
-            if (calls != null) {
-                calls.incrementAndGet();
-            }
+            int callNumber = calls == null ? 1 : calls.incrementAndGet();
             if (requestBodies != null) {
                 requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             }
@@ -783,10 +935,12 @@ class DoctorProbesTest {
                     Thread.currentThread().interrupt();
                 }
             }
+            String finishReason = callNumber >= 2 ? rateSampleFinishReason : "stop";
             byte[] bytes = ("""
-                    {"choices":[{"message":{"role":"assistant","content":"%s"}}]}
-                    """.formatted(reply)).getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, bytes.length);
+                    {"choices":[{"message":{"role":"assistant","content":"%s"},"finish_reason":"%s"}]}
+                    """.formatted(reply, finishReason)).getBytes(StandardCharsets.UTF_8);
+            int responseStatus = callNumber >= 2 ? rateSampleStatus : 200;
+            exchange.sendResponseHeaders(responseStatus, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });

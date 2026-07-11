@@ -169,11 +169,25 @@ public final class ServerProbe implements DoctorProbe {
             }
             String completion = completionSuffix(preflight);
             RateAssessment rates = assessRates(ctx, preflight);
-            boolean sampleAttempted = false;
+            RateSampleOutcome sampleOutcome = RateSampleOutcome.NOT_ATTEMPTED;
             if (!rates.measured() && timingEvidenceSource.canImproveAfterSample(ctx, preflight)) {
-                runBoundedRateSample(chatEngine, runtime);
-                sampleAttempted = true;
+                sampleOutcome = runBoundedRateSample(chatEngine, runtime);
                 rates = assessRates(ctx, preflight);
+            }
+            if (sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED) {
+                return ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but the representative rate sample"
+                                + " reached the provider output limit (finish_reason=length); "
+                                + rates.summary() + "; " + completion
+                                + ". Throughput evidence is bounded because the requested diagnostic response did not complete;"
+                                + " rerun doctor or inspect the llama.cpp log before relying on it.");
+            }
+            if (sampleOutcome == RateSampleOutcome.UNVERIFIED) {
+                return ProbeResult.warn(id(),
+                        "model smoke verified (" + replyChars + " reply chars) but rate sample completion"
+                                + " could not be verified; " + rates.summary() + "; " + completion
+                                + ". The optional diagnostic sample failed or returned no recognized finish reason;"
+                                + " rerun doctor or inspect the llama.cpp log before relying on it.");
             }
             if (rates.warn()) {
                 return ProbeResult.warn(id(),
@@ -182,7 +196,7 @@ public final class ServerProbe implements DoctorProbe {
                                 + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
                                 + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it.");
             }
-            if (sampleAttempted && !rates.measured()) {
+            if (sampleOutcome == RateSampleOutcome.COMPLETED && !rates.measured()) {
                 return ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but rate sample could not be measured within 60s;"
                                 + " " + completion
@@ -209,14 +223,35 @@ public final class ServerProbe implements DoctorProbe {
         }
     }
 
-    private static void runBoundedRateSample(ChatModelEngine chatEngine, EngineRuntimeConfig runtime) {
+    private static RateSampleOutcome runBoundedRateSample(ChatModelEngine chatEngine,
+                                                          EngineRuntimeConfig runtime) {
         try {
-            chatEngine.chat(new ChatRequest(
+            String finishReason = "";
+            boolean sawEndOfStream = false;
+            try (var chunks = chatEngine.chatStreamNonStreaming(new ChatRequest(
                     runtime.backend(), runtime.model(), "",
-                    RATE_SAMPLE_PROMPT, List.of(), Duration.ofSeconds(60)));
+                    RATE_SAMPLE_PROMPT, List.of(), Duration.ofSeconds(60)))) {
+                var iterator = chunks.iterator();
+                while (iterator.hasNext()) {
+                    var chunk = iterator.next();
+                    if (Boolean.TRUE.equals(chunk.done())) {
+                        sawEndOfStream = true;
+                        finishReason = chunk.finishReason();
+                    }
+                }
+            }
+            if (!sawEndOfStream) {
+                return RateSampleOutcome.UNVERIFIED;
+            }
+            return switch (finishReason.strip().toLowerCase(Locale.ROOT)) {
+                case "stop" -> RateSampleOutcome.COMPLETED;
+                case "length" -> RateSampleOutcome.OUTPUT_CAPPED;
+                default -> RateSampleOutcome.UNVERIFIED;
+            };
         } catch (Exception ignored) {
             // Rate sampling is diagnostic. A successful smoke must not become a failure
             // only because the optional rate sample could not be measured.
+            return RateSampleOutcome.UNVERIFIED;
         }
     }
 
@@ -332,5 +367,12 @@ public final class ServerProbe implements DoctorProbe {
         private static RateAssessment unmeasured() {
             return new RateAssessment(false, false, "rates unmeasured");
         }
+    }
+
+    private enum RateSampleOutcome {
+        NOT_ATTEMPTED,
+        COMPLETED,
+        OUTPUT_CAPPED,
+        UNVERIFIED
     }
 }
