@@ -589,6 +589,26 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void scopedSymbolRenameUsesFileEditSurfaceNotFilesystemRename() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Rename reset to resetAll in script.js only. "
+                                + "scripts.js is a different file and must remain unchanged."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
     void explicitTextFormatRequestExposesReadAndWholeFileWriteOnly() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(

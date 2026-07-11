@@ -1006,6 +1006,64 @@ class TurnProcessorTest {
     }
 
     @Test
+    void scopedSymbolRenameRejectsUnchangedSiblingBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "export const helpers = ['format'];\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Rename reset to resetAll in script.js only. "
+                + "scripts.js is a different file and must remain unchanged.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "scripts.js",
+                        "old_string", "helpers",
+                        "new_string", "changedHelpers")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("Target forbidden before approval"),
+                result.errorMessage());
+        assertTrue(result.errorMessage().contains("scripts.js"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("export const helpers = ['format'];\n",
+                Files.readString(workspace.resolve("scripts.js")));
+    }
+
+    @Test
+    void scopedSymbolRenameAllowsRequestedEditWithOneApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "export const helpers = ['format'];\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Rename reset to resetAll in script.js only. "
+                + "scripts.js is a different file and must remain unchanged.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "script.js",
+                        "old_string", "function reset()",
+                        "new_string", "function resetAll()")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("export function resetAll() { return 'ready'; }\n",
+                Files.readString(workspace.resolve("script.js")));
+        assertEquals("export const helpers = ['format'];\n",
+                Files.readString(workspace.resolve("scripts.js")));
+        assertFalse(Files.exists(workspace.resolve("resetAll")));
+    }
+
+    @Test
     void directoryListingContractBlocksContentInspectionTools(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742");
         ToolRegistry registry = new ToolRegistry();

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1034] Rename requests scoped inside a concrete file now stay on the
+  file-content edit surface instead of being misread as filesystem renames.
+  Natural `must remain unchanged` and `must stay unchanged` clauses project
+  their nearest named files as forbidden targets, so an explicitly preserved
+  similar filename cannot become a false mutation obligation or reach
+  approval. Genuine path rename requests retain `talos.rename_path`.
 - [T1033] Deterministic no-provider qualification turns now pair prompt-debug
   `NOT_APPLICABLE` evidence with an explicit model-runtime `NOT_APPLICABLE`
   record instead of requiring a nonexistent llama.cpp log. Both records must

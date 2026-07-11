@@ -10,6 +10,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.spi.types.ChatMessage;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -63,6 +64,8 @@ public final class TaskContractResolver {
     private static final Pattern PRESERVE_UNCHANGED_TARGET_SPAN = Pattern.compile(
             "(?i)\\b(?:keep|preserve)\\s+(.{0,160}?)\\s+"
                     + "(?:unchanged|as\\s*-?\\s*is|intact)\\b");
+    private static final Pattern MUST_REMAIN_UNCHANGED = Pattern.compile(
+            "(?i)\\bmust\\s+(?:remain|stay)\\s+(?:unchanged|intact|as\\s*-?\\s*is)\\b");
     private static final Pattern DIRECT_NOT_TARGET_PREFIX = Pattern.compile(
             "(?is)(?:^|[\\s,;])not\\s+$");
     private static final Pattern TAILWIND_NEGATIVE_LOCAL_ARTIFACT = Pattern.compile(
@@ -982,8 +985,52 @@ public final class TaskContractResolver {
                 if (!target.isBlank()) out.add(target);
             }
         }
+        addMustRemainUnchangedTargets(out, userRequest);
         return Set.copyOf(out);
     }
+
+    private static void addMustRemainUnchangedTargets(Set<String> out, String userRequest) {
+        Matcher unchanged = MUST_REMAIN_UNCHANGED.matcher(userRequest);
+        while (unchanged.find()) {
+            int clauseStart = unchangedClauseStart(userRequest, unchanged.start());
+            String prefix = userRequest.substring(clauseStart, unchanged.start());
+            List<MatcherSpan> targets = new ArrayList<>();
+            Matcher target = TARGET_FILE.matcher(prefix);
+            while (target.find()) {
+                String normalized = normalizeTarget(target.group(1));
+                if (!normalized.isBlank()) {
+                    targets.add(new MatcherSpan(normalized, target.start(1), target.end(1)));
+                }
+            }
+            if (targets.isEmpty()) continue;
+
+            MatcherSpan current = targets.getLast();
+            out.add(current.value());
+            for (int i = targets.size() - 2; i >= 0; i--) {
+                MatcherSpan previous = targets.get(i);
+                String connector = prefix.substring(previous.end(), current.start());
+                if (!connector.matches("(?i)\\s*,?\\s*(?:and|or)\\s+")) break;
+                out.add(previous.value());
+                current = previous;
+            }
+        }
+    }
+
+    private static int unchangedClauseStart(String request, int before) {
+        int floor = Math.max(0, before - 200);
+        for (int i = before - 1; i >= floor; i--) {
+            char c = request.charAt(i);
+            boolean boundaryPunctuation = c == '.' || c == '!' || c == '?' || c == ';';
+            if (boundaryPunctuation
+                    && i + 1 < request.length()
+                    && Character.isWhitespace(request.charAt(i + 1))) {
+                return i + 1;
+            }
+        }
+        return floor;
+    }
+
+    private record MatcherSpan(String value, int start, int end) {}
 
     private static boolean preserveSpanNamesOnlyTargets(String span) {
         if (span == null || span.isBlank()) return false;

@@ -91,6 +91,35 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void scopedSymbolRenameKeepsOnlyTheEditedFileMutable() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Rename reset to resetAll in script.js only. "
+                        + "scripts.js is a different file and must remain unchanged.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("script.js"), contract.expectedTargets());
+        assertEquals(Set.of("scripts.js"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void naturalMustRemainOrStayUnchangedFormsProjectForbiddenTargets() {
+        for (String input : List.of(
+                "Edit script.js. scripts.js must remain unchanged.",
+                "Edit script.js. Keep the helper separate, scripts.js must stay unchanged.",
+                "Edit script.js. SCRIPTS.JS MUST REMAIN UNCHANGED!")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(Set.of("script.js"), contract.expectedTargets(), input);
+            assertEquals(1, contract.forbiddenTargets().size(), input);
+            assertTrue(contract.forbiddenTargets().stream()
+                    .anyMatch(target -> "scripts.js".equalsIgnoreCase(target)), input);
+        }
+    }
+
+    @Test
     void ambiguousMutationRequestKeepsReadOnlyContractUntilClarified() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Rename reset to resetAll in app.js, but do not change any files yet.");

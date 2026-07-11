@@ -63,4 +63,29 @@ class WorkspaceOperationIntentTest {
                 List.of("talos.apply_workspace_batch", "talos.mkdir", "talos.copy_path"),
                 intent.get().toolNames());
     }
+
+    @Test
+    void scopedSymbolRenameInsideFileIsNotAWorkspacePathRename() {
+        for (String request : List.of(
+                "Rename reset to resetAll in script.js only. scripts.js is a different file and must remain unchanged.",
+                "In script.js, rename reset to resetAll.",
+                "Please rename reset to resetAll inside script.js.")) {
+            assertTrue(WorkspaceOperationIntent.detect(request).isEmpty(), request);
+            assertTrue(WorkspaceOperationIntent.detect(
+                    TaskContractResolver.fromUserRequest(request)).isEmpty(), request);
+        }
+    }
+
+    @Test
+    void concreteFilesystemRenameStillSelectsRenamePath() {
+        for (String request : List.of(
+                "Rename old.txt to new.txt.",
+                "Rename docs/old-plan.md to docs/new-plan.md.")) {
+            var intent = WorkspaceOperationIntent.detect(
+                    TaskContractResolver.fromUserRequest(request));
+
+            assertTrue(intent.isPresent(), request);
+            assertEquals(WorkspaceOperationIntent.Kind.RENAME_PATH, intent.get().kind(), request);
+        }
+    }
 }

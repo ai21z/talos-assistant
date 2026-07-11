@@ -73,6 +73,22 @@ class TaskIntentResolverTest {
     }
 
     @Test
+    void scopedSymbolRenameProjectsEditedAndUnchangedFilesWithDistinctRoles() {
+        String prompt = "Rename reset to resetAll in script.js only. "
+                + "scripts.js is a different file and must remain unchanged.";
+
+        TaskIntent intent = TaskIntentResolver.fromUserRequest(
+                prompt,
+                TaskContractResolver.resolveLegacyFromUserRequest(prompt));
+        TaskContract projected = TaskContractCompiler.compile(intent);
+
+        assertEquals(TargetRole.MUST_MUTATE, intent.targets().find("script.js").orElseThrow().role());
+        assertEquals(TargetRole.FORBIDDEN, intent.targets().find("scripts.js").orElseThrow().role());
+        assertEquals(java.util.Set.of("script.js"), projected.expectedTargets());
+        assertEquals(java.util.Set.of("scripts.js"), projected.forbiddenTargets());
+    }
+
+    @Test
     void rolefulIntentCapturesMultipleConsecutiveForbiddenTargetsOnParityPath() {
         String prompt = "Edit styles.css. Do not edit index.html. Do not edit scripts.js.";
 

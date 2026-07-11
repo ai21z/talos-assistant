@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Detects simple explicit workspace organization operations from the current user request. */
@@ -22,6 +23,12 @@ public final class WorkspaceOperationIntent {
     private static final Pattern RENAME_REQUEST = Pattern.compile(
             "\\brename\\s+" + PATH_TOKEN + "\\s+(?:to|as)\\s+" + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
+    private static final String FILE_SCOPE_TOKEN =
+            "`?[A-Za-z0-9_.\\\\/-]+\\.[A-Za-z0-9]+`?";
+    private static final Pattern FILE_SCOPE_BEFORE_RENAME = Pattern.compile(
+            "(?i)\\b(?:in|inside|within)\\s+" + FILE_SCOPE_TOKEN + "\\s*,?\\s*$");
+    private static final Pattern FILE_SCOPE_AFTER_RENAME = Pattern.compile(
+            "(?i)^\\s+(?:in|inside|within)\\s+" + FILE_SCOPE_TOKEN + "\\b");
     private static final Pattern MKDIR_REQUEST = Pattern.compile(
             "\\b(?:mkdir|make\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder)"
                     + "|create\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder))\\s+"
@@ -75,7 +82,7 @@ public final class WorkspaceOperationIntent {
             kinds.add(Kind.MKDIR);
         }
         if (COPY_REQUEST.matcher(request).find()) kinds.add(Kind.COPY_PATH);
-        if (RENAME_REQUEST.matcher(request).find()) kinds.add(Kind.RENAME_PATH);
+        if (hasWorkspaceRenameRequest(request)) kinds.add(Kind.RENAME_PATH);
         if (MOVE_REQUEST.matcher(request).find()) kinds.add(Kind.MOVE_PATH);
         if (DELETE_REQUEST.matcher(request).find()) kinds.add(Kind.DELETE_PATH);
         LinkedHashSet<Kind> distinctKinds = new LinkedHashSet<>(kinds);
@@ -84,13 +91,31 @@ public final class WorkspaceOperationIntent {
         }
         if (MOVE_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.MOVE_PATH));
         if (COPY_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.COPY_PATH));
-        if (RENAME_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.RENAME_PATH));
+        if (hasWorkspaceRenameRequest(request)) return Optional.of(new Intent(Kind.RENAME_PATH));
         if (MKDIR_REQUEST.matcher(request).find()
                 || NATURAL_BATCH_MKDIR_REQUEST.matcher(request).find()) {
             return Optional.of(new Intent(Kind.MKDIR));
         }
         if (DELETE_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.DELETE_PATH));
         return Optional.empty();
+    }
+
+    private static boolean hasWorkspaceRenameRequest(String request) {
+        Matcher matcher = RENAME_REQUEST.matcher(request);
+        while (matcher.find()) {
+            if (!scopedInsideFile(request, matcher.start(), matcher.end())) return true;
+        }
+        return false;
+    }
+
+    private static boolean scopedInsideFile(String request, int start, int end) {
+        int beforeStart = Math.max(0, start - 160);
+        String before = request.substring(beforeStart, start);
+        if (FILE_SCOPE_BEFORE_RENAME.matcher(before).find()) return true;
+
+        int afterEnd = Math.min(request.length(), end + 160);
+        String after = request.substring(end, afterEnd);
+        return FILE_SCOPE_AFTER_RENAME.matcher(after).find();
     }
 
     public enum Kind {
