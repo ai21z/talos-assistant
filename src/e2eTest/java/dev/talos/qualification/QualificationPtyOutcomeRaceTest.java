@@ -67,6 +67,14 @@ class QualificationPtyOutcomeRaceTest {
     }
 
     @Test
+    void idlePromptIsRecognizedWhenCursorWasMadeVisibleBeforePromptText() {
+        String actualStartupFrame = "\u001B[?25h" + PROMPT + "\u001B[0K\u001B[16G";
+
+        assertEquals("\u001B[?25h".length(),
+                QualificationPtyOutcomeRace.idlePromptIndex(actualStartupFrame, 0));
+    }
+
+    @Test
     void processExitBeforeEitherMarkerIsStructuredOutcome() throws Exception {
         ScriptedProbe probe = new ScriptedProbe(
                 snapshot(IDLE_PROMPT + "\r" + PROMPT + " request\r\n", true, 0),

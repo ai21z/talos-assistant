@@ -7,7 +7,7 @@ import java.util.Objects;
 final class QualificationPtyOutcomeRace {
     static final String APPROVAL_MARKER = "Allow?";
     static final String PROMPT_MARKER = "talos [auto] >";
-    static final String IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[16G\u001B[?25h";
+    static final String IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[16G";
     private static final Duration POLL_INTERVAL = Duration.ofMillis(25);
 
     private QualificationPtyOutcomeRace() {}
