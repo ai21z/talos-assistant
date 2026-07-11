@@ -57,4 +57,31 @@ class QualificationRequirementEvaluatorTest {
                                 "1. Keep credentials outside repositories.\n2. Restrict file permissions.", "", Map.of(), Map.of()))
                 .stream().allMatch(QualificationRecords.RequirementResult::passed));
     }
+
+    @Test
+    void exactScalarAnswersAllowOneTerminalSentenceMarkButNoExtraContent() {
+        QualificationScenarioBank.Catalog historical = QualificationScenarioBank.load(3);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(4);
+        QualificationProtocol.Scenario historicalNoAnswer =
+                historical.scenario("F24-weak-hardware-no-tool-short-answer");
+        QualificationProtocol.Scenario noAnswer = catalog.scenario("F24-weak-hardware-no-tool-short-answer");
+        QualificationProtocol.Scenario status = catalog.scenario("F22-weak-hardware-short-read");
+
+        assertFalse(QualificationRequirementEvaluator.evaluate(historicalNoAnswer,
+                        new QualificationRequirementEvaluator.Evidence("No.", "", Map.of(), Map.of()))
+                .stream().allMatch(QualificationRecords.RequirementResult::passed));
+
+        assertTrue(QualificationRequirementEvaluator.evaluate(noAnswer,
+                        new QualificationRequirementEvaluator.Evidence("No.", "", Map.of(), Map.of()))
+                .stream().allMatch(QualificationRecords.RequirementResult::passed));
+        assertTrue(QualificationRequirementEvaluator.evaluate(status,
+                        new QualificationRequirementEvaluator.Evidence("draft.", "", Map.of(), Map.of()))
+                .stream().allMatch(QualificationRecords.RequirementResult::passed));
+
+        for (String ineligible : List.of("No, because approval is required", "\"No\"", "No...", "Not")) {
+            assertFalse(QualificationRequirementEvaluator.evaluate(noAnswer,
+                            new QualificationRequirementEvaluator.Evidence(ineligible, "", Map.of(), Map.of()))
+                    .stream().allMatch(QualificationRecords.RequirementResult::passed), ineligible);
+        }
+    }
 }

@@ -24,6 +24,7 @@ final class QualificationScenarioBank {
             "ANSWER_CONTAINS",
             "ANSWER_NOT_CONTAINS",
             "ANSWER_EQUALS",
+            "ANSWER_SCALAR_EQUALS",
             "ANSWER_MAX_SENTENCES",
             "ANSWER_BULLET_COUNT",
             "ANSWER_ITEM_COUNT",
@@ -32,7 +33,7 @@ final class QualificationScenarioBank {
             "FILE_EQUALS",
             "FILE_UNCHANGED",
             "TRACE_CONTAINS");
-    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3);
+    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4);
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
 

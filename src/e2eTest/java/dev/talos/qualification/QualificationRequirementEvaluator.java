@@ -55,6 +55,7 @@ final class QualificationRequirementEvaluator {
             case "ANSWER_CONTAINS" -> containsIgnoreCase(evidence.answer(), requirement.expected());
             case "ANSWER_NOT_CONTAINS" -> !evidence.answer().contains(requirement.expected());
             case "ANSWER_EQUALS" -> evidence.answer().strip().equals(requirement.expected());
+            case "ANSWER_SCALAR_EQUALS" -> scalarEquals(evidence.answer(), requirement.expected());
             case "ANSWER_MAX_SENTENCES" -> sentenceCount(evidence.answer()) <= positiveInt(requirement);
             case "ANSWER_BULLET_COUNT", "ANSWER_ITEM_COUNT" ->
                     LIST_ITEM.matcher(evidence.answer()).results().count() == positiveInt(requirement);
@@ -84,6 +85,20 @@ final class QualificationRequirementEvaluator {
 
     private static boolean containsIgnoreCase(String value, String expected) {
         return value.toLowerCase(Locale.ROOT).contains(expected.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean scalarEquals(String value, String expected) {
+        return stripOneTerminalSentenceMark(value).equals(stripOneTerminalSentenceMark(expected));
+    }
+
+    private static String stripOneTerminalSentenceMark(String value) {
+        String text = value == null ? "" : value.strip();
+        if (text.isEmpty()) return text;
+        char last = text.charAt(text.length() - 1);
+        if (last == '.' || last == '!' || last == '?') {
+            return text.substring(0, text.length() - 1).stripTrailing();
+        }
+        return text;
     }
 
     private static int positiveInt(QualificationProtocol.AtomicRequirement requirement) {

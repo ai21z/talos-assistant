@@ -61,12 +61,25 @@ class ModelQualificationMainTest {
     }
 
     @Test
+    void validateSelectsTheHistoricalV3CatalogWithoutApplyingV4ScalarRules() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(3);
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+
+        Capture capture = run("validate", "--root", packet.root().toString());
+
+        assertEquals(0, capture.exit(), capture.err());
+        assertTrue(capture.out().contains("Validated runs: 1"));
+        assertEquals("ANSWER_EQUALS", catalog.scenario("F24-weak-hardware-no-tool-short-answer")
+                .atomicRequirements().getFirst().type());
+    }
+
+    @Test
     void validateRejectsAnUnknownCampaignProtocolBeforeUsingLatestResources() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path campaign = packet.root().resolve("campaign.json");
         String changed = Files.readString(campaign, StandardCharsets.UTF_8)
-                .replace("\"protocolVersion\" : 3", "\"protocolVersion\" : 99");
+                .replace("\"protocolVersion\" : 4", "\"protocolVersion\" : 99");
         Files.writeString(campaign, changed, StandardCharsets.UTF_8);
 
         Capture capture = run("validate", "--root", packet.root().toString());

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1045] Qualification protocol v4 adds versioned scalar-answer equality that
+  tolerates one ordinary terminal sentence mark while rejecting repeated
+  punctuation, quoting, and extra prose. Protocols v1 through v3 retain their
+  original byte-pinned literal equality semantics.
 - [T1044] Deterministic contradiction handling now asks one explicit resolution
   question while remaining provider-free, tool-free, approval-free, and
   mutation-free. This aligns the user-facing response with the frozen
