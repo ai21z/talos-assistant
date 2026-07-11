@@ -199,9 +199,12 @@ public final class QualificationPtyCaptureMain {
             throw new IllegalStateException("Talos exited before prompt-debug and trace capture");
         }
         addInput("prompt-debug");
+        int promptDebugAnchor = cursor;
         writeLine("/prompt-debug save " + forwardSlashes(runRoot));
         waitForIdlePrompt(cursor, SLASH_WAIT);
         drainOutput();
+        QualificationPromptDebugEvidence.capture(
+                runRoot, capture.slice(promptDebugAnchor, cursor));
 
         addInput("last-trace");
         writeLine("/last trace");

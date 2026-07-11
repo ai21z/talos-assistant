@@ -265,6 +265,7 @@ final class QualificationEvidenceValidator {
             validateResourceEvidence(runRoot, run, resources, findings);
             validateApprovals(runRoot, scenario, trace, findings);
             validatePtyCapture(runRoot, request, catalog.protocolVersion(), findings);
+            validatePromptDebugEvidence(runRoot, findings);
 
             QualificationFixtureMaterializer.Snapshot before =
                     QualificationFixtureMaterializer.snapshot(runRoot.resolve("before-files"));
@@ -496,6 +497,22 @@ final class QualificationEvidenceValidator {
         }
         if (request == null || !"TRUE_PTY".equals(request.transport())) valid = false;
         if (!valid) findings.add("Qualification PTY capture is missing or invalid: " + runRoot);
+    }
+
+    private static void validatePromptDebugEvidence(
+            Path runRoot,
+            List<String> findings) throws IOException {
+        Path promptDebug = runRoot.resolve("prompt-debug.txt");
+        if (!Files.isRegularFile(promptDebug)) return;
+        String evidence = Files.readString(promptDebug, StandardCharsets.UTF_8);
+        if (!QualificationPromptDebugEvidence.isNotApplicable(evidence)) return;
+
+        String rawOutput = QualificationJson.readTree(runRoot.resolve("transcript.raw.json"))
+                .path("rawOutput").asText("");
+        if (!evidence.equals(QualificationPromptDebugEvidence.notApplicableText())
+                || !rawOutput.contains(QualificationPromptDebugEvidence.NO_PROVIDER_PROMPT)) {
+            findings.add("prompt-debug NOT_APPLICABLE is not bound to captured runtime output: " + runRoot);
+        }
     }
 
     private static java.time.Instant parseInstant(String value) {

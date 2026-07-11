@@ -8,6 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -319,6 +322,51 @@ class QualificationEvidenceValidatorTest {
         assertFalse(result.valid());
         assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("PTY")),
                 () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void promptDebugNotApplicableMustBeBoundToCapturedRuntimeOutput() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        writeNotApplicablePromptDebug(packet, true);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertTrue(result.valid(), () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void fabricatedPromptDebugNotApplicableWithoutCapturedRuntimeOutputFailsClosed() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        writeNotApplicablePromptDebug(packet, false);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("prompt-debug NOT_APPLICABLE")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    private static void writeNotApplicablePromptDebug(
+            QualificationTestPacket packet,
+            boolean bindToCapture) throws Exception {
+        Files.writeString(packet.runRoot().resolve("prompt-debug.txt"),
+                QualificationPromptDebugEvidence.notApplicableText(), StandardCharsets.UTF_8);
+        if (!bindToCapture) return;
+
+        Path capturePath = packet.runRoot().resolve("transcript.raw.json");
+        ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
+        ArrayNode events = (ArrayNode) capture.path("events");
+        ObjectNode output = (ObjectNode) events.get(1);
+        String changed = output.path("data").asText() + "\n"
+                + QualificationPromptDebugEvidence.NO_PROVIDER_PROMPT;
+        output.put("data", changed);
+        capture.put("rawOutput", changed);
+        QualificationJson.write(capturePath, capture);
     }
 
     @Test

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1032] Model-qualification PTY capture now records prompt debug as explicitly
+  `NOT_APPLICABLE` when Talos proves that a deterministic runtime-policy turn
+  sent no provider prompt. The validator binds that bounded record to the exact
+  structured PTY output; missing, partial, or fabricated no-provider evidence
+  still fails closed, while provider-backed prompt renders remain unchanged.
 - [T1031] Model-qualification banks are now selected by the immutable campaign
   protocol version. Protocol v3 permits read-only directory discovery in the
   F04 locate-file scenario, while hash-pinned v1 and v2 banks remain
