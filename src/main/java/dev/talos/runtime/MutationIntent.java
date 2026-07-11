@@ -243,6 +243,11 @@ public final class MutationIntent {
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+    private static final Pattern CONTRASTIVE_MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
+            "(?:^|[.!?;]\\s+|\\b(?:but|however)\\s+)"
+                    + "(?:please\\s+)?\\b" + CORE_MUTATION_VERBS
+                    + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     /**
      * Scoped-prefix imperative: "In SCOPE, VERB ..." (also inside/within,
@@ -429,9 +434,9 @@ public final class MutationIntent {
      * runtime already stores on the task contract, and the matched
      * evidence span for trace/debug (best-effort empty for default
      * routes). AMBIGUOUS marks a mutation-shaped request under an explicit
-     * global read-only negation; it keeps the read-only tool surface, and
-     * the runtime's read-only denial asks the user for an explicit change
-     * request rather than silently mutating or silently dropping the edit.
+     * global read-only negation; it removes the workspace tool surface, and
+     * the runtime's deterministic denial asks the user for an explicit change
+     * request rather than inspecting, mutating, or silently dropping the edit.
      * The decision reflects this classifier only: TaskContractResolver may
      * layer its own reason overrides (session-meta, command-verification)
      * on top of the stored reason string, so the effective contract is
@@ -469,7 +474,8 @@ public final class MutationIntent {
                 || sourceToTargetArtifact(userRequest).isPresent()
                 || looksTextFormatMutationRequest(lower)
                 || looksTerminalBuildArtifactRequest(lower)
-                || looksNaturalMakeItArtifactRequest(lower);
+                || looksNaturalMakeItArtifactRequest(lower)
+                || CONTRASTIVE_MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
     }
 
     public static String classificationReason(String userRequest) {

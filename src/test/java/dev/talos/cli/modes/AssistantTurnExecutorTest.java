@@ -605,6 +605,53 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
+    void leadingNegationContradictionClarifiesWithoutInspectingWorkspace(@TempDir Path workspace) {
+        String request = "Do not change any files, but update notes.md now. "
+                + "Ask me to resolve the contradiction instead of acting.";
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(request));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(
+                        new IllegalStateException("contradiction clarification must not call the model")))
+                .build();
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-f07-contradiction",
+                "sid",
+                1,
+                "2026-07-11T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "test-backend",
+                "test-model",
+                request);
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.text().contains("Please clarify"), out.text());
+            assertEquals(List.of(), audit.policyTrace().nativeTools());
+            assertEquals(List.of(), audit.policyTrace().promptTools());
+            assertTrue(audit.toolCalls().isEmpty(), audit.toolCalls().toString());
+            assertEquals(0, audit.approvalsRequired());
+
+            var decision = trace.events().stream()
+                    .filter(event -> "MUTATION_REQUEST_DECIDED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("AMBIGUOUS", decision.data().get("decision"));
+            assertEquals("global-read-only-negation", decision.data().get("reason"));
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void blanketNoWorkspaceTurnRejectsBackendSuppliedReadBeforeExecution(@TempDir Path workspace) {
         AtomicInteger executions = new AtomicInteger();
         var registry = new ToolRegistry();

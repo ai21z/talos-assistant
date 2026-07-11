@@ -68,4 +68,15 @@ class ActionObligationPolicyTest {
                 ActionObligation.DIRECT_ANSWER_ONLY,
                 ActionObligationPolicy.derive(contract, ExecutionPhase.INSPECT));
     }
+
+    @Test
+    void contradictionClarificationRequiresNoAction() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Do not change any files, but update notes.md now. "
+                        + "Ask me to resolve the contradiction instead of acting.");
+
+        assertEquals(
+                ActionObligation.NONE,
+                ActionObligationPolicy.derive(contract, ExecutionPhase.INSPECT));
+    }
 }

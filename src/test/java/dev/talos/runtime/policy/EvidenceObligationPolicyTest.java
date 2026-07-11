@@ -92,6 +92,17 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
+    void contradictionClarificationRequiresNoWorkspaceEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Do not change any files, but update notes.md now. "
+                        + "Ask me to resolve the contradiction instead of acting.");
+
+        assertEquals(
+                EvidenceObligation.NONE,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @Test
     void staticWebDiagnosisRequiresStaticWebDiagnosisEvidence() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Check whether this website has mismatches between HTML classes/IDs "

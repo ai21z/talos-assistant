@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1028] Contradictory requests that globally forbid file changes while
+  requesting a named-file mutation now stop as deterministic clarification
+  turns without model or workspace tool access. Contrastive mutation clauses
+  are recognized without converting explicit read-only inspections or quoted
+  file instructions into mutation intent, and trace evidence records the
+  ambiguous authority decision without exposing matched prompt text.
 - [T1026] `talos doctor --start` now consumes the representative rate
   sample's provider finish metadata. A sample that reaches
   `finish_reason=length`, fails, or returns no recognized finish reason is

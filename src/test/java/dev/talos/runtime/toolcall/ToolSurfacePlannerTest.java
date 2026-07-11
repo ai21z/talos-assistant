@@ -53,6 +53,35 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void contradictionClarificationExposesNoWorkspaceTools() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Do not change any files, but update notes.md now. "
+                        + "Ask me to resolve the contradiction instead of acting.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                contract,
+                ExecutionPhase.INSPECT,
+                registry());
+
+        assertEquals(List.of(), plan.nativeToolNames());
+        assertEquals(List.of(), plan.nativeToolSpecs());
+        assertEquals("ambiguous mutation clarification", plan.reason());
+    }
+
+    @Test
+    void explicitInspectionUnderNoChangeConstraintKeepsReadTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Do not change any files. Read notes.md and explain what it currently says."),
+                ExecutionPhase.INSPECT,
+                registry());
+
+        assertTrue(plan.nativeToolNames().contains("talos.read_file"), plan.nativeToolNames().toString());
+        assertFalse(plan.nativeToolNames().stream().anyMatch(dev.talos.tools.ToolAliasPolicy::isMutating),
+                plan.nativeToolNames().toString());
+    }
+
+    @Test
     void unsupportedNaturalShellCommandRequestExposesNoFallbackTools() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(

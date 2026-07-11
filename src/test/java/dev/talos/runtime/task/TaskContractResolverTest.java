@@ -75,6 +75,22 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void leadingGlobalNegationThenMutationClauseIsClarificationOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Do not change any files, but update notes.md now. "
+                        + "Ask me to resolve the contradiction instead of acting.");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertTrue(contract.expectedTargets().isEmpty());
+        assertTrue(contract.sourceEvidenceTargets().isEmpty());
+        assertTrue(contract.forbiddenTargets().isEmpty());
+        assertEquals("global-read-only-negation", contract.classificationReason());
+    }
+
+    @Test
     void explicitTextFormatRequestBecomesNamedFileEditContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Normalize notes.txt line endings to LF.");

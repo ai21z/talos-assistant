@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutationIntentTest {
 
+    private static final String F07_CONTRADICTION_PROMPT =
+            "Do not change any files, but update notes.md now. "
+                    + "Ask me to resolve the contradiction instead of acting.";
+
     private static final String RETROCATS_AUDIT_PROMPT =
             "Create a complete modern dark synthwave static website for a band called Retrocats. "
                     + "Use exactly index.html, style.css, and script.js as the local files. "
@@ -261,6 +265,28 @@ class MutationIntentTest {
                 "I am only chatting, please don't inspect my files. What can you do for me?"));
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Can you explain how to build a BMI calculator?"));
+    }
+
+    @Test
+    void globalNegationWithLaterFileMutationClauseIsAmbiguous() {
+        MutationIntent.RequestShape shape = MutationIntent.classifyShape(F07_CONTRADICTION_PROMPT);
+
+        assertEquals(MutationIntent.Decision.AMBIGUOUS, shape.decision());
+        assertEquals("global-read-only-negation", shape.reason());
+        assertEquals("do not change", shape.evidenceSpan());
+        assertFalse(MutationIntent.looksExplicitMutationRequest(F07_CONTRADICTION_PROMPT));
+    }
+
+    @Test
+    void globalNegationWithExplicitInspectionRequestRemainsReadOnly() {
+        for (String request : java.util.List.of(
+                "Do not change any files. Read notes.md and explain what it currently says.",
+                "Do not change any files. Inspect notes.md and explain what should be updated.")) {
+            MutationIntent.RequestShape shape = MutationIntent.classifyShape(request);
+
+            assertEquals(MutationIntent.Decision.READ_ONLY, shape.decision(), request);
+            assertEquals("global-read-only-negation", shape.reason(), request);
+        }
     }
 
     @Test

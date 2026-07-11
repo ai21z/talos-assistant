@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
@@ -60,6 +61,9 @@ public final class ToolSurfacePlanner {
         }
         if (unsupportedCommandRequest(contract)) {
             return new Plan(List.of(), "unsupported command request");
+        }
+        if (ambiguousMutationClarification(contract)) {
+            return new Plan(List.of(), "ambiguous mutation clarification");
         }
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
             return select(registry, ToolSurfacePlanner::isDirectoryListingTool, safeAvailability, "directory listing");
@@ -175,6 +179,13 @@ public final class ToolSurfacePlanner {
                 .map(ToolSpec::name)
                 .sorted()
                 .toList();
+    }
+
+    private static boolean ambiguousMutationClarification(TaskContract contract) {
+        return contract != null
+                && contract.type() == TaskType.READ_ONLY_QA
+                && MutationIntent.classifyShape(contract.originalUserRequest()).decision()
+                == MutationIntent.Decision.AMBIGUOUS;
     }
 
     private static boolean requiresFileWriteForExactExpectation(TaskContract contract) {
