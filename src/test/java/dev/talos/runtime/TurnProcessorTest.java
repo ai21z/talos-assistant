@@ -945,6 +945,67 @@ class TurnProcessorTest {
     }
 
     @Test
+    void scopedWebConstraintRejectsSiblingWritesBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1><p>Online</p>\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                + "Do not touch CSS or JavaScript.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        for (String target : List.of("styles.css", "script.js")) {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.write_file", Map.of(
+                            "path", target,
+                            "content", "off target mutation\n")), ctx);
+
+            assertFalse(result.success(), target);
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code(), target);
+            assertTrue(result.errorMessage().contains("outside the current expected target set"),
+                    result.errorMessage());
+            assertTrue(result.errorMessage().contains("index.html"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        }
+
+        assertEquals(0, approvals.get());
+        assertEquals("body { color: white; }\n", Files.readString(workspace.resolve("styles.css")));
+        assertEquals("console.log('ready');\n", Files.readString(workspace.resolve("script.js")));
+    }
+
+    @Test
+    void scopedWebConstraintAllowsOnlyRequestedEditWithOneApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1><p>Online</p>\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { color: white; }\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                + "Do not touch CSS or JavaScript.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "index.html",
+                        "old_string", "<h1>Old</h1><p>Online</p>",
+                        "new_string", "<h1>Atlas Control</h1><p>Offline</p>")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertEquals("<h1>Atlas Control</h1><p>Offline</p>\n",
+                Files.readString(workspace.resolve("index.html")));
+        assertEquals("body { color: white; }\n", Files.readString(workspace.resolve("styles.css")));
+        assertEquals("console.log('ready');\n", Files.readString(workspace.resolve("script.js")));
+    }
+
+    @Test
     void directoryListingContractBlocksContentInspectionTools(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742");
         ToolRegistry registry = new ToolRegistry();

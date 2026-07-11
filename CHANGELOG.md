@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1029] Scoped web-resource exclusions such as `do not touch CSS or
+  JavaScript` no longer cancel an explicit named-file mutation. Generic
+  resource classes are not converted into guessed paths: the named mutation
+  target remains the complete pre-approval allowlist, so sibling writes are
+  rejected before approval while global no-change instructions remain
+  read-only or require clarification.
 - [T1028] Contradictory requests that globally forbid file changes while
   requesting a named-file mutation now stop as deterministic clarification
   turns without model or workspace tool access. Contrastive mutation clauses

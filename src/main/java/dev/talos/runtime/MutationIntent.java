@@ -128,6 +128,15 @@ public final class MutationIntent {
             "extra", "new", "separate", "unlinked"
     );
 
+    private static final String SCOPED_WEB_RESOURCE =
+            "(?:stylesheets?|style\\s+sheets?|styles?|javascript|java\\s+script|scripts?|css|js|html)"
+                    + "(?:\\s+(?:files?|assets?))?";
+
+    private static final Pattern SCOPED_WEB_RESOURCE_LIST = Pattern.compile(
+            "^(?:(?:any|the|a|an)\\s+)?" + SCOPED_WEB_RESOURCE
+                    + "(?:(?:\\s*,\\s*|\\s+(?:and|or)\\s+)"
+                    + "(?:(?:any|the|a|an)\\s+)?" + SCOPED_WEB_RESOURCE + ")*\\b");
+
     /**
      * The single file-target extension inventory every target pattern
      * below composes from. It previously existed as four hand-copied
@@ -981,6 +990,7 @@ public final class MutationIntent {
                 || startsWithNamedFileTarget(tail)
                 || startsWithQualifiedNamedFileTarget(tail)
                 || startsWithScopedDesignTarget(tail)
+                || startsWithScopedWebResourceTarget(tail)
                 || startsWithTailwindArtifactReference(tail);
     }
 
@@ -1024,6 +1034,11 @@ public final class MutationIntent {
                 || candidate.startsWith("nav ")
                 || candidate.startsWith("navigation")
                 || candidate.startsWith("sidebar");
+    }
+
+    private static boolean startsWithScopedWebResourceTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        return SCOPED_WEB_RESOURCE_LIST.matcher(tail.stripLeading()).find();
     }
 
     private static boolean startsWithTailwindArtifactReference(String tail) {

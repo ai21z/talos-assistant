@@ -17,6 +17,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskContractResolverTest {
 
+    private static final String F10_SCOPED_WEB_PROMPT =
+            "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                    + "Do not touch CSS or JavaScript.";
+
     private static final String RETROCATS_AUDIT_PROMPT =
             "Create a complete modern dark synthwave static website for a band called Retrocats. "
                     + "Use exactly index.html, style.css, and script.js as the local files. "
@@ -60,6 +64,30 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void scopedWebResourceConstraintKeepsOnlyNamedMutationTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(F10_SCOPED_WEB_PROMPT);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+        assertTrue(contract.sourceEvidenceTargets().isEmpty());
+        assertTrue(contract.forbiddenTargets().isEmpty(),
+                "generic resource classes must not be converted into guessed filenames");
+    }
+
+    @Test
+    void explicitScopedWebPathsRemainForbiddenTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Update index.html. Do not touch styles.css or script.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+        assertEquals(Set.of("styles.css", "script.js"), contract.forbiddenTargets());
     }
 
     @Test

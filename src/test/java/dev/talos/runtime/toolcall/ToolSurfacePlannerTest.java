@@ -568,6 +568,27 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void scopedWebResourceConstraintKeepsNarrowFileEditSurfaceVisible() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.delete_path"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
     void explicitTextFormatRequestExposesReadAndWholeFileWriteOnly() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(

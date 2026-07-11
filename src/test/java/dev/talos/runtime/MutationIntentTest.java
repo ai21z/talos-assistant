@@ -15,6 +15,10 @@ class MutationIntentTest {
             "Do not change any files, but update notes.md now. "
                     + "Ask me to resolve the contradiction instead of acting.";
 
+    private static final String F10_SCOPED_WEB_PROMPT =
+            "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                    + "Do not touch CSS or JavaScript.";
+
     private static final String RETROCATS_AUDIT_PROMPT =
             "Create a complete modern dark synthwave static website for a band called Retrocats. "
                     + "Use exactly index.html, style.css, and script.js as the local files. "
@@ -265,6 +269,38 @@ class MutationIntentTest {
                 "I am only chatting, please don't inspect my files. What can you do for me?"));
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Can you explain how to build a BMI calculator?"));
+    }
+
+    @Test
+    void scopedWebResourceNegationDoesNotCancelMutationIntent() {
+        for (String input : java.util.List.of(
+                F10_SCOPED_WEB_PROMPT,
+                "Update index.html. Don't touch stylesheets or scripts.",
+                "Update index.html, do not touch any CSS, JS, or script files.",
+                "UPDATE index.html. DO NOT TOUCH the JavaScript or the CSS.")) {
+            MutationIntent.RequestShape shape = MutationIntent.classifyShape(input);
+
+            assertEquals(MutationIntent.Decision.EXECUTE_MUTATION, shape.decision(), input);
+            assertFalse(shape.reason().contains("global-read-only-negation"), input);
+            assertTrue(MutationIntent.looksExplicitMutationRequest(input), input);
+        }
+    }
+
+    @Test
+    void globalDoNotTouchControlsRemainReadOnly() {
+        for (String input : java.util.List.of(
+                "Do not touch files.",
+                "Do not touch any files.")) {
+            MutationIntent.RequestShape shape = MutationIntent.classifyShape(input);
+
+            assertEquals(MutationIntent.Decision.READ_ONLY, shape.decision(), input);
+            assertEquals("global-read-only-negation", shape.reason(), input);
+        }
+
+        MutationIntent.RequestShape contradiction = MutationIntent.classifyShape(
+                "Update index.html, but do not touch any files.");
+        assertEquals(MutationIntent.Decision.AMBIGUOUS, contradiction.decision());
+        assertEquals("global-read-only-negation", contradiction.reason());
     }
 
     @Test
