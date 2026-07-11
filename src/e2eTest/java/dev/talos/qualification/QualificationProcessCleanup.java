@@ -29,7 +29,8 @@ final class QualificationProcessCleanup {
             $port = [int]$env:TALOS_QUALIFICATION_SERVER_PORT
             $expected = [IO.Path]::GetFullPath($env:TALOS_QUALIFICATION_SERVER_EXE)
             $earliest = [DateTimeOffset]::Parse($env:TALOS_QUALIFICATION_NOT_BEFORE).UtcDateTime
-            $connections = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+            $connections = @(Get-NetTCPConnection -State Listen -ErrorAction Stop |
+              Where-Object { $_.LocalPort -eq $port })
             foreach ($connection in $connections) {
               $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($connection.OwningProcess)"
               if ($null -eq $process -or [string]::IsNullOrWhiteSpace($process.ExecutablePath)) { continue }

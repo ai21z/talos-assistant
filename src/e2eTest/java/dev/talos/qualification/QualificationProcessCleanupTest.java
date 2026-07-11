@@ -4,8 +4,11 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +19,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QualificationProcessCleanupTest {
 
     private static final Duration NO_WAIT = Duration.ZERO;
+
+    @Test
+    void absentCampaignListenerIsVerifiedCleanState() throws Exception {
+        int unusedPort;
+        try (ServerSocket reservation = new ServerSocket(0)) {
+            unusedPort = reservation.getLocalPort();
+        }
+        String executableName = System.getProperty("os.name", "").startsWith("Windows")
+                ? "java.exe"
+                : "java";
+        Path existingExecutable = Path.of(
+                System.getProperty("java.home"), "bin", executableName);
+
+        QualificationProcessCleanup.Result result = QualificationProcessCleanup.stop(
+                null, existingExecutable, unusedPort, Instant.now());
+
+        assertEquals(QualificationProcessCleanup.Outcome.ALREADY_EXITED, result.outcome());
+        assertTrue(result.campaignServerDiscoveryVerified());
+        assertTrue(result.campaignServerPids().isEmpty());
+        assertTrue(result.errors().isEmpty());
+    }
 
     @Test
     void gracefullyExitsRootAndCapturedDescendantsWithoutTermination() {

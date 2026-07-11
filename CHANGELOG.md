@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1042] Windows qualification cleanup now treats an absent campaign listener
+  as verified clean shutdown. Listener enumeration failures still fail closed,
+  while executable, port, launch-time, and process-identity checks remain
+  required before any surviving server can be stopped.
 - [T1041] Failed Windows model-qualification PTY captures now request graceful
   Talos shutdown, retain the harness-owned process tree, and stop any surviving
   campaign server matched by frozen executable, port, and launch time. Cleanup
