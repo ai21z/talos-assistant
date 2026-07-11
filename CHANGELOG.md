@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1041] Failed Windows model-qualification PTY captures now request graceful
+  Talos shutdown, retain the harness-owned process tree, and stop any surviving
+  campaign server matched by frozen executable, port, and launch time. Cleanup
+  is bounded, recorded in the capture packet, and fails the trial if an owned
+  process survives without selecting unrelated llama.cpp processes.
 - [T1040] Windows model-qualification PTY capture now recognizes the exact
   JLine idle-prompt frame that resets the cursor column before final prompt
   positioning. Command echoes, incomplete cursor sequences, and arbitrary

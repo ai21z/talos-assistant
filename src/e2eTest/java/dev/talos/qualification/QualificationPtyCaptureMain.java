@@ -3,6 +3,7 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -22,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 public final class QualificationPtyCaptureMain {
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
+    private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
     private static final Duration STARTUP_WAIT = Duration.ofSeconds(30);
     private static final Duration TURN_WAIT = Duration.ofSeconds(330);
     private static final Duration SLASH_WAIT = Duration.ofSeconds(30);
@@ -35,6 +37,8 @@ public final class QualificationPtyCaptureMain {
     private final Path resourceSamples;
     private final Path transcriptPath;
     private final Path llamaLog;
+    private final Path serverExecutable;
+    private final int serverPort;
     private final Path installedTalos;
     private final String prompt;
     private final String approvalBehavior;
@@ -45,6 +49,8 @@ public final class QualificationPtyCaptureMain {
     private Process talos;
     private Process monitor;
     private Thread outputReader;
+    private Instant talosStartedNotBefore;
+    private QualificationProcessCleanup.Result cleanupResult;
     private String terminalOutcome = "NOT_STARTED";
 
     private QualificationPtyCaptureMain(
@@ -62,7 +68,25 @@ public final class QualificationPtyCaptureMain {
         }
         JsonNode calibration = JSON.readTree(this.campaignRoot.resolve(Path.of(
                 "candidates", candidateAlias, "calibration-rules.json")).toFile());
-        String serverPort = argumentValue(calibration.path("launchArguments"), "--port");
+        String serverPortText = argumentValue(calibration.path("launchArguments"), "--port");
+        this.serverPort = Integer.parseInt(serverPortText);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> config = YAML.readValue(
+                this.campaignRoot.resolve(Path.of("home", ".talos", "config.yaml")).toFile(),
+                Map.class);
+        Map<String, Object> engines = map(config.get("engines"));
+        Map<String, Object> llamaCpp = map(engines.get("llama_cpp"));
+        String configuredServerPath = String.valueOf(llamaCpp.getOrDefault("server_path", "")).strip();
+        int configuredPort = intValue(llamaCpp.get("port"), -1);
+        if (configuredServerPath.isBlank() || configuredPort != this.serverPort) {
+            throw new IllegalStateException(
+                    "campaign config server path/port does not match frozen calibration");
+        }
+        this.serverExecutable = Path.of(configuredServerPath).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(this.serverExecutable)) {
+            throw new IllegalStateException("configured llama.cpp server is missing: "
+                    + this.serverExecutable);
+        }
         String trial = "trial-%02d".formatted(repetition);
         this.runRoot = this.campaignRoot.resolve(Path.of(
                 "runs", candidateAlias, machineId, configId, scenarioId, trial));
@@ -72,7 +96,7 @@ public final class QualificationPtyCaptureMain {
         this.resourceSamples = runRoot.resolve("resource-samples.csv");
         this.transcriptPath = runRoot.resolve("transcript.raw.json");
         this.llamaLog = this.campaignRoot.resolve(Path.of(
-                "home", ".talos", "logs", "llama_cpp-" + serverPort + ".log"));
+                "home", ".talos", "logs", "llama_cpp-" + serverPortText + ".log"));
         String localAppData = System.getenv("LOCALAPPDATA");
         if (localAppData == null || localAppData.isBlank()) {
             throw new IllegalStateException("LOCALAPPDATA is unavailable");
@@ -131,20 +155,24 @@ public final class QualificationPtyCaptureMain {
             exitTalos();
         } catch (Exception failure) {
             captureFailure = failure;
-            throw failure;
         } finally {
-            try {
-                drainOutput();
-                writePacket(started, captureFailure);
-                if (captureFailure != null) {
-                    Files.writeString(runRoot.resolve("transcript.failed.txt"),
-                            capture.text() + System.lineSeparator() + captureFailure,
-                            StandardCharsets.UTF_8);
-                }
-            } finally {
-                stopProcesses();
+            cleanupResult = stopProcesses();
+            if (cleanupResult.outcome() == QualificationProcessCleanup.Outcome.FAILED) {
+                IllegalStateException cleanupFailure = new IllegalStateException(
+                        "qualification process cleanup left survivors: "
+                                + cleanupResult.survivingPids());
+                if (captureFailure == null) captureFailure = cleanupFailure;
+                else captureFailure.addSuppressed(cleanupFailure);
+            }
+            drainOutput();
+            writePacket(started, captureFailure);
+            if (captureFailure != null) {
+                Files.writeString(runRoot.resolve("transcript.failed.txt"),
+                        capture.text() + System.lineSeparator() + captureFailure,
+                        StandardCharsets.UTF_8);
             }
         }
+        if (captureFailure != null) throw captureFailure;
     }
 
     private String awaitApprovalOrTerminal(int turnAnchor) throws Exception {
@@ -244,6 +272,7 @@ public final class QualificationPtyCaptureMain {
         builder.environment().put("JAVA_OPTS", "-Duser.home=" + campaignRoot.resolve("home"));
         builder.environment().put("COLUMNS", "120");
         builder.environment().put("LINES", "40");
+        talosStartedNotBefore = Instant.now();
         talos = builder.start();
         outputReader = Thread.ofPlatform().daemon().start(
                 () -> capture.copyFrom(talos.getInputStream()));
@@ -343,6 +372,7 @@ public final class QualificationPtyCaptureMain {
             packet.put("expectedApprovalBehavior", approvalBehavior);
             packet.put("terminalOutcome", terminalOutcome);
             packet.put("captureFailure", failure == null ? "" : failure.toString());
+            packet.put("processCleanup", cleanupResult == null ? Map.of() : cleanupResult.evidence());
             packet.put("events", events);
             packet.put("rawOutput", capture.text());
             JSON.writeValue(transcriptPath.toFile(), packet);
@@ -371,12 +401,13 @@ public final class QualificationPtyCaptureMain {
         return capture.slice(0, end);
     }
 
-    private void stopProcesses() {
+    private QualificationProcessCleanup.Result stopProcesses() {
         try {
             Files.writeString(stopFile, "stop\n", StandardCharsets.UTF_8);
         } catch (Exception ignored) {
         }
-        stop(talos, 2_000L);
+        QualificationProcessCleanup.Result result = QualificationProcessCleanup.stop(
+                talos, serverExecutable, serverPort, talosStartedNotBefore);
         stop(monitor, 5_000L);
         if (outputReader != null) {
             try {
@@ -385,6 +416,7 @@ public final class QualificationPtyCaptureMain {
                 Thread.currentThread().interrupt();
             }
         }
+        return result;
     }
 
     private static void stop(Process process, long waitMillis) {
@@ -418,6 +450,23 @@ public final class QualificationPtyCaptureMain {
             }
         }
         throw new IllegalStateException("missing frozen launch argument: " + name);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        if (value instanceof Map<?, ?> source) return (Map<String, Object>) source;
+        return Map.of();
+    }
+
+    private static int intValue(Object value, int fallback) {
+        if (value instanceof Number number) return number.intValue();
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text.strip());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return fallback;
     }
 
     private static final class SystemWaiter implements QualificationPtyOutcomeRace.Waiter {
