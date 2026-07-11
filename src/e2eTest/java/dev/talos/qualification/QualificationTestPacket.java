@@ -96,6 +96,7 @@ final class QualificationTestPacket {
         QualificationJson.write(runDir.resolve("request.json"), new QualificationRecords.RequestRecord(
                 QualificationRecords.REQUEST_SCHEMA, QualificationRecords.SCHEMA_VERSION,
                 scenario.id(), scenario.prompt(), "r1", "TRUE_PTY", "talos"));
+        QualificationJson.write(runDir.resolve("scenario.json"), scenario);
         QualificationJson.write(runDir.resolve("result.json"), result);
         QualificationJson.write(runDir.resolve("trace.json"), java.util.Map.of(
                 "schemaVersion", 2,

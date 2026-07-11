@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -200,6 +201,78 @@ class QualificationEvidenceValidatorTest {
 
         assertFalse(result.valid());
         assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("canary")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void frozenScenarioCanaryIsSourceEvidenceRatherThanARuntimeLeak() throws Exception {
+        QualificationScenarioBank.Catalog catalog = catalogWithScenarioSourceCanary();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertTrue(result.valid(), () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void frozenScenarioCanaryCannotHideTheSameCanaryInARuntimeArtifact() throws Exception {
+        QualificationScenarioBank.Catalog catalog = catalogWithScenarioSourceCanary();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Files.writeString(
+                packet.runRoot().resolve("transcript.txt"),
+                "leaked TALOS_CANARY_MODEL_QUALIFICATION_PRIVATE\n",
+                StandardCharsets.UTF_8);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("canary")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void capturedScenarioMustMatchTheFrozenBankBeforeItCanBeAllowlisted() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        ObjectNode captured = (ObjectNode) QualificationJson.readTree(packet.runRoot().resolve("scenario.json"));
+        captured.put("prompt", "tampered prompt");
+        QualificationJson.write(packet.runRoot().resolve("scenario.json"), captured);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("scenario snapshot")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void capturedScenarioIsMandatoryQualificationEvidence() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Files.delete(packet.runRoot().resolve("scenario.json"));
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("scenario.json")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void malformedCapturedScenarioCannotGainASourceEvidenceExemption() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Files.writeString(packet.runRoot().resolve("scenario.json"), "{not-json\n", StandardCharsets.UTF_8);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("scenario.json")),
                 () -> String.join("\n", result.findings()));
     }
 
@@ -513,5 +586,41 @@ class QualificationEvidenceValidatorTest {
 
     private static void assertEqualsOne(int actual) {
         assertTrue(actual == 1, "expected one run but was " + actual);
+    }
+
+    private static QualificationScenarioBank.Catalog catalogWithScenarioSourceCanary() {
+        QualificationScenarioBank.Catalog base = QualificationScenarioBank.loadDefault();
+        QualificationProtocol.Scenario original = base.admission().scenarios().getFirst();
+        List<QualificationProtocol.AtomicRequirement> requirements =
+                new ArrayList<>(original.atomicRequirements());
+        requirements.add(new QualificationProtocol.AtomicRequirement(
+                "source-canary",
+                "ANSWER_NOT_CONTAINS",
+                "answer",
+                "TALOS_CANARY_MODEL_QUALIFICATION_PRIVATE"));
+        QualificationProtocol.Scenario withCanary = new QualificationProtocol.Scenario(
+                original.id(),
+                original.bank(),
+                original.archetype(),
+                original.category(),
+                original.fixture(),
+                original.fixtureSha256(),
+                original.prompt(),
+                original.approvalBehavior(),
+                original.expectedTerminalStates(),
+                original.allowedTargets(),
+                original.forbiddenTargets(),
+                original.expectedDecisions(),
+                requirements);
+        List<QualificationProtocol.Scenario> scenarios = new ArrayList<>(base.admission().scenarios());
+        scenarios.set(0, withCanary);
+        QualificationProtocol.ScenarioBank admission = new QualificationProtocol.ScenarioBank(
+                base.admission().schemaName(),
+                base.admission().schemaVersion(),
+                base.admission().id(),
+                base.admission().kind(),
+                scenarios);
+        return new QualificationScenarioBank.Catalog(
+                base.protocolVersion(), admission, base.full(), base.fixtures(), "c".repeat(64));
     }
 }

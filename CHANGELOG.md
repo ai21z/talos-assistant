@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T1037] Model-qualification canary validation now requires each captured
+  scenario definition to match the hash-pinned frozen bank before exempting
+  that exact source file from runtime-artifact scanning. Missing, malformed,
+  stale, or modified scenario snapshots fail closed, while fixture canaries in
+  verified source evidence no longer create false runtime-leak findings.
+- [T1039] The current-build artifact-canary smoke now scans deterministic build
+  outputs instead of depending on unrelated ignored local evidence. Explicit
+  targeted runtime scans and qualification packet validation remain strict.
 - [T1036] Explicit static-web heading and status-paragraph requirements now
   become independent authoritative readback claims. Generic HTML/CSS/JavaScript
   coherence can no longer certify a turn when one of those requested content

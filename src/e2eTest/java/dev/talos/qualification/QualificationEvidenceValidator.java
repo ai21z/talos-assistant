@@ -30,6 +30,7 @@ final class QualificationEvidenceValidator {
             "## Permitted deviations");
     private static final List<String> REQUIRED_JSON = List.of(
             "request.json",
+            "scenario.json",
             "result.json",
             "trace.json",
             "approvals.json",
@@ -209,6 +210,15 @@ final class QualificationEvidenceValidator {
             findings.add(e.getMessage());
             return;
         }
+        QualificationProtocol.Scenario capturedScenario = read(
+                runRoot.resolve("scenario.json"),
+                QualificationProtocol.Scenario.class,
+                findings,
+                runRoot + "/scenario.json");
+        boolean scenarioSnapshotVerified = capturedScenario != null && capturedScenario.equals(scenario);
+        if (capturedScenario != null && !scenarioSnapshotVerified) {
+            findings.add("Captured scenario snapshot differs from frozen bank: " + runRoot);
+        }
         if (request != null) {
             validateSchema(request.schemaName(), request.schemaVersion(), QualificationRecords.REQUEST_SCHEMA,
                     "request " + runRoot, findings);
@@ -222,7 +232,15 @@ final class QualificationEvidenceValidator {
                 findings.add("Qualification run command is missing: " + runRoot);
             }
         }
-        validateEvidenceContents(catalog, runRoot, scenario, run, request, calibration, findings);
+        validateEvidenceContents(
+                catalog,
+                runRoot,
+                scenario,
+                scenarioSnapshotVerified,
+                run,
+                request,
+                calibration,
+                findings);
         validateRunPath(packetRoot, runRoot, run, findings);
     }
 
@@ -230,13 +248,14 @@ final class QualificationEvidenceValidator {
             QualificationScenarioBank.Catalog catalog,
             Path runRoot,
             QualificationProtocol.Scenario scenario,
+            boolean scenarioSnapshotVerified,
             QualificationRecords.RunResult run,
             QualificationRecords.RequestRecord request,
             QualificationRecords.CalibrationRules calibration,
             List<String> findings) {
         try {
             var canary = QualificationJson.readTree(runRoot.resolve("canary.json"));
-            List<Path> sourceEvidenceAllowlist = sourceEvidenceFiles(runRoot);
+            List<Path> sourceEvidenceAllowlist = sourceEvidenceFiles(runRoot, scenarioSnapshotVerified);
             List<ArtifactCanaryScanner.Finding> canaryFindings =
                     ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(runRoot), sourceEvidenceAllowlist);
             boolean canaryPassed = canaryFindings.isEmpty();
@@ -433,8 +452,11 @@ final class QualificationEvidenceValidator {
         }
     }
 
-    private static List<Path> sourceEvidenceFiles(Path runRoot) throws IOException {
+    private static List<Path> sourceEvidenceFiles(Path runRoot, boolean scenarioSnapshotVerified) throws IOException {
         List<Path> allowlist = new ArrayList<>();
+        if (scenarioSnapshotVerified) {
+            allowlist.add(runRoot.resolve("scenario.json"));
+        }
         for (String directory : REQUIRED_DIRECTORIES) {
             Path root = runRoot.resolve(directory);
             if (!Files.isDirectory(root)) continue;

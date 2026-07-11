@@ -41,8 +41,8 @@ class ArtifactCanaryScanTest {
     }
 
     @Test
-    void artifact_canary_scan_current_generated_artifacts_passes() throws Exception {
-        List<Path> roots = List.of(Path.of("build"), Path.of("local"));
+    void artifact_canary_scan_current_build_artifacts_passes() throws Exception {
+        List<Path> roots = List.of(Path.of("build"));
 
         List<ArtifactCanaryScanner.Finding> findings = ArtifactCanaryScanner.scanExisting(roots, List.of());
 
