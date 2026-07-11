@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QualificationTraceEvidenceTest {
@@ -62,6 +63,69 @@ class QualificationTraceEvidenceTest {
         assertEquals(List.of(new QualificationRecords.DecisionResult("propose-create", true)), facts.decisions());
         assertFalse(facts.calls().getFirst().executed());
         assertTrue(facts.approvalDenied());
+    }
+
+    @Test
+    void pathTransformingExecutionBindsToTheOnlyUnmatchedParsedCall() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("F08-contradictory-similar-file-names");
+        for (String tool : List.of("talos.rename_path", "talos.move_path", "talos.copy_path")) {
+            Path trace = writeTrace(List.of(
+                    parsed(tool, "source.txt"),
+                    executed(tool, "destination.txt")));
+
+            QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+            assertEquals(1, facts.calls().size(), tool);
+            assertEquals("source.txt", facts.calls().getFirst().pathHint(), tool);
+            assertTrue(facts.calls().getFirst().executed(), tool);
+        }
+    }
+
+    @Test
+    void acceptedAliasAndCanonicalExecutionShareOneToolIdentity() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("F08-contradictory-similar-file-names");
+        Path trace = writeTrace(List.of(
+                parsed("rename", "source.txt"),
+                executed("talos.rename_path", "destination.txt")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertEquals("talos.rename_path", facts.calls().getFirst().toolName());
+        assertTrue(facts.calls().getFirst().executed());
+    }
+
+    @Test
+    void uniqueExactPathWinsWhenMultipleSameToolCallsAreUnmatched() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("F08-contradictory-similar-file-names");
+        Path trace = writeTrace(List.of(
+                parsed("talos.rename_path", "first.txt"),
+                parsed("talos.rename_path", "second.txt"),
+                executed("talos.rename_path", "second.txt")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertFalse(facts.calls().get(0).executed());
+        assertTrue(facts.calls().get(1).executed());
+    }
+
+    @Test
+    void ambiguousOrOrphanSuccessfulExecutionsRemainInvalid() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("F08-contradictory-similar-file-names");
+        Path ambiguous = writeTrace(List.of(
+                parsed("talos.rename_path", "first.txt"),
+                parsed("talos.rename_path", "second.txt"),
+                executed("talos.rename_path", "destination.txt")));
+        Path orphan = writeTrace(List.of(
+                executed("talos.rename_path", "destination.txt")));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(ambiguous, scenario));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(orphan, scenario));
     }
 
     private Path writeTrace(List<Map<String, Object>> events) throws Exception {

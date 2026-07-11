@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.talos.tools.ToolAliasPolicy;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -143,16 +144,27 @@ final class QualificationTraceEvidence {
     }
 
     private static MutableCall firstUnexecuted(List<MutableCall> calls, String tool, String pathHint) {
+        List<MutableCall> candidates = new ArrayList<>();
         for (MutableCall call : calls) {
-            if (call.executed || !call.toolName.equals(tool)) continue;
-            if (pathHint.isBlank() || call.pathHint.isBlank() || call.pathHint.equals(pathHint)) return call;
+            if (!call.executed && call.toolName.equals(tool)) candidates.add(call);
         }
-        return null;
+        if (candidates.isEmpty()) return null;
+
+        List<MutableCall> exact = candidates.stream()
+                .filter(call -> !pathHint.isBlank()
+                        && !call.pathHint.isBlank()
+                        && call.pathHint.equals(pathHint))
+                .toList();
+        if (exact.size() == 1) return exact.getFirst();
+        if (!exact.isEmpty()) return null;
+        return candidates.size() == 1 ? candidates.getFirst() : null;
     }
 
     private static String canonicalTool(String value) {
         String tool = value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
         if (tool.isBlank()) return "";
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(tool);
+        if (decision.accepted()) return decision.canonicalToolName();
         return tool.startsWith("talos.") ? tool : "talos." + tool;
     }
 

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1035] Qualification trace evidence now correlates a successful
+  path-transforming execution with its single unmatched parsed call even when
+  the execution reports a destination path instead of the parsed source.
+  Multiple candidates still require one unique exact path match, while
+  ambiguous and orphan executions fail closed. Tool aliases use the runtime's
+  canonical identity policy.
 - [T1034] Rename requests scoped inside a concrete file now stay on the
   file-content edit surface instead of being misread as filesystem renames.
   Natural `must remain unchanged` and `must stay unchanged` clauses project
