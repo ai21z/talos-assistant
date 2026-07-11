@@ -91,9 +91,10 @@ class AssistantTurnExecutorTest {
 
             assertEquals(
                     "Your request asks for a file change and also says not to change files. "
-                            + "I did not modify anything. Please clarify whether Talos should apply "
-                            + "the requested change or keep this turn read-only.",
+                            + "I did not modify anything. Should Talos apply the requested change, "
+                            + "or keep this turn read-only?",
                     out.text());
+            assertTrue(out.text().endsWith("?"), out.text());
             assertFalse(audit.policyTrace().mutationAllowed(), audit.policyTrace().toString());
             assertTrue(audit.policyTrace().nativeTools().stream()
                             .noneMatch(dev.talos.tools.ToolAliasPolicy::isMutating),
@@ -633,7 +634,8 @@ class AssistantTurnExecutorTest {
             var audit = TurnAuditCapture.end();
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.text().contains("Please clarify"), out.text());
+            assertTrue(out.text().contains("Should Talos apply the requested change"), out.text());
+            assertTrue(out.text().endsWith("?"), out.text());
             assertEquals(List.of(), audit.policyTrace().nativeTools());
             assertEquals(List.of(), audit.policyTrace().promptTools());
             assertTrue(audit.toolCalls().isEmpty(), audit.toolCalls().toString());

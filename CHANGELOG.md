@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1044] Deterministic contradiction handling now asks one explicit resolution
+  question while remaining provider-free, tool-free, approval-free, and
+  mutation-free. This aligns the user-facing response with the frozen
+  qualification requirement without weakening the scenario bank.
 - [T1042] Windows qualification cleanup now treats an absent campaign listener
   as verified clean shutdown. Listener enumeration failures still fail closed,
   while executable, port, launch-time, and process-identity checks remain
