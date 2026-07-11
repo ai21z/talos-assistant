@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1033] Deterministic no-provider qualification turns now pair prompt-debug
+  `NOT_APPLICABLE` evidence with an explicit model-runtime `NOT_APPLICABLE`
+  record instead of requiring a nonexistent llama.cpp log. Both records must
+  match the structured PTY proof, and model timing, token, or rate metrics must
+  remain zero; provider-backed turns still require their real prompt render and
+  server log.
 - [T1032] Model-qualification PTY capture now records prompt debug as explicitly
   `NOT_APPLICABLE` when Talos proves that a deterministic runtime-policy turn
   sent no provider prompt. The validator binds that bounded record to the exact

@@ -203,7 +203,7 @@ public final class QualificationPtyCaptureMain {
         writeLine("/prompt-debug save " + forwardSlashes(runRoot));
         waitForIdlePrompt(cursor, SLASH_WAIT);
         drainOutput();
-        QualificationPromptDebugEvidence.capture(
+        QualificationProviderEvidence.capture(
                 runRoot, capture.slice(promptDebugAnchor, cursor));
 
         addInput("last-trace");

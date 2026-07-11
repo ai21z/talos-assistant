@@ -265,7 +265,7 @@ final class QualificationEvidenceValidator {
             validateResourceEvidence(runRoot, run, resources, findings);
             validateApprovals(runRoot, scenario, trace, findings);
             validatePtyCapture(runRoot, request, catalog.protocolVersion(), findings);
-            validatePromptDebugEvidence(runRoot, findings);
+            validateProviderEvidence(runRoot, timings, findings);
 
             QualificationFixtureMaterializer.Snapshot before =
                     QualificationFixtureMaterializer.snapshot(runRoot.resolve("before-files"));
@@ -499,19 +499,39 @@ final class QualificationEvidenceValidator {
         if (!valid) findings.add("Qualification PTY capture is missing or invalid: " + runRoot);
     }
 
-    private static void validatePromptDebugEvidence(
+    private static void validateProviderEvidence(
             Path runRoot,
+            QualificationRecords.TimingEvidence timings,
             List<String> findings) throws IOException {
         Path promptDebug = runRoot.resolve("prompt-debug.txt");
-        if (!Files.isRegularFile(promptDebug)) return;
-        String evidence = Files.readString(promptDebug, StandardCharsets.UTF_8);
-        if (!QualificationPromptDebugEvidence.isNotApplicable(evidence)) return;
+        Path modelLog = runRoot.resolve("llama.log");
+        if (!Files.isRegularFile(promptDebug) || !Files.isRegularFile(modelLog)) return;
+        String promptEvidence = Files.readString(promptDebug, StandardCharsets.UTF_8);
+        String modelEvidence = Files.readString(modelLog, StandardCharsets.UTF_8);
+        boolean promptNotApplicable = QualificationProviderEvidence.isPromptNotApplicable(promptEvidence);
+        boolean modelNotApplicable = QualificationProviderEvidence.isModelRuntimeNotApplicable(modelEvidence);
+        if (promptNotApplicable != modelNotApplicable) {
+            findings.add("provider NOT_APPLICABLE evidence must be paired: " + runRoot);
+            return;
+        }
+        if (!promptNotApplicable) return;
+
+        if (timings.promptEvalMillis() != 0
+                || timings.generationMillis() != 0
+                || timings.promptTokens() != 0
+                || timings.outputTokens() != 0
+                || Double.compare(timings.promptTokensPerSecond(), 0.0) != 0
+                || Double.compare(timings.generationTokensPerSecond(), 0.0) != 0
+                || timings.toolEligibleGenerations() != 0) {
+            findings.add("MODEL_RUNTIME_NOT_APPLICABLE must not contain model timing: " + runRoot);
+        }
 
         String rawOutput = QualificationJson.readTree(runRoot.resolve("transcript.raw.json"))
                 .path("rawOutput").asText("");
-        if (!evidence.equals(QualificationPromptDebugEvidence.notApplicableText())
-                || !rawOutput.contains(QualificationPromptDebugEvidence.NO_PROVIDER_PROMPT)) {
-            findings.add("prompt-debug NOT_APPLICABLE is not bound to captured runtime output: " + runRoot);
+        if (!promptEvidence.equals(QualificationProviderEvidence.promptNotApplicableText())
+                || !modelEvidence.equals(QualificationProviderEvidence.modelRuntimeNotApplicableText())
+                || !rawOutput.contains(QualificationProviderEvidence.NO_PROVIDER_PROMPT)) {
+            findings.add("provider NOT_APPLICABLE evidence is not bound to captured runtime output: " + runRoot);
         }
     }
 

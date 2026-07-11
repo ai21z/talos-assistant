@@ -347,15 +347,75 @@ class QualificationEvidenceValidatorTest {
 
         assertFalse(result.valid());
         assertTrue(result.findings().stream().anyMatch(finding ->
-                        finding.contains("prompt-debug NOT_APPLICABLE")),
+                        finding.contains("provider NOT_APPLICABLE evidence is not bound")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void promptDebugNotApplicableWithoutMatchingModelRuntimeStateFailsClosed() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        writeNotApplicableProviderEvidence(packet, true, true, false);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("provider NOT_APPLICABLE evidence must be paired")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void modelRuntimeNotApplicableWithoutMatchingPromptDebugStateFailsClosed() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        writeNotApplicableProviderEvidence(packet, true, false, true);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("provider NOT_APPLICABLE evidence must be paired")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void modelRuntimeNotApplicableCannotCarryModelTimingMetrics() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        writeNotApplicableProviderEvidence(packet, true, true, true);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("MODEL_RUNTIME_NOT_APPLICABLE must not contain model timing")),
                 () -> String.join("\n", result.findings()));
     }
 
     private static void writeNotApplicablePromptDebug(
             QualificationTestPacket packet,
             boolean bindToCapture) throws Exception {
-        Files.writeString(packet.runRoot().resolve("prompt-debug.txt"),
-                QualificationPromptDebugEvidence.notApplicableText(), StandardCharsets.UTF_8);
+        writeNotApplicableProviderEvidence(packet, bindToCapture, true, true);
+        zeroModelTiming(packet);
+    }
+
+    private static void writeNotApplicableProviderEvidence(
+            QualificationTestPacket packet,
+            boolean bindToCapture,
+            boolean promptNotApplicable,
+            boolean runtimeNotApplicable) throws Exception {
+        if (promptNotApplicable) {
+            Files.writeString(packet.runRoot().resolve("prompt-debug.txt"),
+                    QualificationProviderEvidence.promptNotApplicableText(), StandardCharsets.UTF_8);
+        }
+        if (runtimeNotApplicable) {
+            Files.writeString(packet.runRoot().resolve("llama.log"),
+                    QualificationProviderEvidence.modelRuntimeNotApplicableText(), StandardCharsets.UTF_8);
+        }
         if (!bindToCapture) return;
 
         Path capturePath = packet.runRoot().resolve("transcript.raw.json");
@@ -363,10 +423,28 @@ class QualificationEvidenceValidatorTest {
         ArrayNode events = (ArrayNode) capture.path("events");
         ObjectNode output = (ObjectNode) events.get(1);
         String changed = output.path("data").asText() + "\n"
-                + QualificationPromptDebugEvidence.NO_PROVIDER_PROMPT;
+                + QualificationProviderEvidence.NO_PROVIDER_PROMPT;
         output.put("data", changed);
         capture.put("rawOutput", changed);
         QualificationJson.write(capturePath, capture);
+    }
+
+    private static void zeroModelTiming(QualificationTestPacket packet) throws Exception {
+        for (String file : List.of("timings.json", "result.json")) {
+            Path path = packet.runRoot().resolve(file);
+            ObjectNode json = (ObjectNode) QualificationJson.readTree(path);
+            json.put("promptEvalMillis", 0);
+            json.put("generationMillis", 0);
+            json.put("promptTokens", 0);
+            json.put("outputTokens", 0);
+            json.put("promptTokensPerSecond", 0.0);
+            json.put("generationTokensPerSecond", 0.0);
+            json.put("toolEligibleGenerations", 0);
+            if (file.equals("timings.json")) {
+                json.put("measurementSource", "deterministic runtime-policy turn; no provider request");
+            }
+            QualificationJson.write(path, json);
+        }
     }
 
     @Test
