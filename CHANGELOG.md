@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T1030] The model-qualification Windows PTY capture now races expected
+  approval, an idle returned REPL prompt, process exit, and a bounded timeout
+  from a post-submission anchor. Echoed prompt text cannot impersonate turn
+  completion. Unexpected completed turns send no synthetic approval and still
+  collect prompt-debug and trace evidence, while exit and timeout produce a
+  structured capture packet. A separate continuation guard stops campaign
+  batches on invalid evidence, trust failures, runtime defects, or hardware
+  failures without converting ordinary model failures into missing evidence.
 - [T1029] Scoped web-resource exclusions such as `do not touch CSS or
   JavaScript` no longer cancel an explicit named-file mutation. Generic
   resource classes are not converted into guessed paths: the named mutation

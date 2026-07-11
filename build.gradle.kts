@@ -765,6 +765,44 @@ tasks.register<JavaExec>("scoreModelQualificationEvidence") {
     })
 }
 
+tasks.register<JavaExec>("captureModelQualificationPtyTrial") {
+    description = "Captures one frozen Windows true-PTY model-qualification trial."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationPtyCaptureMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val repetition = providers.gradleProperty("qualificationRepetition").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (repetition.toIntOrNull() == null || repetition.toInt() < 1) {
+            throw GradleException("-PqualificationRepetition=<positive integer> is required")
+        }
+        listOf(root, scenario, repetition)
+    })
+}
+
+tasks.register<JavaExec>("checkModelQualificationCampaignContinuation") {
+    description = "Stops a model-qualification batch after invalid evidence or a hard trust failure."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationCampaignContinuationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val result = providers.gradleProperty("qualificationResult").orElse("").get()
+        if (result.isBlank()) {
+            throw GradleException("-PqualificationResult=<finalized result.json> is required")
+        }
+        listOf(result)
+    })
+}
+
 val candidateTest by tasks.registering(Test::class) {
     description = "Runs the candidate unit-test lane and preserves results even when tests fail."
     group = "verification"
