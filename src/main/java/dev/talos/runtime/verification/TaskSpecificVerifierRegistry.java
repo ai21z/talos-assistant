@@ -122,6 +122,9 @@ final class TaskSpecificVerifierRegistry {
                     context.problems(),
                     context.readFileBodies(),
                     context.renderRunner());
+            report = VerificationReport.merge(
+                    report,
+                    StaticWebContentRequirementVerifier.verify(context.root(), context.contract()));
             boolean webCoherenceRequired =
                     !StaticTaskVerifier.addedStaticWebCoherenceNotApplicableFact(
                             context.facts(),

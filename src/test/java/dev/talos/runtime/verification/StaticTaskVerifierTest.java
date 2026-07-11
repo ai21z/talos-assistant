@@ -2539,7 +2539,7 @@ class StaticTaskVerifierTest {
 
         assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
                 evidence.compatibilityResult().summary());
-        assertTrue(evidence.compatibilityResult().summary().contains("Required interaction verification passed"),
+        assertTrue(evidence.compatibilityResult().summary().contains("Required verification passed"),
                 evidence.compatibilityResult().summary());
         assertEquals(1, evidence.report().requiredClaimCount(), evidence.report().toString());
         assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
@@ -3498,6 +3498,80 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void explicitStaticWebContentClaimsFailWhenOneRequestedClauseIsMissing() throws Exception {
+        writeAtlasControlWebFiles("""
+                <h1>Atlas Control</h1>
+                <button id="status">Check status</button>
+                <p id="message">Waiting</p>
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().toString());
+        assertEquals(2, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(1, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+        assertTrue(evidence.report().problems().stream()
+                        .anyMatch(problem -> problem.contains("requested status paragraph prefix")),
+                evidence.report().problems().toString());
+        assertFalse(evidence.compatibilityResult().summary().contains("Static web coherence checks passed"),
+                evidence.compatibilityResult().summary());
+    }
+
+    @Test
+    void explicitStaticWebContentClaimsPassOnlyWhenEveryRequestedClauseIsSatisfied() throws Exception {
+        writeAtlasControlWebFiles("""
+                <h1>Atlas Control</h1>
+                <button id="status">Check status</button>
+                <p id="message">Offline. Last checked locally.</p>
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().toString());
+        assertEquals(2, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(0, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+    }
+
+    @Test
+    void explicitStaticWebContentClaimsDoNotPassFromCommentsOrUnrelatedParagraphs() throws Exception {
+        writeAtlasControlWebFiles("""
+                <!-- Atlas Control -->
+                <h1>Atlas workspace</h1>
+                <p>Offline information for support.</p>
+                <button id="status">Check status</button>
+                <p id="message">Waiting</p>
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update index.html so the heading is Atlas Control and the status paragraph starts Offline. "
+                                + "Do not touch CSS or JavaScript."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, evidence.compatibilityResult().status(),
+                evidence.compatibilityResult().toString());
+        assertEquals(2, evidence.report().requiredClaimCount(), evidence.report().toString());
+        assertEquals(2, evidence.report().unsatisfiedRequiredClaimCount(), evidence.report().toString());
+    }
+
+    @Test
     void replacementPreserveRestPassesWhenFullWriteEvidenceOnlyReplacesRequestedText() throws Exception {
         String previous = """
                 <html>
@@ -4202,6 +4276,27 @@ class StaticTaskVerifierTest {
                 """);
         Files.writeString(workspace.resolve("script.js"), """
                 document.querySelector('.cta-button');
+                """);
+    }
+
+    private void writeAtlasControlWebFiles(String bodyContent) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <main>
+                """ + bodyContent + """
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('status').addEventListener('click', () => {
+                  document.getElementById('message').textContent = 'Checked';
+                });
                 """);
     }
 

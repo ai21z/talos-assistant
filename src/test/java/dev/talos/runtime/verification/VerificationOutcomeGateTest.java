@@ -23,7 +23,7 @@ class VerificationOutcomeGateTest {
 
         assertTrue(override.isPresent());
         assertEquals(TaskVerificationStatus.PASSED, override.get().status());
-        assertTrue(override.get().summary().contains("Required interaction verification passed"),
+        assertTrue(override.get().summary().contains("Required verification passed"),
                 override.get().summary());
     }
 
@@ -86,7 +86,7 @@ class VerificationOutcomeGateTest {
         assertEquals(0, report.unsatisfiedRequiredClaimCount());
         assertTrue(override.isPresent());
         assertEquals(TaskVerificationStatus.PASSED, override.get().status());
-        assertTrue(override.get().summary().contains("Required interaction verification passed"),
+        assertTrue(override.get().summary().contains("Required verification passed"),
                 override.get().summary());
     }
 

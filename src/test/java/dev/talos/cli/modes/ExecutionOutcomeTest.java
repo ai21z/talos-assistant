@@ -4265,6 +4265,77 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void staticWebCoherenceDoesNotVerifyIncompleteExplicitContentRequirements() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-explicit-web-content-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body>
+                        <h1>Atlas Control</h1>
+                        <button id="status">Check status</button>
+                        <p id="message">Waiting</p>
+                        <script src="script.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), """
+                    document.getElementById('status').addEventListener('click', () => {
+                      document.getElementById('message').textContent = 'Checked';
+                    });
+                    """);
+
+            String request = "Update index.html so the heading is Atlas Control and the status paragraph starts "
+                    + "Offline. Do not touch CSS or JavaScript.";
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(request));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Edited index.html.", 2, 2,
+                    List.of("talos.read_file", "talos.edit_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "index.html", true, true, false,
+                            "edited index.html", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-explicit-web-content",
+                    "sid-explicit-web-content",
+                    1,
+                    "2026-07-11T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    request);
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(2, outcome.verificationReport().requiredClaimCount());
+            assertEquals(1, outcome.verificationReport().unsatisfiedRequiredClaimCount());
+            assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("requested status paragraph prefix"), outcome.finalAnswer());
+            assertNotNull(trace);
+            assertEquals(2, trace.verification().requiredClaimCount());
+            assertEquals(1, trace.verification().unsatisfiedRequiredClaimCount());
+        } finally {
+            LocalTurnTraceCapture.clear();
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void approvedPrivateDocumentContainmentPromptRepairsBlockedHistoryAnswer() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-private-doc-approved-");
         try {

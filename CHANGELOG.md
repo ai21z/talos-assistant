@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1036] Explicit static-web heading and status-paragraph requirements now
+  become independent authoritative readback claims. Generic HTML/CSS/JavaScript
+  coherence can no longer certify a turn when one of those requested content
+  clauses is missing, unbound, or unreadable. Element-aware checks reject text
+  found only in comments or unrelated paragraphs, while vague and negated
+  wording does not manufacture literal obligations.
 - [T1035] Qualification trace evidence now correlates a successful
   path-transforming execution with its single unmatched parsed call even when
   the execution reports a destination path instead of the parsed source.
