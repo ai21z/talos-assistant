@@ -20,19 +20,6 @@ import java.util.Map;
 import java.util.Set;
 
 final class QualificationScenarioBank {
-    private static final Set<String> REQUIREMENT_TYPES = Set.of(
-            "ANSWER_CONTAINS",
-            "ANSWER_NOT_CONTAINS",
-            "ANSWER_EQUALS",
-            "ANSWER_SCALAR_EQUALS",
-            "ANSWER_MAX_SENTENCES",
-            "ANSWER_BULLET_COUNT",
-            "ANSWER_ITEM_COUNT",
-            "FILE_ABSENT",
-            "FILE_CONTAINS",
-            "FILE_EQUALS",
-            "FILE_UNCHANGED",
-            "TRACE_CONTAINS");
     private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4);
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
@@ -164,7 +151,7 @@ final class QualificationScenarioBank {
                 throw new IllegalArgumentException(
                         "Duplicate requirement id in " + scenario.id() + ": " + requirement.id());
             }
-            if (!REQUIREMENT_TYPES.contains(requirement.type())) {
+            if (!QualificationRequirementEvaluator.supports(requirement.type())) {
                 throw new IllegalArgumentException(
                         "Unsupported requirement type in " + scenario.id() + ": " + requirement.type());
             }

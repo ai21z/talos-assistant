@@ -88,6 +88,92 @@ class ModelQualificationMainTest {
         assertTrue(capture.err().contains("Unsupported qualification protocol version: 99"), capture.err());
     }
 
+    @Test
+    void requirementsCommandWritesCanonicalProtocolV4ScalarResult() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(4);
+        QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("v4"), catalog);
+        Files.writeString(packet.runRoot().resolve("answer.txt"), "4.\n", StandardCharsets.UTF_8);
+
+        Capture capture = run(
+                "requirements",
+                "--root", packet.root().toString(),
+                "--scenario", catalog.admission().scenarios().getFirst().id(),
+                "--run", packet.runRoot().toString());
+
+        assertEquals(0, capture.exit(), capture.err());
+        Path output = packet.runRoot().resolve("mechanical-requirements.json");
+        assertTrue(Files.isRegularFile(output));
+        var json = QualificationJson.readTree(output);
+        assertEquals("talos.modelQualification.mechanicalRequirements",
+                json.path("schemaName").asText());
+        assertEquals(4, json.path("protocolVersion").asInt());
+        assertEquals(catalog.sha256(), json.path("scenarioBankSha256").asText());
+        assertEquals("ANSWER_SCALAR_EQUALS",
+                json.path("requirements").get(0).path("type").asText());
+        assertTrue(json.path("requirements").get(0).path("passed").asBoolean());
+    }
+
+    @Test
+    void requirementsCommandPreservesHistoricalV3LiteralEquality() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(3);
+        QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("v3"), catalog);
+        Files.writeString(packet.runRoot().resolve("answer.txt"), "4.\n", StandardCharsets.UTF_8);
+
+        Capture capture = run(
+                "requirements",
+                "--root", packet.root().toString(),
+                "--scenario", catalog.admission().scenarios().getFirst().id(),
+                "--run", packet.runRoot().toString());
+
+        assertEquals(0, capture.exit(), capture.err());
+        var json = QualificationJson.readTree(
+                packet.runRoot().resolve("mechanical-requirements.json"));
+        assertEquals(3, json.path("protocolVersion").asInt());
+        assertEquals("ANSWER_EQUALS", json.path("requirements").get(0).path("type").asText());
+        assertTrue(!json.path("requirements").get(0).path("passed").asBoolean());
+    }
+
+    @Test
+    void requirementsCommandRefusesRunOutsidePacket() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("packet"), catalog);
+        Path outside = temp.resolve("outside-run");
+        Files.createDirectories(outside);
+
+        Capture capture = run(
+                "requirements",
+                "--root", packet.root().toString(),
+                "--scenario", catalog.admission().scenarios().getFirst().id(),
+                "--run", outside.toString());
+
+        assertTrue(capture.exit() != 0);
+        assertTrue(capture.err().contains("packet runs"), capture.err());
+        assertTrue(!Files.exists(outside.resolve("mechanical-requirements.json")));
+    }
+
+    @Test
+    void requirementsCommandRefusesToOverwriteMechanicalResult() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("immutable"), catalog);
+        String[] args = {
+                "requirements",
+                "--root", packet.root().toString(),
+                "--scenario", catalog.admission().scenarios().getFirst().id(),
+                "--run", packet.runRoot().toString()
+        };
+
+        Capture first = run(args);
+        byte[] before = Files.readAllBytes(
+                packet.runRoot().resolve("mechanical-requirements.json"));
+        Capture second = run(args);
+
+        assertEquals(0, first.exit(), first.err());
+        assertTrue(second.exit() != 0);
+        assertTrue(second.err().contains("refusing to overwrite"), second.err());
+        assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(
+                packet.runRoot().resolve("mechanical-requirements.json"))));
+    }
+
     private static Capture run(String... args) {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         ByteArrayOutputStream stderr = new ByteArrayOutputStream();

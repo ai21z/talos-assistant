@@ -27,6 +27,9 @@ public final class ModelQualificationMain {
                 case "preflight" -> preflight(parsed.root(), catalogForPacket(parsed.root()), out, err);
                 case "validate" -> validate(parsed.root(), catalogForPacket(parsed.root()), out, err);
                 case "score" -> score(parsed.root(), parsed.bank(), catalogForPacket(parsed.root()), out, err);
+                case "requirements" -> requirements(
+                        parsed.root(), parsed.runRoot(), parsed.scenarioId(),
+                        catalogForPacket(parsed.root()), out);
                 default -> throw new IllegalArgumentException("Unknown command: " + parsed.command());
             };
         } catch (IllegalArgumentException e) {
@@ -117,17 +120,37 @@ public final class ModelQualificationMain {
         };
     }
 
-    private record Arguments(String command, Path root, QualificationProtocol.BankKind bank) {
+    private static int requirements(
+            Path root,
+            Path runRoot,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out) throws Exception {
+        Path output = QualificationRequirementFinalizer.evaluateAndWrite(
+                root, runRoot, scenarioId, catalog);
+        out.println("Mechanical qualification requirements: "
+                + output.toAbsolutePath().normalize());
+        return 0;
+    }
+
+    private record Arguments(
+            String command,
+            Path root,
+            QualificationProtocol.BankKind bank,
+            String scenarioId,
+            Path runRoot) {
         static Arguments parse(String[] raw) {
             List<String> args = raw == null ? List.of() : List.of(raw);
             if (args.isEmpty()) throw new IllegalArgumentException("A command is required");
             String command = args.getFirst().trim().toLowerCase(Locale.ROOT);
             if (command.equals("bank-hash")) {
                 if (args.size() != 1) throw new IllegalArgumentException("bank-hash accepts no arguments");
-                return new Arguments(command, null, null);
+                return new Arguments(command, null, null, "", null);
             }
             Path root = null;
             QualificationProtocol.BankKind bank = null;
+            String scenarioId = "";
+            Path runRoot = null;
             for (int index = 1; index < args.size(); index++) {
                 String token = args.get(index);
                 if (token.equals("--root") && index + 1 < args.size()) {
@@ -135,6 +158,10 @@ public final class ModelQualificationMain {
                 } else if (token.equals("--bank") && index + 1 < args.size()) {
                     bank = QualificationProtocol.BankKind.valueOf(
                             args.get(++index).trim().toUpperCase(Locale.ROOT));
+                } else if (token.equals("--scenario") && index + 1 < args.size()) {
+                    scenarioId = args.get(++index).strip();
+                } else if (token.equals("--run") && index + 1 < args.size()) {
+                    runRoot = Path.of(args.get(++index));
                 } else {
                     throw new IllegalArgumentException("Unknown or incomplete argument: " + token);
                 }
@@ -143,15 +170,24 @@ public final class ModelQualificationMain {
             if (command.equals("score") && bank == null) {
                 throw new IllegalArgumentException("--bank admission|full is required for score");
             }
-            if (!command.equals("preflight") && !command.equals("validate") && !command.equals("score")) {
+            if (command.equals("requirements")
+                    && (scenarioId.isBlank() || runRoot == null)) {
+                throw new IllegalArgumentException(
+                        "--scenario and --run are required for requirements");
+            }
+            if (!command.equals("preflight")
+                    && !command.equals("validate")
+                    && !command.equals("score")
+                    && !command.equals("requirements")) {
                 throw new IllegalArgumentException("Unknown command: " + command);
             }
-            return new Arguments(command, root, bank);
+            return new Arguments(command, root, bank, scenarioId, runRoot);
         }
 
         static String usage() {
             return "Usage: bank-hash | preflight --root <packet> | validate --root <packet> | "
-                    + "score --root <packet> --bank admission|full";
+                    + "score --root <packet> --bank admission|full | requirements --root <packet> "
+                    + "--scenario <id> --run <run-root>";
         }
     }
 }

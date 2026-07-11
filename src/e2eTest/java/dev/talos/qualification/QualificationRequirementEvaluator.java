@@ -15,6 +15,30 @@ final class QualificationRequirementEvaluator {
 
     private QualificationRequirementEvaluator() {}
 
+    private enum Type {
+        ANSWER_CONTAINS,
+        ANSWER_NOT_CONTAINS,
+        ANSWER_EQUALS,
+        ANSWER_SCALAR_EQUALS,
+        ANSWER_MAX_SENTENCES,
+        ANSWER_BULLET_COUNT,
+        ANSWER_ITEM_COUNT,
+        FILE_ABSENT,
+        FILE_CONTAINS,
+        FILE_EQUALS,
+        FILE_UNCHANGED,
+        TRACE_CONTAINS
+    }
+
+    static boolean supports(String type) {
+        try {
+            Type.valueOf(type == null ? "" : type);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
     record Evidence(
             String answer,
             String trace,
@@ -51,23 +75,28 @@ final class QualificationRequirementEvaluator {
     private static boolean evaluate(
             QualificationProtocol.AtomicRequirement requirement,
             Evidence evidence) {
-        return switch (requirement.type()) {
-            case "ANSWER_CONTAINS" -> containsIgnoreCase(evidence.answer(), requirement.expected());
-            case "ANSWER_NOT_CONTAINS" -> !evidence.answer().contains(requirement.expected());
-            case "ANSWER_EQUALS" -> evidence.answer().strip().equals(requirement.expected());
-            case "ANSWER_SCALAR_EQUALS" -> scalarEquals(evidence.answer(), requirement.expected());
-            case "ANSWER_MAX_SENTENCES" -> sentenceCount(evidence.answer()) <= positiveInt(requirement);
-            case "ANSWER_BULLET_COUNT", "ANSWER_ITEM_COUNT" ->
+        Type type;
+        try {
+            type = Type.valueOf(requirement.type());
+        } catch (IllegalArgumentException unsupported) {
+            throw new IllegalArgumentException(
+                    "Unsupported atomic requirement type: " + requirement.type(), unsupported);
+        }
+        return switch (type) {
+            case ANSWER_CONTAINS -> containsIgnoreCase(evidence.answer(), requirement.expected());
+            case ANSWER_NOT_CONTAINS -> !evidence.answer().contains(requirement.expected());
+            case ANSWER_EQUALS -> evidence.answer().strip().equals(requirement.expected());
+            case ANSWER_SCALAR_EQUALS -> scalarEquals(evidence.answer(), requirement.expected());
+            case ANSWER_MAX_SENTENCES -> sentenceCount(evidence.answer()) <= positiveInt(requirement);
+            case ANSWER_BULLET_COUNT, ANSWER_ITEM_COUNT ->
                     LIST_ITEM.matcher(evidence.answer()).results().count() == positiveInt(requirement);
-            case "FILE_ABSENT" -> !evidence.afterFiles().containsKey(requirement.target());
-            case "FILE_CONTAINS" -> fileText(evidence.afterFiles(), requirement.target())
+            case FILE_ABSENT -> !evidence.afterFiles().containsKey(requirement.target());
+            case FILE_CONTAINS -> fileText(evidence.afterFiles(), requirement.target())
                     .map(text -> text.contains(requirement.expected())).orElse(false);
-            case "FILE_EQUALS" -> fileText(evidence.afterFiles(), requirement.target())
+            case FILE_EQUALS -> fileText(evidence.afterFiles(), requirement.target())
                     .map(text -> text.equals(requirement.expected())).orElse(false);
-            case "FILE_UNCHANGED" -> unchanged(evidence, requirement.target());
-            case "TRACE_CONTAINS" -> evidence.trace().contains(requirement.expected());
-            default -> throw new IllegalArgumentException(
-                    "Unsupported atomic requirement type: " + requirement.type());
+            case FILE_UNCHANGED -> unchanged(evidence, requirement.target());
+            case TRACE_CONTAINS -> evidence.trace().contains(requirement.expected());
         };
     }
 

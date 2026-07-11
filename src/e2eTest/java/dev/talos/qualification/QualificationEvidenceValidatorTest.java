@@ -33,6 +33,40 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void canonicalMechanicalRequirementArtifactValidates() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationRequirementFinalizer.evaluateAndWrite(
+                packet.root(), packet.runRoot(), scenario.id(), catalog);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertTrue(result.valid(), () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void tamperedMechanicalRequirementArtifactFailsClosed() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        Path output = QualificationRequirementFinalizer.evaluateAndWrite(
+                packet.root(), packet.runRoot(), scenario.id(), catalog);
+        String tampered = Files.readString(output, StandardCharsets.UTF_8)
+                .replace("\"passed\" : true", "\"passed\" : false");
+        Files.writeString(output, tampered, StandardCharsets.UTF_8);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("Mechanical requirement artifact differs")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
     void missingTraceFailsClosed() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);

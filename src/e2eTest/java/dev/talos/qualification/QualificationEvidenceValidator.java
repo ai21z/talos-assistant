@@ -312,10 +312,21 @@ final class QualificationEvidenceValidator {
             Map<String, byte[]> afterBytes = readBytes(runRoot.resolve("final-files"));
             String answer = Files.readString(runRoot.resolve("answer.txt"), StandardCharsets.UTF_8);
             String traceText = Files.readString(runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
-            List<QualificationRecords.RequirementResult> mechanical =
-                    QualificationRequirementEvaluator.evaluate(scenario,
+            QualificationRequirementFinalizer.Document mechanicalDocument =
+                    QualificationRequirementFinalizer.evaluate(
+                            catalog.protocolVersion(), catalog.sha256(), scenario,
                             new QualificationRequirementEvaluator.Evidence(
                                     answer, traceText, beforeBytes, afterBytes));
+            List<QualificationRecords.RequirementResult> mechanical = mechanicalDocument.results();
+            Path mechanicalPath = runRoot.resolve(QualificationRequirementFinalizer.OUTPUT_FILE);
+            if (Files.exists(mechanicalPath)) {
+                QualificationRequirementFinalizer.Document declared = QualificationJson.read(
+                        mechanicalPath, QualificationRequirementFinalizer.Document.class);
+                if (!declared.equals(mechanicalDocument)) {
+                    findings.add("Mechanical requirement artifact differs from canonical evidence: "
+                            + runRoot);
+                }
+            }
             if (!mechanical.equals(run.requirements())) {
                 findings.add("Run requirement results differ from mechanical evidence: " + runRoot);
             }

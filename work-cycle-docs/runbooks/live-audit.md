@@ -33,3 +33,20 @@ After each natural-language prompt:
 
 Use separate fresh workspaces per model. Save transcripts, prompt-debug artifacts, provider bodies when relevant, server logs when relevant, approval evidence, final diffs, and final file states.
 
+## Model qualification finalization
+
+After `answer.txt`, `trace.json`, `before-files/`, and `final-files/` are fixed,
+generate requirement results through the tracked canonical evaluator:
+
+```powershell
+.\gradlew.bat finalizeModelQualificationRequirements `
+  -PqualificationRoot=<campaign-root> `
+  -PqualificationScenario=<scenario-id> `
+  -PqualificationRunRoot=<run-root> `
+  --no-daemon
+```
+
+The command writes `mechanical-requirements.json` once and refuses overwrite.
+Campaign finalizers consume its `requirements` array. They must not reimplement
+answer, file, or trace requirement semantics in PowerShell or another script.
+The packet validator recomputes the same results through the same Java owner.

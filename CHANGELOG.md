@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1046] Model-qualification finalizers can now write immutable mechanical
+  requirement results through the same versioned Java evaluator used by packet
+  validation. The command binds protocol and requirement type, rejects run
+  roots outside the packet, and refuses to overwrite prior results, removing
+  requirement semantics from campaign-local PowerShell finalizers.
 - [T1045] Qualification protocol v4 adds versioned scalar-answer equality that
   tolerates one ordinary terminal sentence mark while rejecting repeated
   punctuation, quoting, and extra prose. Protocols v1 through v3 retain their
