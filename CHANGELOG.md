@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1040] Windows model-qualification PTY capture now recognizes the exact
+  JLine idle-prompt frame that resets the cursor column before final prompt
+  positioning. Command echoes, incomplete cursor sequences, and arbitrary
+  prompt-like text remain ineligible for turn completion.
 - [T1037] Model-qualification canary validation now requires each captured
   scenario definition to match the hash-pinned frozen bank before exempting
   that exact source file from runtime-artifact scanning. Missing, malformed,

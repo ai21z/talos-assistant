@@ -75,6 +75,39 @@ class QualificationPtyOutcomeRaceTest {
     }
 
     @Test
+    void idlePromptIsRecognizedWhenJlineResetsTheCursorColumnBeforePositioning() {
+        String actualLastTraceFrame = PROMPT + "\u001B[0K\u001B[1G\u001B[16G";
+
+        assertEquals(0, QualificationPtyOutcomeRace.idlePromptIndex(actualLastTraceFrame, 0));
+    }
+
+    @Test
+    void cursorResetIdlePromptCompletesTheOutcomeRace() throws Exception {
+        String cursorResetIdlePrompt = PROMPT + "\u001B[0K\u001B[1G\u001B[16G";
+        ScriptedProbe probe = new ScriptedProbe(snapshot(
+                IDLE_PROMPT + "\r" + PROMPT + " /last trace\r\ntrace output\r\n"
+                        + cursorResetIdlePrompt,
+                true,
+                0));
+
+        QualificationPtyOutcomeRace.Outcome outcome = QualificationPtyOutcomeRace.await(
+                probe, IDLE_PROMPT.length(), Duration.ofSeconds(1), new FakeWaiter());
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, outcome.kind());
+    }
+
+    @Test
+    void promptLikeTextWithoutAnExactIdleSuffixIsRejected() {
+        for (String candidate : List.of(
+                PROMPT + " /last trace",
+                PROMPT + "\u001B[0K\u001B[1G",
+                PROMPT + "\u001B[0K\u001B[2G\u001B[16G",
+                PROMPT)) {
+            assertEquals(-1, QualificationPtyOutcomeRace.idlePromptIndex(candidate, 0), candidate);
+        }
+    }
+
+    @Test
     void processExitBeforeEitherMarkerIsStructuredOutcome() throws Exception {
         ScriptedProbe probe = new ScriptedProbe(
                 snapshot(IDLE_PROMPT + "\r" + PROMPT + " request\r\n", true, 0),

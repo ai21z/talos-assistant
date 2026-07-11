@@ -8,6 +8,7 @@ final class QualificationPtyOutcomeRace {
     static final String APPROVAL_MARKER = "Allow?";
     static final String PROMPT_MARKER = "talos [auto] >";
     static final String IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[16G";
+    static final String CURSOR_RESET_IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[1G\u001B[16G";
     private static final Duration POLL_INTERVAL = Duration.ofMillis(25);
 
     private QualificationPtyOutcomeRace() {}
@@ -90,7 +91,10 @@ final class QualificationPtyOutcomeRace {
             int found = value.indexOf(PROMPT_MARKER, cursor);
             if (found < 0) return -1;
             int suffix = found + PROMPT_MARKER.length();
-            if (value.startsWith(IDLE_PROMPT_SUFFIX, suffix)) return found;
+            if (value.startsWith(IDLE_PROMPT_SUFFIX, suffix)
+                    || value.startsWith(CURSOR_RESET_IDLE_PROMPT_SUFFIX, suffix)) {
+                return found;
+            }
             cursor = suffix;
         }
         return -1;
