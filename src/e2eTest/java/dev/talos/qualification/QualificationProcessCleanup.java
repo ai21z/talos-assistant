@@ -45,10 +45,19 @@ final class QualificationProcessCleanup {
     private QualificationProcessCleanup() {}
 
     static Result stop(Process root, Path serverExecutable, int serverPort, Instant notBefore) {
+        return stop(root, serverExecutable, serverPort, notBefore, true);
+    }
+
+    static Result stop(
+            Process root,
+            Path serverExecutable,
+            int serverPort,
+            Instant notBefore,
+            boolean allowGracefulExit) {
         Target rootTarget = root == null ? null : new ProcessTarget(root);
         FinderResult finder = findCampaignServers(serverExecutable, serverPort, notBefore);
         return stop(rootTarget, finder.targets(), GRACEFUL_WAIT, NORMAL_WAIT, FORCED_WAIT,
-                finder.verified(), finder.errors());
+                allowGracefulExit, finder.verified(), finder.errors());
     }
 
     static Result stop(
@@ -57,7 +66,19 @@ final class QualificationProcessCleanup {
             Duration gracefulWait,
             Duration normalWait,
             Duration forcedWait) {
-        return stop(root, campaignServers, gracefulWait, normalWait, forcedWait, true, List.of());
+        return stop(root, campaignServers, gracefulWait, normalWait, forcedWait,
+                true, true, List.of());
+    }
+
+    static Result stop(
+            Target root,
+            List<Target> campaignServers,
+            Duration gracefulWait,
+            Duration normalWait,
+            Duration forcedWait,
+            boolean allowGracefulExit) {
+        return stop(root, campaignServers, gracefulWait, normalWait, forcedWait,
+                allowGracefulExit, true, List.of());
     }
 
     private static Result stop(
@@ -66,6 +87,7 @@ final class QualificationProcessCleanup {
             Duration gracefulWait,
             Duration normalWait,
             Duration forcedWait,
+            boolean allowGracefulExit,
             boolean campaignServerDiscoveryVerified,
             List<String> discoveryErrors) {
         List<String> errors = new ArrayList<>(discoveryErrors);
@@ -77,7 +99,7 @@ final class QualificationProcessCleanup {
 
         List<Long> descendantPids = sortedPids(descendants);
         List<Long> serverPids = sortedPids(servers);
-        boolean gracefulRequested = requestGracefulExit(root, errors);
+        boolean gracefulRequested = allowGracefulExit && requestGracefulExit(root, errors);
 
         awaitAll(owned, gracefulWait, errors);
         List<Long> normalStops = stopSurvivors(owned, false, errors);

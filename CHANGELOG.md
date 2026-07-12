@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- [T1047] Windows model-qualification PTY capture now handles repeated
+  approval prompts under one absolute turn deadline. Denial, approve-once,
+  session-allow, and unexpected-approval behavior remain conservative and
+  bounded, cleanup cannot write `/exit` into a prompt after the approval
+  ceiling fires, and immutable approval evidence is derived in order from the
+  same PTY events the packet validator checks.
 - [T1046] Model-qualification finalizers can now write immutable mechanical
   requirement results through the same versioned Java evaluator used by packet
   validation. The command binds protocol and requirement type, rejects run

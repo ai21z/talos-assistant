@@ -678,14 +678,18 @@ final class QualificationEvidenceValidator {
         }
         List<String> responses = new ArrayList<>();
         events.forEach(event -> responses.add(event.path("response").asText("")));
-        Set<String> permitted = switch (scenario.approvalBehavior()) {
-            case NONE, INTERRUPT_BEFORE_APPROVAL -> Set.of();
-            case APPROVE_ONCE -> Set.of("APPROVED");
-            case DENY -> Set.of("DENIED");
-            case SESSION_ALLOW -> Set.of("APPROVED_REMEMBER");
-        };
-        if (responses.stream().anyMatch(response -> !permitted.contains(response))) {
-            findings.add("Approval evidence contains a response outside the scenario policy: " + runRoot);
+        try {
+            List<String> expected = QualificationApprovalFinalizer.derive(
+                            runRoot.resolve("transcript.raw.json"), scenario.approvalBehavior())
+                    .events().stream()
+                    .map(QualificationApprovalFinalizer.ApprovalEvent::response)
+                    .toList();
+            if (!responses.equals(expected)) {
+                findings.add("Approval evidence differs from ordered PTY decisions: " + runRoot);
+            }
+        } catch (IOException | RuntimeException invalidCapture) {
+            findings.add("Approval PTY event sequence is invalid: " + runRoot + ": "
+                    + message(invalidCapture));
         }
         boolean approvedInEvidence = responses.stream()
                 .anyMatch(response -> response.equals("APPROVED") || response.equals("APPROVED_REMEMBER"));

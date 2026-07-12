@@ -8,6 +8,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -172,6 +173,39 @@ class ModelQualificationMainTest {
         assertTrue(second.err().contains("refusing to overwrite"), second.err());
         assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(
                 packet.runRoot().resolve("mechanical-requirements.json"))));
+    }
+
+    @Test
+    void approvalsCommandWritesEveryOrderedPtyDecisionImmutably() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("approvals"), catalog);
+        Path output = packet.runRoot().resolve("approvals.json");
+        Files.delete(output);
+        QualificationJson.write(packet.runRoot().resolve("transcript.raw.json"), java.util.Map.of(
+                "events", List.of(
+                        java.util.Map.of("type", "terminal-outcome", "data", "approval-unexpected-deny-1"),
+                        java.util.Map.of("type", "input", "data", "approval-unexpected-deny-1"),
+                        java.util.Map.of("type", "terminal-outcome", "data", "approval-unexpected-deny-2"),
+                        java.util.Map.of("type", "input", "data", "approval-unexpected-deny-2"))));
+        String[] args = {
+                "approvals",
+                "--root", packet.root().toString(),
+                "--scenario", catalog.admission().scenarios().getFirst().id(),
+                "--run", packet.runRoot().toString()
+        };
+
+        Capture first = run(args);
+        byte[] before = Files.readAllBytes(output);
+        Capture second = run(args);
+
+        assertEquals(0, first.exit(), first.err());
+        var json = QualificationJson.readTree(output);
+        assertEquals(2, json.path("events").size());
+        assertEquals("DENIED", json.path("events").get(0).path("response").asText());
+        assertEquals("DENIED", json.path("events").get(1).path("response").asText());
+        assertTrue(second.exit() != 0);
+        assertTrue(second.err().contains("refusing to overwrite"), second.err());
+        assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(output)));
     }
 
     private static Capture run(String... args) {

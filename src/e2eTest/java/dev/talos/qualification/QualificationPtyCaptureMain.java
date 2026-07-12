@@ -52,6 +52,7 @@ public final class QualificationPtyCaptureMain {
     private Instant talosStartedNotBefore;
     private QualificationProcessCleanup.Result cleanupResult;
     private String terminalOutcome = "NOT_STARTED";
+    private boolean allowGracefulCleanup = true;
 
     private QualificationPtyCaptureMain(
             Path campaignRoot,
@@ -140,8 +141,7 @@ public final class QualificationPtyCaptureMain {
             int turnAnchor = cursor;
             writeLine(prompt);
             switch (approvalBehavior) {
-                case "NONE" -> terminalOutcome = awaitTurnCompletion("turn-completed");
-                case "APPROVE_ONCE", "SESSION_ALLOW", "DENY" ->
+                case "NONE", "APPROVE_ONCE", "SESSION_ALLOW", "DENY" ->
                         terminalOutcome = awaitApprovalOrTerminal(turnAnchor);
                 case "INTERRUPT_BEFORE_APPROVAL" -> {
                     interruptDuringGeneration();
@@ -176,17 +176,40 @@ public final class QualificationPtyCaptureMain {
     }
 
     private String awaitApprovalOrTerminal(int turnAnchor) throws Exception {
-        QualificationPtyOutcomeRace.Outcome outcome = QualificationPtyOutcomeRace.await(
-                () -> new QualificationPtyOutcomeRace.Snapshot(
-                        capture.text(),
-                        talos != null && talos.isAlive(),
-                        talos != null && !talos.isAlive() ? talos.exitValue() : -1),
-                turnAnchor,
-                TURN_WAIT,
-                new SystemWaiter());
+        QualificationPtyOutcomeRace.SequenceOutcome sequence;
+        try {
+            sequence = QualificationPtyOutcomeRace.awaitSequence(
+                    approvalBehavior,
+                    () -> new QualificationPtyOutcomeRace.Snapshot(
+                            capture.text(),
+                            talos != null && talos.isAlive(),
+                            talos != null && !talos.isAlive() ? talos.exitValue() : -1),
+                    turnAnchor,
+                    TURN_WAIT,
+                    new SystemWaiter(),
+                    (action, ordinal) -> {
+                        drainOutput();
+                        addTerminalOutcome(action.eventLabel());
+                        if (!action.sendInput()) return cursor;
+                        addInput(action.eventLabel());
+                        writeLine(action.response());
+                        return cursor;
+                    });
+        } catch (QualificationPtyOutcomeRace.ApprovalPromptLimitException limit) {
+            terminalOutcome = "approval-prompt-limit-exceeded";
+            allowGracefulCleanup = false;
+            addTerminalOutcome(terminalOutcome);
+            throw limit;
+        }
+        QualificationPtyOutcomeRace.Outcome outcome = sequence.outcome();
         terminalOutcome = switch (outcome.kind()) {
-            case APPROVAL -> "approval-presented";
-            case TURN_COMPLETE -> "turn-completed-before-expected-approval";
+            case APPROVAL -> throw new IllegalStateException(
+                    "approval sequence returned an approval");
+            case TURN_COMPLETE -> sequence.approvalCount() == 0
+                    ? (approvalBehavior.equals("NONE")
+                            ? "turn-completed"
+                            : "turn-completed-before-expected-approval")
+                    : "turn-completed-after-approval";
             case PROCESS_EXIT -> "process-exit-before-terminal-marker";
             case TIMEOUT -> "timeout-before-terminal-marker";
         };
@@ -200,18 +223,10 @@ public final class QualificationPtyCaptureMain {
             addTerminalOutcome(terminalOutcome);
             throw new IllegalStateException("timed out waiting for approval or turn completion");
         }
-
-        QualificationPtyOutcomeRace.ApprovalAction action =
-                QualificationPtyOutcomeRace.actionFor(approvalBehavior, outcome);
+        Thread.sleep(100L);
         drainOutput();
-        addTerminalOutcome(action.eventLabel());
-        if (!action.sendInput()) {
-            return terminalOutcome;
-        }
-
-        addInput(action.eventLabel());
-        writeLine(action.response());
-        return awaitTurnCompletion("turn-completed-after-approval");
+        addTerminalOutcome(terminalOutcome);
+        return terminalOutcome;
     }
 
     private String awaitTurnCompletion(String completedOutcome) throws Exception {
@@ -407,7 +422,7 @@ public final class QualificationPtyCaptureMain {
         } catch (Exception ignored) {
         }
         QualificationProcessCleanup.Result result = QualificationProcessCleanup.stop(
-                talos, serverExecutable, serverPort, talosStartedNotBefore);
+                talos, serverExecutable, serverPort, talosStartedNotBefore, allowGracefulCleanup);
         stop(monitor, 5_000L);
         if (outputReader != null) {
             try {

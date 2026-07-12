@@ -161,6 +161,19 @@ class QualificationProcessCleanupTest {
         assertEquals(List.of(702L), result.evidence().get("survivingPids"));
     }
 
+    @Test
+    void approvalPromptFailureCleanupDoesNotWriteExitIntoThePrompt() {
+        FakeTarget root = new FakeTarget(801L).exitOnDestroy();
+
+        QualificationProcessCleanup.Result result = QualificationProcessCleanup.stop(
+                root, List.of(), NO_WAIT, NO_WAIT, NO_WAIT, false);
+
+        assertEquals("", root.inputText());
+        assertFalse(result.gracefulExitRequested());
+        assertEquals(QualificationProcessCleanup.Outcome.TERMINATED, result.outcome());
+        assertEquals(1, root.destroyCalls);
+    }
+
     private static QualificationProcessCleanup.Result cleanup(FakeTarget root) {
         return QualificationProcessCleanup.stop(root, List.of(), NO_WAIT, NO_WAIT, NO_WAIT);
     }

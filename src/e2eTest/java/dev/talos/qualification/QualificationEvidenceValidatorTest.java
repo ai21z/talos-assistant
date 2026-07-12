@@ -432,6 +432,40 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void approvalEvidenceMustEqualTheOrderedPtyDecisionSequence() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path capturePath = packet.runRoot().resolve("transcript.raw.json");
+        ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
+        ArrayNode events = capture.putArray("events");
+        events.addObject().put("timestamp", "2026-07-10T00:00:00Z")
+                .put("type", "input").put("data", "scenario-prompt");
+        events.addObject().put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "output").put("data", "Outcome: READ_ONLY_ANSWERED");
+        events.addObject().put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "terminal-outcome").put("data", "approval-unexpected-deny-1");
+        events.addObject().put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "input").put("data", "approval-unexpected-deny-1");
+        events.addObject().put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "terminal-outcome").put("data", "approval-unexpected-deny-2");
+        events.addObject().put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "input").put("data", "approval-unexpected-deny-2");
+        events.addObject().put("timestamp", "2026-07-10T00:00:02Z")
+                .put("type", "input").put("data", "last-trace");
+        QualificationJson.write(capturePath, capture);
+        QualificationJson.write(packet.runRoot().resolve("approvals.json"), java.util.Map.of(
+                "events", List.of(java.util.Map.of("response", "DENIED"))));
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("Approval evidence differs from ordered PTY decisions")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
     void promptDebugNotApplicableMustBeBoundToCapturedRuntimeOutput() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);

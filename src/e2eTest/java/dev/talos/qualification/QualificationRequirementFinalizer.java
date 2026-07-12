@@ -100,7 +100,7 @@ final class QualificationRequirementFinalizer {
                 SCHEMA, 1, protocolVersion, scenarioBankSha256, scenario.id(), requirements);
     }
 
-    private static Path containedRunRoot(
+    static Path containedRunRoot(
             Path packetRoot,
             Path requestedRunRoot,
             String scenarioId) throws IOException {

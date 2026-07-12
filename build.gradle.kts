@@ -774,6 +774,34 @@ tasks.register<JavaExec>("finalizeModelQualificationRequirements") {
     })
 }
 
+tasks.register<JavaExec>("finalizeModelQualificationApprovals") {
+    description = "Writes immutable ordered approval evidence from the qualification PTY capture."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        listOf(
+            "approvals",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+        )
+    })
+}
+
 tasks.register<JavaExec>("scoreModelQualificationEvidence") {
     description = "Validates and mechanically scores a local admission or full qualification packet."
     group = "verification"

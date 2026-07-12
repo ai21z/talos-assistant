@@ -5,9 +5,11 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QualificationPtyOutcomeRaceTest {
@@ -154,6 +156,83 @@ class QualificationPtyOutcomeRaceTest {
         }
     }
 
+    @Test
+    void denySequenceHandlesTwoApprovalPromptsBeforeCompletion() throws Exception {
+        SequenceFixture fixture = new SequenceFixture("DENY", 2);
+
+        QualificationPtyOutcomeRace.SequenceOutcome result = fixture.run(Duration.ofSeconds(1));
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, result.outcome().kind());
+        assertEquals(2, result.approvalCount());
+        assertEquals(List.of("approval-deny", "approval-deny-repeat-2"), fixture.labels());
+        assertEquals(List.of("", ""), fixture.responses());
+    }
+
+    @Test
+    void approveOnceDeniesASecondApprovalPrompt() throws Exception {
+        SequenceFixture fixture = new SequenceFixture("APPROVE_ONCE", 2);
+
+        QualificationPtyOutcomeRace.SequenceOutcome result = fixture.run(Duration.ofSeconds(1));
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, result.outcome().kind());
+        assertEquals(List.of("approval-once", "approval-extra-deny-2"), fixture.labels());
+        assertEquals(List.of("y", ""), fixture.responses());
+    }
+
+    @Test
+    void sessionAllowDeniesAndLabelsAnUnexpectedLaterApproval() throws Exception {
+        SequenceFixture fixture = new SequenceFixture("SESSION_ALLOW", 2);
+
+        QualificationPtyOutcomeRace.SequenceOutcome result = fixture.run(Duration.ofSeconds(1));
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, result.outcome().kind());
+        assertEquals(List.of("approval-session", "approval-unexpected-deny-2"), fixture.labels());
+        assertEquals(List.of("a", ""), fixture.responses());
+    }
+
+    @Test
+    void noApprovalScenarioConservativelyDeniesAnUnexpectedPrompt() throws Exception {
+        SequenceFixture fixture = new SequenceFixture("NONE", 1);
+
+        QualificationPtyOutcomeRace.SequenceOutcome result = fixture.run(Duration.ofSeconds(1));
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, result.outcome().kind());
+        assertEquals(List.of("approval-unexpected-deny-1"), fixture.labels());
+        assertEquals(List.of(""), fixture.responses());
+    }
+
+    @Test
+    void repeatedApprovalsShareOneAbsoluteDeadline() throws Exception {
+        FakeWaiter waiter = new FakeWaiter();
+        TimedApprovalProbe probe = new TimedApprovalProbe(waiter, 40, 80, 120);
+        List<String> responses = new ArrayList<>();
+
+        QualificationPtyOutcomeRace.SequenceOutcome result =
+                QualificationPtyOutcomeRace.awaitSequence(
+                        "DENY", probe, 0, Duration.ofMillis(100), waiter,
+                        (action, ordinal) -> {
+                            responses.add(action.response());
+                            return probe.consumeApproval();
+                        });
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TIMEOUT, result.outcome().kind());
+        assertEquals(2, result.approvalCount());
+        assertEquals(2, responses.size());
+        assertTrue(waiter.nanos >= Duration.ofMillis(100).toNanos());
+        assertTrue(waiter.nanos < Duration.ofMillis(125).toNanos());
+    }
+
+    @Test
+    void approvalPromptLimitFailsClosed() {
+        SequenceFixture fixture = new SequenceFixture(
+                "DENY", QualificationPtyOutcomeRace.MAX_APPROVAL_PROMPTS + 1);
+
+        assertThrows(QualificationPtyOutcomeRace.ApprovalPromptLimitException.class,
+                () -> fixture.run(Duration.ofSeconds(1)));
+        assertEquals(QualificationPtyOutcomeRace.MAX_APPROVAL_PROMPTS,
+                fixture.responses().size());
+    }
+
     private static void assertAction(String behavior, String label, String response) {
         QualificationPtyOutcomeRace.ApprovalAction action =
                 QualificationPtyOutcomeRace.actionFor(behavior,
@@ -200,6 +279,82 @@ class QualificationPtyOutcomeRaceTest {
         public void pause(Duration duration) {
             pauseCount++;
             nanos += Math.max(1L, duration.toNanos());
+        }
+    }
+
+    private static final class SequenceFixture {
+        private final String behavior;
+        private final int approvals;
+        private final StringBuilder text = new StringBuilder();
+        private final List<String> labels = new ArrayList<>();
+        private final List<String> responses = new ArrayList<>();
+
+        private SequenceFixture(String behavior, int approvals) {
+            this.behavior = behavior;
+            this.approvals = approvals;
+            text.append("request\r\nAllow?");
+        }
+
+        private QualificationPtyOutcomeRace.SequenceOutcome run(Duration timeout) throws Exception {
+            AtomicInteger handled = new AtomicInteger();
+            return QualificationPtyOutcomeRace.awaitSequence(
+                    behavior,
+                    () -> snapshot(text.toString(), true, 0),
+                    0,
+                    timeout,
+                    new FakeWaiter(),
+                    (action, ordinal) -> {
+                        labels.add(action.eventLabel());
+                        responses.add(action.response());
+                        int anchor = text.length();
+                        if (handled.incrementAndGet() < approvals) {
+                            text.append("\r\ndenied\r\nAllow?");
+                        } else {
+                            text.append("\r\ndone\r\n").append(IDLE_PROMPT);
+                        }
+                        return anchor;
+                    });
+        }
+
+        private List<String> labels() {
+            return List.copyOf(labels);
+        }
+
+        private List<String> responses() {
+            return List.copyOf(responses);
+        }
+    }
+
+    private static final class TimedApprovalProbe implements QualificationPtyOutcomeRace.Probe {
+        private final FakeWaiter waiter;
+        private final long[] approvalAtNanos;
+        private final StringBuilder text = new StringBuilder();
+        private int nextApproval;
+
+        private TimedApprovalProbe(FakeWaiter waiter, long... approvalAtMillis) {
+            this.waiter = waiter;
+            this.approvalAtNanos = new long[approvalAtMillis.length];
+            for (int index = 0; index < approvalAtMillis.length; index++) {
+                this.approvalAtNanos[index] = Duration.ofMillis(approvalAtMillis[index]).toNanos();
+            }
+            text.append("request\r\n");
+        }
+
+        @Override
+        public QualificationPtyOutcomeRace.Snapshot snapshot() {
+            if (nextApproval < approvalAtNanos.length
+                    && waiter.nanos >= approvalAtNanos[nextApproval]
+                    && !text.toString().endsWith("Allow?")) {
+                text.append("Allow?");
+            }
+            return QualificationPtyOutcomeRaceTest.snapshot(text.toString(), true, 0);
+        }
+
+        private int consumeApproval() {
+            int anchor = text.length();
+            text.append("\r\ndenied\r\n");
+            nextApproval++;
+            return anchor;
         }
     }
 }

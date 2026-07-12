@@ -30,6 +30,9 @@ public final class ModelQualificationMain {
                 case "requirements" -> requirements(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
                         catalogForPacket(parsed.root()), out);
+                case "approvals" -> approvals(
+                        parsed.root(), parsed.runRoot(), parsed.scenarioId(),
+                        catalogForPacket(parsed.root()), out);
                 default -> throw new IllegalArgumentException("Unknown command: " + parsed.command());
             };
         } catch (IllegalArgumentException e) {
@@ -133,6 +136,19 @@ public final class ModelQualificationMain {
         return 0;
     }
 
+    private static int approvals(
+            Path root,
+            Path runRoot,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out) throws Exception {
+        Path output = QualificationApprovalFinalizer.deriveAndWrite(
+                root, runRoot, scenarioId, catalog);
+        out.println("Qualification approval evidence: "
+                + output.toAbsolutePath().normalize());
+        return 0;
+    }
+
     private record Arguments(
             String command,
             Path root,
@@ -170,15 +186,16 @@ public final class ModelQualificationMain {
             if (command.equals("score") && bank == null) {
                 throw new IllegalArgumentException("--bank admission|full is required for score");
             }
-            if (command.equals("requirements")
+            if ((command.equals("requirements") || command.equals("approvals"))
                     && (scenarioId.isBlank() || runRoot == null)) {
                 throw new IllegalArgumentException(
-                        "--scenario and --run are required for requirements");
+                        "--scenario and --run are required for " + command);
             }
             if (!command.equals("preflight")
                     && !command.equals("validate")
                     && !command.equals("score")
-                    && !command.equals("requirements")) {
+                    && !command.equals("requirements")
+                    && !command.equals("approvals")) {
                 throw new IllegalArgumentException("Unknown command: " + command);
             }
             return new Arguments(command, root, bank, scenarioId, runRoot);
@@ -187,6 +204,7 @@ public final class ModelQualificationMain {
         static String usage() {
             return "Usage: bank-hash | preflight --root <packet> | validate --root <packet> | "
                     + "score --root <packet> --bank admission|full | requirements --root <packet> "
+                    + "--scenario <id> --run <run-root> | approvals --root <packet> "
                     + "--scenario <id> --run <run-root>";
         }
     }

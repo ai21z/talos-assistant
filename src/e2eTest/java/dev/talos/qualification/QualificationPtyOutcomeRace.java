@@ -9,6 +9,7 @@ final class QualificationPtyOutcomeRace {
     static final String PROMPT_MARKER = "talos [auto] >";
     static final String IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[16G";
     static final String CURSOR_RESET_IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[1G\u001B[16G";
+    static final int MAX_APPROVAL_PROMPTS = 8;
     private static final Duration POLL_INTERVAL = Duration.ofMillis(25);
 
     private QualificationPtyOutcomeRace() {}
@@ -36,6 +37,24 @@ final class QualificationPtyOutcomeRace {
         ApprovalAction {
             eventLabel = eventLabel == null ? "" : eventLabel;
             response = response == null ? "" : response;
+        }
+    }
+
+    record SequenceOutcome(Outcome outcome, int approvalCount) {
+        SequenceOutcome {
+            Objects.requireNonNull(outcome, "outcome");
+            if (approvalCount < 0) throw new IllegalArgumentException("approval count must not be negative");
+        }
+    }
+
+    @FunctionalInterface
+    interface ApprovalResponder {
+        int respond(ApprovalAction action, int ordinal) throws Exception;
+    }
+
+    static final class ApprovalPromptLimitException extends IllegalStateException {
+        ApprovalPromptLimitException(int limit) {
+            super("approval prompt limit exceeded: " + limit);
         }
     }
 
@@ -84,6 +103,40 @@ final class QualificationPtyOutcomeRace {
         }
     }
 
+    static SequenceOutcome awaitSequence(
+            String approvalBehavior,
+            Probe probe,
+            int from,
+            Duration timeout,
+            Waiter waiter,
+            ApprovalResponder responder) throws Exception {
+        Objects.requireNonNull(probe, "probe");
+        Objects.requireNonNull(timeout, "timeout");
+        Objects.requireNonNull(waiter, "waiter");
+        Objects.requireNonNull(responder, "responder");
+        if (timeout.isNegative()) throw new IllegalArgumentException("timeout must not be negative");
+
+        long deadline = saturatingAdd(waiter.nanoTime(), timeout.toNanos());
+        int anchor = from;
+        int approvalCount = 0;
+        while (true) {
+            long remainingNanos = Math.max(0L, deadline - waiter.nanoTime());
+            Outcome outcome = await(probe, anchor, Duration.ofNanos(remainingNanos), waiter);
+            if (outcome.kind() != Kind.APPROVAL) {
+                return new SequenceOutcome(outcome, approvalCount);
+            }
+
+            approvalCount++;
+            if (approvalCount > MAX_APPROVAL_PROMPTS) {
+                throw new ApprovalPromptLimitException(MAX_APPROVAL_PROMPTS);
+            }
+            ApprovalAction action = actionFor(approvalBehavior, outcome, approvalCount);
+            int nextAnchor = responder.respond(action, approvalCount);
+            if (nextAnchor < 0) throw new IllegalStateException("approval responder returned a negative anchor");
+            anchor = nextAnchor;
+        }
+    }
+
     static int idlePromptIndex(String text, int from) {
         String value = text == null ? "" : text;
         int cursor = Math.max(0, Math.min(from, value.length()));
@@ -101,7 +154,17 @@ final class QualificationPtyOutcomeRace {
     }
 
     static ApprovalAction actionFor(String approvalBehavior, Outcome outcome) {
+        return actionFor(approvalBehavior, outcome, 1);
+    }
+
+    static ApprovalAction actionFor(
+            String approvalBehavior,
+            Outcome outcome,
+            int approvalOrdinal) {
         Objects.requireNonNull(outcome, "outcome");
+        if (approvalOrdinal <= 0) {
+            throw new IllegalArgumentException("approval ordinal must be positive");
+        }
         String behavior = approvalBehavior == null ? "" : approvalBehavior.strip();
         if (outcome.kind() == Kind.TURN_COMPLETE) {
             return new ApprovalAction(false, "turn-completed-before-expected-approval", "");
@@ -109,7 +172,20 @@ final class QualificationPtyOutcomeRace {
         if (outcome.kind() != Kind.APPROVAL) {
             throw new IllegalStateException("approval action unavailable for " + outcome.kind());
         }
+        if (approvalOrdinal > 1) {
+            return switch (behavior) {
+                case "DENY" -> new ApprovalAction(
+                        true, "approval-deny-repeat-" + approvalOrdinal, "");
+                case "APPROVE_ONCE" -> new ApprovalAction(
+                        true, "approval-extra-deny-" + approvalOrdinal, "");
+                case "SESSION_ALLOW", "NONE" -> new ApprovalAction(
+                        true, "approval-unexpected-deny-" + approvalOrdinal, "");
+                default -> throw new IllegalArgumentException(
+                        "unsupported approval behavior: " + approvalBehavior);
+            };
+        }
         return switch (behavior) {
+            case "NONE" -> new ApprovalAction(true, "approval-unexpected-deny-1", "");
             case "APPROVE_ONCE" -> new ApprovalAction(true, "approval-once", "y");
             case "SESSION_ALLOW" -> new ApprovalAction(true, "approval-session", "a");
             case "DENY" -> new ApprovalAction(true, "approval-deny", "");
