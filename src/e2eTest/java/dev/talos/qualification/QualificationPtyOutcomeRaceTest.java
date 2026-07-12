@@ -99,11 +99,38 @@ class QualificationPtyOutcomeRaceTest {
     }
 
     @Test
+    void idlePromptIsRecognizedWhenJlineWrapsAndReturnsOneRow() {
+        String wrappedIdlePrompt = PROMPT
+                + "\u001B[0K\r\n\u001B[0K\r\u001B[1A\u001B[16G";
+
+        assertEquals(0, QualificationPtyOutcomeRace.idlePromptIndex(wrappedIdlePrompt, 0));
+    }
+
+    @Test
+    void wrappedIdlePromptCompletesTheOutcomeRace() throws Exception {
+        String wrappedIdlePrompt = PROMPT
+                + "\u001B[0K\r\n\u001B[0K\r\u001B[1A\u001B[16G";
+        ScriptedProbe probe = new ScriptedProbe(snapshot(
+                IDLE_PROMPT + "\r" + PROMPT + " What is 2 + 2?\r\n4\r\n"
+                        + wrappedIdlePrompt,
+                true,
+                0));
+
+        QualificationPtyOutcomeRace.Outcome outcome = QualificationPtyOutcomeRace.await(
+                probe, IDLE_PROMPT.length(), Duration.ofSeconds(1), new FakeWaiter());
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, outcome.kind());
+    }
+
+    @Test
     void promptLikeTextWithoutAnExactIdleSuffixIsRejected() {
         for (String candidate : List.of(
                 PROMPT + " /last trace",
                 PROMPT + "\u001B[0K\u001B[1G",
                 PROMPT + "\u001B[0K\u001B[2G\u001B[16G",
+                PROMPT + "\u001B[0K\r\n\u001B[0K\r\u001B[1A",
+                PROMPT + "\u001B[0K\r\n\u001B[0K\r\u001B[2A\u001B[16G",
+                PROMPT + "\u001B[0K\r\n\r\u001B[1A\u001B[16G",
                 PROMPT)) {
             assertEquals(-1, QualificationPtyOutcomeRace.idlePromptIndex(candidate, 0), candidate);
         }

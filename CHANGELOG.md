@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1049] Model-qualification PTY capture now recognizes the exact wrapped
+  JLine idle-prompt redraw observed after a completed Qwen3 answer. Matching
+  remains anchored and exact, while command echoes, altered cursor movement,
+  and partial ANSI frames remain ineligible for turn completion.
 - [T1048] Model-qualification PTY capture now distinguishes a fresh approval
   card from JLine's echo of an answered `Allow?` line. Echoes no longer create
   phantom denials or approval evidence, while genuine later approval cards
