@@ -309,6 +309,34 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void unnamedFileLookupRequiresSourceBearingContentEvidence() {
+        EvidenceObligation obligation = EvidenceObligation.valueOf("FILE_CONTENT_LOOKUP_REQUIRED");
+
+        var directRead = EvidenceObligationVerifier.verify(
+                obligation,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "src/App.java", true, false, false,
+                        "read App.java", "")));
+        var listOnly = EvidenceObligationVerifier.verify(
+                obligation,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "config.json\nsrc", "")));
+        var noResultGrep = EvidenceObligationVerifier.verify(
+                obligation,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.grep", "", true, false, false,
+                        "No matches found.", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, directRead.status());
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, listOnly.status());
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, noResultGrep.status());
+    }
+
+    @Test
     void pathExistenceAcceptsDirectTargetNotFoundReadAsNegativeEvidence() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,

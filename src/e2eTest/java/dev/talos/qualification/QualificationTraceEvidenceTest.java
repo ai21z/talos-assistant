@@ -169,6 +169,25 @@ class QualificationTraceEvidenceTest {
     }
 
     @Test
+    void runtimeBoundedNegativeDisclosureIsParsedAsTypedTraceFact() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        Path trace = writeTrace(List.of(Map.of(
+                "type", "PROTOCOL_SANITIZED",
+                "timestamp", "2026-07-10T00:00:00Z",
+                "phase", "",
+                "toolName", "",
+                "data", Map.of(
+                        "reason", "file-content lookup negative claim bounded to source evidence"))));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+        var method = facts.getClass().getDeclaredMethod("boundedFileLookupNegative");
+        method.setAccessible(true);
+
+        assertEquals(Boolean.TRUE, method.invoke(facts));
+    }
+
+    @Test
     void ambiguousOrOrphanSuccessfulExecutionsRemainInvalid() throws Exception {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
                 .scenario("F08-contradictory-similar-file-names");

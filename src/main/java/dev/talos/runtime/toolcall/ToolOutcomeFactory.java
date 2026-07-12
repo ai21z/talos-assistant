@@ -7,6 +7,9 @@ import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolResult;
 
+import java.util.LinkedHashSet;
+import java.util.List;
+
 final class ToolOutcomeFactory {
     private static final int LIST_DIR_EVIDENCE_SUMMARY_CHARS = 4_000;
 
@@ -95,7 +98,22 @@ final class ToolOutcomeFactory {
                 mutationEvidence,
                 result == null || result.error() == null
                         ? ToolFailureReason.NONE
-                        : result.error().reason());
+                        : result.error().reason(),
+                evidenceSourcePaths(call, pathHint, result));
+    }
+
+    private static List<String> evidenceSourcePaths(ToolCall call, String pathHint, ToolResult result) {
+        if (result == null || !result.success()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (result.contentMetadata() != null) {
+            out.addAll(result.contentMetadata().sourcePaths());
+        }
+        if ("talos.read_file".equals(canonicalToolName(call))
+                && pathHint != null
+                && !pathHint.isBlank()) {
+            out.add(pathHint.strip().replace('\\', '/'));
+        }
+        return List.copyOf(out);
     }
 
     /** Maps the edit pre-approval guard's typed verdict to a failure reason (T758). */

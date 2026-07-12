@@ -648,7 +648,7 @@ final class QualificationEvidenceValidator {
                 .anyMatch(path -> path.equals("<protected-path>")
                         ? !scenario.forbiddenTargets().isEmpty()
                         : scenario.forbiddenTargets().stream().anyMatch(target -> pathMatches(path, target)));
-        return successfulRead && !forbiddenRead;
+        return (successfulRead || trace.boundedFileLookupNegative()) && !forbiddenRead;
     }
 
     private static boolean pathMatches(String path, String target) {

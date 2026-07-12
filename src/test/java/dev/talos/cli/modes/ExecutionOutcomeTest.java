@@ -269,6 +269,72 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void unnamedFileLookupBoundsNegativeAnswerToActuallyReadSources() {
+        LocalTurnTraceCapture.begin(
+                "trc-file-lookup-bounded",
+                "sid-file-lookup-bounded",
+                1,
+                "2026-07-12T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "qwen3-8b",
+                "bounded negative lookup");
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Locate the service port, name the file, and quote only the relevant key and value. "
+                        + "Do not edit anything."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve"),
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The service port information was not found in the provided files.",
+                4, 4,
+                List.of("talos.grep", "talos.list_dir", "talos.read_file"),
+                List.of(),
+                0, 0, false, 0, List.of("src/App.java"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.grep", "", true, false, false,
+                                "No matches found.", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", "src", true, false, false,
+                                "src/App.java", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "src/App.java", true, false, false,
+                                "final class App {}", "")));
+
+        ExecutionOutcome outcome;
+        LocalTurnTrace trace;
+        try {
+            outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertEquals("FILE_CONTENT_LOOKUP_REQUIRED", plan.evidenceObligation());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Grounding scope: the requested file-backed fact was not established.]"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("src/App.java"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("does not prove"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("not found in the provided files"), outcome.finalAnswer());
+        assertTrue(trace.events().stream().anyMatch(event ->
+                        "PROTOCOL_SANITIZED".equals(event.type())
+                                && dev.talos.runtime.outcome.FileLookupAnswerGuard.TRACE_REASON.equals(
+                                event.data().get("reason"))),
+                trace.events().toString());
+    }
+
+    @Test
     void successfulVerifyCommandUsesRuntimeOwnedSummary() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

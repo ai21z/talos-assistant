@@ -6,6 +6,7 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.CommandOutputTruthfulnessGuard;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
+import dev.talos.runtime.outcome.FileLookupAnswerGuard;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
@@ -323,6 +324,13 @@ record ExecutionOutcome(
                     evidenceObligation,
                     evidenceResult,
                     workspace);
+        }
+        if (!missingEvidence) {
+            shaped = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(current, safePlan, loopResult);
+            if (!Objects.equals(current, shaped)) {
+                LocalTurnTraceCapture.recordProtocolSanitized(FileLookupAnswerGuard.TRACE_REASON);
+            }
+            current = shaped;
         }
         ReadOnlyToolLimitOutcome readOnlyToolLimit = ReadOnlyToolLimitOutcome.assess(
                 contract,

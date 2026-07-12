@@ -81,6 +81,9 @@ public final class EvidenceContainmentAnswerGuard {
                     "I did not gather directory or target-read evidence for the requested path "
                             + "existence check, so I cannot answer whether those files exist yet."
                             + targetSentence(plan);
+            case FILE_CONTENT_LOOKUP_REQUIRED ->
+                    "I did not gather source-bearing file content for this lookup, so I cannot "
+                            + "claim the requested fact was found or absent from the workspace.";
             case LIST_DIRECTORY_ONLY ->
                     "I did not complete a directory-list-only evidence path this turn. "
                             + "I cannot answer with file contents or derived file claims from "

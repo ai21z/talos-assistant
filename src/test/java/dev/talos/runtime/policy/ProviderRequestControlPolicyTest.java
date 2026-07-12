@@ -78,6 +78,29 @@ class ProviderRequestControlPolicyTest {
     }
 
     @Test
+    void unnamedFileLookupRequiresSourceEvidenceToolFromFirstGeneration() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Locate the service port, name the file, and quote only the relevant key and value. "
+                        + "Do not edit anything.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of("talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.read_file"), tool("talos.grep"), tool("talos.retrieve")),
+                true);
+
+        assertEquals("FILE_CONTENT_LOOKUP_REQUIRED", plan.evidenceObligation());
+        assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
+        assertEquals(List.of("evidence-obligation:FILE_CONTENT_LOOKUP_REQUIRED"), controls.debugTags());
+        assertEquals(512, controls.maxOutputTokens());
+    }
+
+    @Test
     void explicitCommandProfileRequestRequiresRunCommandToolChoice() {
         var contract = TaskContractResolver.fromUserRequest(
                 "Run the approved Gradle test command profile for this workspace and report the exact command result. "

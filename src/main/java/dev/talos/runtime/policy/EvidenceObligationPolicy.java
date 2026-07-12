@@ -8,10 +8,15 @@ import dev.talos.runtime.task.TaskType;
 
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** Deterministic derivation for current-turn evidence obligations. */
 public final class EvidenceObligationPolicy {
     private static final Config DEFAULT_CAPABILITY_CONFIG = new Config(null);
+    private static final Pattern UNNAMED_FILE_CONTENT_LOOKUP = Pattern.compile(
+            "(?is).*\\b(?:locate|find|search|identify|look\\s+up)\\b.{0,160}"
+                    + "\\b(?:file|files|key|value|port|setting|config|configuration|endpoint|"
+                    + "dependency|version|script)\\b.*");
 
     private EvidenceObligationPolicy() {}
 
@@ -57,10 +62,25 @@ public final class EvidenceObligationPolicy {
         if (!contract.mutationAllowed() && !contract.expectedTargets().isEmpty()) {
             return EvidenceObligation.READ_TARGET_REQUIRED;
         }
+        if (requiresUnnamedFileContentLookup(contract, type)) {
+            return EvidenceObligation.FILE_CONTENT_LOOKUP_REQUIRED;
+        }
         if (type == TaskType.WORKSPACE_EXPLAIN || type == TaskType.DIAGNOSE_ONLY) {
             return EvidenceObligation.WORKSPACE_INSPECTION_REQUIRED;
         }
         return EvidenceObligation.NONE;
+    }
+
+    private static boolean requiresUnnamedFileContentLookup(TaskContract contract, TaskType type) {
+        if (contract == null
+                || type != TaskType.READ_ONLY_QA
+                || contract.mutationAllowed()
+                || !contract.expectedTargets().isEmpty()
+                || !contract.sourceEvidenceTargets().isEmpty()) {
+            return false;
+        }
+        String request = contract.originalUserRequest();
+        return request != null && UNNAMED_FILE_CONTENT_LOOKUP.matcher(request).matches();
     }
 
     public static EvidenceObligation parse(String value) {

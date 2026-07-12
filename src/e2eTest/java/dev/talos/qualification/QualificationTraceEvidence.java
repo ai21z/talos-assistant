@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.talos.runtime.outcome.FileLookupAnswerGuard;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.io.IOException;
@@ -49,10 +50,29 @@ final class QualificationTraceEvidence {
             List<Call> calls,
             List<QualificationRecords.DecisionResult> decisions,
             boolean approvalGranted,
-            boolean approvalDenied) {
+            boolean approvalDenied,
+            boolean boundedFileLookupNegative) {
         Facts {
             calls = List.copyOf(calls);
             decisions = List.copyOf(decisions);
+        }
+
+        Facts(
+                String traceId,
+                String modelId,
+                String taskType,
+                boolean mutationAllowed,
+                String actionObligation,
+                String terminalState,
+                String outcomeStatus,
+                String verificationStatus,
+                List<Call> calls,
+                List<QualificationRecords.DecisionResult> decisions,
+                boolean approvalGranted,
+                boolean approvalDenied) {
+            this(traceId, modelId, taskType, mutationAllowed, actionObligation,
+                    terminalState, outcomeStatus, verificationStatus, calls, decisions,
+                    approvalGranted, approvalDenied, false);
         }
 
         List<QualificationRecords.ToolCallResult> toolCallResults() {
@@ -98,6 +118,7 @@ final class QualificationTraceEvidence {
         List<MutableCall> calls = new ArrayList<>();
         boolean approvalGranted = false;
         boolean approvalDenied = false;
+        boolean boundedFileLookupNegative = false;
         for (JsonNode event : events) {
             String type = event.path("type").asText("");
             String tool = canonicalTool(event.path("toolName").asText(""));
@@ -123,6 +144,10 @@ final class QualificationTraceEvidence {
                 approvalGranted = true;
             } else if (type.endsWith("APPROVAL_DENIED")) {
                 approvalDenied = true;
+            } else if (type.equals("PROTOCOL_SANITIZED")
+                    && FileLookupAnswerGuard.TRACE_REASON.equals(
+                    event.path("data").path("reason").asText(""))) {
+                boundedFileLookupNegative = true;
             }
         }
 
@@ -139,7 +164,8 @@ final class QualificationTraceEvidence {
                 .toList();
         return new Facts(traceId, modelId, taskType, mutationAllowed, actionObligation,
                 terminalState, outcomeStatus, verificationStatus,
-                frozenCalls, decisions(scenario, frozenCalls), approvalGranted, approvalDenied);
+                frozenCalls, decisions(scenario, frozenCalls), approvalGranted, approvalDenied,
+                boundedFileLookupNegative);
     }
 
     private static List<QualificationRecords.DecisionResult> decisions(

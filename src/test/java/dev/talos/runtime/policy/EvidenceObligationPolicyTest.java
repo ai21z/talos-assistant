@@ -92,6 +92,33 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
+    void unnamedWorkspaceFileLookupRequiresSourceContentEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Locate the service port, name the file, and quote only the relevant key and value. "
+                        + "Do not edit anything.");
+
+        assertEquals(Set.of(), contract.expectedTargets());
+        assertEquals(
+                "FILE_CONTENT_LOOKUP_REQUIRED",
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE).name());
+    }
+
+    @Test
+    void generalKnowledgeAndNamingRequestsDoNotBecomeWorkspaceFileLookups() {
+        for (String request : Set.of(
+                "What port does HTTPS normally use?",
+                "Find a concise name for the new CLI mode.",
+                "Explain dependency injection in Java.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(request);
+
+            assertNotEquals(
+                    "FILE_CONTENT_LOOKUP_REQUIRED",
+                    EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE).name(),
+                    request);
+        }
+    }
+
+    @Test
     void contradictionClarificationRequiresNoWorkspaceEvidence() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Do not change any files, but update notes.md now. "

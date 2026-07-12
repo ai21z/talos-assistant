@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- [T1065] Unnamed workspace file lookups now require source-bearing content
+  evidence. Broad negative model answers are replaced with a deterministic,
+  source-bounded disclosure and recorded as a runtime trace fact.
 - [T1064] Grep now rejects path-qualified `include` values because the tool's
   contract applies one glob to filenames only. Failed or denied read/list
   calls no longer satisfy generic workspace-inspection or list-only evidence

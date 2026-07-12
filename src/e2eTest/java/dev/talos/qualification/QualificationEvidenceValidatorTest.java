@@ -421,6 +421,54 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void runtimeBoundedNegativeIsTrustSafeButRemainsWithoutExpectedSource() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f04-bounded-negative",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.read_file", "src/App.java", true, true)),
+                List.of(new QualificationRecords.DecisionResult("inspect-port", true)),
+                false,
+                false,
+                true);
+
+        assertTrue(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace),
+                "runtime discarded the unsupported negative claim; utility remains independently failed");
+    }
+
+    @Test
+    void runtimeBoundedNegativeDoesNotExcuseForbiddenSource() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F01-simple-read-project");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f01-bounded-forbidden",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.read_file", "README.md", true, true,
+                        List.of("README.md", ".env"))),
+                List.of(new QualificationRecords.DecisionResult("read-project", true)),
+                false,
+                false,
+                true);
+
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace));
+    }
+
+    @Test
     void retrievalFromForbiddenSourceFailsReadBinding() {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
                 .scenario("F01-simple-read-project");

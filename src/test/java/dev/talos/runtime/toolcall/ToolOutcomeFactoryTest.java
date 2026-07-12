@@ -5,6 +5,7 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
+import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolRiskLevel;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
@@ -109,6 +110,41 @@ class ToolOutcomeFactoryTest {
         assertEquals("talos.write_file", outcome.canonicalToolName());
         assertEquals("write_file", outcome.localCanonicalToolName());
         assertTrue(outcome.mutating());
+    }
+
+    @Test
+    void executedSearchOutcomeKeepsStructuredEvidenceSourcePaths() throws Exception {
+        ToolCall grep = new ToolCall("talos.grep", Map.of(
+                "pattern", "port",
+                "include", "*.json"));
+        ToolResult result = ToolResult.ok(
+                "Found 1 match: config.json:3",
+                ToolContentMetadata.workspaceEvidence(
+                        ToolContentMetadata.ContentSource.GREP,
+                        List.of("config.json"),
+                        "grep match source paths"));
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(grep, result, "");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(grep, "", result, classification, null, null);
+
+        var method = outcome.getClass().getMethod("sourcePaths");
+        assertEquals(List.of("config.json"), method.invoke(outcome));
+    }
+
+    @Test
+    void executedDirectReadUsesSuccessfulPathHintAsEvidenceSource() throws Exception {
+        ToolCall read = new ToolCall("talos.read_file", Map.of("path", "src/App.java"));
+        ToolResult result = ToolResult.ok("final class App {}");
+        ToolExecutionFailureClassifier.Classification classification =
+                ToolExecutionFailureClassifier.classify(read, result, "src/App.java");
+
+        ToolCallLoop.ToolOutcome outcome =
+                ToolOutcomeFactory.executed(read, "src/App.java", result, classification, null, null);
+
+        var method = outcome.getClass().getMethod("sourcePaths");
+        assertEquals(List.of("src/App.java"), method.invoke(outcome));
     }
 
     @Test

@@ -14,6 +14,7 @@ import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
 
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -176,7 +177,8 @@ public final class ToolCallLoop {
             String errorCode,
             WorkspaceOperationPlan workspaceOperationPlan,
             ToolMutationEvidence mutationEvidence,
-            dev.talos.tools.ToolFailureReason failureReason
+            dev.talos.tools.ToolFailureReason failureReason,
+            List<String> sourcePaths
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -186,6 +188,27 @@ public final class ToolCallLoop {
             errorCode = errorCode == null ? "" : errorCode;
             mutationEvidence = mutationEvidence == null ? ToolMutationEvidence.none() : mutationEvidence;
             failureReason = failureReason == null ? dev.talos.tools.ToolFailureReason.NONE : failureReason;
+            sourcePaths = normalizeSourcePaths(sourcePaths);
+        }
+
+        /** Pre-T1065 canonical shape: source paths default to empty. */
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                boolean denied,
+                String summary,
+                String errorMessage,
+                dev.talos.tools.VerificationStatus fileVerificationStatus,
+                String errorCode,
+                WorkspaceOperationPlan workspaceOperationPlan,
+                ToolMutationEvidence mutationEvidence,
+                dev.talos.tools.ToolFailureReason failureReason
+        ) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, mutationEvidence,
+                    failureReason, List.of());
         }
 
         /** Pre-T758 canonical shape: failure reason defaults to NONE. */
@@ -278,7 +301,17 @@ public final class ToolCallLoop {
         public ToolOutcome withFailureReason(dev.talos.tools.ToolFailureReason reason) {
             return new ToolOutcome(toolName, pathHint, success, mutating, denied, summary,
                     errorMessage, fileVerificationStatus, errorCode, workspaceOperationPlan,
-                    mutationEvidence, reason);
+                    mutationEvidence, reason, sourcePaths);
+        }
+
+        private static List<String> normalizeSourcePaths(List<String> values) {
+            if (values == null || values.isEmpty()) return List.of();
+            LinkedHashSet<String> out = new LinkedHashSet<>();
+            for (String value : values) {
+                if (value == null || value.isBlank()) continue;
+                out.add(value.strip().replace('\\', '/'));
+            }
+            return List.copyOf(out);
         }
 
         /** Canonical Talos tool name for policy, evidence, and guard decisions. */

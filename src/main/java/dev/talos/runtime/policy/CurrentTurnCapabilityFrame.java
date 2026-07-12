@@ -551,6 +551,9 @@ public final class CurrentTurnCapabilityFrame {
                     "Evidence: the named target is protected. "
                             + "Call talos.read_file for the protected target; runtime will request approval. "
                             + "Do not answer from protected content unless the read succeeds.";
+            case FILE_CONTENT_LOOKUP_REQUIRED ->
+                    "Evidence: locate the requested workspace fact with read, grep, or retrieval results "
+                            + "that identify at least one source file before answering.";
             case LIST_DIRECTORY_ONLY ->
                     "Evidence: list directory entries only; do not inspect file contents.";
             case WORKSPACE_INSPECTION_REQUIRED ->

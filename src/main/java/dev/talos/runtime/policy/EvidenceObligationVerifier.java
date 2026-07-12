@@ -80,6 +80,7 @@ public final class EvidenceObligationVerifier {
             case READ_TARGET_REQUIRED -> verifyReadTargets(targets, safeOutcomes, true);
             case PATH_EXISTENCE_EVIDENCE_REQUIRED -> verifyPathExistenceTargets(targets, safeOutcomes);
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
+            case FILE_CONTENT_LOOKUP_REQUIRED -> verifyFileContentLookup(safeOutcomes);
             case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosis(targets, safeOutcomes, workspace);
             case WORKSPACE_INSPECTION_REQUIRED, VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     verifyAnyReadOnlyEvidence(safeOutcomes);
@@ -568,6 +569,24 @@ public final class EvidenceObligationVerifier {
             }
         }
         return Result.unsatisfied("Read-only workspace evidence was not gathered.");
+    }
+
+    private static Result verifyFileContentLookup(List<ToolCallLoop.ToolOutcome> outcomes) {
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            String toolName = canonicalToolName(outcome.toolName());
+            if (!CONTENT_INSPECTION_TOOLS.contains(toolName)
+                    || !outcome.success()
+                    || outcome.denied()) {
+                continue;
+            }
+            if (!outcome.sourcePaths().isEmpty()) {
+                return Result.satisfied("Source-bearing file-content evidence was gathered.");
+            }
+            if ("talos.read_file".equals(toolName) && !normalizePath(outcome.pathHint()).isBlank()) {
+                return Result.satisfied("Source-bearing file-content evidence was gathered.");
+            }
+        }
+        return Result.unsatisfied("Source-bearing file-content evidence was not gathered.");
     }
 
     private static Result verifyUnsupportedCapability(
