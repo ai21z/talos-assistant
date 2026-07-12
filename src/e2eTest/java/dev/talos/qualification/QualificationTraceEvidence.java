@@ -18,7 +18,20 @@ final class QualificationTraceEvidence {
 
     private QualificationTraceEvidence() {}
 
-    record Call(String toolName, String pathHint, boolean executed, boolean allowed) {
+    record Call(
+            String toolName,
+            String pathHint,
+            boolean executed,
+            boolean allowed,
+            List<String> sourcePaths) {
+        Call {
+            sourcePaths = normalizedSourcePaths(sourcePaths, pathHint);
+        }
+
+        Call(String toolName, String pathHint, boolean executed, boolean allowed) {
+            this(toolName, pathHint, executed, allowed, List.of());
+        }
+
         QualificationRecords.ToolCallResult toResult() {
             return new QualificationRecords.ToolCallResult(toolName, true, allowed, executed, false);
         }
@@ -105,6 +118,7 @@ final class QualificationTraceEvidence {
                 }
                 match.settled = true;
                 match.executed = event.path("data").path("success").asBoolean(false);
+                match.sourcePaths.addAll(sourcePaths(event.path("data"), pathHint));
             } else if (type.endsWith("APPROVAL_GRANTED")) {
                 approvalGranted = true;
             } else if (type.endsWith("APPROVAL_DENIED")) {
@@ -120,7 +134,8 @@ final class QualificationTraceEvidence {
         List<Call> frozenCalls = calls.stream()
                 .map(call -> new Call(call.toolName, call.pathHint, call.executed,
                         expectedTools.contains(call.toolName)
-                                || (mutationLike && MUTATION_INSPECTION_AUXILIARIES.contains(call.toolName))))
+                                || (mutationLike && MUTATION_INSPECTION_AUXILIARIES.contains(call.toolName)),
+                        List.copyOf(call.sourcePaths)))
                 .toList();
         return new Facts(traceId, modelId, taskType, mutationAllowed, actionObligation,
                 terminalState, outcomeStatus, verificationStatus,
@@ -179,6 +194,33 @@ final class QualificationTraceEvidence {
         return value == null ? "" : value.strip().replace('\\', '/');
     }
 
+    private static List<String> sourcePaths(JsonNode data, String fallbackPath) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        JsonNode values = data == null ? null : data.path("pathHints");
+        if (values != null && values.isArray()) {
+            values.forEach(value -> {
+                String path = normalizedPathHint(value.asText(""));
+                if (!path.isBlank()) out.add(path);
+            });
+        }
+        String fallback = normalizedPathHint(fallbackPath);
+        if (!fallback.isBlank()) out.add(fallback);
+        return List.copyOf(out);
+    }
+
+    private static List<String> normalizedSourcePaths(List<String> values, String fallbackPath) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (values != null) {
+            for (String value : values) {
+                String path = normalizedPathHint(value);
+                if (!path.isBlank()) out.add(path);
+            }
+        }
+        String fallback = normalizedPathHint(fallbackPath);
+        if (!fallback.isBlank()) out.add(fallback);
+        return List.copyOf(out);
+    }
+
     private static String required(String value, String label) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(label + " is missing");
         return value;
@@ -201,12 +243,14 @@ final class QualificationTraceEvidence {
     private static final class MutableCall {
         private final String toolName;
         private final String pathHint;
+        private final java.util.LinkedHashSet<String> sourcePaths = new java.util.LinkedHashSet<>();
         private boolean settled;
         private boolean executed;
 
         private MutableCall(String toolName, String pathHint) {
             this.toolName = toolName;
             this.pathHint = pathHint;
+            if (!pathHint.isBlank()) sourcePaths.add(pathHint);
         }
     }
 }

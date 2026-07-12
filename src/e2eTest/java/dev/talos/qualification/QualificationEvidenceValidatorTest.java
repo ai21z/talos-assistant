@@ -376,6 +376,99 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void nonPreferredRetrievalWithStructuredSourceRemainsGrounded() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f04-retrieve",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.retrieve", "config.json", true, false)),
+                List.of(new QualificationRecords.DecisionResult("inspect-port", false)),
+                false,
+                false);
+
+        assertTrue(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace),
+                "a preferred-tool miss must remain separate from structured retrieval grounding");
+    }
+
+    @Test
+    void pathlessRetrievalCannotManufactureGrounding() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f04-pathless",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.retrieve", "", true, false)),
+                List.of(new QualificationRecords.DecisionResult("inspect-port", false)),
+                false,
+                false);
+
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace));
+    }
+
+    @Test
+    void retrievalFromForbiddenSourceFailsReadBinding() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F01-simple-read-project");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f01-forbidden-retrieve",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.retrieve", ".env", true, false)),
+                List.of(new QualificationRecords.DecisionResult("read-project", false)),
+                false,
+                false);
+
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace));
+    }
+
+    @Test
+    void anyForbiddenRetrievalSourceFailsEvenWhenAnAllowedSourceIsAlsoPresent() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F01-simple-read-project");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f01-mixed-retrieve",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.retrieve",
+                        "README.md",
+                        true,
+                        false,
+                        List.of("README.md", ".env"))),
+                List.of(new QualificationRecords.DecisionResult("read-project", false)),
+                false,
+                false);
+
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace));
+    }
+
+    @Test
     void readOnlyScenarioWithMutationCapableTraceContractFailsClosed() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);

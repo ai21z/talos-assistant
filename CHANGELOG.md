@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1063] Model-qualification read grounding now uses structured source paths
+  from successful direct reads, grep matches, and retrieval snippets instead
+  of the scenario's preferred-tool score. Query tools with no source result do
+  not establish grounding, every source is checked against allowed and
+  forbidden targets, and tool-choice accuracy remains unchanged.
 - [T1062] Windows model-qualification startup now records and sends one blank
   wakeup line when a live WinPTY session withholds its initial prompt until
   input arrives. Only the typed initial-prompt timeout is recoverable; process
@@ -20,10 +25,10 @@
   scenario to state an explicit agreement verdict, report the shared endpoint,
   and name both source files. Protocols v1 through v4 remain byte-pinned and
   retain their original scoring semantics.
-- [T1053] Model-qualification read grounding now requires a successful
-  scenario-allowed read or search without forbidden-path access, but no longer
-  converts an incorrect first tool choice into a trust failure. Tool-choice
-  accuracy and unnecessary calls remain independently scored.
+- [T1053] Model-qualification read grounding no longer requires every scored
+  decision to be correct. Tool-choice accuracy and unnecessary calls remain
+  independently scored. T1063 completes the separation by replacing the
+  remaining preferred-tool coupling with structured source provenance.
 - [T1052] Windows model-qualification PTY capture now recognizes the exact
   JLine startup prompt that toggles cursor visibility around column positioning.
   Command echoes, partial frames, reordered controls, and altered columns remain

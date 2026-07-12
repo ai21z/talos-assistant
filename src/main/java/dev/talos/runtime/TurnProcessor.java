@@ -794,7 +794,7 @@ public final class TurnProcessor {
         if (result.success()) {
             TurnAuditCapture.recordToolCall(
                     call.toolName(),
-                    auditPathHints(call, path),
+                    auditPathHints(call, path, result),
                     true,
                     "");
         } else {
@@ -851,19 +851,28 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static List<String> auditPathHints(ToolCall call, String fallbackPath) {
+    private static List<String> auditPathHints(ToolCall call, String fallbackPath, ToolResult result) {
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
+        boolean operationPathsResolved = false;
         if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
                 Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
                 if (plan.isPresent()) {
                     List<String> changedPaths = plan.get().changedPaths();
-                    if (!changedPaths.isEmpty()) return changedPaths;
+                    paths.addAll(changedPaths);
+                    operationPathsResolved = !changedPaths.isEmpty();
                 }
             } catch (IllegalArgumentException ignored) {
                 // Invalid operation payloads are handled before successful audit recording.
             }
         }
-        return fallbackPath == null || fallbackPath.isBlank() ? List.of() : List.of(fallbackPath);
+        if (!operationPathsResolved && fallbackPath != null && !fallbackPath.isBlank()) {
+            paths.add(fallbackPath);
+        }
+        if (result != null && result.contentMetadata() != null) {
+            paths.addAll(result.contentMetadata().sourcePaths());
+        }
+        return List.copyOf(paths);
     }
 
     private CheckpointCaptureResult captureCheckpointBeforeMutation(Session session, ToolCall call) {

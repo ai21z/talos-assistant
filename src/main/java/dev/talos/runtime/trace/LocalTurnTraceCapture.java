@@ -187,9 +187,19 @@ public final class LocalTurnTraceCapture {
     }
 
     public static void recordToolExecuted(String phase, ToolCall call, boolean success, String reason) {
+        recordToolExecuted(phase, call, success, reason, List.of());
+    }
+
+    public static void recordToolExecuted(
+            String phase,
+            ToolCall call,
+            boolean success,
+            String reason,
+            List<String> sourcePathHints) {
         Bag bag = HOLDER.get();
         if (bag != null) {
-            bag.builder.event(TurnTraceEvent.toolExecuted(now(), phase, call, success, reason));
+            bag.builder.event(TurnTraceEvent.toolExecuted(
+                    now(), phase, call, success, reason, sourcePathHints));
         }
     }
 

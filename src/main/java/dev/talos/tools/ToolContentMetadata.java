@@ -1,5 +1,8 @@
 package dev.talos.tools;
 
+import java.util.LinkedHashSet;
+import java.util.List;
+
 /**
  * Provenance and handoff metadata for tool output.
  *
@@ -15,7 +18,8 @@ public record ToolContentMetadata(
         boolean modelHandoffAllowed,
         boolean rawArtifactPersistenceAllowed,
         boolean ragIndexAllowed,
-        String decisionReason) {
+        String decisionReason,
+        List<String> sourcePaths) {
 
     public enum ContentPrivacyClass {
         NORMAL,
@@ -43,6 +47,19 @@ public record ToolContentMetadata(
         source = source == null ? ContentSource.TOOL_OUTPUT : source;
         sourcePath = sourcePath == null ? "" : sourcePath;
         decisionReason = decisionReason == null ? "" : decisionReason;
+        sourcePaths = normalizeSourcePaths(sourcePaths);
+    }
+
+    public ToolContentMetadata(
+            ContentPrivacyClass privacyClass,
+            ContentSource source,
+            String sourcePath,
+            boolean modelHandoffAllowed,
+            boolean rawArtifactPersistenceAllowed,
+            boolean ragIndexAllowed,
+            String decisionReason) {
+        this(privacyClass, source, sourcePath, modelHandoffAllowed,
+                rawArtifactPersistenceAllowed, ragIndexAllowed, decisionReason, List.of());
     }
 
     public static ToolContentMetadata normal() {
@@ -53,7 +70,8 @@ public record ToolContentMetadata(
                 true,
                 false,
                 true,
-                "normal tool output");
+                "normal tool output",
+                List.of());
     }
 
     public static ToolContentMetadata extractedDocument(
@@ -103,7 +121,27 @@ public record ToolContentMetadata(
                 false,
                 decisionReason == null || decisionReason.isBlank()
                         ? "command output"
-                        : decisionReason);
+                        : decisionReason,
+                List.of());
+    }
+
+    public static ToolContentMetadata workspaceEvidence(
+            ContentSource source,
+            List<String> sourcePaths,
+            String decisionReason) {
+        List<String> paths = normalizeSourcePaths(sourcePaths);
+        String primary = paths.isEmpty() ? "" : paths.getFirst();
+        return new ToolContentMetadata(
+                ContentPrivacyClass.NORMAL,
+                source,
+                primary,
+                true,
+                false,
+                true,
+                decisionReason == null || decisionReason.isBlank()
+                        ? "workspace evidence"
+                        : decisionReason,
+                paths);
     }
 
     public ToolContentMetadata withModelHandoffAllowed(boolean allowed, String reason) {
@@ -114,6 +152,17 @@ public record ToolContentMetadata(
                 allowed,
                 rawArtifactPersistenceAllowed,
                 ragIndexAllowed,
-                reason == null || reason.isBlank() ? decisionReason : reason);
+                reason == null || reason.isBlank() ? decisionReason : reason,
+                sourcePaths);
+    }
+
+    private static List<String> normalizeSourcePaths(List<String> values) {
+        if (values == null || values.isEmpty()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) continue;
+            out.add(value.strip().replace('\\', '/'));
+        }
+        return List.copyOf(out);
     }
 }

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
@@ -211,6 +212,18 @@ class RetrieveToolTest {
         assertTrue(r.output().contains("CLASS"));
         assertTrue(r.output().contains("src/RetrocatsService.java:1"));
         assertTrue(r.output().indexOf("Symbol signature matches") < r.output().indexOf("Found 1 snippet result"));
+        assertEquals(List.of("src/RetrocatsService.java"), sourcePaths(r));
+    }
+
+    private static List<String> sourcePaths(ToolResult result) {
+        try {
+            Method method = result.contentMetadata().getClass().getMethod("sourcePaths");
+            @SuppressWarnings("unchecked")
+            List<String> paths = (List<String>) method.invoke(result.contentMetadata());
+            return paths;
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Tool content metadata must expose structured source paths", e);
+        }
     }
 }
 

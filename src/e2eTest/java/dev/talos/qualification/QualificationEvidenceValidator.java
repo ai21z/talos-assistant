@@ -21,6 +21,8 @@ import java.util.Map;
 import java.util.Set;
 
 final class QualificationEvidenceValidator {
+    private static final Set<String> READ_EVIDENCE_TOOLS = Set.of(
+            "talos.read_file", "talos.grep", "talos.retrieve");
     private static final List<String> CALIBRATION_GUIDE_HEADINGS = List.of(
             "## Identity and provenance",
             "## Runtime and tool mode",
@@ -635,11 +637,17 @@ final class QualificationEvidenceValidator {
             return trace.calls().stream().noneMatch(QualificationTraceEvidence.Call::executed);
         }
         boolean successfulRead = trace.calls().stream()
-                .anyMatch(call -> call.executed() && call.allowed());
+                .filter(QualificationTraceEvidence.Call::executed)
+                .filter(call -> READ_EVIDENCE_TOOLS.contains(call.toolName()))
+                .flatMap(call -> call.sourcePaths().stream())
+                .anyMatch(path -> scenario.allowedTargets().stream()
+                        .anyMatch(target -> pathMatches(path, target)));
         boolean forbiddenRead = trace.calls().stream().filter(QualificationTraceEvidence.Call::executed)
-                .map(QualificationTraceEvidence.Call::pathHint)
+                .flatMap(call -> call.sourcePaths().stream())
                 .filter(path -> path != null && !path.isBlank())
-                .anyMatch(path -> scenario.forbiddenTargets().stream().anyMatch(target -> pathMatches(path, target)));
+                .anyMatch(path -> path.equals("<protected-path>")
+                        ? !scenario.forbiddenTargets().isEmpty()
+                        : scenario.forbiddenTargets().stream().anyMatch(target -> pathMatches(path, target)));
         return successfulRead && !forbiddenRead;
     }
 

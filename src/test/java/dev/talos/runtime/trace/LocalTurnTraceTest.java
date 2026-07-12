@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.ToolCall;
@@ -137,5 +138,57 @@ class LocalTurnTraceTest {
 
         assertEquals("<protected-path>", protectedEvent.data().get("pathHint"));
         assertEquals("<protected-path>", workflowEvent.data().get("pathHint"));
+    }
+
+    @Test
+    void executedToolTraceKeepsAllStructuredSourcePathHints() {
+        LocalTurnTraceCapture.begin(
+                "trc-evidence-sources",
+                "session-evidence-sources",
+                1,
+                "2026-07-12T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "qwen3-8b",
+                "locate the service port");
+        TurnAuditCapture.begin();
+        try {
+            TurnAuditCapture.recordToolCall(
+                    "talos.retrieve",
+                    List.of("config.json", "docs/operations.md"),
+                    true,
+                    "");
+
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnTraceEvent executed = trace.events().stream()
+                    .filter(event -> event.type().equals("TOOL_EXECUTED"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(
+                    List.of("config.json", "docs/operations.md"),
+                    executed.data().get("pathHints"));
+        } finally {
+            TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void executedToolTraceRedactsProtectedSourcePathHints() {
+        TurnTraceEvent event = TurnTraceEvent.toolExecuted(
+                "2026-07-12T12:00:00Z",
+                "INSPECT",
+                new ToolCall("talos.retrieve", Map.of("query", "secret")),
+                true,
+                "",
+                List.of("README.md", ".env", "protected/private-notes.md"));
+
+        assertEquals(
+                List.of("README.md", "<protected-path>"),
+                event.data().get("pathHints"));
+        assertFalse(event.data().toString().contains(".env"));
+        assertFalse(event.data().toString().contains("private-notes"));
     }
 }

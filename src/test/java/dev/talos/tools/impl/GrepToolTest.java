@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -85,6 +86,7 @@ class GrepToolTest {
         assertTrue(r.success());
         assertTrue(r.output().contains("App.java"));
         assertTrue(r.output().contains("Util.java"));
+        assertEquals(List.of("App.java", "src/Util.java"), sourcePaths(r));
     }
 
     @Test void regexSearch() {
@@ -119,6 +121,18 @@ class GrepToolTest {
         var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "xyznonexistentxyz")), ctx);
         assertTrue(r.success());
         assertTrue(r.output().contains("No matches"));
+        assertEquals(List.of(), sourcePaths(r));
+    }
+
+    private static List<String> sourcePaths(ToolResult result) {
+        try {
+            Method method = result.contentMetadata().getClass().getMethod("sourcePaths");
+            @SuppressWarnings("unchecked")
+            List<String> paths = (List<String>) method.invoke(result.contentMetadata());
+            return paths;
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Tool content metadata must expose structured source paths", e);
+        }
     }
 
     @Test void includeGlobReportsUnsupportedBinaryDocuments() throws IOException {

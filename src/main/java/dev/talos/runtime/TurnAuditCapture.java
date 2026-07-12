@@ -83,7 +83,7 @@ public final class TurnAuditCapture {
             b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason));
             ToolCall synthetic = syntheticCall(name, pathHint);
             if (success) {
-                LocalTurnTraceCapture.recordToolExecuted("", synthetic, true, "");
+                LocalTurnTraceCapture.recordToolExecuted("", synthetic, true, "", pathHints);
             } else {
                 LocalTurnTraceCapture.recordToolCallBlocked("", synthetic, normalizedReason);
             }

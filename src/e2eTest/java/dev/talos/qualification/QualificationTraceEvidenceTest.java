@@ -146,6 +146,29 @@ class QualificationTraceEvidenceTest {
     }
 
     @Test
+    void queryToolExecutionKeepsEveryStructuredEvidenceSource() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        Path trace = writeTrace(List.of(
+                parsed("talos.retrieve", ""),
+                event(
+                        "TOOL_EXECUTED",
+                        "talos.retrieve",
+                        "config.json",
+                        Map.of(
+                                "success", true,
+                                "pathHints", List.of("config.json", "docs/operations.md")))));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertEquals(
+                List.of("config.json", "docs/operations.md"),
+                facts.calls().getFirst().sourcePaths());
+        assertFalse(facts.calls().getFirst().allowed(),
+                "source provenance must not rewrite preferred-tool scoring");
+    }
+
+    @Test
     void ambiguousOrOrphanSuccessfulExecutionsRemainInvalid() throws Exception {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
                 .scenario("F08-contradictory-similar-file-names");

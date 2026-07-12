@@ -3,6 +3,8 @@ package dev.talos.runtime.trace;
 import dev.talos.tools.ToolCall;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,9 +41,21 @@ public record TurnTraceEvent(
     }
 
     public static TurnTraceEvent toolExecuted(String timestamp, String phase, ToolCall call, boolean success, String reason) {
+        return toolExecuted(timestamp, phase, call, success, reason, List.of());
+    }
+
+    public static TurnTraceEvent toolExecuted(
+            String timestamp,
+            String phase,
+            ToolCall call,
+            boolean success,
+            String reason,
+            List<String> sourcePathHints) {
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("success", success);
         if (reason != null && !reason.isBlank()) extra.put("reason", reason.strip());
+        List<String> redactedPaths = redactedPathHints(sourcePathHints);
+        if (!redactedPaths.isEmpty()) extra.put("pathHints", redactedPaths);
         return toolCallEvent("TOOL_EXECUTED", timestamp, phase, call, extra);
     }
 
@@ -100,5 +114,15 @@ public record TurnTraceEvent(
 
     private static String safe(String value) {
         return value == null ? "" : value.strip();
+    }
+
+    private static List<String> redactedPathHints(List<String> values) {
+        if (values == null || values.isEmpty()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) continue;
+            out.add(TraceRedactor.pathHint(value.strip().replace('\\', '/')));
+        }
+        return List.copyOf(out);
     }
 }

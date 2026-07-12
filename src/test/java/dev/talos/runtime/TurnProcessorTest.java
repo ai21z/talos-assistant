@@ -205,6 +205,66 @@ class TurnProcessorTest {
         assertEquals("Echo: hello", result.output());
     }
 
+    @Test
+    void successfulInspectionCarriesStructuredResultSourcesIntoLocalTrace(@TempDir Path workspace) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new TalosTool() {
+            @Override public String name() { return "talos.retrieve"; }
+            @Override public String description() { return "retrieve fixture"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor(
+                        name(),
+                        description(),
+                        null,
+                        ToolRiskLevel.READ_ONLY,
+                        ToolOperationMetadata.retrieve(name(), "WORKSPACE_RETRIEVED"));
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok(
+                        "fixture evidence",
+                        ToolContentMetadata.workspaceEvidence(
+                                ToolContentMetadata.ContentSource.RAG_RETRIEVE,
+                                List.of("config.json", "docs/operations.md"),
+                                "test evidence"));
+            }
+        });
+        var processor = new TurnProcessor(
+                ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        LocalTurnTraceCapture.begin(
+                "trc-t1063",
+                "session-t1063",
+                1,
+                "2026-07-12T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "qwen3-8b",
+                "locate the port");
+        TurnAuditCapture.begin();
+        try {
+            ToolResult result = processor.executeTool(
+                    session,
+                    new ToolCall("talos.retrieve", Map.of("query", "service port")),
+                    ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            var executed = trace.events().stream()
+                    .filter(event -> event.type().equals("TOOL_EXECUTED"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertEquals(
+                    List.of("config.json", "docs/operations.md"),
+                    executed.data().get("pathHints"));
+        } finally {
+            TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     @Test void executeToolReturnsErrorForUnknownTool() {
         var tp = new TurnProcessor(ModeController.defaultController());
         var session = new Session(WS, new Config());

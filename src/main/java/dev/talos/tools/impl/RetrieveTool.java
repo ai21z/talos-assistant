@@ -7,6 +7,7 @@ import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.*;
 
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -78,6 +79,12 @@ public final class RetrieveTool implements TalosTool {
             }
 
             var sb = new StringBuilder();
+            LinkedHashSet<String> sourcePaths = new LinkedHashSet<>();
+            prepared.symbolHits().stream()
+                    .map(SymbolHit::path)
+                    .map(RetrieveTool::baseSourcePath)
+                    .filter(path -> !path.isBlank())
+                    .forEach(sourcePaths::add);
             appendSymbolHits(sb, prepared.symbolHits(), ws);
             sb.append("Found ").append(prepared.snippets().size()).append(" snippet result(s):\n\n");
             int protectedSnippets = 0;
@@ -85,6 +92,8 @@ public final class RetrieveTool implements TalosTool {
 
             for (int i = 0; i < prepared.snippets().size(); i++) {
                 var snippet = prepared.snippets().get(i);
+                String sourcePath = baseSourcePath(snippet.path());
+                if (!sourcePath.isBlank()) sourcePaths.add(sourcePath);
                 sb.append("--- [").append(i + 1).append("] ");
 
                 // Use citation if available, otherwise just path
@@ -114,7 +123,12 @@ public final class RetrieveTool implements TalosTool {
                 sb.append("Some retrieval snippets contained protected markers or secret-like values and were redacted.\n");
             }
 
-            return ToolResult.ok(sb.toString());
+            return ToolResult.ok(
+                    sb.toString(),
+                    ToolContentMetadata.workspaceEvidence(
+                            ToolContentMetadata.ContentSource.RAG_RETRIEVE,
+                            List.copyOf(sourcePaths),
+                            "retrieval result source paths"));
         } catch (Exception e) {
             return ToolResult.fail(ToolError.internal(
                     "Retrieval failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())));
@@ -151,6 +165,13 @@ public final class RetrieveTool implements TalosTool {
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "\n... (truncated)";
+    }
+
+    private static String baseSourcePath(String value) {
+        if (value == null || value.isBlank()) return "";
+        String path = value.strip().replace('\\', '/');
+        int chunk = path.indexOf('#');
+        return chunk < 0 ? path : path.substring(0, chunk);
     }
 }
 

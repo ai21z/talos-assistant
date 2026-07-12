@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -108,6 +109,7 @@ public final class GrepTool implements TalosTool {
         Path root = ctx.workspace();
         boolean privateMode = PrivacyConfigFacts.privateMode(ctx.config());
         List<String> matches = new ArrayList<>();
+        LinkedHashSet<String> matchedPaths = new LinkedHashSet<>();
         List<String> skippedUnsupportedDocuments = new ArrayList<>();
         int[] skippedProtected = {0};
         final PathMatcher matcher = globMatcher;
@@ -151,7 +153,8 @@ public final class GrepTool implements TalosTool {
                     FileCapabilityPolicy.FormatInfo capability =
                             FileCapabilityPolicy.describe(file, ctx.config()).orElse(null);
                     if (capability != null && capability.enabled()) {
-                        searchExtractedFile(file, root, ctx, pattern, matches, maxResults, skippedUnsupportedDocuments);
+                        searchExtractedFile(file, root, ctx, pattern, matches, matchedPaths,
+                                maxResults, skippedUnsupportedDocuments);
                         return matches.size() >= maxResults
                                 ? FileVisitResult.TERMINATE
                                 : FileVisitResult.CONTINUE;
@@ -168,7 +171,7 @@ public final class GrepTool implements TalosTool {
                         return FileVisitResult.CONTINUE;
                     }
 
-                    searchFile(file, root, pattern, matches, maxResults, privateMode);
+                    searchFile(file, root, pattern, matches, matchedPaths, maxResults, privateMode);
                     return matches.size() >= maxResults
                             ? FileVisitResult.TERMINATE
                             : FileVisitResult.CONTINUE;
@@ -185,9 +188,14 @@ public final class GrepTool implements TalosTool {
 
         if (matches.isEmpty()) {
             String safePattern = ProtectedContentSanitizer.sanitizeText(patternStr);
-            return ToolResult.ok("No matches found in searchable non-protected text files for: " + safePattern
-                    + ProtectedContentMessages.protectedContentNote(skippedProtected[0])
-                    + unsupportedDocumentNote(skippedUnsupportedDocuments));
+            return ToolResult.ok(
+                    "No matches found in searchable non-protected text files for: " + safePattern
+                            + ProtectedContentMessages.protectedContentNote(skippedProtected[0])
+                            + unsupportedDocumentNote(skippedUnsupportedDocuments),
+                    ToolContentMetadata.workspaceEvidence(
+                            ToolContentMetadata.ContentSource.GREP,
+                            List.of(),
+                            "grep returned no source paths"));
         }
 
         var sb = new StringBuilder();
@@ -200,7 +208,12 @@ public final class GrepTool implements TalosTool {
         }
         sb.append(ProtectedContentMessages.protectedContentNote(skippedProtected[0]));
         sb.append(unsupportedDocumentNote(skippedUnsupportedDocuments));
-        return ToolResult.ok(sb.toString());
+        return ToolResult.ok(
+                sb.toString(),
+                ToolContentMetadata.workspaceEvidence(
+                        ToolContentMetadata.ContentSource.GREP,
+                        List.copyOf(matchedPaths),
+                        "grep match source paths"));
     }
 
     private static boolean hasTopLevelComma(String glob) {
@@ -233,7 +246,8 @@ public final class GrepTool implements TalosTool {
     }
 
     private static void searchFile(Path file, Path root, Pattern pattern,
-                                   List<String> matches, int maxResults, boolean privateMode) {
+                                   List<String> matches, LinkedHashSet<String> matchedPaths,
+                                   int maxResults, boolean privateMode) {
         try {
             String relPath = root.relativize(file).toString().replace('\\', '/');
             List<String> lines = Files.readAllLines(file);
@@ -242,6 +256,7 @@ public final class GrepTool implements TalosTool {
                 if (pattern.matcher(line).find()) {
                     String safeLine = safeSearchLine(line.stripTrailing(), privateMode);
                     matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
+                    matchedPaths.add(relPath);
                 }
             }
         } catch (IOException ignored) {
@@ -255,6 +270,7 @@ public final class GrepTool implements TalosTool {
             ToolContext ctx,
             Pattern pattern,
             List<String> matches,
+            LinkedHashSet<String> matchedPaths,
             int maxResults,
             List<String> skippedUnsupportedDocuments) {
         String relPath = root.relativize(file).toString().replace('\\', '/');
@@ -272,6 +288,7 @@ public final class GrepTool implements TalosTool {
             if (pattern.matcher(line).find()) {
                 String safeLine = safeExtractedSearchLine(line.stripTrailing(), privateMode, extraction);
                 matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
+                matchedPaths.add(relPath);
             }
         }
     }
