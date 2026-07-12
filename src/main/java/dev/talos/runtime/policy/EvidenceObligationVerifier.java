@@ -107,7 +107,7 @@ public final class EvidenceObligationVerifier {
         boolean listedDirectory = false;
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
             String toolName = canonicalToolName(outcome.toolName());
-            if ("talos.list_dir".equals(toolName)) {
+            if ("talos.list_dir".equals(toolName) && outcome.success() && !outcome.denied()) {
                 listedDirectory = true;
             }
             if (CONTENT_INSPECTION_TOOLS.contains(toolName)) {
@@ -559,7 +559,11 @@ public final class EvidenceObligationVerifier {
 
     private static Result verifyAnyReadOnlyEvidence(List<ToolCallLoop.ToolOutcome> outcomes) {
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (EVIDENCE_TOOLS.contains(canonicalToolName(outcome.toolName()))) {
+            String toolName = canonicalToolName(outcome.toolName());
+            if ("talos.run_command".equals(toolName)) {
+                return Result.satisfied("Command outcome evidence was gathered.");
+            }
+            if (EVIDENCE_TOOLS.contains(toolName) && outcome.success() && !outcome.denied()) {
                 return Result.satisfied("Read-only workspace evidence was gathered.");
             }
         }

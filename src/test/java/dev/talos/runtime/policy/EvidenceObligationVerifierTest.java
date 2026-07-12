@@ -261,6 +261,54 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void listOnlyDoesNotCountFailedDirectoryListingAsEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.LIST_DIRECTORY_ONLY,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", false, false, false,
+                        "", "Listing failed.")));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void workspaceInspectionDoesNotCountFailedGrepAsEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.WORKSPACE_INSPECTION_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.grep", "", false, false, false,
+                        "", "Invalid include glob.", null, ToolError.INVALID_PARAMS)));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void traceVerificationDoesNotCountDeniedReadAsEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "notes.md", false, false, true,
+                        "", "Read denied.", null, ToolError.DENIED)));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void traceVerificationKeepsFailedCommandAsOutcomeEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.run_command", "", false, false, false,
+                        "", "Command exited with code 1.", null, ToolError.INTERNAL_ERROR)));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
     void pathExistenceAcceptsDirectTargetNotFoundReadAsNegativeEvidence() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,

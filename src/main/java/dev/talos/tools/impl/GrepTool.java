@@ -56,7 +56,7 @@ public final class GrepTool implements TalosTool {
                 """
                 {"type":"object","properties":{
                   "pattern":{"type":"string","description":"Text or regex pattern to search for"},
-                  "include":{"type":"string","description":"Single glob for filenames, e.g. *.java or *.{js,css} (optional). Do not pass comma-separated globs."},
+                  "include":{"type":"string","description":"Single filename-only glob, e.g. *.java or *.{js,css} (optional). Do not pass path separators or comma-separated globs."},
                   "max_results":{"type":"integer","description":"Max matching lines (default 50)"},
                   "regex":{"type":"string","description":"'true' to use regex (default plain text)"}
                 },"required":["pattern"]}""",
@@ -94,6 +94,11 @@ public final class GrepTool implements TalosTool {
         // Optional filename glob matcher
         PathMatcher globMatcher = null;
         if (includeGlob != null && !includeGlob.isBlank()) {
+            if (hasPathSeparator(includeGlob)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Invalid include glob: include accepts a filename glob only and cannot contain path separators. "
+                                + "Use *.json instead of /*.json or src/*.json."));
+            }
             if (hasTopLevelComma(includeGlob)) {
                 return ToolResult.fail(ToolError.invalidParams(
                         "Invalid include glob: comma-separated include values are not supported. "
@@ -230,6 +235,10 @@ public final class GrepTool implements TalosTool {
             }
         }
         return false;
+    }
+
+    private static boolean hasPathSeparator(String glob) {
+        return glob != null && (glob.indexOf('/') >= 0 || glob.indexOf('\\') >= 0);
     }
 
     private static String unsupportedDocumentNote(List<String> skippedUnsupportedDocuments) {

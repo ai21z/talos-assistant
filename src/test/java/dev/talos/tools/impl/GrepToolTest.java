@@ -102,6 +102,34 @@ class GrepToolTest {
         assertFalse(r.output().contains("README.md"));
     }
 
+    @Test void pathQualifiedFilenameGlobsAreRejectedInsteadOfSilentlySearchingZeroFiles()
+            throws IOException {
+        Files.writeString(workspace.resolve("config.json"), "{\"port\": 8080}\n");
+
+        for (String include : List.of("/*.json", "src/*.json", "src\\*.json")) {
+            var r = tool.execute(new ToolCall("talos.grep", Map.of(
+                    "pattern", "port",
+                    "include", include)), ctx);
+
+            assertFalse(r.success(), include);
+            assertEquals(ToolError.INVALID_PARAMS, r.error().code(), include);
+            assertTrue(r.error().message().contains("filename"), r.error().message());
+            assertTrue(r.error().message().contains("*.json"), r.error().message());
+        }
+    }
+
+    @Test void filenameOnlyJsonGlobStillFindsRootJsonFile() throws IOException {
+        Files.writeString(workspace.resolve("config.json"), "{\"port\": 8080}\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of(
+                "pattern", "port",
+                "include", "*.json")), ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("config.json"), r.output());
+        assertEquals(List.of("config.json"), sourcePaths(r));
+    }
+
     @Test void commaSeparatedIncludeGlobIsRejectedInsteadOfSilentFalseNegative() throws IOException {
         Files.writeString(workspace.resolve("script.js"),
                 "const button = document.querySelector('.missing-button');\n");

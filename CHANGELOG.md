@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1064] Grep now rejects path-qualified `include` values because the tool's
+  contract applies one glob to filenames only. Failed or denied read/list
+  calls no longer satisfy generic workspace-inspection or list-only evidence
+  gates, while command failures and denials remain truthful outcome evidence.
 - [T1063] Model-qualification read grounding now uses structured source paths
   from successful direct reads, grep matches, and retrieval snippets instead
   of the scenario's preferred-tool score. Query tools with no source result do
