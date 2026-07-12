@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1050] Model-qualification evidence now distinguishes pending tool calls
+  from blocked or failed attempts. A corrected same-tool retry binds to the
+  remaining pending call, while genuine ambiguity and orphan terminal events
+  still fail closed.
 - [T1049] Model-qualification PTY capture now recognizes the exact wrapped
   JLine idle-prompt redraw observed after a completed Qwen3 answer. Matching
   remains anchored and exact, while command echoes, altered cursor movement,

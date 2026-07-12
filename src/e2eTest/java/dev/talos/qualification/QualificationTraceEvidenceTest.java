@@ -112,6 +112,40 @@ class QualificationTraceEvidenceTest {
     }
 
     @Test
+    void blockedAttemptSettlesBeforeSuccessfulSameToolRetry() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A06-technical-find-port");
+        Path trace = writeTrace(List.of(
+                parsed("talos.grep", ""),
+                blocked("talos.grep", ""),
+                parsed("talos.grep", ""),
+                executed("talos.grep", "")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertEquals(2, facts.calls().size());
+        assertFalse(facts.calls().get(0).executed());
+        assertTrue(facts.calls().get(1).executed());
+    }
+
+    @Test
+    void failedExecutionSettlesBeforeSuccessfulSameToolRetry() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A06-technical-find-port");
+        Path trace = writeTrace(List.of(
+                parsed("talos.grep", ""),
+                failed("talos.grep", ""),
+                parsed("talos.grep", ""),
+                executed("talos.grep", "")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertEquals(2, facts.calls().size());
+        assertFalse(facts.calls().get(0).executed());
+        assertTrue(facts.calls().get(1).executed());
+    }
+
+    @Test
     void ambiguousOrOrphanSuccessfulExecutionsRemainInvalid() throws Exception {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
                 .scenario("F08-contradictory-similar-file-names");
@@ -121,11 +155,15 @@ class QualificationTraceEvidenceTest {
                 executed("talos.rename_path", "destination.txt")));
         Path orphan = writeTrace(List.of(
                 executed("talos.rename_path", "destination.txt")));
+        Path orphanBlock = writeTrace(List.of(
+                blocked("talos.rename_path", "destination.txt")));
 
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationTraceEvidence.read(ambiguous, scenario));
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationTraceEvidence.read(orphan, scenario));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(orphanBlock, scenario));
     }
 
     private Path writeTrace(List<Map<String, Object>> events) throws Exception {
@@ -152,6 +190,14 @@ class QualificationTraceEvidenceTest {
 
     private static Map<String, Object> executed(String tool, String path) {
         return event("TOOL_EXECUTED", tool, path, Map.of("success", true));
+    }
+
+    private static Map<String, Object> failed(String tool, String path) {
+        return event("TOOL_EXECUTED", tool, path, Map.of("success", false));
+    }
+
+    private static Map<String, Object> blocked(String tool, String path) {
+        return event("TOOL_CALL_BLOCKED", tool, path, Map.of("reason", "INVALID_PARAMS"));
     }
 
     private static Map<String, Object> approval(String type, String tool, String path) {

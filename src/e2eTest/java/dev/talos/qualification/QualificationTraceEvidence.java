@@ -92,12 +92,19 @@ final class QualificationTraceEvidence {
             if (type.equals("TOOL_CALL_PARSED")) {
                 if (tool.isBlank()) throw new IllegalArgumentException("parsed tool event lacks toolName");
                 calls.add(new MutableCall(tool, pathHint));
-            } else if (type.equals("TOOL_EXECUTED") && event.path("data").path("success").asBoolean(false)) {
-                MutableCall match = firstUnexecuted(calls, tool, pathHint);
+            } else if (type.equals("TOOL_CALL_BLOCKED") && !tool.isBlank()) {
+                MutableCall match = uniquePending(calls, tool, pathHint);
                 if (match == null) {
-                    throw new IllegalArgumentException("successful tool execution lacks a parsed call: " + tool);
+                    throw new IllegalArgumentException("blocked tool call lacks a parsed call: " + tool);
                 }
-                match.executed = true;
+                match.settled = true;
+            } else if (type.equals("TOOL_EXECUTED")) {
+                MutableCall match = uniquePending(calls, tool, pathHint);
+                if (match == null) {
+                    throw new IllegalArgumentException("tool execution lacks a parsed call: " + tool);
+                }
+                match.settled = true;
+                match.executed = event.path("data").path("success").asBoolean(false);
             } else if (type.endsWith("APPROVAL_GRANTED")) {
                 approvalGranted = true;
             } else if (type.endsWith("APPROVAL_DENIED")) {
@@ -143,10 +150,10 @@ final class QualificationTraceEvidence {
         return List.copyOf(out);
     }
 
-    private static MutableCall firstUnexecuted(List<MutableCall> calls, String tool, String pathHint) {
+    private static MutableCall uniquePending(List<MutableCall> calls, String tool, String pathHint) {
         List<MutableCall> candidates = new ArrayList<>();
         for (MutableCall call : calls) {
-            if (!call.executed && call.toolName.equals(tool)) candidates.add(call);
+            if (!call.settled && call.toolName.equals(tool)) candidates.add(call);
         }
         if (candidates.isEmpty()) return null;
 
@@ -194,6 +201,7 @@ final class QualificationTraceEvidence {
     private static final class MutableCall {
         private final String toolName;
         private final String pathHint;
+        private boolean settled;
         private boolean executed;
 
         private MutableCall(String toolName, String pathHint) {
