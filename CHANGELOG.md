@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1066] Windows model-qualification PTY capture now recognizes the exact
+  JLine idle prompt that leaves the cursor visible after a slash command.
+  Prompt echoes, partial frames, reordered controls, and altered columns remain
+  ineligible for turn completion.
 - [T1065] Unnamed workspace file lookups now require source-bearing content
   evidence. Broad negative model answers are replaced with a deterministic,
   source-bounded disclosure and recorded as a runtime trace fact.
