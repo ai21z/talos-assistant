@@ -4,7 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.GgufCacheScanner;
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.List;
@@ -69,9 +69,9 @@ public final class SetModelCommand implements Command {
      */
     static String modelNotFoundMessage(String sanitized, List<ModelRef> downloaded) {
         String matched = matchDownloaded(sanitized, downloaded);
-        LlamaCppModelProfiles.CannedProfile profile = matched == null
+        LlamaCppModelCatalog.Profile profile = matched == null
                 ? null
-                : LlamaCppModelProfiles.profileForGgufFile(matched).orElse(null);
+                : LlamaCppModelCatalog.profileForGgufFile(matched).orElse(null);
         return modelNotFoundMessage(sanitized, downloaded, profile);
     }
 
@@ -83,7 +83,7 @@ public final class SetModelCommand implements Command {
      * profile. Honest about the no-hot-swap reality: this still requires a restart.
      */
     static String modelNotFoundMessage(
-            String sanitized, List<ModelRef> downloaded, LlamaCppModelProfiles.CannedProfile profile) {
+            String sanitized, List<ModelRef> downloaded, LlamaCppModelCatalog.Profile profile) {
         String matched = matchDownloaded(sanitized, downloaded);
         if (matched == null) {
             return modelNotFoundMessage(sanitized);
@@ -104,15 +104,15 @@ public final class SetModelCommand implements Command {
         return sb.toString();
     }
 
-    private static String cannedProfileConfigPatch(LlamaCppModelProfiles.CannedProfile profile) {
+    private static String cannedProfileConfigPatch(LlamaCppModelCatalog.Profile profile) {
         String alias = yamlScalar(profile.alias());
         return "\n  llm:"
                 + "\n    model: \"" + alias + "\""
                 + "\n  engines:"
                 + "\n    llama_cpp:"
                 + "\n      model: \"" + alias + "\""
-                + "\n      hf_repo: \"" + yamlScalar(profile.hfRepo()) + "\""
-                + "\n      hf_file: \"" + yamlScalar(profile.hfFile()) + "\"";
+                + "\n      hf_repo: \"" + yamlScalar(profile.repository()) + "\""
+                + "\n      hf_file: \"" + yamlScalar(profile.artifactFile()) + "\"";
     }
 
     private static String yamlScalar(String value) {

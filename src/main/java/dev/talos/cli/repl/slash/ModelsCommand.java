@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.GgufCacheScanner;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.ArrayList;
@@ -77,8 +78,18 @@ The /profiles command is unrelated: it manages workspace verification profiles, 
         sb.append(title).append(":\n");
         for (ModelRef model : models) {
             sb.append("  ").append(model.backend()).append("/").append(model.name());
+            List<String> notes = new ArrayList<>();
+            if ("llama_cpp".equals(model.backend())) {
+                LlamaCppModelCatalog.byAlias(model.name())
+                        .filter(LlamaCppModelCatalog.Profile::selectable)
+                        .map(profile -> profile.disposition().label())
+                        .ifPresent(notes::add);
+            }
             if (model.note() != null && !model.note().isBlank()) {
-                sb.append("  (").append(model.note()).append(")");
+                notes.add(model.note());
+            }
+            if (!notes.isEmpty()) {
+                sb.append("  (").append(String.join("; ", notes)).append(")");
             }
             sb.append("\n");
         }

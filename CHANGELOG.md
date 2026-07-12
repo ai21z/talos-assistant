@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1015] Managed llama.cpp profiles now have one canonical catalog for exact
+  artifact provenance, runtime defaults, support disposition, and qualification
+  evidence. Setup, wizard downloads, model listing, status, and documentation
+  project that record, while incomplete or stale selectable profiles fail closed.
 - [T1066] Windows model-qualification PTY capture now recognizes the exact
   JLine idle prompt that leaves the cursor visible after a slash command.
   Prompt echoes, partial frames, reordered controls, and altered columns remain

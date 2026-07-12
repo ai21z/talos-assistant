@@ -11,6 +11,7 @@ import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.core.embed.ManagedLlamaCppEmbeddingConfig;
 import dev.talos.core.extract.DocumentExtractionPreflight;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.safety.ProtectedContentSanitizer;
 
@@ -109,6 +110,13 @@ public final class StatusCommand implements Command {
         sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");
         if (!activeRuntime.modelSourceLabel().isBlank()) {
             sb.append(AnsiColor.grey("  ModelFile ")).append(activeRuntime.modelSourceLabel()).append("\n");
+        }
+        if ("llama_cpp".equals(activeRuntime.backend())) {
+            LlamaCppModelCatalog.profileForRuntime(activeRuntime.model(), activeRuntime.modelSourceLabel())
+                    .ifPresent(profile -> {
+                        sb.append(AnsiColor.grey("  Profile   ")).append(profile.disposition().label()).append("\n");
+                        sb.append(AnsiColor.grey("  Evidence  ")).append(profile.evidencePacket()).append("\n");
+                    });
         }
         sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
         sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");

@@ -69,6 +69,8 @@ class TopLevelStatusCmdTest {
 
         assertTrue(output.contains("Context     : 16384"), output);
         assertTrue(output.contains("estimated 16k context from 1536 MiB at 8192 on CUDA lane"), output);
+        assertTrue(output.contains("Profile tier: accepted beta stability"), output);
+        assertTrue(output.contains("Profile proof: legacy:two-model-large-scale-live-audit-0.10.8"), output);
     }
 
     @Test

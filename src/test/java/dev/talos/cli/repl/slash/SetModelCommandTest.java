@@ -2,7 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.runtime.Result;
 import dev.talos.spi.types.ModelRef;
 import org.junit.jupiter.api.Test;
@@ -70,7 +70,7 @@ class SetModelCommandTest {
         // concrete hf_repo/hf_file config edit needs no absolute path, so it survives
         // the render layer's privacy path-redaction (a server_path would show as [path]).
         var downloaded = List.of(ModelRef.of("llama_cpp", "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K"));
-        var profile = LlamaCppModelProfiles.profileForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K").orElseThrow();
+        var profile = LlamaCppModelCatalog.profileForGgufFile("Qwen3.6-14B-A3B-VibeForged-v2-Q6_K").orElseThrow();
 
         String text = SetModelCommand.modelNotFoundMessage(
                 "Qwen3.6-14B-A3B-VibeForged-v2-Q6_K", downloaded, profile);

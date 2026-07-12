@@ -7,7 +7,7 @@ import dev.talos.cli.setup.SetupWizardPlanner;
 import dev.talos.cli.setup.SetupWizardRenderer;
 import dev.talos.cli.setup.SetupWizardRunner;
 import dev.talos.core.Config;
-import dev.talos.engine.llamacpp.LlamaCppModelProfiles;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.engine.llamacpp.ManagedContextSelector;
 import picocli.CommandLine;
 
@@ -20,7 +20,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -74,7 +73,8 @@ public class SetupCmd implements Callable<Integer> {
     @CommandLine.Option(names = "--config", hidden = true)
     Path configPath;
 
-    private static final Map<String, ModelProfile> PROFILES = profiles();
+    private static final Map<String, LlamaCppModelCatalog.Profile> PROFILES =
+            LlamaCppModelCatalog.profiles();
 
     public static String setupSummary() {
         return "Talos uses configurable local model engines. The default path is llama.cpp: "
@@ -89,12 +89,12 @@ public class SetupCmd implements Callable<Integer> {
 
                 Accepted beta stability profiles:
                 """);
-        appendProfiles(out, LlamaCppModelProfiles.SupportTier.ACCEPTED_BETA);
+        appendProfiles(out, LlamaCppModelCatalog.Disposition.ACCEPTED_BETA);
         out.append("""
 
                 Experimental selectable profiles:
                 """);
-        appendProfiles(out, LlamaCppModelProfiles.SupportTier.EXPERIMENTAL_SELECTABLE);
+        appendProfiles(out, LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE);
         out.append("""
 
                 Repeatable configure -> test -> guide recipe:
@@ -138,16 +138,20 @@ public class SetupCmd implements Callable<Integer> {
         return out.toString();
     }
 
-    private static void appendProfiles(StringBuilder out, LlamaCppModelProfiles.SupportTier tier) {
-        for (var profile : LlamaCppModelProfiles.profiles().values()) {
-            if (profile.supportTier() != tier) continue;
+    private static void appendProfiles(StringBuilder out, LlamaCppModelCatalog.Disposition disposition) {
+        for (var profile : LlamaCppModelCatalog.selectableProfiles()) {
+            if (profile.disposition() != disposition) continue;
             out.append("  ")
                     .append(profile.alias())
                     .append("\n")
-                    .append("    source: ").append(profile.hfRepo()).append("\n")
-                    .append("    file: ").append(profile.hfFile()).append("\n")
+                    .append("    source: ").append(profile.repository()).append("\n")
+                    .append("    revision: ").append(profile.revision()).append("\n")
+                    .append("    file: ").append(profile.artifactFile()).append("\n")
+                    .append("    sha256: ").append(profile.artifactSha256()).append("\n")
+                    .append("    license: ").append(profile.license()).append("\n")
                     .append("    tool mode: ").append(profile.toolMode()).append("\n")
                     .append("    guide: ").append(profile.guidePath()).append("\n")
+                    .append("    evidence packet: ").append(profile.evidencePacket()).append("\n")
                     .append("    evidence: ").append(profile.evidenceSummary()).append("\n");
         }
     }
@@ -198,24 +202,25 @@ public class SetupCmd implements Callable<Integer> {
             ManagedContextSelector.Decision contextDecision) {
         String normalizedProfile = normalizeProfile(profileName);
         boolean userOwnedModel = modelPath != null;
-        ModelProfile known = PROFILES.get(normalizedProfile);
+        LlamaCppModelCatalog.Profile known = PROFILES.get(normalizedProfile);
         if (!userOwnedModel && known == null) {
             throw new IllegalArgumentException("Unknown model profile: " + Objects.toString(profileName, ""));
         }
         if (userOwnedModel && known != null && !ggufFileMatchesProfile(modelPath, known)) {
             throw new IllegalArgumentException("Model path " + modelPath.getFileName()
                     + " does not match profile " + known.alias()
-                    + ". Expected GGUF file " + known.hfFile()
+                    + ". Expected GGUF file " + known.artifactFile()
                     + "; use the matching file or use a custom profile name for an unverified local GGUF.");
         }
         String alias = userOwnedModel ? normalizedProfile : known.alias();
-        String hfRepo = userOwnedModel ? "" : known.hfRepo();
-        String hfFile = userOwnedModel ? "" : known.hfFile();
+        String hfRepo = userOwnedModel ? "" : known.repository();
+        String hfFile = userOwnedModel ? "" : known.artifactFile();
         String modelPathValue = userOwnedModel ? yamlPath(modelPath) : "";
         String hfCacheDir = userOwnedModel ? "" : yamlPath(cacheDir == null ? defaultHfCacheDir() : cacheDir);
         boolean nativeCalling = userOwnedModel
                 ? known != null && known.nativeCalling()
                 : known.nativeCalling();
+        List<String> managedServerArgs = known == null ? List.of() : known.runtime().managedServerArgs();
         EmbeddingSetupProfile embedding = embeddingProfile(embedProfile);
         String embeddingYaml = renderEmbeddingYaml(
                 embedding,
@@ -247,7 +252,7 @@ public class SetupCmd implements Callable<Integer> {
                     context: %d
                     context_reason: "%s"
                     jinja: true
-                    server_args: []
+                    server_args: %s
 
                 tools:
                   native_calling: %s
@@ -268,6 +273,7 @@ public class SetupCmd implements Callable<Integer> {
                 Math.max(1, port),
                 context.context(),
                 yamlScalar(context.reason()),
+                renderServerArgs(managedServerArgs),
                 nativeCalling,
                 embeddingYaml.stripTrailing(),
                 vectorsEnabled);
@@ -414,7 +420,7 @@ public class SetupCmd implements Callable<Integer> {
         if (explicitModelPath != null) {
             return new ModelPathSelection(explicitModelPath, false);
         }
-        ModelProfile known = PROFILES.get(normalizedProfile);
+        LlamaCppModelCatalog.Profile known = PROFILES.get(normalizedProfile);
         if (known == null) {
             return new ModelPathSelection(null, false);
         }
@@ -425,14 +431,16 @@ public class SetupCmd implements Callable<Integer> {
         if (known.requiresLocalModelPath()) {
             throw new IllegalArgumentException(known.alias()
                     + " requires a local GGUF before setup can write a startable config. "
-                    + "Pass --model-path " + known.hfFile()
-                    + ", place " + known.hfFile() + " in the standard Hugging Face cache, "
+                    + "Pass --model-path " + known.artifactFile()
+                    + ", place " + known.artifactFile() + " in the standard Hugging Face cache, "
                     + "or run talos setup wizard to download the pinned model.");
         }
         return new ModelPathSelection(null, false);
     }
 
-    private static Path findCachedProfileModel(ModelProfile profile, Path configuredCacheDir) {
+    private static Path findCachedProfileModel(
+            LlamaCppModelCatalog.Profile profile,
+            Path configuredCacheDir) {
         for (Path root : candidateCacheRoots(configuredCacheDir)) {
             Path found = findCachedProfileModel(root, profile);
             if (found != null) return found;
@@ -476,18 +484,18 @@ public class SetupCmd implements Callable<Integer> {
         }
     }
 
-    private static Path findCachedProfileModel(Path root, ModelProfile profile) {
+    private static Path findCachedProfileModel(Path root, LlamaCppModelCatalog.Profile profile) {
         if (root == null || !Files.isDirectory(root)) return null;
         List<Path> bases = new ArrayList<>();
         bases.add(root);
         bases.add(root.resolve("hub"));
         for (Path base : bases) {
-            Path flat = base.resolve(profile.hfFile());
+            Path flat = base.resolve(profile.artifactFile());
             if (Files.isRegularFile(flat)) return flat.toAbsolutePath().normalize();
             Path snapshots = base
-                    .resolve("models--" + profile.hfRepo().replace("/", "--"))
+                    .resolve("models--" + profile.repository().replace("/", "--"))
                     .resolve("snapshots");
-            Path found = findSnapshotFile(snapshots, profile.hfFile());
+            Path found = findSnapshotFile(snapshots, profile.artifactFile());
             if (found != null) return found;
         }
         return null;
@@ -507,22 +515,6 @@ public class SetupCmd implements Callable<Integer> {
         } catch (Exception ignored) {
             return null;
         }
-    }
-
-    private static Map<String, ModelProfile> profiles() {
-        // T902: sourced from the shared LlamaCppModelProfiles registry so the
-        // canned profiles here and the /set model switch guidance never drift.
-        Map<String, ModelProfile> out = new LinkedHashMap<>();
-        for (var p : LlamaCppModelProfiles.profiles().values()) {
-            boolean requiresLocalModelPath = "gpt-oss-20b".equals(p.alias());
-            out.put(p.alias(), new ModelProfile(
-                    p.alias(),
-                    p.hfRepo(),
-                    p.hfFile(),
-                    p.nativeCalling(),
-                    requiresLocalModelPath));
-        }
-        return Map.copyOf(out);
     }
 
     private static EmbeddingSetupProfile embeddingProfile(String value) {
@@ -596,11 +588,11 @@ public class SetupCmd implements Callable<Integer> {
         return normalized;
     }
 
-    private static boolean ggufFileMatchesProfile(Path modelPath, ModelProfile profile) {
+    private static boolean ggufFileMatchesProfile(Path modelPath, LlamaCppModelCatalog.Profile profile) {
         if (modelPath == null || profile == null) return false;
         Path fileName = modelPath.getFileName();
         if (fileName == null) return false;
-        return ggufStem(fileName.toString()).equals(ggufStem(profile.hfFile()));
+        return ggufStem(fileName.toString()).equals(ggufStem(profile.artifactFile()));
     }
 
     private static String ggufStem(String value) {
@@ -626,6 +618,15 @@ public class SetupCmd implements Callable<Integer> {
 
     private static String yamlScalar(String value) {
         return Objects.toString(value, "").replace("\\", "/").replace("\"", "\\\"");
+    }
+
+    private static String renderServerArgs(List<String> arguments) {
+        if (arguments == null || arguments.isEmpty()) return "[]";
+        StringBuilder out = new StringBuilder();
+        for (String argument : arguments) {
+            out.append("\n      - \"").append(yamlScalar(argument)).append("\"");
+        }
+        return out.toString();
     }
 
     private static ManagedContextSelector.Decision managedContextDecision(String profileName, Path serverPath) {
@@ -689,13 +690,6 @@ public class SetupCmd implements Callable<Integer> {
     private static String safeTimestamp() {
         return Instant.now().toString().replace(":", "").replace(".", "");
     }
-
-    private record ModelProfile(
-            String alias,
-            String hfRepo,
-            String hfFile,
-            boolean nativeCalling,
-            boolean requiresLocalModelPath) {}
 
     private record ModelPathSelection(Path path, boolean resolvedFromCache) {}
 

@@ -1,5 +1,6 @@
 package dev.talos.cli.setup;
 
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -22,6 +23,10 @@ class LlamaCppModelManifestTest {
         assertEquals("qwen2.5-coder-14b-instruct-q4_k_m.gguf", qwen.hfFile());
         assertEquals(8_988_110_272L, qwen.sizeBytes());
         assertEquals("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940", qwen.sha256());
+        assertEquals("https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/"
+                        + "d0a692ef765eefbf2fabb130b3cb2e8917e3d225/"
+                        + "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+                qwen.url().toString());
         assertTrue(qwen.guidanceLine().contains("16 GB RAM minimum"), qwen.guidanceLine());
         assertTrue(qwen.guidanceLine().contains("large CPU model"), qwen.guidanceLine());
         assertTrue(qwen.guidanceLine().contains("not the low-resource lane"), qwen.guidanceLine());
@@ -45,5 +50,18 @@ class LlamaCppModelManifestTest {
         assertEquals(userHome.resolve(".talos/models/gguf/qwen2.5-coder-14b/qwen2.5-coder-14b-instruct-q4_k_m.gguf")
                 .toAbsolutePath()
                 .normalize(), path);
+    }
+
+    @Test
+    void everyWizardEntryProjectsCanonicalArtifactFactsWithoutDrift() {
+        for (var entry : LlamaCppModelManifest.acceptedBeta()) {
+            var profile = LlamaCppModelCatalog.byAlias(entry.alias()).orElseThrow();
+            assertEquals(profile.repository(), entry.hfRepo(), entry.alias());
+            assertEquals(profile.revision(), entry.revision(), entry.alias());
+            assertEquals(profile.artifactFile(), entry.hfFile(), entry.alias());
+            assertEquals(profile.artifactSha256(), entry.sha256(), entry.alias());
+            assertEquals(profile.artifactSizeBytes(), entry.sizeBytes(), entry.alias());
+            assertEquals(profile.disposition().label(), entry.supportLevel(), entry.alias());
+        }
     }
 }

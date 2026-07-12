@@ -178,6 +178,26 @@ class InfraCommandsTest {
             assertFalse(text.contains("Embed     bge-m3"), text);
         }
 
+        @Test void verbose_projects_canonical_profile_tier_and_evidence() {
+            Config cfg = new Config(null);
+            cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                    "transport", "engine",
+                    "default_backend", "llama_cpp",
+                    "model", "qwen2.5-coder-14b")));
+            cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                    "llama_cpp", new LinkedHashMap<>(Map.of(
+                            "mode", "managed",
+                            "host", "http://127.0.0.1",
+                            "port", 18116,
+                            "model", "qwen2.5-coder-14b")))));
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
+
+            assertTrue(text.contains("Profile   accepted beta stability"), text);
+            assertTrue(text.contains("Evidence  legacy:two-model-large-scale-live-audit-0.10.8"), text);
+        }
+
         @Test void verboseShowsManagedEmbeddingHostAndRetrievalMode() {
             Config cfg = new Config(null);
             cfg.data.put("llm", new LinkedHashMap<>(Map.of(

@@ -355,6 +355,7 @@ class PublicInstallPackagingContractTest {
     @DisplayName("setup wizard owns pinned engine and model manifests with explicit model download prompt")
     void setupWizardOwnsPinnedEngineAndExplicitModelDownloadManifest() throws Exception {
         String engineManifest = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineManifest.java");
+        String modelCatalog = read("src/main/java/dev/talos/engine/llamacpp/LlamaCppModelCatalog.java");
         String modelManifest = read("src/main/java/dev/talos/cli/setup/LlamaCppModelManifest.java");
         String installer = read("src/main/java/dev/talos/cli/setup/LlamaCppEngineInstaller.java");
         String runner = read("src/main/java/dev/talos/cli/setup/SetupWizardRunner.java");
@@ -366,14 +367,16 @@ class PublicInstallPackagingContractTest {
                 "manifest must pin the artifact SHA-256");
         assertFalse(engineManifest.contains("releases/latest"),
                 "manifest must not follow upstream latest");
-        assertTrue(modelManifest.contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
-                "model manifest must pin the accepted beta Qwen GGUF filename");
-        assertTrue(modelManifest.contains("gpt-oss-20b-mxfp4.gguf"),
-                "model manifest must pin the accepted beta GPT-OSS GGUF filename");
-        assertTrue(modelManifest.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"),
-                "model manifest must pin Qwen SHA-256");
-        assertTrue(modelManifest.contains("be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935"),
-                "model manifest must pin GPT-OSS SHA-256");
+        assertTrue(modelManifest.contains("LlamaCppModelCatalog.selectableProfiles()"),
+                "wizard downloads must derive from the canonical model catalog");
+        assertTrue(modelCatalog.contains("qwen2.5-coder-14b-instruct-q4_k_m.gguf"),
+                "canonical catalog must pin the accepted beta Qwen GGUF filename");
+        assertTrue(modelCatalog.contains("gpt-oss-20b-mxfp4.gguf"),
+                "canonical catalog must pin the accepted beta GPT-OSS GGUF filename");
+        assertTrue(modelCatalog.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"),
+                "canonical catalog must pin Qwen SHA-256");
+        assertTrue(modelCatalog.contains("be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935"),
+                "canonical catalog must pin GPT-OSS SHA-256");
         assertTrue(installer.contains("SHA-256 mismatch"),
                 "installer must fail closed on checksum mismatch");
         assertTrue(runner.contains("Install this pinned llama.cpp engine now? [y/N]"),

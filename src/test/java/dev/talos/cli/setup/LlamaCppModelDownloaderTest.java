@@ -98,6 +98,7 @@ class LlamaCppModelDownloaderTest {
         return new LlamaCppModelManifest.Entry(
                 alias,
                 "owner/repo",
+                "0123456789abcdef0123456789abcdef01234567",
                 file,
                 sha256,
                 123L,

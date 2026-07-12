@@ -67,6 +67,9 @@ class SetupCmdTest {
         assertTrue(help.contains("Accepted beta stability profiles:"), help);
         assertTrue(help.contains("Experimental selectable profiles:"), help);
         assertTrue(help.contains("qwen2.5-coder-14b"));
+        assertTrue(help.contains("d0a692ef765eefbf2fabb130b3cb2e8917e3d225"), help);
+        assertTrue(help.contains("c1e659736d89ac1065fb495330fb824d94001974a4bfa78e7270e43476a8d940"), help);
+        assertTrue(help.contains("legacy:two-model-large-scale-live-audit-0.10.8"), help);
         assertTrue(help.contains("gpt-oss-20b"));
         assertTrue(help.contains("qwen36vf-q6k"));
         assertTrue(help.contains("deepseek-v2lite-q4km"));

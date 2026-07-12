@@ -7,6 +7,7 @@ import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.LlamaCppContextArgs;
 import dev.talos.engine.llamacpp.LlamaCppContextLimits;
+import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.Health;
 import org.apache.lucene.index.DirectoryReader;
@@ -138,6 +139,7 @@ public class TopLevelStatusCmd implements Runnable {
         if (!runtime.modelSourceLabel().isBlank()) {
             out.append("  Model file  : ").append(runtime.modelSourceLabel()).append("\n");
         }
+        appendProfileEvidence(out, runtime);
         appendLlamaCppContext(out, cfg, runtime.backend());
         out.append("  Embeddings  : ").append(runtime.embeddingLabel()).append("\n");
 
@@ -159,6 +161,15 @@ public class TopLevelStatusCmd implements Runnable {
             out.append("  Health      : DOWN - ").append(e.getMessage()).append("\n");
         }
         return out.toString();
+    }
+
+    private static void appendProfileEvidence(StringBuilder out, EngineRuntimeConfig runtime) {
+        if (!"llama_cpp".equals(runtime.backend())) return;
+        LlamaCppModelCatalog.profileForRuntime(runtime.model(), runtime.modelSourceLabel())
+                .ifPresent(profile -> {
+                    out.append("  Profile tier: ").append(profile.disposition().label()).append("\n");
+                    out.append("  Profile proof: ").append(profile.evidencePacket()).append("\n");
+                });
     }
 
     private static void appendLlamaCppContext(StringBuilder out, Config cfg, String backend) {

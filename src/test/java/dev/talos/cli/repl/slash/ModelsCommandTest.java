@@ -25,6 +25,7 @@ class ModelsCommandTest {
         int compat = text.indexOf("compat/custom-chat");
 
         assertTrue(text.contains("Configured/selectable models"), text);
+        assertTrue(text.contains("accepted beta stability"), text);
         assertFalse(text.contains("Installed models"), text);
         assertFalse(text.contains("ready now"), text);
         assertTrue(text.contains("verify with talos doctor --start"), text);
