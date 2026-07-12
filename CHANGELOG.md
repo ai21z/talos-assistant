@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
+- [T1062] Windows model-qualification startup now records and sends one blank
+  wakeup line when a live WinPTY session withholds its initial prompt until
+  input arrives. Only the typed initial-prompt timeout is recoverable; process
+  exit, arbitrary failures, and a second timeout still produce failed evidence.
 - [T1061] Windows model-qualification PTY capture now applies the same bounded
   idle-prompt settle rule before the initial scenario input as it does between
-  diagnostics. Raw idle waiting is centralized so startup output cannot remain
-  buffered until cleanup while exact prompt matching and fixed deadlines remain
-  unchanged.
+  diagnostics. Raw idle waiting is centralized so recognized startup output is
+  stable before scenario input while exact prompt matching and fixed deadlines
+  remain unchanged.
 - [T1060] Windows model-qualification diagnostics now leave one bounded settle
   interval after each recognized idle prompt before sending the next PTY input.
   This prevents `/last trace` from remaining buffered behind prompt-debug output

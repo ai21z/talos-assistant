@@ -25,6 +25,7 @@ public final class QualificationPtyCaptureMain {
             .enable(SerializationFeature.INDENT_OUTPUT);
     private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
     private static final Duration STARTUP_WAIT = Duration.ofSeconds(30);
+    private static final Duration STARTUP_RECOVERY_WAIT = Duration.ofSeconds(10);
     private static final Duration TURN_WAIT = Duration.ofSeconds(330);
     private static final Duration SLASH_WAIT = Duration.ofSeconds(30);
     private static final String PROMPT = QualificationPtyOutcomeRace.PROMPT_MARKER;
@@ -134,7 +135,7 @@ public final class QualificationPtyCaptureMain {
         try {
             startMonitor();
             startTalos();
-            waitForSettledIdlePrompt(0, STARTUP_WAIT);
+            waitForStartupIdlePrompt();
             drainOutput();
 
             addInput("scenario-prompt");
@@ -326,6 +327,21 @@ public final class QualificationPtyCaptureMain {
         throw new IllegalStateException("timed out waiting for " + marker);
     }
 
+    private void waitForStartupIdlePrompt() throws Exception {
+        QualificationPtyStartupHandshake.await(
+                timeout -> waitForSettledIdlePrompt(0, timeout),
+                () -> {
+                    if (talos == null || !talos.isAlive()) {
+                        throw new IllegalStateException(
+                                "Talos exited before the startup wakeup could be sent");
+                    }
+                    addInput("startup-wakeup");
+                    writeLine("");
+                },
+                STARTUP_WAIT,
+                STARTUP_RECOVERY_WAIT);
+    }
+
     private int waitForIdlePrompt(int from, Duration timeout) throws Exception {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
@@ -339,7 +355,7 @@ public final class QualificationPtyCaptureMain {
             Thread.sleep(25L);
         }
         terminalOutcome = "timeout-while-waiting-for-idle-prompt";
-        throw new IllegalStateException("timed out waiting for idle prompt");
+        throw new QualificationPtyIdlePromptTimeoutException();
     }
 
     private void waitForSettledIdlePrompt(int from, Duration timeout) throws Exception {

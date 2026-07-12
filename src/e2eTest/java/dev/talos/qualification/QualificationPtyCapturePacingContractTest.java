@@ -18,8 +18,20 @@ class QualificationPtyCapturePacingContractTest {
         String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
         String runMethod = between(source, "private void run()", "private String awaitApprovalOrTerminal");
 
-        assertTrue(runMethod.contains("waitForSettledIdlePrompt(0, STARTUP_WAIT);"), runMethod);
+        assertTrue(runMethod.contains("waitForStartupIdlePrompt();"), runMethod);
         assertFalse(runMethod.contains("waitForIdlePrompt(0, STARTUP_WAIT);"), runMethod);
+    }
+
+    @Test
+    void startupWakeupIsRecordedAndBlank() throws Exception {
+        String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
+        String startupMethod = between(
+                source, "private void waitForStartupIdlePrompt()", "private int waitForIdlePrompt");
+
+        assertTrue(startupMethod.contains("addInput(\"startup-wakeup\");"), startupMethod);
+        assertTrue(startupMethod.contains("writeLine(\"\");"), startupMethod);
+        assertFalse(startupMethod.contains("writeLine(prompt)"), startupMethod);
+        assertFalse(startupMethod.contains("addInput(\"scenario-prompt\")"), startupMethod);
     }
 
     @Test
