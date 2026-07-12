@@ -342,6 +342,40 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void wrongFirstToolWithLaterSuccessfulReadRemainsGrounded() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(4)
+                .scenario("F20-context-compare-code-and-docs");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f20",
+                "qwen3-8b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(
+                        new QualificationTraceEvidence.Call("talos.list_dir", ".", true, false),
+                        new QualificationTraceEvidence.Call(
+                                "talos.read_file", "docs/operations.md", true, true)),
+                List.of(new QualificationRecords.DecisionResult("compare-read", false)),
+                false,
+                false);
+
+        assertTrue(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace),
+                "tool-choice accuracy must not replace same-turn read grounding");
+
+        QualificationTraceEvidence.Facts ungrounded = new QualificationTraceEvidence.Facts(
+                trace.traceId(), trace.modelId(), trace.taskType(), trace.mutationAllowed(),
+                trace.actionObligation(), trace.terminalState(), trace.outcomeStatus(),
+                trace.verificationStatus(),
+                List.of(new QualificationTraceEvidence.Call("talos.list_dir", ".", true, false)),
+                trace.decisions(), false, false);
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, ungrounded),
+                "an unrelated discovery call alone is not read grounding");
+    }
+
+    @Test
     void readOnlyScenarioWithMutationCapableTraceContractFailsClosed() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);

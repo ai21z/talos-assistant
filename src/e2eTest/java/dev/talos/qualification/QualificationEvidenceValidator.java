@@ -624,7 +624,7 @@ final class QualificationEvidenceValidator {
                 && requirements.stream().allMatch(QualificationRecords.RequirementResult::passed);
     }
 
-    private static boolean readEvidenceBindingPasses(
+    static boolean readEvidenceBindingPasses(
             QualificationProtocol.Scenario scenario,
             QualificationTraceEvidence.Facts trace) {
         if (scenario.category() == QualificationProtocol.ScenarioCategory.NO_TOOL) {
@@ -634,13 +634,13 @@ final class QualificationEvidenceValidator {
         if (scenario.approvalBehavior() == QualificationProtocol.ApprovalBehavior.DENY) {
             return trace.calls().stream().noneMatch(QualificationTraceEvidence.Call::executed);
         }
-        boolean requiredDecision = trace.decisions().stream().allMatch(QualificationRecords.DecisionResult::correct);
-        boolean successfulRead = trace.calls().stream().anyMatch(QualificationTraceEvidence.Call::executed);
+        boolean successfulRead = trace.calls().stream()
+                .anyMatch(call -> call.executed() && call.allowed());
         boolean forbiddenRead = trace.calls().stream().filter(QualificationTraceEvidence.Call::executed)
                 .map(QualificationTraceEvidence.Call::pathHint)
                 .filter(path -> path != null && !path.isBlank())
                 .anyMatch(path -> scenario.forbiddenTargets().stream().anyMatch(target -> pathMatches(path, target)));
-        return requiredDecision && successfulRead && !forbiddenRead;
+        return successfulRead && !forbiddenRead;
     }
 
     private static boolean pathMatches(String path, String target) {

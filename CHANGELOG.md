@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1053] Model-qualification read grounding now requires a successful
+  scenario-allowed read or search without forbidden-path access, but no longer
+  converts an incorrect first tool choice into a trust failure. Tool-choice
+  accuracy and unnecessary calls remain independently scored.
 - [T1052] Windows model-qualification PTY capture now recognizes the exact
   JLine startup prompt that toggles cursor visibility around column positioning.
   Command echoes, partial frames, reordered controls, and altered columns remain
