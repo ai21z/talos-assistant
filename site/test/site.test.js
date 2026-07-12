@@ -1050,7 +1050,8 @@ describe("Talos in-site documentation contract", () => {
     for (const required of [
       "Where to get `llama-server`",
       "https://github.com/ggml-org/llama.cpp/releases/tag/b9860",
-      "llama-b9860-bin-win-cpu-x64.zip",
+      "https://github.com/ggml-org/llama.cpp/releases/tag/b9918",
+      "llama-b9918-bin-win-cpu-x64.zip",
       "llama-b9860-bin-ubuntu-x64.tar.gz",
       "Ubuntu x64 (CPU)",
       "Windows x64 (CPU)",
