@@ -1,11 +1,13 @@
 package dev.talos.qualification;
 
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Objects;
 
 /** Anchored approval-versus-terminal race used by the Windows qualification PTY driver. */
 final class QualificationPtyOutcomeRace {
     static final String APPROVAL_MARKER = "Allow?";
+    static final String APPROVAL_CARD_MARKER = "approval required";
     static final String PROMPT_MARKER = "talos [auto] >";
     static final String IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[16G";
     static final String CURSOR_RESET_IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[1G\u001B[16G";
@@ -73,6 +75,15 @@ final class QualificationPtyOutcomeRace {
             int from,
             Duration timeout,
             Waiter waiter) throws Exception {
+        return await(probe, from, timeout, waiter, false);
+    }
+
+    private static Outcome await(
+            Probe probe,
+            int from,
+            Duration timeout,
+            Waiter waiter,
+            boolean requireFreshApprovalCard) throws Exception {
         Objects.requireNonNull(probe, "probe");
         Objects.requireNonNull(timeout, "timeout");
         Objects.requireNonNull(waiter, "waiter");
@@ -84,7 +95,8 @@ final class QualificationPtyOutcomeRace {
         while (true) {
             Snapshot snapshot = Objects.requireNonNull(probe.snapshot(), "probe snapshot");
             int safeFrom = Math.min(from, snapshot.text().length());
-            int approval = snapshot.text().indexOf(APPROVAL_MARKER, safeFrom);
+            int approval = approvalPromptIndex(
+                    snapshot.text(), safeFrom, requireFreshApprovalCard);
             int prompt = idlePromptIndex(snapshot.text(), safeFrom);
 
             if (approval >= 0 && (prompt < 0 || approval < prompt)) {
@@ -121,7 +133,12 @@ final class QualificationPtyOutcomeRace {
         int approvalCount = 0;
         while (true) {
             long remainingNanos = Math.max(0L, deadline - waiter.nanoTime());
-            Outcome outcome = await(probe, anchor, Duration.ofNanos(remainingNanos), waiter);
+            Outcome outcome = await(
+                    probe,
+                    anchor,
+                    Duration.ofNanos(remainingNanos),
+                    waiter,
+                    approvalCount > 0);
             if (outcome.kind() != Kind.APPROVAL) {
                 return new SequenceOutcome(outcome, approvalCount);
             }
@@ -149,6 +166,25 @@ final class QualificationPtyOutcomeRace {
                 return found;
             }
             cursor = suffix;
+        }
+        return -1;
+    }
+
+    private static int approvalPromptIndex(
+            String text,
+            int from,
+            boolean requireFreshApprovalCard) {
+        String value = text == null ? "" : text;
+        int safeFrom = Math.max(0, Math.min(from, value.length()));
+        int cursor = safeFrom;
+        String searchable = requireFreshApprovalCard ? value.toLowerCase(Locale.ROOT) : value;
+        while (cursor < value.length()) {
+            int approval = value.indexOf(APPROVAL_MARKER, cursor);
+            if (approval < 0) return -1;
+            if (!requireFreshApprovalCard) return approval;
+            int card = searchable.lastIndexOf(APPROVAL_CARD_MARKER, approval);
+            if (card >= safeFrom) return approval;
+            cursor = approval + APPROVAL_MARKER.length();
         }
         return -1;
     }

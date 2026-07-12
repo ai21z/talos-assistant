@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1048] Model-qualification PTY capture now distinguishes a fresh approval
+  card from JLine's echo of an answered `Allow?` line. Echoes no longer create
+  phantom denials or approval evidence, while genuine later approval cards
+  retain T1047's bounded, ordered handling.
 - [T1047] Windows model-qualification PTY capture now handles repeated
   approval prompts under one absolute turn deadline. Denial, approve-once,
   session-allow, and unexpected-approval behavior remain conservative and

@@ -233,6 +233,34 @@ class QualificationPtyOutcomeRaceTest {
                 fixture.responses().size());
     }
 
+    @Test
+    void answeredApprovalEchoDoesNotCountAsAnotherPrompt() throws Exception {
+        StringBuilder text = new StringBuilder("approval required\r\nAllow?");
+        List<String> labels = new ArrayList<>();
+        List<String> responses = new ArrayList<>();
+
+        QualificationPtyOutcomeRace.SequenceOutcome result =
+                QualificationPtyOutcomeRace.awaitSequence(
+                        "APPROVE_ONCE",
+                        () -> snapshot(text.toString(), true, 0),
+                        0,
+                        Duration.ofSeconds(1),
+                        new FakeWaiter(),
+                        (action, ordinal) -> {
+                            labels.add(action.eventLabel());
+                            responses.add(action.response());
+                            int anchor = text.length();
+                            text.append("\r\nAllow? [y=yes, a=yes for session, N=no] y\r\n")
+                                    .append(IDLE_PROMPT);
+                            return anchor;
+                        });
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, result.outcome().kind());
+        assertEquals(1, result.approvalCount());
+        assertEquals(List.of("approval-once"), labels);
+        assertEquals(List.of("y"), responses);
+    }
+
     private static void assertAction(String behavior, String label, String response) {
         QualificationPtyOutcomeRace.ApprovalAction action =
                 QualificationPtyOutcomeRace.actionFor(behavior,
@@ -308,7 +336,7 @@ class QualificationPtyOutcomeRaceTest {
                         responses.add(action.response());
                         int anchor = text.length();
                         if (handled.incrementAndGet() < approvals) {
-                            text.append("\r\ndenied\r\nAllow?");
+                            text.append("\r\ndenied\r\napproval required\r\nAllow?");
                         } else {
                             text.append("\r\ndone\r\n").append(IDLE_PROMPT);
                         }
@@ -345,7 +373,7 @@ class QualificationPtyOutcomeRaceTest {
             if (nextApproval < approvalAtNanos.length
                     && waiter.nanos >= approvalAtNanos[nextApproval]
                     && !text.toString().endsWith("Allow?")) {
-                text.append("Allow?");
+                text.append("approval required\r\nAllow?");
             }
             return QualificationPtyOutcomeRaceTest.snapshot(text.toString(), true, 0);
         }
