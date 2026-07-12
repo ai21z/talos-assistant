@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1054] Model-qualification protocol v5 now requires the source-comparison
+  scenario to state an explicit agreement verdict, report the shared endpoint,
+  and name both source files. Protocols v1 through v4 remain byte-pinned and
+  retain their original scoring semantics.
 - [T1053] Model-qualification read grounding now requires a successful
   scenario-allowed read or search without forbidden-path access, but no longer
   converts an incorrect first tool choice into a trust failure. Tool-choice

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 
 final class QualificationProtocol {
-    static final int VERSION = 4;
+    static final int VERSION = 5;
     static final String BANK_SCHEMA = "talos.modelQualification.scenarioBank";
     static final String FIXTURE_SCHEMA = "talos.modelQualification.fixture";
 

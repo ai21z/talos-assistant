@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 final class QualificationScenarioBank {
-    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4);
+    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4, 5);
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
 

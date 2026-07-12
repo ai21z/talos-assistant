@@ -80,7 +80,7 @@ class ModelQualificationMainTest {
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path campaign = packet.root().resolve("campaign.json");
         String changed = Files.readString(campaign, StandardCharsets.UTF_8)
-                .replace("\"protocolVersion\" : 4", "\"protocolVersion\" : 99");
+                .replace("\"protocolVersion\" : 5", "\"protocolVersion\" : 99");
         Files.writeString(campaign, changed, StandardCharsets.UTF_8);
 
         Capture capture = run("validate", "--root", packet.root().toString());

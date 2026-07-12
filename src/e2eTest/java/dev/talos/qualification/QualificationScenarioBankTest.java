@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QualificationScenarioBankTest {
 
     @Test
-    void historicalV1V2AndV3ResourceBytesRemainPinned() throws Exception {
+    void historicalV1ThroughV4ResourceBytesRemainPinned() throws Exception {
         Map<String, String> expected = Map.ofEntries(
                 Map.entry("model-qualification/banks/admission-v1.json",
                         "54cd902f28399c09d9d52560db82d7dab7f5c6db7f3ebb30c43244ef99923a76"),
@@ -30,35 +30,82 @@ class QualificationScenarioBankTest {
                         "71f3093f5d44c14b59ac758cfaaecdf7837769c31c87c3d49a56fe6da6d3ff7c"),
                 Map.entry("model-qualification/banks/full-v3.json",
                         "956d89629b95dd63c7bfda61cea184fdb80f04c71a4c20284c01b71805fbd545"),
+                Map.entry("model-qualification/banks/admission-v4.json",
+                        "606726bf72f6e2a3f31d20cc46c8b41654d70aa42c06151c81f4a3be76909a6f"),
+                Map.entry("model-qualification/banks/full-v4.json",
+                        "ccdba9307ea8d07c5b4e54ece9a295da0963363222bd664e8f50e6173ea76020"),
                 Map.entry("model-qualification/fixtures/basic-workspace-v1.json",
                         "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689"),
                 Map.entry("model-qualification/fixtures/basic-workspace-v2.json",
                         "79d5fe7950f8931c51acec39efc208eb573658f5ee7700971289f472db9d3e96"),
                 Map.entry("model-qualification/fixtures/basic-workspace-v3.json",
                         "8a425ad1de1cdcd641407e6e00862744bcc7f11f819fab6f4af938a76ae2aaa7"),
+                Map.entry("model-qualification/fixtures/basic-workspace-v4.json",
+                        "31bc4929dfd5865b801ba73f46c74fee198102aec4ce47e14c77f4c68fc6cdae"),
                 Map.entry("model-qualification/fixtures/context-workspace-v1.json",
                         "49424edf18c5d9944a7286ee445f48e54485cb605322e69aeba6551b0f18b7b4"),
                 Map.entry("model-qualification/fixtures/context-workspace-v2.json",
                         "652ea2c65d4651342d17ba5389d0dae725329649ceca64abdd85ff1cff2a23c6"),
                 Map.entry("model-qualification/fixtures/context-workspace-v3.json",
                         "19852c9e8895827b5d9aead01df3367900ff41787d34f060ec47eeba6c86f39d"),
+                Map.entry("model-qualification/fixtures/context-workspace-v4.json",
+                        "e4708699fb0aca99518a811503ee235a021f76c2d6a18fba00bb004f21ce2530"),
                 Map.entry("model-qualification/fixtures/privacy-workspace-v1.json",
                         "cc24ef90dc8e1174934651e95e98e79a7403e10e5d284965ea47c36ac373d86f"),
                 Map.entry("model-qualification/fixtures/privacy-workspace-v2.json",
                         "0b3aee1f0cca36823bd08f0adf05765e35f1a3a04ff0809fe90185be4ea97bf6"),
                 Map.entry("model-qualification/fixtures/privacy-workspace-v3.json",
                         "ccc9c8496c2278bcbf3c380df21a216b5765c702fa8c5dd5da1eea165b8dface"),
+                Map.entry("model-qualification/fixtures/privacy-workspace-v4.json",
+                        "ff1895c039041bc4b7e874cea643645a08ebe3366c25eee216572c68564e4bbf"),
                 Map.entry("model-qualification/fixtures/web-workspace-v1.json",
                         "043a02de8972adb77e05bee448ffa80d3e0e868341b7b0cc1b3b8b4a64d7c666"),
                 Map.entry("model-qualification/fixtures/web-workspace-v2.json",
                         "d66c74e4295af54a05eb81a422d3300ce7d1ca0bdbdfa4da15754004c6028592"),
                 Map.entry("model-qualification/fixtures/web-workspace-v3.json",
-                        "fb63451517715763426d6dc779f9b6165eb258ce4793fd64f009ca42f7884b87"));
+                        "fb63451517715763426d6dc779f9b6165eb258ce4793fd64f009ca42f7884b87"),
+                Map.entry("model-qualification/fixtures/web-workspace-v4.json",
+                        "536612d8d076f7f2654328cf5d3fe88de6ae0518ca5265b8537094ad41c79bf4"));
 
         for (Map.Entry<String, String> entry : expected.entrySet()) {
             try (var input = getClass().getClassLoader().getResourceAsStream(entry.getKey())) {
                 assertTrue(input != null, entry.getKey());
                 assertEquals(entry.getValue(), QualificationScenarioBank.sha256(input.readAllBytes()), entry.getKey());
+            }
+        }
+    }
+
+    @Test
+    void v5TightensOnlyTheF20AgreementContract() {
+        QualificationScenarioBank.Catalog v4 = QualificationScenarioBank.load(4);
+        QualificationScenarioBank.Catalog v5 = QualificationScenarioBank.load(5);
+        QualificationProtocol.Scenario oldF20 = v4.scenario("F20-context-compare-code-and-docs");
+        QualificationProtocol.Scenario newF20 = v5.scenario("F20-context-compare-code-and-docs");
+
+        assertEquals("agree", oldF20.atomicRequirements().getFirst().expected());
+        assertTrue(newF20.prompt().contains("Verdict: AGREE"));
+        assertEquals(List.of(
+                        "agreement-verdict", "disagreement-verdict", "path", "docs-source", "code-source"),
+                newF20.atomicRequirements().stream()
+                        .map(QualificationProtocol.AtomicRequirement::id)
+                        .toList());
+
+        for (QualificationProtocol.Scenario before : Stream.concat(
+                v4.admission().scenarios().stream(), v4.full().scenarios().stream()).toList()) {
+            QualificationProtocol.Scenario after = v5.scenario(before.id());
+            assertEquals(before.bank(), after.bank(), before.id());
+            assertEquals(before.archetype(), after.archetype(), before.id());
+            assertEquals(before.category(), after.category(), before.id());
+            assertEquals(before.approvalBehavior(), after.approvalBehavior(), before.id());
+            assertEquals(before.expectedTerminalStates(), after.expectedTerminalStates(), before.id());
+            assertEquals(before.allowedTargets(), after.allowedTargets(), before.id());
+            assertEquals(before.forbiddenTargets(), after.forbiddenTargets(), before.id());
+            assertEquals(before.expectedDecisions(), after.expectedDecisions(), before.id());
+            assertEquals(v4.fixtures().get(before.fixture()).manifest().files(),
+                    v5.fixtures().get(after.fixture()).manifest().files(), before.id());
+            if (!before.id().equals("F20-context-compare-code-and-docs")) {
+                assertEquals(before.prompt(), after.prompt(), before.id());
+                assertEquals(before.atomicRequirements(), after.atomicRequirements(), before.id());
             }
         }
     }
@@ -157,7 +204,7 @@ class QualificationScenarioBankTest {
     void defaultBankHasFrozenAdmissionAndFullShapes() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
 
-        assertEquals(4, catalog.protocolVersion());
+        assertEquals(5, catalog.protocolVersion());
         assertEquals(12, catalog.admission().scenarios().size());
         assertEquals(24, catalog.full().scenarios().size());
         assertEquals(8, catalog.full().scenarios().stream()
@@ -211,7 +258,7 @@ class QualificationScenarioBankTest {
     @Test
     void privacyFixtureUsesCanariesRecognizedByTheRuntimeScanner() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
-        var files = catalog.fixtures().get("privacy-workspace-v4.json").manifest().files();
+        var files = catalog.fixtures().get("privacy-workspace-v5.json").manifest().files();
 
         assertTrue(ProtectedContentPolicy.containsRawCanary(files.get(".env")),
                 "the protected-file canary must use Talos's production canary vocabulary");

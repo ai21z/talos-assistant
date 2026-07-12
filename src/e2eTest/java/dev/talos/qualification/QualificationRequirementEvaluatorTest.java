@@ -84,4 +84,25 @@ class QualificationRequirementEvaluatorTest {
                     .stream().allMatch(QualificationRecords.RequirementResult::passed), ineligible);
         }
     }
+
+    @Test
+    void f20V5RejectsNegatedAgreementAndRequiresBothSources() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F20-context-compare-code-and-docs");
+        String wrong = """
+                The documented health endpoint is `/healthz`, as stated in `docs/operations.md`.
+                The code does not explicitly mention it, so the sources do not agree.
+                """;
+        String correct = """
+                `docs/operations.md` documents `/healthz`, and `src/Gateway.java` returns `/healthz`.
+                Verdict: AGREE
+                """;
+
+        assertFalse(QualificationRequirementEvaluator.evaluate(scenario,
+                        new QualificationRequirementEvaluator.Evidence(wrong, "", Map.of(), Map.of()))
+                .stream().allMatch(QualificationRecords.RequirementResult::passed));
+        assertTrue(QualificationRequirementEvaluator.evaluate(scenario,
+                        new QualificationRequirementEvaluator.Evidence(correct, "", Map.of(), Map.of()))
+                .stream().allMatch(QualificationRecords.RequirementResult::passed));
+    }
 }
