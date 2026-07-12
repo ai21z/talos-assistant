@@ -70,7 +70,26 @@ class TopLevelStatusCmdTest {
         assertTrue(output.contains("Context     : 16384"), output);
         assertTrue(output.contains("estimated 16k context from 1536 MiB at 8192 on CUDA lane"), output);
         assertTrue(output.contains("Profile tier: accepted beta stability"), output);
-        assertTrue(output.contains("Profile proof: legacy:two-model-large-scale-live-audit-0.10.8"), output);
+        assertTrue(output.contains("Profile evidence: legacy:two-model-large-scale-live-audit-0.10.8"), output);
+    }
+
+    @Test
+    void verboseEngineStatusProjectsQwen3ExperimentalEvidence() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen3-8b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "mode", "managed",
+                        "model", "qwen3-8b",
+                        "model_path", "D:/models/Qwen3-8B-Q4_K_M.gguf")))));
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg);
+
+        assertTrue(output.contains("Profile tier: experimental selectable"), output);
+        assertTrue(output.contains("Profile evidence: local/model-qualification/"
+                + "qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712"), output);
     }
 
     @Test

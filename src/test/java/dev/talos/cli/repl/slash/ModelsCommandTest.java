@@ -78,4 +78,13 @@ class ModelsCommandTest {
         assertTrue(text.contains("llama_cpp/custom-agent"), text);
         assertTrue(text.contains("GGUF file: qwen2.5-coder-7b-instruct-q4_k_m.gguf"), text);
     }
+
+    @Test
+    void renderMarksQwen3AsExperimentalRatherThanAccepted() {
+        String text = ModelsCommand.renderInstalledModels(
+                List.of(ModelRef.of("llama_cpp", "qwen3-8b")), List.of());
+
+        assertTrue(text.contains("llama_cpp/qwen3-8b  (experimental selectable)"), text);
+        assertFalse(text.contains("accepted beta stability"), text);
+    }
 }

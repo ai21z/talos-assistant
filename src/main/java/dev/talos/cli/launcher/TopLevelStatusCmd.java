@@ -168,7 +168,7 @@ public class TopLevelStatusCmd implements Runnable {
         LlamaCppModelCatalog.profileForRuntime(runtime.model(), runtime.modelSourceLabel())
                 .ifPresent(profile -> {
                     out.append("  Profile tier: ").append(profile.disposition().label()).append("\n");
-                    out.append("  Profile proof: ").append(profile.evidencePacket()).append("\n");
+                    out.append("  Profile evidence: ").append(profile.evidencePacket()).append("\n");
                 });
     }
 

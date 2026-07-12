@@ -90,6 +90,16 @@ public final class SetModelCommand implements Command {
         }
         StringBuilder sb = new StringBuilder();
         sb.append("\"").append(matched).append("\" is downloaded but not configured, so it is not selectable here yet.");
+        if (profile != null && profile.requiresLocalModelPath()) {
+            sb.append("\nThe ").append(profile.alias())
+                    .append(" evidence applies only to the exact local GGUF path for ")
+                    .append(profile.artifactFile()).append(".");
+            sb.append("\nRun: talos setup models --profile ").append(profile.alias())
+                    .append(" --server-path <your llama-server path> --model-path <path-to-")
+                    .append(profile.artifactFile()).append("> --write --force");
+            sb.append("\nThen restart Talos and confirm with /models and /status --verbose.");
+            return sb.toString();
+        }
         sb.append("\nManaged llama.cpp binds one GGUF at launch (no hot-swap). To switch, edit ~/.talos/config.yaml with this redaction-safe patch:");
         if (profile != null) {
             sb.append(cannedProfileConfigPatch(profile));

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlamaCppModelManifestTest {
@@ -17,6 +18,9 @@ class LlamaCppModelManifestTest {
         assertEquals(2, entries.size());
         assertTrue(entries.stream().anyMatch(e -> e.alias().equals("qwen2.5-coder-14b")));
         assertTrue(entries.stream().anyMatch(e -> e.alias().equals("gpt-oss-20b")));
+        assertFalse(entries.stream().anyMatch(e -> e.alias().equals("qwen3-8b")),
+                "experimental profiles must not become wizard downloads");
+        assertTrue(LlamaCppModelManifest.byAlias("qwen3-8b").isEmpty());
 
         var qwen = LlamaCppModelManifest.byAlias("qwen2.5-coder-14b").orElseThrow();
         assertEquals("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", qwen.hfRepo());

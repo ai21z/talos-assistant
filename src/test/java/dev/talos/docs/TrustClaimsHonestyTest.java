@@ -41,6 +41,8 @@ class TrustClaimsHonestyTest {
             "gpt-oss-20b requires a concrete local GGUF model path";
     private static final String DEEPSEEK_TOOL_MODE_BOUNDARY =
             "DeepSeek-Coder-V2-Lite uses text/tool-prompt mode";
+    private static final String QWEN3_EXPERIMENTAL_BOUNDARY =
+            "Qwen3-8B is an experimental selectable profile";
 
     private static final Pattern MISUSED_AGENTHALLU_STAT =
             Pattern.compile("11\\.6%.{0,120}(detect|detection|solution|solves|prove|proves)",
@@ -97,7 +99,8 @@ class TrustClaimsHonestyTest {
                 LARGE_MODEL_BOUNDARY,
                 EXPERIMENTAL_MODEL_BOUNDARY,
                 GPT_OSS_LOCAL_GGUF_BOUNDARY,
-                DEEPSEEK_TOOL_MODE_BOUNDARY)) {
+                DEEPSEEK_TOOL_MODE_BOUNDARY,
+                QWEN3_EXPERIMENTAL_BOUNDARY)) {
             assertContainsNormalized(docs, required);
         }
     }
@@ -140,6 +143,7 @@ class TrustClaimsHonestyTest {
         assertContainsNormalized(modelProfiles, EXPERIMENTAL_MODEL_BOUNDARY);
         assertContainsNormalized(modelProfiles, GPT_OSS_LOCAL_GGUF_BOUNDARY);
         assertContainsNormalized(modelProfiles, DEEPSEEK_TOOL_MODE_BOUNDARY);
+        assertContainsNormalized(modelProfiles, QWEN3_EXPERIMENTAL_BOUNDARY);
         assertContains(modelProfiles, "talos setup models --profile qwen2.5-coder-14b");
         assertContains(modelProfiles, "talos setup models --profile gpt-oss-20b");
         assertContains(modelProfiles, "talos doctor --start");

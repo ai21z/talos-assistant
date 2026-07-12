@@ -16,6 +16,7 @@ Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. The acce
 | --- | --- | --- | --- |
 | `qwen2.5-coder-14b` | accepted beta stability | native/default | Wizard download or `talos setup models` |
 | `gpt-oss-20b` | accepted beta stability | native/default | Exact local GGUF path required by `talos setup models` |
+| `qwen3-8b` | experimental selectable | native/default, non-thinking | Exact local GGUF path required by `talos setup models` |
 | `qwen36vf-q4km` | experimental selectable | native/default | `talos setup models` |
 | `qwen36vf-q6k` | experimental selectable | native/default | `talos setup models` |
 | `deepseek-v2lite-q4km` | experimental selectable | text/tool-prompt | `talos setup models` |
@@ -57,6 +58,30 @@ This profile requires the exact local GGUF path. It is a large model and is not 
 gpt-oss-20b requires a concrete local GGUF model path.
 
 ## Experimental profiles
+
+### qwen3-8b
+
+Qwen3-8B is an experimental selectable profile. It is not an accepted beta profile or a weak-hardware claim.
+
+```powershell
+talos setup models --profile qwen3-8b --server-path C:/path/to/llama-server.exe --model-path D:/models/Qwen3-8B-Q4_K_M.gguf --write
+talos doctor --start
+```
+
+- Repository: `Qwen/Qwen3-8B-GGUF`
+- Revision: `7c41481f57cb95916b40956ab2f0b139b296d974`
+- Artifact: `Qwen3-8B-Q4_K_M.gguf`
+- SHA-256: `d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785`
+- License: Apache-2.0
+- Support level: experimental selectable
+- Runtime: native/default tool mode, 8,192-token context, non-thinking through llama.cpp `--reasoning off`
+- Qualified lane: pinned llama.cpp b9918, Windows x64 CUDA 13.3, 16 GiB-class VRAM and 32 GiB system RAM
+- Evidence: `local/model-qualification/qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712`
+- Result: 18 of 24 scenario definitions and 57 of 72 trials passed, with zero Talos trust failures
+
+Talos verifies the local file size and SHA-256 before writing this profile. The packet does not establish CPU-only, 8 GiB VRAM, Linux, or weak-PC support.
+
+The evidence value is an immutable local packet identifier. Raw qualification packets are retained as local review evidence and are not bundled in Talos release artifacts.
 
 ### qwen36vf-q4km
 

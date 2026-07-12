@@ -101,6 +101,21 @@ class SetModelCommandTest {
     }
 
     @Test
+    void qwen3GuidanceRequiresExactLocalArtifactInsteadOfUnpinnedHuggingFaceConfig() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "Qwen3-8B-Q4_K_M"));
+        var profile = LlamaCppModelCatalog.profileForGgufFile("Qwen3-8B-Q4_K_M").orElseThrow();
+
+        String text = SetModelCommand.modelNotFoundMessage("Qwen3-8B-Q4_K_M", downloaded, profile);
+
+        assertTrue(text.contains("exact local GGUF path"), text);
+        assertTrue(text.contains("--profile qwen3-8b"), text);
+        assertTrue(text.contains("--model-path"), text);
+        assertTrue(text.contains("Qwen3-8B-Q4_K_M.gguf"), text);
+        assertFalse(text.contains("hf_repo:"), text);
+        assertFalse(text.contains("hf_file:"), text);
+    }
+
+    @Test
     void unknownNameWithDownloadedListFallsBackToGenericHint() {
         var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
 

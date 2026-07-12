@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T990] Qwen3-8B Q4_K_M is now an experimental selectable profile bound to
+  its protocol-v5 72-trial packet. Setup keeps non-thinking mode, requires and
+  verifies the exact local artifact, and does not add it to wizard downloads or
+  make an accepted-beta or weak-hardware claim.
 - [T1015] Managed llama.cpp profiles now have one canonical catalog for exact
   artifact provenance, runtime defaults, support disposition, and qualification
   evidence. Setup, wizard downloads, model listing, status, and documentation

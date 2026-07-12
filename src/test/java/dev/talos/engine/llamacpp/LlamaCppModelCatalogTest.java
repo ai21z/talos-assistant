@@ -25,13 +25,14 @@ class LlamaCppModelCatalogTest {
             boolean localPathRequired) {}
 
     @Test
-    void ownsTheFiveExistingSelectableProfilesBeforeAnyNewPromotion() {
+    void ownsExistingProfilesAndEvidenceQualifiedQwen3() {
         assertEquals(List.of(
                         "qwen2.5-coder-14b",
                         "gpt-oss-20b",
                         "qwen36vf-q4km",
                         "qwen36vf-q6k",
-                        "deepseek-v2lite-q4km"),
+                        "deepseek-v2lite-q4km",
+                        "qwen3-8b"),
                 LlamaCppModelCatalog.selectableProfiles().stream()
                         .map(LlamaCppModelCatalog.Profile::alias)
                         .toList());
@@ -47,6 +48,36 @@ class LlamaCppModelCatalogTest {
         assertEquals(LlamaCppModelCatalog.Disposition.ACCEPTED_BETA, qwen.disposition());
         assertTrue(qwen.selectable());
         assertTrue(qwen.wizardDownload());
+    }
+
+    @Test
+    void qwen3ProjectsTheExactImmutableExperimentalQualification() {
+        var qwen3 = LlamaCppModelCatalog.byAlias("qwen3-8b").orElseThrow();
+
+        assertEquals("Qwen/Qwen3-8B-GGUF", qwen3.repository());
+        assertEquals("7c41481f57cb95916b40956ab2f0b139b296d974", qwen3.revision());
+        assertEquals("Qwen3-8B-Q4_K_M.gguf", qwen3.artifactFile());
+        assertEquals("d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+                qwen3.artifactSha256());
+        assertEquals(5_027_783_488L, qwen3.artifactSizeBytes());
+        assertEquals("Apache-2.0", qwen3.license());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE, qwen3.disposition());
+        assertTrue(qwen3.selectable());
+        assertTrue(qwen3.requiresLocalModelPath());
+        assertEquals(false, qwen3.wizardDownload());
+        assertEquals(true, qwen3.nativeCalling());
+        assertEquals("native/default", qwen3.toolMode());
+        assertEquals(8_192, qwen3.runtime().contextTokens());
+        assertEquals(List.of("--reasoning", "off"), qwen3.runtime().managedServerArgs());
+        assertEquals(List.of("win-x64-cuda-13.3:b9918"), qwen3.runtime().compatibleEngineLanes());
+        assertEquals(5, qwen3.qualification().protocolRevision());
+        assertEquals(
+                "local/model-qualification/qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712",
+                qwen3.evidencePacket());
+        assertEquals("3271f5f092fe826a882dd27bdbdfbe53a7904fc9", qwen3.qualification().talosCommit());
+        assertEquals("91aa1e6a60aed548948d182fe17dab55b09d00a247a78dd9a3c5cf43ab573467",
+                qwen3.qualification().scorecardSha256());
+        assertEquals(LocalDate.of(2026, 7, 12), qwen3.qualification().qualifiedOn());
     }
 
     @Test

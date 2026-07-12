@@ -206,6 +206,7 @@ public final class LlamaCppModelCatalog {
         profiles.add(vibeForgedQ4());
         profiles.add(vibeForgedQ6());
         profiles.add(deepSeekV2Lite());
+        profiles.add(qwen3EightB());
         validateProfiles(profiles);
         LinkedHashMap<String, Profile> indexed = new LinkedHashMap<>();
         for (Profile profile : profiles) {
@@ -367,6 +368,43 @@ public final class LlamaCppModelCatalog {
                         "experimental text/tool-prompt evidence; native/default produced zero executable tool calls"),
                 MODEL_PROFILES_GUIDE,
                 "24 GB+ system RAM or a 16 GB GPU screening lane; third-party experimental profile");
+    }
+
+    private static Profile qwen3EightB() {
+        return new Profile(
+                "qwen3-8b",
+                new ModelArtifact(
+                        "Qwen/Qwen3-8B-GGUF",
+                        "7c41481f57cb95916b40956ab2f0b139b296d974",
+                        "Qwen3-8B-Q4_K_M.gguf",
+                        "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+                        5_027_783_488L,
+                        "Apache-2.0"),
+                new RuntimeDefaults(
+                        "Qwen3 dense decoder-only transformer, 36 layers, GQA with 32 query heads and 8 KV heads",
+                        "8.2B total parameters, dense-active",
+                        true,
+                        "native/default",
+                        "non-thinking via llama.cpp --reasoning off",
+                        "embedded Jinja Qwen3 template",
+                        8_192,
+                        "Talos standard request controls; three uncontrolled qualification repetitions",
+                        List.of("--reasoning", "off"),
+                        List.of("win-x64-cuda-13.3:b9918"),
+                        "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM and 32 GiB system RAM; no weak-hardware claim",
+                        true),
+                new QualificationEvidence(
+                        Disposition.EXPERIMENTAL_SELECTABLE,
+                        true,
+                        false,
+                        5,
+                        "local/model-qualification/qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712",
+                        "3271f5f092fe826a882dd27bdbdfbe53a7904fc9",
+                        "91aa1e6a60aed548948d182fe17dab55b09d00a247a78dd9a3c5cf43ab573467",
+                        LocalDate.of(2026, 7, 12),
+                        "experimental full-bank evidence: 18 of 24 scenario definitions and 57 of 72 trials passed, with zero trust failures; not accepted beta or weak-hardware evidence"),
+                MODEL_PROFILES_GUIDE,
+                "32 GiB system RAM and a 16 GiB-class CUDA reference lane; experimental evidence only; no weak-hardware claim");
     }
 
     private static QualificationEvidence legacyEvidence(

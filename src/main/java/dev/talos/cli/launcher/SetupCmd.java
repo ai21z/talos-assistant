@@ -1,6 +1,7 @@
 package dev.talos.cli.launcher;
 
 import dev.talos.cli.setup.LlamaCppEngineInstaller;
+import dev.talos.cli.setup.LlamaCppModelArtifactVerifier;
 import dev.talos.cli.setup.LlamaCppModelDownloader;
 import dev.talos.cli.setup.SetupWizardEnvironmentProbe;
 import dev.talos.cli.setup.SetupWizardPlanner;
@@ -43,7 +44,7 @@ public class SetupCmd implements Callable<Integer> {
     @CommandLine.Option(names = "--dry-run", description = "Render setup wizard decisions without installing, downloading, writing config, or starting models")
     boolean dryRun;
 
-    @CommandLine.Option(names = "--profile", description = "Managed llama.cpp profile, for example qwen2.5-coder-14b, gpt-oss-20b, qwen36vf-q6k, or deepseek-v2lite-q4km")
+    @CommandLine.Option(names = "--profile", description = "Managed llama.cpp profile, for example qwen2.5-coder-14b, gpt-oss-20b, qwen3-8b, qwen36vf-q6k, or deepseek-v2lite-q4km")
     String profile;
 
     @CommandLine.Option(names = "--server-path", description = "Path to llama-server.exe")
@@ -149,7 +150,18 @@ public class SetupCmd implements Callable<Integer> {
                     .append("    file: ").append(profile.artifactFile()).append("\n")
                     .append("    sha256: ").append(profile.artifactSha256()).append("\n")
                     .append("    license: ").append(profile.license()).append("\n")
+                    .append("    support: ").append(profile.disposition().label()).append("\n")
                     .append("    tool mode: ").append(profile.toolMode()).append("\n")
+                    .append("    model input: ")
+                    .append(profile.requiresLocalModelPath()
+                            ? "exact local GGUF path required"
+                            : "managed Hugging Face source or matching local GGUF")
+                    .append("\n")
+                    .append("    reasoning: ").append(profile.runtime().reasoningMode()).append("\n")
+                    .append("    context: ").append(profile.runtime().contextTokens()).append(" tokens\n")
+                    .append("    qualified lanes: ")
+                    .append(String.join(", ", profile.runtime().compatibleEngineLanes())).append("\n")
+                    .append("    hardware: ").append(profile.runtime().hardwareEnvelope()).append("\n")
                     .append("    guide: ").append(profile.guidePath()).append("\n")
                     .append("    evidence packet: ").append(profile.evidencePacket()).append("\n")
                     .append("    evidence: ").append(profile.evidenceSummary()).append("\n");
@@ -252,7 +264,7 @@ public class SetupCmd implements Callable<Integer> {
                     context: %d
                     context_reason: "%s"
                     jinja: true
-                    server_args: %s
+                    server_args:%s
 
                 tools:
                   native_calling: %s
@@ -373,6 +385,13 @@ public class SetupCmd implements Callable<Integer> {
 
         String normalizedProfile = normalizeProfile(profile);
         ModelPathSelection selectedModelPath = selectModelPath(normalizedProfile, modelPath, cacheDir);
+        LlamaCppModelCatalog.Profile knownProfile = PROFILES.get(normalizedProfile);
+        if (knownProfile != null
+                && knownProfile.qualification().protocolRevision() > 0
+                && selectedModelPath.path() != null) {
+            System.out.println("Verifying pinned model artifact: " + knownProfile.artifactFile());
+            LlamaCppModelArtifactVerifier.requireMatch(selectedModelPath.path(), knownProfile);
+        }
         ManagedContextSelector.Decision context = managedContextDecision(normalizedProfile, serverPath);
 
         String yaml = renderManagedLlamaCppProfileConfig(
@@ -621,7 +640,7 @@ public class SetupCmd implements Callable<Integer> {
     }
 
     private static String renderServerArgs(List<String> arguments) {
-        if (arguments == null || arguments.isEmpty()) return "[]";
+        if (arguments == null || arguments.isEmpty()) return " []";
         StringBuilder out = new StringBuilder();
         for (String argument : arguments) {
             out.append("\n      - \"").append(yamlScalar(argument)).append("\"");

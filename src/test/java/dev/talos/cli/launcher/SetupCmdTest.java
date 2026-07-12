@@ -73,6 +73,10 @@ class SetupCmdTest {
         assertTrue(help.contains("gpt-oss-20b"));
         assertTrue(help.contains("qwen36vf-q6k"));
         assertTrue(help.contains("deepseek-v2lite-q4km"));
+        assertTrue(help.contains("qwen3-8b"), help);
+        assertTrue(help.contains("Qwen3-8B-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("experimental selectable"), help);
+        assertTrue(help.contains("qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712"), help);
         assertTrue(help.contains("native/default"));
         assertTrue(help.contains("text/tool-prompt"));
         assertTrue(help.contains("docs/reference/model-profiles.md"), help);
@@ -229,6 +233,57 @@ class SetupCmdTest {
         assertTrue(yaml.contains("hf_repo: \"bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF\""));
         assertTrue(yaml.contains("hf_file: \"DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf\""));
         assertTrue(yaml.contains("native_calling: false"));
+    }
+
+    @Test
+    void qwen3ExperimentalProfileUsesExactLocalArtifactAndNonThinkingRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("Qwen3-8B-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen3-8b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen3-8b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args:\n      - \"--reasoning\"\n      - \"off\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+    }
+
+    @Test
+    void qwen3SetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("Qwen3-8B-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen3-8b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("does not match the pinned qwen3-8b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
     }
 
     @Test
