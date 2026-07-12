@@ -244,14 +244,18 @@ public final class QualificationPtyCaptureMain {
         addInput("prompt-debug");
         int promptDebugAnchor = cursor;
         writeLine("/prompt-debug save " + forwardSlashes(runRoot));
-        waitForIdlePrompt(cursor, SLASH_WAIT);
+        QualificationPtyIdleSettle.awaitAndPause(
+                () -> waitForIdlePrompt(cursor, SLASH_WAIT),
+                SystemWaiter::pauseThread);
         drainOutput();
         QualificationProviderEvidence.capture(
                 runRoot, capture.slice(promptDebugAnchor, cursor));
 
         addInput("last-trace");
         writeLine("/last trace");
-        waitForIdlePrompt(cursor, SLASH_WAIT);
+        QualificationPtyIdleSettle.awaitAndPause(
+                () -> waitForIdlePrompt(cursor, SLASH_WAIT),
+                SystemWaiter::pauseThread);
         drainOutput();
     }
 
@@ -492,6 +496,10 @@ public final class QualificationPtyCaptureMain {
 
         @Override
         public void pause(Duration duration) throws InterruptedException {
+            pauseThread(duration);
+        }
+
+        private static void pauseThread(Duration duration) throws InterruptedException {
             Thread.sleep(Math.max(1L, duration.toMillis()));
         }
     }

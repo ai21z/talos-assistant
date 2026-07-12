@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1060] Windows model-qualification diagnostics now leave one bounded settle
+  interval after each recognized idle prompt before sending the next PTY input.
+  This prevents `/last trace` from remaining buffered behind prompt-debug output
+  while preserving exact prompt matching, fixed deadlines, and failed-capture
+  evidence.
 - [T1054] Model-qualification protocol v5 now requires the source-comparison
   scenario to state an explicit agreement verdict, report the shared endpoint,
   and name both source files. Protocols v1 through v4 remain byte-pinned and
