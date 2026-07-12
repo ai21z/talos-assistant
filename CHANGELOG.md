@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1052] Windows model-qualification PTY capture now recognizes the exact
+  JLine startup prompt that toggles cursor visibility around column positioning.
+  Command echoes, partial frames, reordered controls, and altered columns remain
+  ineligible for turn completion.
 - [T1051] Tool calls rejected by pre-execution safety guards now record one
   parsed event before their blocked terminal event. Qualification evidence can
   bind guarded retries without inferring orphan calls, while ordinary executed

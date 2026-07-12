@@ -99,6 +99,37 @@ class QualificationPtyOutcomeRaceTest {
     }
 
     @Test
+    void idlePromptIsRecognizedWithCapturedStartupCursorToggles() {
+        String capturedStartupFrame = PROMPT
+                + "\u001B[0K\u001B[1G\u001B[?25h\u001B[16G\u001B[?25l\r";
+
+        assertEquals(0, QualificationPtyOutcomeRace.idlePromptIndex(capturedStartupFrame, 0));
+    }
+
+    @Test
+    void capturedStartupCursorTogglePromptCompletesTheOutcomeRace() throws Exception {
+        String capturedStartupFrame = PROMPT
+                + "\u001B[0K\u001B[1G\u001B[?25h\u001B[16G\u001B[?25l\r";
+        ScriptedProbe probe = new ScriptedProbe(snapshot(capturedStartupFrame, true, 0));
+
+        QualificationPtyOutcomeRace.Outcome outcome = QualificationPtyOutcomeRace.await(
+                probe, 0, Duration.ofSeconds(1), new FakeWaiter());
+
+        assertEquals(QualificationPtyOutcomeRace.Kind.TURN_COMPLETE, outcome.kind());
+    }
+
+    @Test
+    void nearMissStartupCursorTogglePromptsRemainRejected() {
+        for (String candidate : List.of(
+                PROMPT + "\u001B[0K\u001B[1G\u001B[?25h\u001B[16G\u001B[?25l",
+                PROMPT + "\u001B[0K\u001B[1G\u001B[?25h\u001B[16G\r",
+                PROMPT + "\u001B[0K\u001B[1G\u001B[?25l\u001B[16G\u001B[?25h\r",
+                PROMPT + "\u001B[0K\u001B[1G\u001B[?25h\u001B[15G\u001B[?25l\r")) {
+            assertEquals(-1, QualificationPtyOutcomeRace.idlePromptIndex(candidate, 0), candidate);
+        }
+    }
+
+    @Test
     void idlePromptIsRecognizedWhenJlineWrapsAndReturnsOneRow() {
         String wrappedIdlePrompt = PROMPT
                 + "\u001B[0K\r\n\u001B[0K\r\u001B[1A\u001B[16G";

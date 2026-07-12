@@ -11,6 +11,8 @@ final class QualificationPtyOutcomeRace {
     static final String PROMPT_MARKER = "talos [auto] >";
     static final String IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[16G";
     static final String CURSOR_RESET_IDLE_PROMPT_SUFFIX = "\u001B[0K\u001B[1G\u001B[16G";
+    static final String CURSOR_TOGGLE_STARTUP_PROMPT_SUFFIX =
+            "\u001B[0K\u001B[1G\u001B[?25h\u001B[16G\u001B[?25l\r";
     static final String WRAPPED_IDLE_PROMPT_SUFFIX =
             "\u001B[0K\r\n\u001B[0K\r\u001B[1A\u001B[16G";
     static final int MAX_APPROVAL_PROMPTS = 8;
@@ -165,6 +167,7 @@ final class QualificationPtyOutcomeRace {
             int suffix = found + PROMPT_MARKER.length();
             if (value.startsWith(IDLE_PROMPT_SUFFIX, suffix)
                     || value.startsWith(CURSOR_RESET_IDLE_PROMPT_SUFFIX, suffix)
+                    || value.startsWith(CURSOR_TOGGLE_STARTUP_PROMPT_SUFFIX, suffix)
                     || value.startsWith(WRAPPED_IDLE_PROMPT_SUFFIX, suffix)) {
                 return found;
             }
