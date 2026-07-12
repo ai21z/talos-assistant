@@ -134,7 +134,7 @@ public final class QualificationPtyCaptureMain {
         try {
             startMonitor();
             startTalos();
-            waitForIdlePrompt(0, STARTUP_WAIT);
+            waitForSettledIdlePrompt(0, STARTUP_WAIT);
             drainOutput();
 
             addInput("scenario-prompt");
@@ -230,8 +230,7 @@ public final class QualificationPtyCaptureMain {
     }
 
     private String awaitTurnCompletion(String completedOutcome) throws Exception {
-        waitForIdlePrompt(cursor, TURN_WAIT);
-        Thread.sleep(100L);
+        waitForSettledIdlePrompt(cursor, TURN_WAIT);
         drainOutput();
         addTerminalOutcome(completedOutcome);
         return completedOutcome;
@@ -244,18 +243,14 @@ public final class QualificationPtyCaptureMain {
         addInput("prompt-debug");
         int promptDebugAnchor = cursor;
         writeLine("/prompt-debug save " + forwardSlashes(runRoot));
-        QualificationPtyIdleSettle.awaitAndPause(
-                () -> waitForIdlePrompt(cursor, SLASH_WAIT),
-                SystemWaiter::pauseThread);
+        waitForSettledIdlePrompt(cursor, SLASH_WAIT);
         drainOutput();
         QualificationProviderEvidence.capture(
                 runRoot, capture.slice(promptDebugAnchor, cursor));
 
         addInput("last-trace");
         writeLine("/last trace");
-        QualificationPtyIdleSettle.awaitAndPause(
-                () -> waitForIdlePrompt(cursor, SLASH_WAIT),
-                SystemWaiter::pauseThread);
+        waitForSettledIdlePrompt(cursor, SLASH_WAIT);
         drainOutput();
     }
 
@@ -345,6 +340,12 @@ public final class QualificationPtyCaptureMain {
         }
         terminalOutcome = "timeout-while-waiting-for-idle-prompt";
         throw new IllegalStateException("timed out waiting for idle prompt");
+    }
+
+    private void waitForSettledIdlePrompt(int from, Duration timeout) throws Exception {
+        QualificationPtyIdleSettle.awaitAndPause(
+                () -> waitForIdlePrompt(from, timeout),
+                SystemWaiter::pauseThread);
     }
 
     private static void waitForFile(Path path, String marker, Duration timeout) throws Exception {
