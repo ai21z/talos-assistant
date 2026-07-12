@@ -43,6 +43,15 @@ public final class ManagedContextSelector {
     public static Decision select(Request request) {
         Request safe = request == null ? new Request("", Lane.UNKNOWN, -1, -1) : request;
         if (!highContextProfile(safe.profile())) {
+            var catalogProfile = LlamaCppModelCatalog.byAlias(safe.profile())
+                    .filter(LlamaCppModelCatalog.Profile::selectable);
+            if (catalogProfile.isPresent()) {
+                var profile = catalogProfile.get();
+                return new Decision(profile.runtime().contextTokens(),
+                        profile.runtime().contextTokens() + " selected: " + profile.alias() + " "
+                                + profile.disposition().label()
+                                + " profile default; 16384 context fit is not established");
+            }
             return new Decision(DEFAULT_CONTEXT,
                     "8192 selected: unverified profile; 16384 context fit is not assumed");
         }

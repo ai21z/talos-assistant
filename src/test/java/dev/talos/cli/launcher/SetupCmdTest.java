@@ -253,6 +253,8 @@ class SetupCmdTest {
         assertTrue(yaml.contains("hf_file: \"\""), yaml);
         assertTrue(yaml.contains("server_args:\n      - \"--reasoning\"\n      - \"off\""), yaml);
         assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: qwen3-8b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
     }
 
     @Test

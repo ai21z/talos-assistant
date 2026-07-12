@@ -76,6 +76,21 @@ class ManagedContextSelectorTest {
         assertTrue(decision.reason().contains("unverified"), decision.reason());
     }
 
+    @Test
+    void qwen3UsesItsExperimentalCatalogContextWithoutCallingTheProfileUnverified() {
+        ManagedContextSelector.Decision decision = ManagedContextSelector.select(
+                new ManagedContextSelector.Request(
+                        "qwen3-8b",
+                        ManagedContextSelector.Lane.CUDA,
+                        16_303,
+                        128_000));
+
+        assertEquals(8_192, decision.context());
+        assertTrue(decision.reason().contains("experimental selectable"), decision.reason());
+        assertTrue(decision.reason().contains("16384 context fit is not established"), decision.reason());
+        org.junit.jupiter.api.Assertions.assertFalse(decision.reason().contains("unverified"), decision.reason());
+    }
+
     @org.junit.jupiter.api.Test
     void laneFromServerPathRequiresCudaAsAPathToken() {
         org.junit.jupiter.api.Assertions.assertEquals(
