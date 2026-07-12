@@ -274,7 +274,22 @@ class ToolCallLoopTest {
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
-            ToolCallLoop.LoopResult result = loop.run("", calls, messages, ws, ctx);
+            LocalTurnTraceCapture.begin("trc-t1051-read-display", "session", 1,
+                    "2026-07-12T00:00:00Z", "ws", "test", "llama_cpp", "qwen3-8b",
+                    "Modify helper.py so bar returns 99.");
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run("", calls, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+            List<String> writeTraceEvents = trace.events().stream()
+                    .filter(event -> "talos.write_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type) || "TOOL_CALL_BLOCKED".equals(type))
+                    .toList();
 
             ToolCallLoop.ToolOutcome writeOutcome = result.toolOutcomes().stream()
                     .filter(outcome -> "talos.write_file".equals(outcome.toolName()))
@@ -289,6 +304,8 @@ class ToolCallLoopTest {
                             def bar():
                                 return 1
                             """, Files.readString(ws.resolve("helper.py"))),
+                    () -> assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), writeTraceEvents,
+                            "the blocked write must retain its parsed-call lifecycle"),
                     () -> assertEquals(0, result.mutatingToolSuccesses()));
         } finally {
             deleteRecursive(ws);

@@ -178,6 +178,11 @@ class ToolCallExecutionStageCharacterizationTest {
 
         ToolCallExecutionStage.IterationOutcome outcome = execute(harness);
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        List<String> toolEvents = trace.events().stream()
+                .filter(event -> "talos.read_file".equals(event.toolName()))
+                .map(event -> event.type())
+                .filter(type -> "TOOL_CALL_PARSED".equals(type) || "TOOL_CALL_BLOCKED".equals(type))
+                .toList();
 
         ToolCallLoop.ToolOutcome toolOutcome = harness.state().toolOutcomes.get(0);
         ChatMessage result = harness.state().messages.get(harness.state().messages.size() - 1);
@@ -197,6 +202,8 @@ class ToolCallExecutionStageCharacterizationTest {
                         "outside the current requested private document target set"), result.content()),
                 () -> assertFalse(result.content().contains("Sibling DOCX fact"), result.content()),
                 () -> assertTrue(harness.state().readEvidence.latestReadFileBodiesByNormalizedPath().isEmpty()),
+                () -> assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), toolEvents,
+                        "a pre-execution block must settle one previously parsed call"),
                 () -> assertTrue(trace.events().stream().anyMatch(event ->
                         "TOOL_CALL_BLOCKED".equals(event.type())
                                 && "talos.read_file".equals(event.toolName())
@@ -223,6 +230,12 @@ class ToolCallExecutionStageCharacterizationTest {
 
         ToolCallExecutionStage.IterationOutcome outcome = execute(harness);
         var ledger = ContextLedgerCapture.snapshot();
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        List<String> toolEvents = trace.events().stream()
+                .filter(event -> "talos.echo".equals(event.toolName()))
+                .map(event -> event.type())
+                .filter("TOOL_CALL_PARSED"::equals)
+                .toList();
 
         ToolCallLoop.ToolOutcome toolOutcome = harness.state().toolOutcomes.get(0);
         ChatMessage result = harness.state().messages.get(harness.state().messages.size() - 1);
@@ -234,6 +247,8 @@ class ToolCallExecutionStageCharacterizationTest {
                         .get(ContextDecision.Action.INCLUDED_IN_MODEL_PROMPT.name())),
                 () -> assertEquals("talos.echo", toolOutcome.toolName()),
                 () -> assertTrue(toolOutcome.success()),
+                () -> assertEquals(List.of("TOOL_CALL_PARSED"), toolEvents,
+                        "the loop and processor must not duplicate parsed-call evidence"),
                 () -> assertTrue(toolOutcome.summary().contains("ledger: included"), toolOutcome.summary()),
                 () -> assertTrue(result.content().contains("ledger: included"), result.content()));
     }

@@ -70,6 +70,7 @@ final class ToolCallPreExecutionGuardChain {
                     effective, pathHint, diagnosticError, editPreApprovalDecision));
             resultMessageAppender.append(state, nativePath, callIndex, diagnostic);
             logEditPreApprovalBlock(editPreApprovalDecision, pathHint);
+            recordBlockedCall(effective, diagnosticError);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -83,6 +84,7 @@ final class ToolCallPreExecutionGuardChain {
             resultMessageAppender.append(state, nativePath, callIndex, diagnostic);
             LOG.debug("  Suppressed redundant {} call (sig: {})",
                     effective.toolName(), SafeLogFormatter.value(redundantReadDecision.readSignature()));
+            recordBlockedCall(effective, redundantReadDecision.diagnostic());
             return Result.blocked(effective, pathContext, 0, false);
         }
 
@@ -108,10 +110,7 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     privateDocumentNamedTargetDiagnostic,
                     "PRIVATE_DOCUMENT_READ_OUTSIDE_REQUESTED_TARGET_SET");
-            LocalTurnTraceCapture.recordToolCallBlocked(
-                    "tool_loop",
-                    effective,
-                    privateDocumentNamedTargetDiagnostic);
+            recordBlockedCall(effective, privateDocumentNamedTargetDiagnostic);
             state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionRead(
                     effective,
                     pathHint,
@@ -156,6 +155,7 @@ final class ToolCallPreExecutionGuardChain {
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.value(requiredSourceEvidence.missingSourceTargets()));
+            recordBlockedCall(effective, diagnosticError);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -206,6 +206,7 @@ final class ToolCallPreExecutionGuardChain {
                         effective.toolName(),
                         SafeLogFormatter.value(pathHint),
                         SafeLogFormatter.text(sourceEvidenceCoverageDiagnostic));
+                recordBlockedCall(effective, sourceEvidenceCoverageDiagnostic);
                 return Result.blocked(effective, pathContext, failures, false);
             }
         }
@@ -239,6 +240,7 @@ final class ToolCallPreExecutionGuardChain {
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.text(appendLineDiagnostic));
+            recordBlockedCall(effective, appendLineDiagnostic);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -258,10 +260,7 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     redactedReadWritebackDiagnostic,
                     "REDACTED_READBACK_WRITE_BLOCKED");
-            LocalTurnTraceCapture.recordToolCallBlocked(
-                    "tool_loop",
-                    effective,
-                    redactedReadWritebackDiagnostic);
+            recordBlockedCall(effective, redactedReadWritebackDiagnostic);
             state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
                     effective,
                     pathHint,
@@ -315,10 +314,7 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     namedTargetExistenceDiagnostic,
                     "NAMED_TARGET_NOT_FOUND");
-            LocalTurnTraceCapture.recordToolCallBlocked(
-                    "tool_loop",
-                    effective,
-                    namedTargetExistenceDiagnostic);
+            recordBlockedCall(effective, namedTargetExistenceDiagnostic);
             state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
                     effective,
                     pathHint,
@@ -350,10 +346,7 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     readDisplayWriteDiagnostic,
                     "READ_DISPLAY_PREFIX_WRITE");
-            LocalTurnTraceCapture.recordToolCallBlocked(
-                    "tool_loop",
-                    effective,
-                    readDisplayWriteDiagnostic);
+            recordBlockedCall(effective, readDisplayWriteDiagnostic);
             state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
                     effective,
                     pathHint,
@@ -399,6 +392,7 @@ final class ToolCallPreExecutionGuardChain {
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.text(staticWebRewriteGroundingDiagnostic));
+            recordBlockedCall(effective, staticWebRewriteGroundingDiagnostic);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -416,10 +410,7 @@ final class ToolCallPreExecutionGuardChain {
                     "FAILED",
                     staticWebRepairPathDiagnostic,
                     "STATIC_WEB_REPAIR_DIRECTORY_TARGET_BEFORE_APPROVAL");
-            LocalTurnTraceCapture.recordToolCallBlocked(
-                    "tool_loop",
-                    effective,
-                    staticWebRepairPathDiagnostic);
+            recordBlockedCall(effective, staticWebRepairPathDiagnostic);
             state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
                     effective,
                     pathHint,
@@ -465,6 +456,7 @@ final class ToolCallPreExecutionGuardChain {
                     effective.toolName(),
                     SafeLogFormatter.value(pathHint),
                     SafeLogFormatter.text(staticWebBlankRequiredAssetDiagnostic));
+            recordBlockedCall(effective, staticWebBlankRequiredAssetDiagnostic);
             return Result.blocked(effective, pathContext, failures, false);
         }
 
@@ -496,6 +488,11 @@ final class ToolCallPreExecutionGuardChain {
                 // No pre-approval block.
             }
         }
+    }
+
+    private static void recordBlockedCall(ToolCall call, String reason) {
+        LocalTurnTraceCapture.recordToolCallParsed("tool_loop", call);
+        LocalTurnTraceCapture.recordToolCallBlocked("tool_loop", call, reason);
     }
 
     record Result(

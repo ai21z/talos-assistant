@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1051] Tool calls rejected by pre-execution safety guards now record one
+  parsed event before their blocked terminal event. Qualification evidence can
+  bind guarded retries without inferring orphan calls, while ordinary executed
+  calls retain their single parsed event.
 - [T1050] Model-qualification evidence now distinguishes pending tool calls
   from blocked or failed attempts. A corrected same-tool retry binds to the
   remaining pending call, while genuine ambiguity and orphan terminal events
