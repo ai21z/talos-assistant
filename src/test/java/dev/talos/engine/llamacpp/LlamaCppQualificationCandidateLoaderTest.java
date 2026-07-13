@@ -1,6 +1,7 @@
 package dev.talos.engine.llamacpp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -163,6 +165,34 @@ class LlamaCppQualificationCandidateLoaderTest {
     }
 
     @Test
+    void verificationLaunchUsesTheFrozenVerificationArguments() throws Exception {
+        Fixture fixture = fixture();
+        LlamaCppConfig verificationConfig = config(fixture.model(), fixture.engine(), true);
+
+        var loaded = loader().load(
+                fixture.settings(), verificationConfig, fixture.talosHome()).orElseThrow();
+
+        assertEquals("granite-4.1-3b", loaded.profile().alias());
+    }
+
+    @Test
+    void changedVerificationLaunchIsRefused() throws Exception {
+        Fixture fixture = fixture();
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode rules = (ObjectNode) mapper.readTree(fixture.rules().toFile());
+        var verification = rules.withArray("verificationLaunchArguments");
+        verification.set(verification.size() - 1, mapper.getNodeFactory().textNode("1"));
+        mapper.writerWithDefaultPrettyPrinter().writeValue(fixture.rules().toFile(), rules);
+        var changedSettings = new LlamaCppQualificationCandidateLoader.Settings(
+                fixture.root(), fixture.rules(), sha256(fixture.rules()));
+
+        assertThrows(IllegalStateException.class, () -> loader().load(
+                changedSettings,
+                config(fixture.model(), fixture.engine(), true),
+                fixture.talosHome()));
+    }
+
+    @Test
     void tunedConfigurationCannotUseTheStandardAdmissionOverlay() throws Exception {
         Fixture fixture = fixture(Map.of(
                 "configurationKind", "TUNED",
@@ -197,6 +227,9 @@ class LlamaCppQualificationCandidateLoaderTest {
                 "-m", model.toString().replace('\\', '/'),
                 "-c", "8192", "--host", "127.0.0.1", "--port", "18161",
                 "--jinja", "--alias", "granite-4.1-3b", "--parallel", "1", "--predict", "2048");
+        List<String> verificationLaunch = new ArrayList<>(launch);
+        verificationLaunch.add("-lv");
+        verificationLaunch.add("4");
         LinkedHashMap<String, Object> rules = new LinkedHashMap<>();
         rules.put("schemaName", "talos.modelQualification.calibrationRules");
         rules.put("schemaVersion", 1);
@@ -219,6 +252,7 @@ class LlamaCppQualificationCandidateLoaderTest {
         rules.put("executableSha256", sha256(engine));
         rules.put("backend", "cuda-13.3");
         rules.put("launchArguments", launch);
+        rules.put("verificationLaunchArguments", verificationLaunch);
         rules.put("toolMode", "native");
         rules.put("chatTemplate", "embedded Granite role template");
         rules.put("reasoningBehavior", "thinking disabled");
@@ -232,6 +266,10 @@ class LlamaCppQualificationCandidateLoaderTest {
     }
 
     private LlamaCppConfig config(Path model, Path engine) {
+        return config(model, engine, false);
+    }
+
+    private LlamaCppConfig config(Path model, Path engine, boolean verification) {
         Config cfg = new Config();
         cfg.data.put("llm", Map.of("default_backend", "llama_cpp", "model", "granite-4.1-3b"));
         cfg.data.put("engines", Map.of("llama_cpp", Map.ofEntries(
@@ -245,6 +283,7 @@ class LlamaCppQualificationCandidateLoaderTest {
                 Map.entry("jinja", true),
                 Map.entry("server_args", List.of()))));
         cfg.data.put("tools", Map.of("native_calling", true));
+        if (verification) LlamaCppVerificationLaunch.mark(cfg);
         return LlamaCppConfig.from(cfg);
     }
 

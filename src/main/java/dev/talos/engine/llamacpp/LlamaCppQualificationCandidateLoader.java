@@ -152,7 +152,10 @@ final class LlamaCppQualificationCandidateLoader {
             int context = integer(rules, "contextTokens");
             requireEquals(config.context(), context, "context");
 
-            List<String> launchArguments = textList(rules, "launchArguments");
+            String launchField = config.verificationLogging()
+                    ? "verificationLaunchArguments"
+                    : "launchArguments";
+            List<String> launchArguments = textList(rules, launchField);
             requireLaunchShape(launchArguments, LlamaCppServerManager.buildArguments(config));
             Path modelPath = existingFile(path(config.modelPath(), "configured model path"), "model artifact");
             Path launchModelPath = existingFile(

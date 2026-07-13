@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1106] Evidence-bound qualification now validates ordinary managed launches
+  against the frozen ordinary command and doctor or tune launches against the
+  separately frozen verification command. The existing `-lv 4` evidence lane
+  remains explicit and no undeclared launch variation is accepted.
 - [T1105] Clean packaged Talos JARs now carry the exact Git commit and branch
   that produced them. Dirty builds record an unknown commit, and the generated
   identity is bound to Gradle task inputs so an incremental build cannot retain
