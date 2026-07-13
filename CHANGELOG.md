@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1108] Model qualification now treats a successful directory listing as
+  read evidence only for a dedicated listing scenario whose allowed target
+  matches the listed directory. A discovery listing still cannot stand in for
+  file-content evidence.
 - [T1106] Evidence-bound qualification now validates ordinary managed launches
   against the frozen ordinary command and doctor or tune launches against the
   separately frozen verification command. The existing `-lv 4` evidence lane

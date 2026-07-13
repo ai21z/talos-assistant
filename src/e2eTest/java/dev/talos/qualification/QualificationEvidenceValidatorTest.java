@@ -376,6 +376,28 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void directoryListingScenarioAcceptsMatchingListEvidence() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("A04-technical-list-root");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-a04-list",
+                "granite-4.1-3b",
+                "DIRECTORY_LISTING",
+                false,
+                "LIST_DIR_ONLY",
+                "READ_ONLY_ANSWERED",
+                "OK",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call("talos.list_dir", ".", true, true)),
+                List.of(new QualificationRecords.DecisionResult("list-root", true)),
+                false,
+                false);
+
+        assertTrue(QualificationEvidenceValidator.readEvidenceBindingPasses(scenario, trace),
+                "a matching list_dir call is the complete evidence for a directory-listing scenario");
+    }
+
+    @Test
     void nonPreferredRetrievalWithStructuredSourceRemainsGrounded() {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
                 .scenario("F04-technical-trace-port");

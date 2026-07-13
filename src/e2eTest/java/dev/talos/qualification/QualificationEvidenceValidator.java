@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 final class QualificationEvidenceValidator {
-    private static final Set<String> READ_EVIDENCE_TOOLS = Set.of(
+    private static final Set<String> FILE_CONTENT_EVIDENCE_TOOLS = Set.of(
             "talos.read_file", "talos.grep", "talos.retrieve");
     private static final List<String> CALIBRATION_GUIDE_HEADINGS = List.of(
             "## Identity and provenance",
@@ -638,7 +638,7 @@ final class QualificationEvidenceValidator {
         }
         boolean successfulRead = trace.calls().stream()
                 .filter(QualificationTraceEvidence.Call::executed)
-                .filter(call -> READ_EVIDENCE_TOOLS.contains(call.toolName()))
+                .filter(call -> isReadEvidenceTool(scenario, trace, call.toolName()))
                 .flatMap(call -> call.sourcePaths().stream())
                 .anyMatch(path -> scenario.allowedTargets().stream()
                         .anyMatch(target -> pathMatches(path, target)));
@@ -649,6 +649,20 @@ final class QualificationEvidenceValidator {
                         ? !scenario.forbiddenTargets().isEmpty()
                         : scenario.forbiddenTargets().stream().anyMatch(target -> pathMatches(path, target)));
         return (successfulRead || trace.boundedFileLookupNegative()) && !forbiddenRead;
+    }
+
+    private static boolean isReadEvidenceTool(
+            QualificationProtocol.Scenario scenario,
+            QualificationTraceEvidence.Facts trace,
+            String toolName) {
+        if (FILE_CONTENT_EVIDENCE_TOOLS.contains(toolName)) return true;
+        if (!"talos.list_dir".equals(toolName) || !"DIRECTORY_LISTING".equals(trace.taskType())) {
+            return false;
+        }
+        return scenario.expectedDecisions().stream()
+                .filter(QualificationProtocol.ExpectedDecision::scored)
+                .filter(decision -> decision.kind() == QualificationProtocol.DecisionKind.REQUIRED_TOOL)
+                .anyMatch(decision -> decision.allowedTools().equals(List.of("talos.list_dir")));
     }
 
     private static boolean pathMatches(String path, String target) {
