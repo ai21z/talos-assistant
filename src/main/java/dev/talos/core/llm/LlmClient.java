@@ -9,8 +9,10 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.util.UiChrome;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -114,6 +116,8 @@ public final class LlmClient implements AutoCloseable {
 
     /** Tool definitions to include in engine chat requests (native tool calling). */
     private volatile List<ToolSpec> toolSpecs = List.of();
+    private final boolean configuredNativeTools;
+    private volatile Capabilities preparedCapabilities;
 
     // Telemetry: track truncation events
     private final AtomicInteger truncationCount = new AtomicInteger();
@@ -154,6 +158,8 @@ public final class LlmClient implements AutoCloseable {
         String transport = String.valueOf(llmBlock.getOrDefault("transport", "placeholder"));
         this.mode = "engine".equalsIgnoreCase(transport) ? TransportMode.ENGINE : TransportMode.PLACEHOLDER;
         this.configSampling = parseConfigSampling(CfgUtil.map(llmBlock.get("sampling")));
+        this.configuredNativeTools = CfgUtil.boolAt(
+                CfgUtil.map(this.cfg.data.get("tools")), "native_calling", true);
 
         // ---- defaults compatible with existing tests ----
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(this.cfg);
@@ -235,7 +241,7 @@ public final class LlmClient implements AutoCloseable {
     public static LlmClient scripted(java.util.List<String> responses) {
         java.util.List<String> safe = (responses == null || responses.isEmpty())
                 ? java.util.List.of("") : java.util.List.copyOf(responses);
-        LlmClient c = new LlmClient(new Config());
+        LlmClient c = new LlmClient(placeholderOnlyConfig());
         c.scriptedResponses = safe;
         return c;
     }
@@ -251,11 +257,19 @@ public final class LlmClient implements AutoCloseable {
      * exercise backend exception handling without opening a real engine.
      */
     public static LlmClient scriptedFailure(RuntimeException failure) {
-        LlmClient c = new LlmClient(new Config());
+        LlmClient c = new LlmClient(placeholderOnlyConfig());
         c.scriptedFailure = failure == null
                 ? new RuntimeException("scripted LLM failure")
                 : failure;
         return c;
+    }
+
+    private static Config placeholderOnlyConfig() {
+        Config config = new Config();
+        Map<String, Object> llm = new java.util.LinkedHashMap<>(CfgUtil.map(config.data.get("llm")));
+        llm.put("transport", "placeholder");
+        config.data.put("llm", llm);
+        return config;
     }
 
     /**
@@ -308,6 +322,7 @@ public final class LlmClient implements AutoCloseable {
             this.model = sanitized;
             if (mode == TransportMode.ENGINE && engineResolver != null) try { engineResolver.select(this.backend, this.model); } catch (Exception ignore) {}
         }
+        this.preparedCapabilities = null;
     }
 
     /**
@@ -323,11 +338,51 @@ public final class LlmClient implements AutoCloseable {
         return toolSpecs;
     }
 
+    /** Prepares the selected engine and returns whether native tools are permitted for this turn. */
+    public boolean prepareNativeTools() throws Exception {
+        if (!configuredNativeTools) return false;
+        if (mode != TransportMode.ENGINE || engineResolver == null) return true;
+        if (!engineResolver.capabilitiesAuthoritative()) return true;
+        Capabilities prepared = engineResolver.prepareCapabilities();
+        preparedCapabilities = prepared;
+        return prepared != null && prepared.nativeTools();
+    }
+
+    /** Current no-start view used by prompt inspection and turn-policy recording. */
+    public boolean nativeToolsCurrentlyEnabled() {
+        if (!configuredNativeTools) return false;
+        if (mode != TransportMode.ENGINE || engineResolver == null) return true;
+        if (!engineResolver.capabilitiesAuthoritative()) return true;
+        Capabilities current = preparedCapabilities;
+        if (current == null) {
+            try {
+                current = engineResolver.capabilities();
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return current != null && current.nativeTools();
+    }
+
+    /** Returns the selected engine's bounded identity evidence without starting it. */
+    public ModelIdentitySnapshot modelIdentity() {
+        if (mode != TransportMode.ENGINE || engineResolver == null) {
+            return ModelIdentitySnapshot.empty();
+        }
+        try {
+            ModelIdentitySnapshot identity = engineResolver.modelIdentity();
+            return identity == null ? ModelIdentitySnapshot.empty() : identity;
+        } catch (RuntimeException ignored) {
+            return ModelIdentitySnapshot.empty();
+        }
+    }
+
     public boolean supportsRequiredToolChoice() {
         if (mode != TransportMode.ENGINE || engineResolver == null) return false;
         if ("ollama".equalsIgnoreCase(backend)) return false;
         try {
-            return engineResolver.capabilities().requiredToolChoice();
+            Capabilities current = effectiveCapabilities();
+            return current != null && current.requiredToolChoice();
         } catch (Exception e) {
             return false;
         }
@@ -337,7 +392,8 @@ public final class LlmClient implements AutoCloseable {
         if (mode != TransportMode.ENGINE || engineResolver == null) return false;
         if ("ollama".equalsIgnoreCase(backend)) return false;
         try {
-            return engineResolver.capabilities().namedToolChoice();
+            Capabilities current = effectiveCapabilities();
+            return current != null && current.namedToolChoice();
         } catch (Exception e) {
             return false;
         }
@@ -529,7 +585,7 @@ public final class LlmClient implements AutoCloseable {
 
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
             ChatRequest req = new ChatRequest(
-                    backend, model, sys, usr, sn, timeout, List.of(), toolSpecs,
+                    backend, model, sys, usr, sn, timeout, List.of(), effectiveToolSpecs(toolSpecs),
                     withConfigSampling(promptDebugControlsForPlainCall(sys)));
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, onChunk != null));
             return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
@@ -607,7 +663,8 @@ public final class LlmClient implements AutoCloseable {
                 .toList();
 
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
-            ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
+            ChatRequest req = new ChatRequest(
+                    backend, model, "", "", List.of(), timeout, sanitized, effectiveToolSpecs(toolSpecs));
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, onChunk != null));
             return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
         });
@@ -1135,7 +1192,14 @@ public final class LlmClient implements AutoCloseable {
     }
 
     private List<ToolSpec> effectiveToolSpecs(List<ToolSpec> requestToolSpecs) {
+        if (!nativeToolsCurrentlyEnabled()) return List.of();
         return requestToolSpecs == null ? toolSpecs : List.copyOf(requestToolSpecs);
+    }
+
+    private Capabilities effectiveCapabilities() {
+        if (engineResolver == null) return null;
+        if (preparedCapabilities != null) return preparedCapabilities;
+        return engineResolver.capabilities();
     }
 
     private static ChatRequestControls withDebugTag(ChatRequestControls controls, String tag) {

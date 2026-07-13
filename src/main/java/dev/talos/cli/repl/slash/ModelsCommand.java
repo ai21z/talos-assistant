@@ -5,6 +5,8 @@ import dev.talos.runtime.Result;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.GgufCacheScanner;
 import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+import dev.talos.cli.ui.ModelIdentityPresentation;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.ArrayList;
@@ -27,7 +29,10 @@ public final class ModelsCommand implements Command {
                 if (list.isEmpty() && downloaded.isEmpty()) {
                     return new Result.Info("No configured or downloaded models found. Run `talos setup models` to configure managed llama.cpp, or select a configured legacy backend.");
                 }
-                return new Result.Ok(renderInstalledModels(list, downloaded));
+                ModelIdentitySnapshot identity = ctx.llm() == null
+                        ? ModelIdentitySnapshot.empty()
+                        : ctx.llm().modelIdentity();
+                return new Result.Ok(renderInstalledModels(list, downloaded, identity));
             }
         } catch (Exception e) {
             // Friendly error instead of crashing the REPL
@@ -37,6 +42,13 @@ public final class ModelsCommand implements Command {
     }
 
     static String renderInstalledModels(List<ModelRef> models, List<ModelRef> downloaded) {
+        return renderInstalledModels(models, downloaded, ModelIdentitySnapshot.empty());
+    }
+
+    static String renderInstalledModels(
+            List<ModelRef> models,
+            List<ModelRef> downloaded,
+            ModelIdentitySnapshot identity) {
         List<ModelRef> managed = new ArrayList<>();
         List<ModelRef> ollama = new ArrayList<>();
         List<ModelRef> other = new ArrayList<>();
@@ -51,9 +63,9 @@ public final class ModelsCommand implements Command {
         }
 
         StringBuilder sb = new StringBuilder("\nConfigured/selectable models:\n\n");
-        appendGroup(sb, "Recommended managed llama.cpp", managed);
-        appendGroup(sb, "Legacy/optional Ollama", ollama);
-        appendGroup(sb, "Other configured backends", other);
+        appendGroup(sb, "Recommended managed llama.cpp", managed, identity);
+        appendGroup(sb, "Legacy/optional Ollama", ollama, identity);
+        appendGroup(sb, "Other configured backends", other, identity);
         appendDownloadedGroup(sb, downloaded);
         sb.append("""
 
@@ -71,7 +83,11 @@ The /profiles command is unrelated: it manages workspace verification profiles, 
         return sb.toString();
     }
 
-    private static void appendGroup(StringBuilder sb, String title, List<ModelRef> models) {
+    private static void appendGroup(
+            StringBuilder sb,
+            String title,
+            List<ModelRef> models,
+            ModelIdentitySnapshot identity) {
         if (models.isEmpty()) {
             return;
         }
@@ -82,14 +98,16 @@ The /profiles command is unrelated: it manages workspace verification profiles, 
             if ("llama_cpp".equals(model.backend())) {
                 LlamaCppModelCatalog.byAlias(model.name())
                         .filter(LlamaCppModelCatalog.Profile::selectable)
-                        .map(profile -> profile.disposition().label())
+                        .map(profile -> "catalog " + profile.disposition().label())
                         .ifPresent(notes::add);
             }
+            notes.addAll(ModelIdentityPresentation.activeModelNotes(
+                    identity, model.backend(), model.name()));
             if (model.note() != null && !model.note().isBlank()) {
                 notes.add(model.note());
             }
             if (!notes.isEmpty()) {
-                sb.append("  (").append(String.join("; ", notes)).append(")");
+                sb.append("  (").append(String.join(", ", notes)).append(")");
             }
             sb.append("\n");
         }

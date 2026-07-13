@@ -1,6 +1,7 @@
 package dev.talos.cli.launcher;
 
 import dev.talos.core.Config;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -69,12 +70,11 @@ class TopLevelStatusCmdTest {
 
         assertTrue(output.contains("Context     : 16384"), output);
         assertTrue(output.contains("estimated 16k context from 1536 MiB at 8192 on CUDA lane"), output);
-        assertTrue(output.contains("Profile tier: accepted beta stability"), output);
-        assertTrue(output.contains("Profile evidence: legacy:two-model-large-scale-live-audit-0.10.8"), output);
+        assertFalse(output.contains("Profile tier: accepted beta stability"), output);
     }
 
     @Test
-    void verboseEngineStatusProjectsQwen3ExperimentalEvidence() {
+    void verboseEngineStatusDoesNotProjectQwen3QualificationFromAliasAlone() {
         Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of(
                 "default_backend", "llama_cpp",
@@ -87,9 +87,56 @@ class TopLevelStatusCmdTest {
 
         String output = TopLevelStatusCmd.renderEngineStatus(cfg);
 
-        assertTrue(output.contains("Profile tier: experimental selectable"), output);
-        assertTrue(output.contains("Profile evidence: local/model-qualification/"
-                + "qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712"), output);
+        assertFalse(output.contains("Profile tier: experimental selectable"), output);
+        assertFalse(output.contains("qwen3-8b-full-p5a15"), output);
+        assertTrue(output.contains("Resolution  : refused"), output);
+        assertTrue(output.contains("Artifact    : missing"), output);
+    }
+
+    @Test
+    void verboseEngineStatusProjectsOneBoundedQualifiedIdentityDecision() {
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen3-8b")));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "mode", "managed",
+                        "model", "qwen3-8b")))));
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel("qwen3-8b")
+                .configuredModelFile("C:/private/Qwen3-8B-Q4_K_M.gguf")
+                .declaredProfile("qwen3-8b")
+                .resolvedProfile("qwen3-8b")
+                .observedModelFile("D:/served/Qwen3-8B-Q4_K_M.gguf")
+                .artifactState("EXACT")
+                .artifactVerificationIdentity("a".repeat(64))
+                .engineLane("win-x64-cuda-13.3:b9918")
+                .engineExecutableIdentity("b".repeat(64))
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveContextTokens(8192)
+                .disposition("experimental selectable")
+                .propsState("AVAILABLE")
+                .propsResponseSha256("c".repeat(64))
+                .chatAvailable(true)
+                .build();
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg, identity);
+
+        assertTrue(output.contains("Configured  : qwen3-8b"), output);
+        assertTrue(output.contains("Config file : Qwen3-8B-Q4_K_M.gguf"), output);
+        assertTrue(output.contains("Resolved    : qwen3-8b"), output);
+        assertTrue(output.contains("Artifact    : exact"), output);
+        assertTrue(output.contains("Serving     : Qwen3-8B-Q4_K_M.gguf, matched"), output);
+        assertTrue(output.contains("Tool mode   : native"), output);
+        assertTrue(output.contains("Resolved ctx: 8192"), output);
+        assertTrue(output.contains("Engine lane : win-x64-cuda-13.3:b9918"), output);
+        assertTrue(output.contains("Resolution  : qualified"), output);
+        assertFalse(output.contains("C:/private"), output);
+        assertFalse(output.contains("D:/served"), output);
     }
 
     @Test

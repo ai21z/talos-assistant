@@ -117,6 +117,21 @@ class DoctorProbesTest {
         assertTrue(result.detail().contains("source=nvidia-smi"), result.detail());
     }
 
+    // -- engine profile --------------------------------------------------
+
+    @Test
+    void engineProfileWarnsWhenAliasHasNoBoundArtifactOrServedEvidence() {
+        Config cfg = llamaCppConfig(Map.of(
+                "mode", "connect_only",
+                "model", "qwen2.5-coder-14b"));
+
+        ProbeResult result = new EngineProfileProbe().run(ctx(cfg));
+
+        assertEquals(ProbeResult.Status.WARN, result.status());
+        assertTrue(result.detail().contains("identity unverified"), result.detail());
+        assertFalse(result.detail().contains(tempDir.toString()), result.detail());
+    }
+
     // ── engine-files ─────────────────────────────────────────────────────
 
     @Test
@@ -158,7 +173,7 @@ class DoctorProbesTest {
     // ── server ───────────────────────────────────────────────────────────
 
     @Test
-    void serverRespondingPasses() throws IOException {
+    void serverRespondingWithoutPropsWarnsThatIdentityIsUnverified() throws IOException {
         HttpServer server = startHealthServer(200);
         try {
             Config cfg = llamaCppConfig(Map.of(
@@ -168,8 +183,9 @@ class DoctorProbesTest {
 
             ProbeResult result = new ServerProbe(false).run(ctx(cfg));
 
-            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertEquals(ProbeResult.Status.WARN, result.status());
             assertTrue(result.detail().contains("server responding"));
+            assertTrue(result.detail().contains("identity unverified"), result.detail());
         } finally {
             server.stop(0);
         }
@@ -292,7 +308,7 @@ class DoctorProbesTest {
     }
 
     @Test
-    void startModePassesWhenSuccessfulModelSmokeIsFast() throws IOException {
+    void startModeWarnsWhenSmokePassesButConnectOnlyIdentityIsUnverified() throws IOException {
         AtomicInteger chatCalls = new AtomicInteger();
         HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls);
         try {
@@ -304,8 +320,9 @@ class DoctorProbesTest {
 
             ProbeResult result = new ServerProbe(true).run(ctx(cfg));
 
-            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertEquals(ProbeResult.Status.WARN, result.status());
             assertTrue(result.detail().contains("end-to-end model smoke verified"), result.detail());
+            assertTrue(result.detail().contains("identity unverified"), result.detail());
             assertTrue(result.detail().contains("rates unmeasured"), result.detail());
             assertFalse(result.detail().contains("slow"), result.detail());
             assertTrue(result.detail().contains("external server left running"), result.detail());
@@ -399,8 +416,9 @@ class DoctorProbesTest {
                     Duration.ofSeconds(60),
                     (ctx, preflight) -> tinyPromptOnly).run(ctx(cfg));
 
-            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertEquals(ProbeResult.Status.WARN, result.status());
             assertTrue(result.detail().contains("rates unmeasured"), result.detail());
+            assertTrue(result.detail().contains("identity unverified"), result.detail());
             assertFalse(result.detail().contains("prompt eval 10.0 tok/s"), result.detail());
         } finally {
             server.stop(0);
@@ -533,7 +551,7 @@ class DoctorProbesTest {
     }
 
     @Test
-    void startModePassesWhenBoundedRateSampleStopsNormallyAndRatesAreFast() throws IOException {
+    void startModeWarnsWhenRateSamplePassesButIdentityRemainsUnverified() throws IOException {
         AtomicInteger chatCalls = new AtomicInteger();
         HttpServer server = startChatServer(
                 MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls, null, "stop");
@@ -570,8 +588,9 @@ class DoctorProbesTest {
                         }
                     }).run(ctx(cfg));
 
-            assertEquals(ProbeResult.Status.PASS, result.status());
+            assertEquals(ProbeResult.Status.WARN, result.status());
             assertTrue(result.detail().contains("prompt eval 3200.0 tok/s"), result.detail());
+            assertTrue(result.detail().contains("identity unverified"), result.detail());
             assertFalse(result.detail().contains("output limit"), result.detail());
             assertEquals(2, chatCalls.get(), "doctor should run only smoke plus one bounded rate sample");
         } finally {

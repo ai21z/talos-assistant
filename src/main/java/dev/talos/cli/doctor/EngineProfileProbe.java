@@ -2,9 +2,21 @@ package dev.talos.cli.doctor;
 
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.engine.EngineRegistry;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
+
+import dev.talos.spi.types.ModelIdentitySnapshot;
 
 /** Verifies the configured backend resolves to a provider and a model is set. */
 public final class EngineProfileProbe implements DoctorProbe {
+    private final boolean runtimeVerificationFollows;
+
+    public EngineProfileProbe() {
+        this(false);
+    }
+
+    EngineProfileProbe(boolean runtimeVerificationFollows) {
+        this.runtimeVerificationFollows = runtimeVerificationFollows;
+    }
 
     @Override
     public String id() {
@@ -27,6 +39,23 @@ public final class EngineProfileProbe implements DoctorProbe {
             return ProbeResult.warn(id(),
                     "backend '" + backend + "' resolves but no model is configured");
         }
-        return ProbeResult.pass(id(), "backend " + backend + ", model " + model);
+        if (!"llama_cpp".equals(backend)) {
+            return ProbeResult.pass(id(), "backend " + backend + ", model " + model);
+        }
+
+        ModelIdentitySnapshot identity = LlamaCppProfileIdentity.inspectLocal(ctx.cfg(), ctx.talosHome());
+        ModelIdentityDoctorAssessment assessment = ModelIdentityDoctorAssessment.assess(identity);
+        String detail = "backend " + backend + ", model " + model + "; " + assessment.detail();
+        if (assessment.status() == ProbeResult.Status.FAIL) {
+            return ProbeResult.fail(id(), detail,
+                    "run 'talos setup models' or correct the configured model and engine paths");
+        }
+        if (assessment.status() == ProbeResult.Status.WARN && runtimeVerificationFollows) {
+            return ProbeResult.pass(id(), "backend " + backend + ", model " + model
+                    + "; runtime identity verification follows in the server probe");
+        }
+        return assessment.status() == ProbeResult.Status.PASS
+                ? ProbeResult.pass(id(), detail)
+                : ProbeResult.warn(id(), detail);
     }
 }

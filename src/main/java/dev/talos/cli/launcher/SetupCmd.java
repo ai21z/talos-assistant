@@ -390,7 +390,8 @@ public class SetupCmd implements Callable<Integer> {
                 && knownProfile.qualification().protocolRevision() > 0
                 && selectedModelPath.path() != null) {
             System.out.println("Verifying pinned model artifact: " + knownProfile.artifactFile());
-            LlamaCppModelArtifactVerifier.requireMatch(selectedModelPath.path(), knownProfile);
+            LlamaCppModelArtifactVerifier.requireMatchAndRecord(
+                    selectedModelPath.path(), knownProfile, talosHomeForConfig(target));
         }
         ManagedContextSelector.Decision context = managedContextDecision(normalizedProfile, serverPath);
 
@@ -637,6 +638,14 @@ public class SetupCmd implements Callable<Integer> {
 
     private static String yamlScalar(String value) {
         return Objects.toString(value, "").replace("\\", "/").replace("\"", "\\\"");
+    }
+
+    private static Path talosHomeForConfig(Path configPath) {
+        Path absolute = configPath == null
+                ? defaultConfigPath()
+                : configPath.toAbsolutePath().normalize();
+        Path parent = absolute.getParent();
+        return parent == null ? defaultConfigPath().getParent() : parent;
     }
 
     private static String renderServerArgs(List<String> arguments) {

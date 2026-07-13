@@ -7,7 +7,9 @@ import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.LlamaCppContextArgs;
 import dev.talos.engine.llamacpp.LlamaCppContextLimits;
-import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
+import dev.talos.cli.ui.ModelIdentityPresentation;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.Health;
 import org.apache.lucene.index.DirectoryReader;
@@ -128,6 +130,14 @@ public class TopLevelStatusCmd implements Runnable {
 
     static String renderEngineStatus(Config cfg) {
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+        ModelIdentitySnapshot identity = "llama_cpp".equals(runtime.backend())
+                ? LlamaCppProfileIdentity.inspectAvailable(cfg, defaultTalosHome())
+                : ModelIdentitySnapshot.empty();
+        return renderEngineStatus(cfg, identity);
+    }
+
+    static String renderEngineStatus(Config cfg, ModelIdentitySnapshot identity) {
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
         StringBuilder out = new StringBuilder();
         out.append("  Backend     : ").append(runtime.backend()).append("\n");
         if ("ollama".equals(runtime.backend())) {
@@ -139,7 +149,7 @@ public class TopLevelStatusCmd implements Runnable {
         if (!runtime.modelSourceLabel().isBlank()) {
             out.append("  Model file  : ").append(runtime.modelSourceLabel()).append("\n");
         }
-        appendProfileEvidence(out, runtime);
+        appendModelIdentity(out, identity);
         appendLlamaCppContext(out, cfg, runtime.backend());
         out.append("  Embeddings  : ").append(runtime.embeddingLabel()).append("\n");
 
@@ -151,11 +161,19 @@ public class TopLevelStatusCmd implements Runnable {
                     .append(health.ok() ? "OK" : "DOWN")
                     .append(health.message().isBlank() ? "" : " - " + health.message())
                     .append("\n");
+            boolean identityControlsTools = identity != null
+                    && "llama_cpp".equals(runtime.backend())
+                    && identity.available();
+            boolean nativeTools = identityControlsTools
+                    ? identity.qualified() && "NATIVE".equals(identity.effectiveToolMode())
+                    : caps.nativeTools();
             out.append("  Capabilities: chat=")
                     .append(caps.chat())
                     .append(", stream=").append(caps.stream())
-                    .append(", tools=").append(caps.nativeTools())
-                    .append(", required_tool=").append(caps.requiredToolChoice())
+                    .append(", tools=").append(nativeTools)
+                    .append(", required_tool=").append(identityControlsTools
+                            ? nativeTools
+                            : caps.requiredToolChoice())
                     .append("\n");
         } catch (Exception e) {
             out.append("  Health      : DOWN - ").append(e.getMessage()).append("\n");
@@ -163,13 +181,16 @@ public class TopLevelStatusCmd implements Runnable {
         return out.toString();
     }
 
-    private static void appendProfileEvidence(StringBuilder out, EngineRuntimeConfig runtime) {
-        if (!"llama_cpp".equals(runtime.backend())) return;
-        LlamaCppModelCatalog.profileForRuntime(runtime.model(), runtime.modelSourceLabel())
-                .ifPresent(profile -> {
-                    out.append("  Profile tier: ").append(profile.disposition().label()).append("\n");
-                    out.append("  Profile evidence: ").append(profile.evidencePacket()).append("\n");
-                });
+    private static void appendModelIdentity(StringBuilder out, ModelIdentitySnapshot identity) {
+        for (ModelIdentityPresentation.Row row : ModelIdentityPresentation.statusRows(identity)) {
+            out.append("  ").append(String.format("%-12s", row.label()))
+                    .append(": ").append(row.value()).append("\n");
+        }
+    }
+
+    private static Path defaultTalosHome() {
+        return Path.of(System.getProperty("user.home", "."), ".talos")
+                .toAbsolutePath().normalize();
     }
 
     private static void appendLlamaCppContext(StringBuilder out, Config cfg, String backend) {

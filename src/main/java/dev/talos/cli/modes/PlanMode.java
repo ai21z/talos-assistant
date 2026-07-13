@@ -78,7 +78,7 @@ public final class PlanMode implements Mode {
                 NativeToolSpecPolicy.select(effectiveContract, effectivePhase, ctx.toolRegistry(), ctx.cfg());
         List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
 
-        boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        boolean nativeTools = ctx.llm().prepareNativeTools();
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forPlan()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                 .withVisibleToolNames(plannedNativeToolNames)

@@ -50,6 +50,30 @@ class LlamaCppProfileResolverTest {
     }
 
     @Test
+    void qwen14HardwareSelected16kContextRemainsQualified() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen2.5-coder-14b").orElseThrow();
+        var request = exactRequest(profile, "C:/models/" + profile.artifactFile(), LANE);
+        var configured = new LlamaCppProfileResolver.ConfiguredFacts(
+                profile.alias(), request.configured().canonicalModelPath(), 16_384,
+                profile.toolMode(), profile.runtime().reasoningMode(),
+                profile.runtime().managedServerArgs(), true);
+        var observed = new LlamaCppProfileResolver.ObservedServerFacts(
+                ObservationState.AVAILABLE,
+                request.observed().canonicalModelPath(), profile.alias(), "llama_cpp",
+                "embedded-template", MatchState.MATCHED, ToolMode.NATIVE, 16_384,
+                Set.of(Modality.TEXT), "49 layers offloaded");
+
+        var resolved = LlamaCppProfileResolver.resolve(new LlamaCppProfileResolver.Request(
+                request.declaredProfile(), configured, request.artifact(), request.engine(),
+                observed, request.hardware()));
+
+        assertEquals(ResolutionState.QUALIFIED, resolved.resolution());
+        assertEquals(16_384, resolved.effectiveContextTokens());
+        assertFalse(resolved.reasons().contains(ReasonCode.CONTEXT_CAPPED_TO_DECLARED));
+        assertFalse(resolved.reasons().contains(ReasonCode.OBSERVED_CONTEXT_EXCEEDS_DECLARED));
+    }
+
+    @Test
     void everySelectableCatalogProfileIsPreservedWhenAllFactsAgree() {
         for (var profile : LlamaCppModelCatalog.selectableProfiles()) {
             String modelPath = "C:/models/" + profile.artifactFile();
@@ -413,6 +437,24 @@ class LlamaCppProfileResolverTest {
 
         assertEquals(ResolutionState.REFUSED, resolved.resolution());
         assertTrue(resolved.reasons().contains(ReasonCode.REQUIRED_LAUNCH_ARGUMENTS_MISSING));
+    }
+
+    @Test
+    void observedManagedDownloadPathCanBindBlankConfiguredPathToExactArtifact() {
+        var profile = qwen3();
+        var request = exactRequest(profile);
+        var configured = new LlamaCppProfileResolver.ConfiguredFacts(
+                profile.alias(), "", profile.runtime().contextTokens(),
+                profile.toolMode(), profile.runtime().reasoningMode(),
+                profile.runtime().managedServerArgs(), true);
+
+        var resolved = LlamaCppProfileResolver.resolve(new LlamaCppProfileResolver.Request(
+                request.declaredProfile(), configured, request.artifact(), request.engine(),
+                request.observed(), request.hardware()));
+
+        assertEquals(ResolutionState.QUALIFIED, resolved.resolution());
+        assertEquals(MatchState.MATCHED, resolved.servedIdentity());
+        assertEquals(ToolMode.NATIVE, resolved.effectiveToolMode());
     }
 
     @Test

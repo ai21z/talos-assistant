@@ -5,15 +5,17 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliStatusDashboard;
+import dev.talos.cli.ui.ModelIdentityPresentation;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.HostLocalityPolicy;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.core.embed.ManagedLlamaCppEmbeddingConfig;
 import dev.talos.core.extract.DocumentExtractionPreflight;
-import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -112,11 +114,11 @@ public final class StatusCommand implements Command {
             sb.append(AnsiColor.grey("  ModelFile ")).append(activeRuntime.modelSourceLabel()).append("\n");
         }
         if ("llama_cpp".equals(activeRuntime.backend())) {
-            LlamaCppModelCatalog.profileForRuntime(activeRuntime.model(), activeRuntime.modelSourceLabel())
-                    .ifPresent(profile -> {
-                        sb.append(AnsiColor.grey("  Profile   ")).append(profile.disposition().label()).append("\n");
-                        sb.append(AnsiColor.grey("  Evidence  ")).append(profile.evidencePacket()).append("\n");
-                    });
+            ModelIdentitySnapshot identity = resolvedIdentity(ctx, cfg);
+            for (ModelIdentityPresentation.Row row : ModelIdentityPresentation.statusRows(identity)) {
+                sb.append(AnsiColor.grey(String.format("  %-12s", row.label())))
+                        .append(row.value()).append("\n");
+            }
         }
         sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
         sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");
@@ -205,6 +207,18 @@ public final class StatusCommand implements Command {
 
         sb.append("\n");
         return new Result.TrustedInfo(sb.toString());
+    }
+
+    private static ModelIdentitySnapshot resolvedIdentity(Context ctx, dev.talos.core.Config cfg) {
+        ModelIdentitySnapshot current = ctx == null || ctx.llm() == null
+                ? ModelIdentitySnapshot.empty()
+                : ctx.llm().modelIdentity();
+        if (current.available() && "AVAILABLE".equals(current.propsState())) {
+            return current;
+        }
+        Path talosHome = Path.of(System.getProperty("user.home", "."), ".talos")
+                .toAbsolutePath().normalize();
+        return LlamaCppProfileIdentity.inspectAvailable(cfg, talosHome);
     }
 
     private static String embeddingHost(dev.talos.core.Config cfg, EngineRuntimeConfig runtime) {

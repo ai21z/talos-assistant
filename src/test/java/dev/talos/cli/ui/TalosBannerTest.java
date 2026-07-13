@@ -134,4 +134,23 @@ class TalosBannerTest {
             assertEquals("unknown", model);
         }
     }
+
+    @Test
+    void resolveModelDoesNotPresentAConfiguredAliasAsResolvedIdentity() {
+        Config mismatched = new Config();
+        mismatched.data.put("llm", Map.of(
+                "default_backend", "llama_cpp",
+                "model", "qwen2.5-coder-14b"));
+        mismatched.data.put("engines", Map.of("llama_cpp", Map.of(
+                "mode", "managed",
+                "model", "qwen2.5-coder-14b",
+                "model_path", "C:/models/qwen2.5-coder-7b.gguf",
+                "server_path", "C:/engines/llama-server.exe")));
+
+        String model = TalosBanner.resolveModel(mismatched);
+
+        assertTrue(model.startsWith("qwen2.5-coder-14b"), model);
+        assertTrue(model.contains("refused") || model.contains("unverified"), model);
+        assertNotEquals("qwen2.5-coder-14b", model);
+    }
 }

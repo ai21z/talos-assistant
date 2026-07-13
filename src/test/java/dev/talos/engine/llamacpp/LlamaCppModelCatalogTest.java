@@ -48,6 +48,8 @@ class LlamaCppModelCatalogTest {
         assertEquals(LlamaCppModelCatalog.Disposition.ACCEPTED_BETA, qwen.disposition());
         assertTrue(qwen.selectable());
         assertTrue(qwen.wizardDownload());
+        assertEquals(8_192, qwen.runtime().contextTokens());
+        assertEquals(16_384, qwen.runtime().maxContextTokens());
     }
 
     @Test
@@ -68,6 +70,7 @@ class LlamaCppModelCatalogTest {
         assertEquals(true, qwen3.nativeCalling());
         assertEquals("native/default", qwen3.toolMode());
         assertEquals(8_192, qwen3.runtime().contextTokens());
+        assertEquals(8_192, qwen3.runtime().maxContextTokens());
         assertEquals(List.of("--reasoning", "off"), qwen3.runtime().managedServerArgs());
         assertEquals(List.of("win-x64-cuda-13.3:b9918"), qwen3.runtime().compatibleEngineLanes());
         assertEquals(5, qwen3.qualification().protocolRevision());

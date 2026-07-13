@@ -42,6 +42,7 @@ import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -173,6 +174,9 @@ public final class AssistantTurnExecutor {
     public static TurnOutput execute(List<ChatMessage> messages, Path workspace,
                               Context ctx, Options opts) {
         PromptDebugCapture.beginTurn();
+        recordModelIdentityDiagnostics(ctx == null || ctx.llm() == null
+                ? ModelIdentitySnapshot.empty()
+                : ctx.llm().modelIdentity());
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
         WorkspaceBoundaryPreflight workspaceBoundaryPreflight =
@@ -367,6 +371,12 @@ public final class AssistantTurnExecutor {
         }
 
         return new TurnOutput(out.toString(), streamed);
+    }
+
+    static void recordModelIdentityDiagnostics(ModelIdentitySnapshot identity) {
+        if (identity == null || !identity.available()) return;
+        identity.diagnostics().forEach(PromptDebugCapture::putTurnDiagnostic);
+        LocalTurnTraceCapture.recordModelIdentity(identity);
     }
 
     private static void appendEngineException(StringBuilder out, EngineException ex) {
@@ -721,10 +731,14 @@ public final class AssistantTurnExecutor {
     private static CurrentTurnPlan compatibilityPlanFromMessages(List<ChatMessage> messages, Context ctx) {
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         ExecutionPhase phase = currentExecutionPhase(ctx, contract);
-        List<String> nativeTools = ctx == null
+        List<String> promptTools = ctx == null
                 ? ToolSurfacePlanner.defaultVisibleToolNames(contract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
-        return CurrentTurnPlan.compatibility(contract, phase, nativeTools, nativeTools, List.of());
+        boolean nativeEnabled = ctx == null
+                || ctx.llm() == null
+                || ctx.llm().nativeToolsCurrentlyEnabled();
+        List<String> nativeTools = nativeEnabled ? promptTools : List.of();
+        return CurrentTurnPlan.compatibility(contract, phase, nativeTools, promptTools, List.of());
     }
 
     private static CurrentTurnPlan safePlanFromMessages(

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1069] llama.cpp setup, launch, status, doctor, model listing, prompt
+  planning, prompt debug, trace, and request tools now consume one resolved
+  model identity. Exact artifact evidence is cached against file metadata,
+  `/props` observations are bounded and loopback-only, mismatches fail closed,
+  and connect-only servers without `/props` remain chat-capable but unverified.
 - [T1068] llama.cpp profile resolution now combines declared catalog data with
   typed artifact, engine, server, template, context, modality, and hardware
   facts. Runtime evidence can preserve or narrow a profile, while missing or

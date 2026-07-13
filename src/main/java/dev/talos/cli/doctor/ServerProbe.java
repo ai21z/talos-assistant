@@ -5,8 +5,10 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.engine.llamacpp.LlamaCppLogEvidence;
 import dev.talos.engine.llamacpp.LlamaCppPreflight;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 import dev.talos.spi.ChatModelEngine;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 
 import java.net.ConnectException;
 import java.net.URI;
@@ -95,10 +97,10 @@ public final class ServerProbe implements DoctorProbe {
         if (startServer) {
             return startAndChat(ctx, runtime, preflight);
         }
-        return probeHealth(preflight);
+        return probeHealth(ctx, preflight);
     }
 
-    private ProbeResult probeHealth(LlamaCppPreflight.Report preflight) {
+    private ProbeResult probeHealth(DoctorContext ctx, LlamaCppPreflight.Report preflight) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(preflight.baseUrl() + "/health"))
@@ -108,7 +110,12 @@ public final class ServerProbe implements DoctorProbe {
             HttpResponse<String> response = HttpClient.newHttpClient()
                     .send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 == 2) {
-                return ProbeResult.pass(id(), "server responding at " + preflight.baseUrl());
+                ModelIdentitySnapshot identity = LlamaCppProfileIdentity.inspectAvailable(
+                        ctx.cfg(), ctx.talosHome());
+                return withIdentity(
+                        ProbeResult.pass(id(), "server responding at " + preflight.baseUrl()),
+                        ModelIdentityDoctorAssessment.assess(identity),
+                        preflight);
             }
             return ProbeResult.fail(id(),
                     "server at " + preflight.baseUrl() + " returned HTTP " + response.statusCode(),
@@ -167,6 +174,14 @@ public final class ServerProbe implements DoctorProbe {
                         "check the model profile, chat template, tool mode, and llama.cpp log under ~/.talos/logs/llama_cpp-"
                                 + preflight.port() + ".log");
             }
+            ModelIdentityDoctorAssessment identity = ModelIdentityDoctorAssessment.assess(
+                    registry.engine().modelIdentity());
+            if (identity.status() == ProbeResult.Status.FAIL) {
+                return withIdentity(
+                        ProbeResult.pass(id(), "model smoke verified (" + replyChars + " reply chars)"),
+                        identity,
+                        preflight);
+            }
             String completion = completionSuffix(preflight);
             RateAssessment rates = assessRates(ctx, preflight);
             RateSampleOutcome sampleOutcome = RateSampleOutcome.NOT_ATTEMPTED;
@@ -175,47 +190,49 @@ public final class ServerProbe implements DoctorProbe {
                 rates = assessRates(ctx, preflight);
             }
             if (sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED) {
-                return ProbeResult.warn(id(),
+                return withIdentity(ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but the representative rate sample"
                                 + " reached the provider output limit (finish_reason=length); "
                                 + rates.summary() + "; " + completion
                                 + ". Throughput evidence is bounded because the requested diagnostic response did not complete;"
-                                + " rerun doctor or inspect the llama.cpp log before relying on it.");
+                                + " rerun doctor or inspect the llama.cpp log before relying on it."), identity, preflight);
             }
             if (sampleOutcome == RateSampleOutcome.UNVERIFIED) {
-                return ProbeResult.warn(id(),
+                return withIdentity(ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but rate sample completion"
                                 + " could not be verified; " + rates.summary() + "; " + completion
                                 + ". The optional diagnostic sample failed or returned no recognized finish reason;"
-                                + " rerun doctor or inspect the llama.cpp log before relying on it.");
+                                + " rerun doctor or inspect the llama.cpp log before relying on it."), identity, preflight);
             }
             if (rates.warn()) {
-                return ProbeResult.warn(id(),
+                return withIdentity(ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but measured rates are slow: "
                                 + rates.summary()
                                 + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
-                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it.");
+                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it."),
+                        identity, preflight);
             }
             if (sampleOutcome == RateSampleOutcome.COMPLETED && !rates.measured()) {
-                return ProbeResult.warn(id(),
+                return withIdentity(ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but rate sample could not be measured within 60s;"
                                 + " " + completion
                                 + ". This profile may be too slow or the llama.cpp timing log may be incomplete;"
-                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it.");
+                                + " use GPU acceleration, a smaller profile, or raise limits.llm_timeout_ms before relying on it."),
+                        identity, preflight);
             }
             if (elapsed.compareTo(slowSmokeWarningThreshold) > 0) {
-                return ProbeResult.warn(id(),
+                return withIdentity(ProbeResult.warn(id(),
                         "model smoke verified (" + replyChars + " reply chars) but slow: "
                                 + elapsedSeconds(elapsed)
                                 + " for startup/smoke on "
                                 + runtime.model()
                                 + "; " + completion + ". This profile may be too slow for practical edit work on this machine;"
-                                + " use GPU acceleration or stronger hardware before relying on it.");
+                                + " use GPU acceleration or stronger hardware before relying on it."), identity, preflight);
             }
-            return ProbeResult.pass(id(),
+            return withIdentity(ProbeResult.pass(id(),
                     "end-to-end model smoke verified (" + replyChars + " reply chars);"
                             + " " + rates.summary()
-                            + "; " + completion);
+                            + "; " + completion), identity, preflight);
         } catch (Exception e) {
             return ProbeResult.fail(id(),
                     "end-to-end server start failed: " + e.getMessage(),
@@ -253,6 +270,25 @@ public final class ServerProbe implements DoctorProbe {
             // only because the optional rate sample could not be measured.
             return RateSampleOutcome.UNVERIFIED;
         }
+    }
+
+    private ProbeResult withIdentity(
+            ProbeResult base,
+            ModelIdentityDoctorAssessment identity,
+            LlamaCppPreflight.Report preflight) {
+        if (base.status() == ProbeResult.Status.FAIL || base.status() == ProbeResult.Status.SKIP) {
+            return base;
+        }
+        String detail = base.detail() + "; " + identity.detail();
+        if (identity.status() == ProbeResult.Status.FAIL) {
+            return ProbeResult.fail(id(), detail,
+                    "check the configured model, llama.cpp lane, and /props identity; inspect ~/.talos/logs/llama_cpp-"
+                            + preflight.port() + ".log");
+        }
+        if (base.status() == ProbeResult.Status.WARN || identity.status() == ProbeResult.Status.WARN) {
+            return ProbeResult.warn(id(), detail);
+        }
+        return ProbeResult.pass(id(), detail);
     }
 
     private RateAssessment assessRates(DoctorContext ctx, LlamaCppPreflight.Report preflight) {

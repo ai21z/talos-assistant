@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,7 +69,7 @@ class LlamaCppEngineProviderTest {
     }
 
     @Test
-    void capsReportLlamaCppCompatSurface() {
+    void capsDoNotAdvertiseUnverifiedModelToolCapabilities() {
         Config cfg = config(Map.of(
                 "mode", "managed",
                 "context", 16384));
@@ -78,12 +79,12 @@ class LlamaCppEngineProviderTest {
         assertTrue(caps.chat());
         assertTrue(caps.stream());
         assertFalse(caps.embed());
-        assertEquals(16384, caps.contextWindow());
-        assertTrue(caps.nativeTools());
-        assertTrue(caps.requiredToolChoice());
-        assertTrue(caps.namedToolChoice());
-        assertTrue(caps.jsonObjectResponse());
-        assertTrue(caps.jsonSchemaResponse());
+        assertEquals(8192, caps.contextWindow());
+        assertFalse(caps.nativeTools());
+        assertFalse(caps.requiredToolChoice());
+        assertFalse(caps.namedToolChoice());
+        assertFalse(caps.jsonObjectResponse());
+        assertFalse(caps.jsonSchemaResponse());
         assertTrue(caps.serverModelCatalog());
         assertTrue(caps.managedProcess());
     }
@@ -108,6 +109,54 @@ class LlamaCppEngineProviderTest {
         Capabilities caps = new LlamaCppEngineProvider().create(cfg).caps();
 
         assertEquals(4096, caps.contextWindow());
+    }
+
+    @Test
+    void preparedQualifiedIdentityAdvertisesOnlyItsEffectiveNativeCapabilities() throws Exception {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3-8b").orElseThrow();
+        String modelPath = tempFilePath(profile.artifactFile());
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "model", profile.alias(),
+                "model_path", modelPath,
+                "context", 8192,
+                "server_args", List.of("--reasoning", "off")));
+        cfg.data.put("tools", Map.of("native_calling", true));
+        LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
+        var service = new LlamaCppResolvedProfileService(
+                llamaCfg,
+                java.nio.file.Files.createTempDirectory("talos-profile-service"),
+                (path, alias, expected, home, verify) -> new LlamaCppProfileResolver.ArtifactIdentity(
+                        LlamaCppProfileResolver.ArtifactState.EXACT,
+                        path.toAbsolutePath().normalize().toString(),
+                        profile.artifactSizeBytes(),
+                        profile.artifactSizeBytes(),
+                        profile.artifactSha256(),
+                        profile.artifactSha256(),
+                        "artifact-record"),
+                base -> LlamaCppPropsClient.Result.available(new LlamaCppPropsClient.Props(
+                        modelPath, "embedded template", true, true, false, false,
+                        8192, "b9918-test", "props-hash")),
+                (config, declared, observed, verify) -> new LlamaCppProfileResolver.EngineFacts(
+                        profile.runtime().compatibleEngineLanes().getFirst(),
+                        "engine-hash",
+                        LlamaCppProfileResolver.MatchState.MATCHED));
+        LlamaCppEngine engine = new LlamaCppEngine(
+                llamaCfg,
+                new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                    throw new AssertionError("connect-only must not launch");
+                }, HttpClient.newHttpClient()),
+                HttpClient.newHttpClient(),
+                service);
+
+        Capabilities caps = engine.prepareCapabilities();
+
+        assertTrue(caps.nativeTools());
+        assertTrue(caps.requiredToolChoice());
+        assertTrue(caps.namedToolChoice());
+        assertEquals(8192, caps.contextWindow());
+        assertEquals("QUALIFIED", engine.modelIdentity().resolution());
+        assertEquals("qwen3-8b", engine.modelIdentity().resolvedProfile());
     }
 
     @Test

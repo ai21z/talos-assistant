@@ -131,16 +131,20 @@ final class AssistantTurnPreparation {
             ActiveTaskContextPolicy.Decision activeDecision
     ) {
         ExecutionPhase phase = currentExecutionPhase(ctx, taskContract);
-        List<String> nativeTools = ctx == null
+        List<String> promptTools = ctx == null
                 ? defaultVisibleToolNames(taskContract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        boolean nativeEnabled = ctx == null
+                || ctx.llm() == null
+                || ctx.llm().nativeToolsCurrentlyEnabled();
+        List<String> nativeTools = nativeEnabled ? promptTools : List.of();
         String activeTaskContext = renderActiveTaskContextForPlan(activeDecision);
         String artifactGoal = renderArtifactGoalForPlan(activeDecision);
         return CurrentTurnPlan.create(
                 taskContract,
                 phase,
                 nativeTools,
-                nativeTools,
+                promptTools,
                 List.of(),
                 activeTaskContext,
                 artifactGoal,

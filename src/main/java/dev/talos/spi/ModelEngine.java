@@ -13,6 +13,8 @@ import dev.talos.spi.types.*;
 public interface ModelEngine extends ChatModelEngine, EmbeddingEngine, AutoCloseable {
     String id();
     Capabilities caps();
+    default Capabilities prepareCapabilities() throws Exception { return caps(); }
+    default ModelIdentitySnapshot modelIdentity() { return ModelIdentitySnapshot.empty(); }
     Health health();
 
     @Override default void close() {}

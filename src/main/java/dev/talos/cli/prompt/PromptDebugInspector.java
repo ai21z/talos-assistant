@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
 /** Formats internal prompt-debug captures for Talos maintainers. */
 public final class PromptDebugInspector {
@@ -23,6 +24,8 @@ public final class PromptDebugInspector {
             PromptDebugRedactor.PROTECTED_TOOL_RESULT_REDACTION;
     public static final String PROTECTED_ASSISTANT_ANSWER_REDACTION =
             PromptDebugRedactor.PROTECTED_ASSISTANT_ANSWER_REDACTION;
+    private static final Pattern ABSOLUTE_PATH = Pattern.compile(
+            "(?i)(?:^|\\s)(?:[a-z]:[\\\\/]|/|\\\\\\\\|//)\\S*");
 
     private PromptDebugInspector() {}
 
@@ -74,6 +77,7 @@ public final class PromptDebugInspector {
         out.append("- Target roles: ").append(targetRoles(contract)).append('\n');
         out.append("- ").append(targetCoverageLabel(contract)).append(": ").append(expectedCoverage).append('\n');
         out.append("- Exact-literal coverage: ").append(exactCoverage).append("\n\n");
+        appendModelIdentity(out, snapshot.diagnostics());
         appendContextLedger(out);
 
         if ("OLLAMA_HTTP_BODY".equals(snapshot.stage())) {
@@ -132,6 +136,53 @@ public final class PromptDebugInspector {
             }
             out.append('\n');
         }
+    }
+
+    private static void appendModelIdentity(StringBuilder out, Map<String, String> diagnostics) {
+        if (diagnostics == null
+                || diagnostics.keySet().stream().noneMatch(key -> key.startsWith("model."))) {
+            return;
+        }
+        out.append("## Model Identity\n\n");
+        appendModelFact(out, diagnostics, "model.backend", "Backend");
+        appendModelFact(out, diagnostics, "model.configured", "Configured");
+        appendModelFact(out, diagnostics, "model.configuredFile", "Configured file");
+        appendModelFact(out, diagnostics, "model.declaredProfile", "Declared");
+        appendModelFact(out, diagnostics, "model.resolvedProfile", "Resolved");
+        appendModelFact(out, diagnostics, "model.observedFile", "Observed file");
+        appendModelFact(out, diagnostics, "model.artifact", "Artifact");
+        appendModelFact(out, diagnostics, "model.artifactVerification", "Artifact verification");
+        appendModelFact(out, diagnostics, "model.engineLane", "Engine lane");
+        appendModelFact(out, diagnostics, "model.engineExecutable", "Engine executable");
+        appendModelFact(out, diagnostics, "model.servedIdentity", "Serving identity");
+        appendModelFact(out, diagnostics, "model.resolution", "Resolution");
+        appendModelFact(out, diagnostics, "model.toolMode", "Effective tools");
+        appendModelFact(out, diagnostics, "model.contextTokens", "Effective context");
+        appendModelFact(out, diagnostics, "model.disposition", "Disposition");
+        appendModelFact(out, diagnostics, "model.propsState", "Props");
+        appendModelFact(out, diagnostics, "model.propsSha256", "Props response");
+        appendModelFact(out, diagnostics, "model.engineBuild", "Engine build");
+        appendModelFact(out, diagnostics, "model.reasons", "Reasons");
+        appendModelFact(out, diagnostics, "model.chatAvailable", "Chat available");
+        out.append('\n');
+    }
+
+    private static void appendModelFact(
+            StringBuilder out,
+            Map<String, String> diagnostics,
+            String key,
+            String label) {
+        String value = safeDiagnostic(diagnostics.get(key));
+        if (!value.isBlank()) {
+            out.append("- ").append(label).append(": ").append(value).append('\n');
+        }
+    }
+
+    private static String safeDiagnostic(String raw) {
+        String clean = Objects.toString(raw, "").replaceAll("[\\r\\n\\t]+", " ").strip();
+        if (clean.isBlank()) return "";
+        if (ABSOLUTE_PATH.matcher(clean).find()) return "[path redacted]";
+        return clean.length() <= 240 ? clean : clean.substring(0, 240);
     }
 
     private static void appendContextLedger(StringBuilder out) {

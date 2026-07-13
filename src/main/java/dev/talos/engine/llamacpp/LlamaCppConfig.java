@@ -26,7 +26,8 @@ record LlamaCppConfig(
         String chatTemplate,
         String chatTemplateFile,
         List<String> serverArgs,
-        boolean verificationLogging
+        boolean verificationLogging,
+        boolean nativeCallingRequested
 ) {
     static final int DEFAULT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
     static final int MIN_MANAGED_AGENT_CONTEXT = ManagedContextSelector.DEFAULT_CONTEXT;
@@ -61,6 +62,8 @@ record LlamaCppConfig(
         // never part of the user's config file; see LlamaCppVerificationLaunch.
         boolean verificationLogging = CfgUtil.boolAt(
                 block, LlamaCppVerificationLaunch.KEY, false);
+        Map<String, Object> tools = CfgUtil.map(cfg == null ? null : cfg.data().get("tools"));
+        boolean nativeCallingRequested = CfgUtil.boolAt(tools, "native_calling", true);
 
         return new LlamaCppConfig(
                 mode,
@@ -78,7 +81,8 @@ record LlamaCppConfig(
                 chatTemplate,
                 chatTemplateFile,
                 serverArgs,
-                verificationLogging);
+                verificationLogging,
+                nativeCallingRequested);
     }
 
     boolean managed() {

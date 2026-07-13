@@ -1,6 +1,8 @@
 package dev.talos.cli.setup;
 
 import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+import dev.talos.engine.llamacpp.profile.LlamaCppArtifactVerificationStore;
+import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -52,6 +54,25 @@ class LlamaCppModelArtifactVerifierTest {
                         model, "test-profile", artifact(actual.length + 1, sha256(actual))));
 
         assertTrue(error.getMessage().contains("size"), error.getMessage());
+    }
+
+    @Test
+    void exactSetupVerificationPersistsMetadataBoundRuntimeEvidence() throws Exception {
+        byte[] bytes = "qualified gguf bytes".getBytes(StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("model.gguf");
+        Files.write(model, bytes);
+        var expected = artifact(bytes.length, sha256(bytes));
+        Path talosHome = tempDir.resolve("talos-home");
+
+        var verified = LlamaCppModelArtifactVerifier.requireMatchAndRecord(
+                model, "test-profile", expected, talosHome);
+        var cached = new LlamaCppArtifactVerificationStore().inspect(
+                model, "test-profile", expected, talosHome);
+
+        assertTrue(verified.verificationIdentity().matches("[0-9a-f]{64}"));
+        assertTrue(cached.verificationIdentity().matches("[0-9a-f]{64}"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                LlamaCppProfileResolver.ArtifactState.EXACT, cached.state());
     }
 
     private static LlamaCppModelCatalog.ModelArtifact artifact(long size, String sha256) {

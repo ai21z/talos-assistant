@@ -178,7 +178,7 @@ class InfraCommandsTest {
             assertFalse(text.contains("Embed     bge-m3"), text);
         }
 
-        @Test void verbose_projects_canonical_profile_tier_and_evidence() {
+        @Test void verbose_does_not_project_profile_qualification_from_alias_alone() {
             Config cfg = new Config(null);
             cfg.data.put("llm", new LinkedHashMap<>(Map.of(
                     "transport", "engine",
@@ -194,8 +194,10 @@ class InfraCommandsTest {
 
             String text = cmd.execute("--verbose", Context.builder(cfg).build()).toString();
 
-            assertTrue(text.contains("Profile   accepted beta stability"), text);
-            assertTrue(text.contains("Evidence  legacy:two-model-large-scale-live-audit-0.10.8"), text);
+            assertTrue(text.contains("Resolution"), text);
+            assertTrue(text.toLowerCase(java.util.Locale.ROOT).contains("unverified"), text);
+            assertFalse(text.contains("accepted beta stability"), text);
+            assertFalse(text.contains("two-model-large-scale-live-audit"), text);
         }
 
         @Test void verboseShowsManagedEmbeddingHostAndRetrievalMode() {

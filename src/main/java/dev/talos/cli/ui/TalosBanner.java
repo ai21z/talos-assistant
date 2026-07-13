@@ -3,6 +3,7 @@ package dev.talos.cli.ui;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.engine.llamacpp.LlamaCppPreflight;
+import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -82,7 +83,18 @@ public final class TalosBanner {
     // ── Config readers ────────────────────────────────────────────────────
 
     static String resolveModel(Config cfg) {
-        return CliStatusDashboard.resolveModel(cfg);
+        String configured = CliStatusDashboard.resolveModel(cfg);
+        try {
+            EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+            if (!"llama_cpp".equals(runtime.backend())) return configured;
+            var identity = LlamaCppProfileIdentity.inspectLocal(
+                    cfg,
+                    Path.of(System.getProperty("user.home", "."), ".talos")
+                            .toAbsolutePath().normalize());
+            return ModelIdentityPresentation.bannerModelLabel(identity, configured);
+        } catch (RuntimeException ignored) {
+            return configured;
+        }
     }
 
     static String startupHint(Config cfg) {

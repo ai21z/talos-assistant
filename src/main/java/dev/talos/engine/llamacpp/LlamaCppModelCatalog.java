@@ -67,6 +67,7 @@ public final class LlamaCppModelCatalog {
             String reasoningMode,
             String chatTemplate,
             int contextTokens,
+            int maxContextTokens,
             String samplingProfile,
             List<String> managedServerArgs,
             List<String> compatibleEngineLanes,
@@ -233,6 +234,7 @@ public final class LlamaCppModelCatalog {
                         "standard instruction behavior with no separate reasoning channel",
                         "embedded Jinja chat template",
                         8_192,
+                        16_384,
                         "Talos request defaults; near-greedy mutation obligations",
                         List.of(),
                         PINNED_CROSS_PLATFORM_LANES,
@@ -265,6 +267,7 @@ public final class LlamaCppModelCatalog {
                         "native/default",
                         "embedded Harmony reasoning behavior with no Talos reasoning-effort override",
                         "embedded Jinja Harmony template",
+                        8_192,
                         8_192,
                         "Talos request defaults; near-greedy mutation obligations",
                         List.of(),
@@ -322,6 +325,7 @@ public final class LlamaCppModelCatalog {
                         "custom think boundaries from the third-party model",
                         "embedded Jinja template with custom tool syntax",
                         8_192,
+                        8_192,
                         "Talos request defaults; experimental profile",
                         List.of(),
                         PINNED_WINDOWS_LANES,
@@ -355,6 +359,7 @@ public final class LlamaCppModelCatalog {
                         "no separate thinking channel documented",
                         "DeepSeek-specific prompt format",
                         8_192,
+                        8_192,
                         "Talos text/tool-prompt defaults; experimental profile",
                         List.of(),
                         PINNED_WINDOWS_LANES,
@@ -387,6 +392,7 @@ public final class LlamaCppModelCatalog {
                         "native/default",
                         "non-thinking via llama.cpp --reasoning off",
                         "embedded Jinja Qwen3 template",
+                        8_192,
                         8_192,
                         "Talos standard request controls; three uncontrolled qualification repetitions",
                         List.of("--reasoning", "off"),
@@ -467,7 +473,9 @@ public final class LlamaCppModelCatalog {
         nonBlank(runtime.chatTemplate(), "chat template");
         nonBlank(runtime.samplingProfile(), "sampling profile");
         nonBlank(runtime.hardwareEnvelope(), "hardware envelope");
-        if (runtime.contextTokens() <= 0 || runtime.compatibleEngineLanes().isEmpty()) {
+        if (runtime.contextTokens() <= 0
+                || runtime.maxContextTokens() < runtime.contextTokens()
+                || runtime.compatibleEngineLanes().isEmpty()) {
             throw new IllegalArgumentException("Missing runtime compatibility for " + profile.alias());
         }
 

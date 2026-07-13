@@ -231,8 +231,8 @@ public final class PromptInspector {
     }
 
     private static boolean nativeTools(Context ctx) {
-        if (ctx == null || ctx.cfg() == null) return true;
-        return CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        if (ctx == null || ctx.llm() == null) return true;
+        return ctx.llm().nativeToolsCurrentlyEnabled();
     }
 
     private static boolean hasHistory(Context ctx) {

@@ -4,6 +4,7 @@ import dev.talos.core.Config;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.TokenChunk;
 
 import java.util.stream.Stream;
@@ -24,6 +25,21 @@ final class RegistryLlmEngineResolver implements LlmEngineResolver {
     @Override
     public Capabilities capabilities() {
         return registry.engine().caps();
+    }
+
+    @Override
+    public boolean capabilitiesAuthoritative() {
+        return true;
+    }
+
+    @Override
+    public Capabilities prepareCapabilities() throws Exception {
+        return registry.engine().prepareCapabilities();
+    }
+
+    @Override
+    public ModelIdentitySnapshot modelIdentity() {
+        return registry.engine().modelIdentity();
     }
 
     @Override

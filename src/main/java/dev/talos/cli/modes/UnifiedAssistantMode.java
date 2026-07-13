@@ -96,7 +96,7 @@ public final class UnifiedAssistantMode implements Mode {
 
         // System prompt - unified mode: tools + workspace + retrieval guidance
         boolean hasHistory = !history.isEmpty();
-        boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        boolean nativeTools = ctx.llm().prepareNativeTools();
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(contractMessages),
                 workspace);

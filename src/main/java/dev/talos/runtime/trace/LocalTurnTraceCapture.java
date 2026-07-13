@@ -10,6 +10,7 @@ import dev.talos.core.context.ContextLedgerSnapshot;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolCall;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -188,6 +189,15 @@ public final class LocalTurnTraceCapture {
 
     public static void recordToolExecuted(String phase, ToolCall call, boolean success, String reason) {
         recordToolExecuted(phase, call, success, reason, List.of());
+    }
+
+    public static void recordModelIdentity(ModelIdentitySnapshot identity) {
+        Bag bag = HOLDER.get();
+        if (bag == null || identity == null || !identity.available()) return;
+        bag.builder.event(TurnTraceEvent.simple(
+                "MODEL_IDENTITY_RESOLVED",
+                now(),
+                identity.traceData()));
     }
 
     public static void recordToolExecuted(

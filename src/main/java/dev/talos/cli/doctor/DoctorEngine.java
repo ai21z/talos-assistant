@@ -28,7 +28,7 @@ public final class DoctorEngine {
         return List.of(
                 new ConfigProbe(),
                 new RuntimeEnvironmentProbe(),
-                new EngineProfileProbe(),
+                new EngineProfileProbe(startServer),
                 new EngineFilesProbe(),
                 new ServerProbe(startServer),
                 new RetrievalStateProbe(),

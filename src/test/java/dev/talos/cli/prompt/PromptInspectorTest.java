@@ -2,6 +2,8 @@ package dev.talos.cli.prompt;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.CfgUtil;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.impl.FileEditTool;
@@ -373,7 +375,11 @@ class PromptInspectorTest {
     private static Context context(Config cfg) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
+        Map<String, Object> llm = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        llm.put("transport", "placeholder");
+        cfg.data.put("llm", llm);
         return Context.builder(cfg)
+                .llm(new LlmClient(cfg))
                 .toolRegistry(registry)
                 .build();
     }
@@ -389,7 +395,11 @@ class PromptInspectorTest {
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
+        Map<String, Object> llm = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        llm.put("transport", "placeholder");
+        cfg.data.put("llm", llm);
         return Context.builder(cfg)
+                .llm(new LlmClient(cfg))
                 .toolRegistry(registry)
                 .build();
     }
@@ -402,7 +412,11 @@ class PromptInspectorTest {
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
         registry.register(new RetrieveTool(null));
+        Map<String, Object> llm = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("llm")));
+        llm.put("transport", "placeholder");
+        cfg.data.put("llm", llm);
         return Context.builder(cfg)
+                .llm(new LlmClient(cfg))
                 .toolRegistry(registry)
                 .build();
     }

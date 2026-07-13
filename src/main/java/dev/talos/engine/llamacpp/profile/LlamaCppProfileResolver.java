@@ -306,7 +306,7 @@ public final class LlamaCppProfileResolver {
         String declaredAlias = declared.map(LlamaCppModelCatalog.Profile::alias).orElse("");
         ArtifactState artifactState = resolveArtifactState(declared, configured, artifact, reasons, flags);
         MatchState engineCompatibility = resolveEngineCompatibility(declared, engine, reasons, flags);
-        MatchState servedIdentity = resolveServedIdentity(configured, observed, reasons, flags);
+        MatchState servedIdentity = resolveServedIdentity(configured, artifact, observed, reasons, flags);
 
         if (declared.isEmpty()) {
             flags.unverified();
@@ -387,7 +387,8 @@ public final class LlamaCppProfileResolver {
             } else if (!artifact.expectedSha256().equals(profile.artifactSha256())
                     || !artifact.actualSha256().equals(profile.artifactSha256())) {
                 state = ArtifactState.SHA256_MISMATCH;
-            } else if (!configured.canonicalModelPath().equals(artifact.canonicalPath())) {
+            } else if (!configured.canonicalModelPath().isBlank()
+                    && !configured.canonicalModelPath().equals(artifact.canonicalPath())) {
                 flags.refuse();
                 reasons.add(ReasonCode.ARTIFACT_PATH_MISMATCH);
             } else if (artifact.verificationIdentity().isBlank()) {
@@ -464,6 +465,7 @@ public final class LlamaCppProfileResolver {
 
     private static MatchState resolveServedIdentity(
             ConfiguredFacts configured,
+            ArtifactIdentity artifact,
             ObservedServerFacts observed,
             Set<ReasonCode> reasons,
             DecisionFlags flags) {
@@ -479,8 +481,12 @@ public final class LlamaCppProfileResolver {
         }
         boolean pathPresent = !observed.canonicalModelPath().isBlank();
         boolean aliasPresent = !observed.modelAlias().isBlank();
+        String expectedPath = configured.canonicalModelPath().isBlank()
+                ? artifact.canonicalPath()
+                : configured.canonicalModelPath();
         boolean pathMismatch = pathPresent
-                && !observed.canonicalModelPath().equals(configured.canonicalModelPath());
+                && !expectedPath.isBlank()
+                && !observed.canonicalModelPath().equals(expectedPath);
         boolean aliasMismatch = aliasPresent
                 && !normalized(observed.modelAlias()).equals(normalized(configured.alias()));
         if (pathMismatch || aliasMismatch) {
@@ -488,7 +494,7 @@ public final class LlamaCppProfileResolver {
             reasons.add(ReasonCode.SERVER_MODEL_MISMATCH);
             return MatchState.MISMATCHED;
         }
-        if (!pathPresent) {
+        if (!pathPresent || (expectedPath.isBlank() && !aliasPresent)) {
             flags.unverified();
             reasons.add(ReasonCode.SERVER_MODEL_UNVERIFIED);
             return MatchState.UNVERIFIED;
@@ -502,11 +508,14 @@ public final class LlamaCppProfileResolver {
             LlamaCppModelCatalog.RuntimeDefaults runtime,
             Set<ReasonCode> reasons,
             DecisionFlags flags) {
-        int declaredCeiling = runtime == null
+        int declaredDefault = runtime == null
                 ? ManagedContextSelector.DEFAULT_CONTEXT
                 : runtime.contextTokens();
+        int declaredCeiling = runtime == null
+                ? ManagedContextSelector.DEFAULT_CONTEXT
+                : runtime.maxContextTokens();
         int effective = Math.min(configured.contextTokens(), declaredCeiling);
-        if (configured.contextTokens() < declaredCeiling) {
+        if (configured.contextTokens() < declaredDefault) {
             reasons.add(ReasonCode.CONTEXT_REDUCED);
         } else if (configured.contextTokens() > declaredCeiling) {
             flags.unverified();

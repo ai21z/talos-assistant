@@ -1,6 +1,7 @@
 package dev.talos.cli.repl.slash;
 
 import dev.talos.spi.types.ModelRef;
+import dev.talos.spi.types.ModelIdentitySnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -25,7 +26,7 @@ class ModelsCommandTest {
         int compat = text.indexOf("compat/custom-chat");
 
         assertTrue(text.contains("Configured/selectable models"), text);
-        assertTrue(text.contains("accepted beta stability"), text);
+        assertTrue(text.contains("catalog accepted beta stability"), text);
         assertFalse(text.contains("Installed models"), text);
         assertFalse(text.contains("ready now"), text);
         assertTrue(text.contains("verify with talos doctor --start"), text);
@@ -84,7 +85,33 @@ class ModelsCommandTest {
         String text = ModelsCommand.renderInstalledModels(
                 List.of(ModelRef.of("llama_cpp", "qwen3-8b")), List.of());
 
-        assertTrue(text.contains("llama_cpp/qwen3-8b  (experimental selectable)"), text);
+        assertTrue(text.contains("llama_cpp/qwen3-8b  (catalog experimental selectable)"), text);
         assertFalse(text.contains("accepted beta stability"), text);
+    }
+
+    @Test
+    void activeModelUsesResolvedRuntimeIdentityRatherThanCatalogAlias() {
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel("qwen3-8b")
+                .resolvedProfile("qwen3-8b")
+                .artifactState("EXACT")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveContextTokens(8192)
+                .servedIdentityState("MATCHED")
+                .propsState("AVAILABLE")
+                .chatAvailable(true)
+                .build();
+
+        String text = ModelsCommand.renderInstalledModels(
+                List.of(ModelRef.of("llama_cpp", "qwen3-8b")),
+                List.of(),
+                identity);
+
+        assertTrue(text.contains("catalog experimental selectable"), text);
+        assertTrue(text.contains("active"), text);
+        assertTrue(text.contains("resolution qualified"), text);
+        assertTrue(text.contains("tools native"), text);
     }
 }
