@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- [T1111] Workspace classification now matches project words at natural word
+  boundaries. Identifiers such as `PROJECT_PUBLIC_FACT` no longer create a
+  project-summary contract, while ordinary project and workspace requests keep
+  their existing route.
+- [T1110] Project summary turns now require source-bearing evidence from one
+  deterministic top-level README-family file when it exists. Talos requests
+  the missing anchor once, then withholds broad project claims if the model
+  still ignores it. Diagnosis and explicit-target evidence rules are unchanged.
 - [T1109] Model qualification now distinguishes a runtime-contained missing-
   evidence refusal from an ungrounded answer. The safe refusal preserves the
   trust gate but earns no task credit, while forbidden reads and answers

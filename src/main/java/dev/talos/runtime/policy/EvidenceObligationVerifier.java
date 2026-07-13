@@ -81,6 +81,7 @@ public final class EvidenceObligationVerifier {
             case PATH_EXISTENCE_EVIDENCE_REQUIRED -> verifyPathExistenceTargets(targets, safeOutcomes);
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
             case FILE_CONTENT_LOOKUP_REQUIRED -> verifyFileContentLookup(safeOutcomes);
+            case PROJECT_SUMMARY_EVIDENCE_REQUIRED -> verifyProjectSummaryEvidence(safeOutcomes, workspace);
             case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosis(targets, safeOutcomes, workspace);
             case WORKSPACE_INSPECTION_REQUIRED, VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     verifyAnyReadOnlyEvidence(safeOutcomes);
@@ -587,6 +588,36 @@ public final class EvidenceObligationVerifier {
             }
         }
         return Result.unsatisfied("Source-bearing file-content evidence was not gathered.");
+    }
+
+    private static Result verifyProjectSummaryEvidence(
+            List<ToolCallLoop.ToolOutcome> outcomes,
+            Path workspace
+    ) {
+        ProjectSummaryEvidencePolicy.AnchorSelection selection =
+                ProjectSummaryEvidencePolicy.selectAnchor(workspace);
+        if (selection.status() == ProjectSummaryEvidencePolicy.SelectionStatus.UNAVAILABLE) {
+            if (workspace == null) {
+                return verifyProjectSummaryFallback(outcomes);
+            }
+            return Result.unsatisfied("Project summary anchor availability could not be checked.");
+        }
+        if (selection.status() == ProjectSummaryEvidencePolicy.SelectionStatus.ABSENT) {
+            return verifyProjectSummaryFallback(outcomes);
+        }
+        String anchor = selection.anchor();
+        if (ProjectSummaryEvidencePolicy.hasSourceEvidence(workspace, anchor, outcomes)) {
+            return Result.satisfied("Project summary anchor evidence was gathered from " + anchor + ".");
+        }
+        return Result.unsatisfied(
+                "Project summary requires source-bearing evidence from " + anchor + ".");
+    }
+
+    private static Result verifyProjectSummaryFallback(List<ToolCallLoop.ToolOutcome> outcomes) {
+        Result fallback = verifyFileContentLookup(outcomes);
+        return fallback.status() == Status.SATISFIED
+                ? Result.satisfied("Project summary content evidence was gathered.")
+                : Result.unsatisfied("Project summary requires source-bearing workspace content evidence.");
     }
 
     private static Result verifyUnsupportedCapability(

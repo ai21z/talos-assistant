@@ -1701,6 +1701,15 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void underscoredProjectIdentifierDoesNotCreateWorkspaceExplainContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Retrieve context for PROJECT_PUBLIC_FACT using talos.retrieve.");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
     void metaQuestionAboutEditToolStaysReadOnly() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Why didn't you call the edit tool?");

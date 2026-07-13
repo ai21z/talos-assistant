@@ -4,11 +4,13 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.ProofKind;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -16,6 +18,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolFailureReason;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -3715,6 +3718,42 @@ class ExecutionOutcomeTest {
         } finally {
             LocalTurnTraceCapture.clear();
         }
+    }
+
+    @Test
+    void toolLoopProjectSummaryWithoutReadmeEvidenceIsContained(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "A small local project.\n");
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("What does this project do?"));
+        var plan = CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The project is a one-file JavaScript utility.", 2, 2,
+                List.of("talos.list_dir", "talos.read_file"), List.of(),
+                0, 0, false, 0, List.of("script.js"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", ".", true, false, false,
+                                "README.md\nscript.js\n", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "script.js", true, false, false,
+                                "read script.js", "")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, workspace, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertTrue(outcome.finalAnswer().startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX));
+        assertFalse(outcome.finalAnswer().contains("one-file JavaScript utility"));
     }
 
     @Test

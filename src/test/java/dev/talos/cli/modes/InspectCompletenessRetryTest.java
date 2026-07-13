@@ -8,7 +8,9 @@ import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
@@ -105,9 +107,121 @@ class InspectCompletenessRetryTest {
         assertTrue(prompt.contains("Read these files now before answering: script.js"), prompt);
     }
 
+    @Test
+    void projectSummaryRequestsReadmeAfterUnrelatedRead(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Local project facts.\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                "The project is a script.",
+                2,
+                2,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("script.js"),
+                List.of(
+                        outcome("talos.list_dir", "."),
+                        outcome("talos.read_file", "script.js")));
+
+        List<String> missing = InspectCompletenessRetry.missingReads(
+                workspace,
+                plan("What does this project do?"),
+                loopResult);
+
+        assertEquals(List.of("README.md"), missing);
+    }
+
+    @Test
+    void projectSummaryRetryReadsAnchorAndMergesEvidence(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "A small local qualification project.\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        ToolCallLoop.LoopResult original = loopResult(
+                "The project is a script.",
+                2,
+                2,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("script.js"),
+                List.of(
+                        outcome("talos.list_dir", "."),
+                        outcome("talos.read_file", "script.js")));
+        Context ctx = context(workspace, "This is a small local qualification project.");
+        AtomicReference<List<ChatMessage>> retryMessages = new AtomicReference<>();
+
+        InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
+                original.finalAnswer(),
+                messages("What does this project do?"),
+                plan("What does this project do?"),
+                original,
+                workspace,
+                ctx,
+                sentMessages -> {
+                    retryMessages.set(List.copyOf(sentMessages));
+                    return new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_readme",
+                            "talos.read_file",
+                            Map.of("path", "README.md"))));
+                });
+
+        assertEquals("This is a small local qualification project.", result.answer());
+        assertNotNull(result.loopResult());
+        assertEquals(List.of("script.js", "README.md"), result.loopResult().readPaths());
+        assertEquals(3, result.loopResult().toolsInvoked());
+        String prompt = retryMessages.get().get(3).content();
+        assertTrue(prompt.contains("Read these files now before answering: README.md"), prompt);
+    }
+
+    @Test
+    void projectSummaryDoesNotRequestReadmeAfterAnchorEvidence(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Local project facts.\n");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                "A local project.",
+                1,
+                1,
+                List.of("talos.read_file"),
+                List.of("README.md"),
+                List.of(outcome("talos.read_file", "README.md")));
+
+        List<String> missing = InspectCompletenessRetry.missingReads(
+                workspace,
+                plan("What does this project do?"),
+                loopResult);
+
+        assertEquals(List.of(), missing);
+    }
+
+    @Test
+    void diagnosisDoesNotInheritProjectSummaryAnchor(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Local project facts.\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+        TaskContract diagnosis = new TaskContract(
+                TaskType.DIAGNOSE_ONLY,
+                false,
+                false,
+                false,
+                java.util.Set.of(),
+                java.util.Set.of(),
+                "Diagnose why script.js fails.");
+        ToolCallLoop.LoopResult loopResult = loopResult(
+                "The script has a syntax error.",
+                1,
+                1,
+                List.of("talos.read_file"),
+                List.of("script.js"),
+                List.of(outcome("talos.read_file", "script.js")));
+
+        List<String> missing = InspectCompletenessRetry.missingReads(
+                workspace,
+                plan(diagnosis),
+                loopResult);
+
+        assertEquals(List.of(), missing);
+    }
+
     private static CurrentTurnPlan plan(String request) {
+        return plan(TaskContractResolver.fromUserRequest(request));
+    }
+
+    private static CurrentTurnPlan plan(TaskContract contract) {
         return CurrentTurnPlan.compatibility(
-                TaskContractResolver.fromUserRequest(request),
+                contract,
                 ExecutionPhase.INSPECT,
                 List.of("talos.read_file"),
                 List.of("talos.read_file"),

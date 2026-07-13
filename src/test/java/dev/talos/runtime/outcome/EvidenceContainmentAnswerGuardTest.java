@@ -69,6 +69,22 @@ class EvidenceContainmentAnswerGuardTest {
     }
 
     @Test
+    void projectSummaryMissingAnchorSuppressesBroadProjectClaim() {
+        String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
+                "The project is a one-file JavaScript utility.",
+                null,
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                EvidenceObligationVerifier.Result.unsatisfied(
+                        "Project summary requires source-bearing evidence from README.md."),
+                MARKERS);
+
+        assertTrue(answer.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), answer);
+        assertTrue(answer.contains("I did not inspect the project summary anchor"), answer);
+        assertTrue(answer.contains("README.md"), answer);
+        assertFalse(answer.contains("one-file JavaScript utility"), answer);
+    }
+
+    @Test
     void protectedReadNotAttemptedSuppressesFabricatedProtectedBody() {
         String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
                 "API_KEY=pretend-secret",

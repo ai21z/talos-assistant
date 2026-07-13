@@ -57,7 +57,7 @@ class ReadOnlyInspectionRetryTest {
         assertEquals(4, retryMessages.get().size(), "retry appends assistant answer and corrective user prompt");
         String prompt = retryMessages.get().get(3).content();
         assertTrue(prompt.contains("Use read-only tools now."), prompt);
-        assertTrue(prompt.contains("any obvious primary text files"), prompt);
+        assertTrue(prompt.contains("README.md"), prompt);
         assertTrue(prompt.contains("Do not call write_file or edit_file."), prompt);
     }
 

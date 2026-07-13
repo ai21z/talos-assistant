@@ -7,6 +7,7 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
+import dev.talos.runtime.policy.ProjectSummaryEvidencePolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -42,8 +43,25 @@ final class InspectCompletenessRetry {
     ) {}
 
     static List<String> missingReads(Path workspace, ToolCallLoop.LoopResult loopResult) {
+        return missingReads(workspace, null, loopResult);
+    }
+
+    static List<String> missingReads(
+            Path workspace,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult
+    ) {
         if (loopResult == null) return List.of();
-        LinkedHashSet<String> missing = new LinkedHashSet<>(missingPrimaryReads(workspace, loopResult));
+        LinkedHashSet<String> missing = new LinkedHashSet<>();
+        TaskContract contract = plan == null ? null : plan.taskContract();
+        if (contract != null && contract.type() == TaskType.WORKSPACE_EXPLAIN) {
+            for (String target : ProjectSummaryEvidencePolicy.missingAnchorReadTargets(
+                    workspace, loopResult.toolOutcomes())) {
+                String normalized = ToolCallSupport.normalizePath(target);
+                if (!normalized.isBlank()) missing.add(normalized);
+            }
+        }
+        missing.addAll(missingPrimaryReads(workspace, loopResult));
         for (String target : EvidenceObligationVerifier.missingLinkedScriptReadTargets(
                 workspace, loopResult.toolOutcomes())) {
             if (target == null || target.isBlank()) continue;
@@ -76,7 +94,7 @@ final class InspectCompletenessRetry {
                 && !requiresWorkspaceEvidence(contract)) {
             return new Result(answer, null, null);
         }
-        List<String> missing = missingReads(workspace, loopResult);
+        List<String> missing = missingReads(workspace, plan, loopResult);
         if (missing.isEmpty()) return new Result(answer, null, null);
         if (loopResult.mutatingToolSuccesses() > 0) return new Result(answer, null, null);
         if (answer.isBlank()) return new Result(answer, null, null);

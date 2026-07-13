@@ -431,6 +431,23 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void projectSummaryFrameRequiresReadmeAnchorWhenPresent() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("What does this project do?");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of("talos.list_dir", "talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("evidenceObligation: PROJECT_SUMMARY_EVIDENCE_REQUIRED"), frame);
+        assertTrue(frame.contains("inspect the preferred top-level README-family file"), frame);
+        assertTrue(frame.contains("Do not infer the whole project from one unrelated file"), frame);
+    }
+
+    @Test
     void renderOmitsSuppressedContextDetailsFromModelGuidance() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,

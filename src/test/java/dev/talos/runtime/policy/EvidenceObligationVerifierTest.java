@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.tools.ToolError;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -285,6 +286,87 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void projectSummaryRejectsUnrelatedReadWhenReadmeExists(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Local project facts.\n");
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "script.js", true, false, false,
+                        "read script.js", "")),
+                workspace);
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+        assertEquals("Project summary requires source-bearing evidence from README.md.", result.message());
+    }
+
+    @Test
+    void projectSummaryAcceptsDirectReadAndStructuredSearchSources(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Local project facts.\n");
+
+        for (ToolCallLoop.ToolOutcome outcome : List.of(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "./README.md", true, false, false,
+                        "read README.md", ""),
+                sourceOutcome("talos.grep", "README.md"),
+                sourceOutcome("talos.retrieve", "./README.md"))) {
+            var result = EvidenceObligationVerifier.verify(
+                    EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                    Set.of(),
+                    List.of(outcome),
+                    workspace);
+
+            assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status(), outcome.toolName());
+        }
+    }
+
+    @Test
+    void projectSummaryRejectsDirectoryListingWithoutAnchorContent(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Local project facts.\n");
+
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "README.md\nscript.js\n", "")),
+                workspace);
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void projectSummaryFallsBackToContentInspectionWhenNoReadmeExists(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "export function reset() { return 'ready'; }\n");
+
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "script.js", true, false, false,
+                        "read script.js", "")),
+                workspace);
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void projectSummaryFailsClosedWhenWorkspaceCannotBeInspected(@TempDir Path workspace) {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "script.js", true, false, false,
+                        "read script.js", "")),
+                workspace.resolve("missing"));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+        assertEquals("Project summary anchor availability could not be checked.", result.message());
+    }
+
+    @Test
     void traceVerificationDoesNotCountDeniedReadAsEvidence() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE,
@@ -496,5 +578,22 @@ class EvidenceObligationVerifierTest {
                 });
             }
         }
+    }
+
+    private static ToolCallLoop.ToolOutcome sourceOutcome(String toolName, String sourcePath) {
+        return new ToolCallLoop.ToolOutcome(
+                toolName,
+                "",
+                true,
+                false,
+                false,
+                "source-bearing evidence",
+                "",
+                null,
+                "",
+                null,
+                null,
+                null,
+                List.of(sourcePath));
     }
 }

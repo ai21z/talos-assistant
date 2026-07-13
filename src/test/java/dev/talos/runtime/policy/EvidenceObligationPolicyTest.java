@@ -83,8 +83,24 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
-    void workspaceExplainRequiresWorkspaceInspection() {
+    void workspaceExplainRequiresProjectSummaryEvidence() {
         TaskContract contract = TaskContractResolver.fromUserRequest("What is this project?");
+
+        assertEquals(
+                EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @Test
+    void diagnosisKeepsGenericWorkspaceInspectionEvidence() {
+        TaskContract contract = new TaskContract(
+                TaskType.DIAGNOSE_ONLY,
+                false,
+                false,
+                false,
+                Set.of(),
+                Set.of(),
+                "Diagnose why the application fails at startup.");
 
         assertEquals(
                 EvidenceObligation.WORKSPACE_INSPECTION_REQUIRED,

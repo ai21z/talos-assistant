@@ -161,6 +161,8 @@ public final class TaskContractResolver {
             "what is in this", "explain this", "this folder", "this directory",
             "this site"
     );
+    private static final Pattern WORKSPACE_WORD_MARKER = Pattern.compile(
+            "\\b(?:workspace|repo|repository|project|codebase)\\b");
 
     private static final Set<String> COMMAND_EXECUTION_ACTION_MARKERS = Set.of(
             "run ", "execute ", "call ", "try ", "probe ", "verify ", "check ",
@@ -1172,7 +1174,7 @@ public final class TaskContractResolver {
         if (containsAny(lower, DIAGNOSE_MARKERS)) {
             return TaskType.DIAGNOSE_ONLY;
         }
-        if (containsAny(lower, WORKSPACE_MARKERS)) {
+        if (containsWorkspaceMarker(lower)) {
             return TaskType.WORKSPACE_EXPLAIN;
         }
         if (looksSmallTalkOnly(lower)) {
@@ -1348,7 +1350,7 @@ public final class TaskContractResolver {
     private static boolean looksConversationalGreetingRequest(String lower) {
         if (lower == null || lower.isBlank()) return false;
         if (!lower.matches("^\\s*(?:hi|hello|hey|hey there|yo)\\b.*")) return false;
-        if (containsAny(lower, WORKSPACE_MARKERS)
+        if (containsWorkspaceMarker(lower)
                 || containsAny(lower, DIAGNOSE_MARKERS)
                 || lower.contains("read ")
                 || lower.contains("search ")
@@ -1724,6 +1726,15 @@ public final class TaskContractResolver {
     private static boolean containsAny(String lower, Set<String> markers) {
         for (String marker : markers) {
             if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsWorkspaceMarker(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (WORKSPACE_WORD_MARKER.matcher(lower).find()) return true;
+        for (String marker : WORKSPACE_MARKERS) {
+            if (marker.indexOf(' ') >= 0 && lower.contains(marker)) return true;
         }
         return false;
     }

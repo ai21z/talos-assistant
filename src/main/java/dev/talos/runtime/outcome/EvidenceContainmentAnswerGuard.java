@@ -87,6 +87,10 @@ public final class EvidenceContainmentAnswerGuard {
             case FILE_CONTENT_LOOKUP_REQUIRED ->
                     "I did not gather source-bearing file content for this lookup, so I cannot "
                             + "claim the requested fact was found or absent from the workspace.";
+            case PROJECT_SUMMARY_EVIDENCE_REQUIRED ->
+                    "I did not inspect the project summary anchor, so I cannot make a grounded "
+                            + "claim about what the whole project does."
+                            + evidenceDetailSentence(evidenceResult);
             case LIST_DIRECTORY_ONLY ->
                     "I did not complete a directory-list-only evidence path this turn. "
                             + "I cannot answer with file contents or derived file claims from "

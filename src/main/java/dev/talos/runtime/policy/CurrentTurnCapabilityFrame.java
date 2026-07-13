@@ -554,6 +554,10 @@ public final class CurrentTurnCapabilityFrame {
             case FILE_CONTENT_LOOKUP_REQUIRED ->
                     "Evidence: locate the requested workspace fact with read, grep, or retrieval results "
                             + "that identify at least one source file before answering.";
+            case PROJECT_SUMMARY_EVIDENCE_REQUIRED ->
+                    "Evidence: before making project-level claims, inspect the preferred top-level "
+                            + "README-family file when one is present. Do not infer the whole project "
+                            + "from one unrelated file.";
             case LIST_DIRECTORY_ONLY ->
                     "Evidence: list directory entries only; do not inspect file contents.";
             case WORKSPACE_INSPECTION_REQUIRED ->

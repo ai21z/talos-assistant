@@ -65,7 +65,10 @@ public final class EvidenceObligationPolicy {
         if (requiresUnnamedFileContentLookup(contract, type)) {
             return EvidenceObligation.FILE_CONTENT_LOOKUP_REQUIRED;
         }
-        if (type == TaskType.WORKSPACE_EXPLAIN || type == TaskType.DIAGNOSE_ONLY) {
+        if (type == TaskType.WORKSPACE_EXPLAIN) {
+            return EvidenceObligation.PROJECT_SUMMARY_EVIDENCE_REQUIRED;
+        }
+        if (type == TaskType.DIAGNOSE_ONLY) {
             return EvidenceObligation.WORKSPACE_INSPECTION_REQUIRED;
         }
         return EvidenceObligation.NONE;

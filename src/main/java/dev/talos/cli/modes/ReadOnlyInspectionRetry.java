@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
+import dev.talos.runtime.policy.ProjectSummaryEvidencePolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -16,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 
@@ -91,7 +93,12 @@ final class ReadOnlyInspectionRetry {
         if (request.length() > 1000) {
             request = request.substring(0, 1000) + "...";
         }
-        String primaryFiles = String.join(", ", StaticTaskVerifier.obviousPrimaryFiles(workspace));
+        LinkedHashSet<String> primaryTargets = new LinkedHashSet<>();
+        if (contract != null && contract.type() == TaskType.WORKSPACE_EXPLAIN) {
+            ProjectSummaryEvidencePolicy.preferredAnchor(workspace).ifPresent(primaryTargets::add);
+        }
+        primaryTargets.addAll(StaticTaskVerifier.obviousPrimaryFiles(workspace));
+        String primaryFiles = String.join(", ", primaryTargets);
         if (primaryFiles.isBlank()) {
             primaryFiles = "any obvious primary text files";
         }
