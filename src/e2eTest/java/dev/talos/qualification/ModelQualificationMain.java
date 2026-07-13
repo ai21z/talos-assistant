@@ -33,6 +33,9 @@ public final class ModelQualificationMain {
                 case "approvals" -> approvals(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
                         catalogForPacket(parsed.root()), out);
+                case "provider-evidence" -> providerEvidence(
+                        parsed.root(), parsed.runRoot(), parsed.scenarioId(),
+                        parsed.serverPort(), catalogForPacket(parsed.root()), out);
                 default -> throw new IllegalArgumentException("Unknown command: " + parsed.command());
             };
         } catch (IllegalArgumentException e) {
@@ -149,24 +152,44 @@ public final class ModelQualificationMain {
         return 0;
     }
 
+    private static int providerEvidence(
+            Path root,
+            Path runRoot,
+            String scenarioId,
+            int serverPort,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out) throws Exception {
+        catalog.scenario(scenarioId);
+        QualificationProviderEvidenceFinalizer.Result result =
+                QualificationProviderEvidenceFinalizer.finalizeEvidence(
+                        root, runRoot, scenarioId, serverPort);
+        out.println("Qualification provider evidence: prompt="
+                + result.promptDebug().toAbsolutePath().normalize()
+                + " model=" + result.modelLog().toAbsolutePath().normalize()
+                + " providerPromptSent=" + result.providerPromptSent());
+        return 0;
+    }
+
     private record Arguments(
             String command,
             Path root,
             QualificationProtocol.BankKind bank,
             String scenarioId,
-            Path runRoot) {
+            Path runRoot,
+            int serverPort) {
         static Arguments parse(String[] raw) {
             List<String> args = raw == null ? List.of() : List.of(raw);
             if (args.isEmpty()) throw new IllegalArgumentException("A command is required");
             String command = args.getFirst().trim().toLowerCase(Locale.ROOT);
             if (command.equals("bank-hash")) {
                 if (args.size() != 1) throw new IllegalArgumentException("bank-hash accepts no arguments");
-                return new Arguments(command, null, null, "", null);
+                return new Arguments(command, null, null, "", null, -1);
             }
             Path root = null;
             QualificationProtocol.BankKind bank = null;
             String scenarioId = "";
             Path runRoot = null;
+            int serverPort = -1;
             for (int index = 1; index < args.size(); index++) {
                 String token = args.get(index);
                 if (token.equals("--root") && index + 1 < args.size()) {
@@ -178,6 +201,12 @@ public final class ModelQualificationMain {
                     scenarioId = args.get(++index).strip();
                 } else if (token.equals("--run") && index + 1 < args.size()) {
                     runRoot = Path.of(args.get(++index));
+                } else if (token.equals("--server-port") && index + 1 < args.size()) {
+                    try {
+                        serverPort = Integer.parseInt(args.get(++index));
+                    } catch (NumberFormatException error) {
+                        throw new IllegalArgumentException("--server-port must be an integer");
+                    }
                 } else {
                     throw new IllegalArgumentException("Unknown or incomplete argument: " + token);
                 }
@@ -186,26 +215,34 @@ public final class ModelQualificationMain {
             if (command.equals("score") && bank == null) {
                 throw new IllegalArgumentException("--bank admission|full is required for score");
             }
-            if ((command.equals("requirements") || command.equals("approvals"))
+            if ((command.equals("requirements")
+                    || command.equals("approvals")
+                    || command.equals("provider-evidence"))
                     && (scenarioId.isBlank() || runRoot == null)) {
                 throw new IllegalArgumentException(
                         "--scenario and --run are required for " + command);
+            }
+            if (command.equals("provider-evidence") && (serverPort < 1 || serverPort > 65_535)) {
+                throw new IllegalArgumentException(
+                        "--server-port 1..65535 is required for provider-evidence");
             }
             if (!command.equals("preflight")
                     && !command.equals("validate")
                     && !command.equals("score")
                     && !command.equals("requirements")
-                    && !command.equals("approvals")) {
+                    && !command.equals("approvals")
+                    && !command.equals("provider-evidence")) {
                 throw new IllegalArgumentException("Unknown command: " + command);
             }
-            return new Arguments(command, root, bank, scenarioId, runRoot);
+            return new Arguments(command, root, bank, scenarioId, runRoot, serverPort);
         }
 
         static String usage() {
             return "Usage: bank-hash | preflight --root <packet> | validate --root <packet> | "
                     + "score --root <packet> --bank admission|full | requirements --root <packet> "
                     + "--scenario <id> --run <run-root> | approvals --root <packet> "
-                    + "--scenario <id> --run <run-root>";
+                    + "--scenario <id> --run <run-root> | provider-evidence --root <packet> "
+                    + "--scenario <id> --run <run-root> --server-port <port>";
         }
     }
 }

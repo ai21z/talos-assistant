@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1112] Model qualification now finalizes provider evidence through one
+  tracked Java owner. An identity-only managed server startup no longer
+  conflicts with authoritative no-provider evidence, while real provider
+  turns still require immutable prompt and llama.cpp log copies.
 - [T1111] Workspace classification now matches project words at natural word
   boundaries. Identifiers such as `PROJECT_PUBLIC_FACT` no longer create a
   project-summary contract, while ordinary project and workspace requests keep

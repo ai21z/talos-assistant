@@ -208,6 +208,31 @@ class ModelQualificationMainTest {
         assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(output)));
     }
 
+    @Test
+    void providerEvidenceCommandAcceptsIdentityOnlyStartupWithNoProviderTurn() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("provider-evidence"), catalog);
+        String scenario = catalog.admission().scenarios().getFirst().id();
+        Files.writeString(packet.runRoot().resolve("prompt-debug.txt"),
+                QualificationProviderEvidence.promptNotApplicableText(), StandardCharsets.UTF_8);
+        Files.writeString(packet.runRoot().resolve("llama.log"),
+                QualificationProviderEvidence.modelRuntimeNotApplicableText(), StandardCharsets.UTF_8);
+        Path source = packet.root().resolve("home/.talos/logs/llama_cpp-18161.log");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "model loaded\nlistening\nstopped\n", StandardCharsets.UTF_8);
+
+        Capture capture = run(
+                "provider-evidence",
+                "--root", packet.root().toString(),
+                "--scenario", scenario,
+                "--run", packet.runRoot().toString(),
+                "--server-port", "18161");
+
+        assertEquals(0, capture.exit(), capture.err());
+        assertTrue(capture.out().contains("providerPromptSent=false"), capture.out());
+    }
+
     private static Capture run(String... args) {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         ByteArrayOutputStream stderr = new ByteArrayOutputStream();

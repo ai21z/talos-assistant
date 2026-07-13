@@ -35,6 +35,24 @@ Use separate fresh workspaces per model. Save transcripts, prompt-debug artifact
 
 ## Model qualification finalization
 
+Finalize provider evidence through the tracked owner. A deterministic runtime
+answer may start the managed server only to verify identity. Server process
+existence does not prove that a provider prompt was sent.
+
+```powershell
+.\gradlew.bat finalizeModelQualificationProviderEvidence `
+  -PqualificationRoot=<campaign-root> `
+  -PqualificationScenario=<scenario-id> `
+  -PqualificationRunRoot=<run-root> `
+  -PqualificationServerPort=<port> `
+  --no-daemon
+```
+
+The command retains the exact paired `NOT_APPLICABLE` evidence written from a
+verified prompt-debug response. For a provider turn, it requires one saved
+prompt render and the campaign llama.cpp log. Mixed, partial, missing, or
+pre-existing noncanonical evidence fails closed.
+
 After `answer.txt`, `trace.json`, `before-files/`, and `final-files/` are fixed,
 generate requirement results through the tracked canonical evaluator:
 

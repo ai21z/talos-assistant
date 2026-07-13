@@ -121,9 +121,10 @@ Review evidence as it is captured. A late discovery that invalidates the shared 
 
 ## Gate 6, finalize and score
 
-Run the maintained requirement and approval finalizers. Then validate and score the packet.
+Run the maintained provider evidence, approval, and requirement finalizers. Then validate and score the packet.
 
 ```powershell
+.\gradlew.bat finalizeModelQualificationProviderEvidence --no-daemon
 .\gradlew.bat finalizeModelQualificationRequirements --no-daemon
 .\gradlew.bat finalizeModelQualificationApprovals --no-daemon
 .\gradlew.bat validateModelQualificationEvidence --no-daemon
@@ -166,7 +167,7 @@ A Talos defect is not a model failure. Record it separately, add a failing regre
 
 Admission closure requires 12 valid trials, calibration hashes, candidate and engine hashes, validator output, scorecard, and a pass or mechanical rejection.
 
-Full closure requires 72 valid trials, both finalizers, validator output, complete scorecard, continuation record, performance envelope, and disposition review.
+Full closure requires 72 valid trials, all three finalizers, validator output, complete scorecard, continuation record, performance envelope, and disposition review.
 
 Hardware closure requires one complete physical packet per claimed OS and backend. The claim must not be broader than measured machines.
 

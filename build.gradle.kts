@@ -802,6 +802,39 @@ tasks.register<JavaExec>("finalizeModelQualificationApprovals") {
     })
 }
 
+tasks.register<JavaExec>("finalizeModelQualificationProviderEvidence") {
+    description = "Writes immutable provider prompt and model runtime evidence for one qualification trial."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        val serverPort = providers.gradleProperty("qualificationServerPort").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        if (serverPort.toIntOrNull() !in 1..65535) {
+            throw GradleException("-PqualificationServerPort=<1..65535> is required")
+        }
+        listOf(
+            "provider-evidence",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+            "--server-port", serverPort,
+        )
+    })
+}
+
 tasks.register<JavaExec>("scoreModelQualificationEvidence") {
     description = "Validates and mechanically scores a local admission or full qualification packet."
     group = "verification"
