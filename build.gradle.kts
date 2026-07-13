@@ -875,6 +875,7 @@ val candidateTest by tasks.registering(Test::class) {
 }
 
 tasks.test {
+    dependsOn(tasks.jar)
     filter {
         excludeTestsMatching("dev.talos.architecture.intelligence.*")
     }
@@ -976,6 +977,39 @@ val generateBuildVersionResource by tasks.registering {
     }
 }
 
+val packagedGitHead = providers.provider {
+    gitOutput("rev-parse", "HEAD")
+        ?.lowercase()
+        ?.takeIf { it.matches(Regex("[0-9a-f]{40}")) }
+        ?: "unknown"
+}
+val packagedGitBranch = providers.provider {
+    gitOutput("rev-parse", "--abbrev-ref", "HEAD") ?: "unknown"
+}
+val packagedGitDirty = providers.provider {
+    gitOutput("status", "--porcelain", "--untracked-files=no") != null
+}
+val generatePackagedBuildIdentityResource by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/resources/packagedBuildIdentity")
+    outputs.dir(outputDir)
+    inputs.property("gitHead", packagedGitHead)
+    inputs.property("gitBranch", packagedGitBranch)
+    inputs.property("gitDirty", packagedGitDirty)
+
+    doLast {
+        val dirty = packagedGitDirty.get()
+        val commit = if (dirty) "unknown" else packagedGitHead.get()
+        val metaInfDir = outputDir.get().file("META-INF").asFile
+        metaInfDir.mkdirs()
+        metaInfDir.resolve("talos-build.properties").writeText(
+            "git.commit=$commit\n" +
+                    "git.branch=${packagedGitBranch.get()}\n" +
+                    "git.dirty=$dirty\n",
+            Charsets.UTF_8
+        )
+    }
+}
+
 tasks.processResources {
     from(generateBuildVersionResource)
 }
@@ -983,6 +1017,7 @@ tasks.processResources {
 /* ---------- Jar naming ---------- */
 
 tasks.jar {
+    from(generatePackagedBuildIdentityResource)
     archiveBaseName.set("talos")
     archiveVersion.set("") // stable name: talos.jar (referenced by installDist + jpackage)
 }

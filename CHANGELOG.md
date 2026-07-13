@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1105] Clean packaged Talos JARs now carry the exact Git commit and branch
+  that produced them. Dirty builds record an unknown commit, and the generated
+  identity is bound to Gradle task inputs so an incremental build cannot retain
+  stale source identity. Exploded test classpaths keep the same honest fallback.
 - [T1104] Frozen model-qualification campaigns can now supply one exact,
   process-scoped capability ceiling for an uncatalogued candidate. The overlay
   verifies the calibration, Talos build, model bytes, engine bytes, launch
