@@ -3,6 +3,7 @@ package dev.talos.runtime.verification;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.expectation.AppendLineExpectation;
 import dev.talos.runtime.expectation.AppendSectionExpectation;
+import dev.talos.runtime.expectation.AppendStatementExpectation;
 import dev.talos.runtime.expectation.BulletListExpectation;
 import dev.talos.runtime.expectation.ExpectationVerificationStatus;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
@@ -37,6 +38,7 @@ final class TaskExpectationStaticVerifier {
         boolean replacementRequired = false;
         boolean appendLineRequired = false;
         boolean appendSectionRequired = false;
+        boolean appendStatementRequired = false;
         boolean bulletCountRequired = false;
         Set<String> verifiedTargets = new LinkedHashSet<>();
 
@@ -78,6 +80,17 @@ final class TaskExpectationStaticVerifier {
                         facts,
                         problems,
                         recordExpectationTrace);
+            } else if (expectation instanceof AppendStatementExpectation appendStatement) {
+                verifiedAny = true;
+                appendStatementRequired = true;
+                addExpectationTarget(verifiedTargets, appendStatement);
+                verifyAppendStatementExpectation(
+                        root,
+                        appendStatement,
+                        successfulMutations,
+                        facts,
+                        problems,
+                        recordExpectationTrace);
             } else if (expectation instanceof BulletListExpectation bullets) {
                 verifiedAny = true;
                 bulletCountRequired = true;
@@ -91,6 +104,7 @@ final class TaskExpectationStaticVerifier {
                 replacementRequired,
                 appendLineRequired,
                 appendSectionRequired,
+                appendStatementRequired,
                 bulletCountRequired,
                 coversAllSuccessfulMutations(verifiedTargets, successfulMutations),
                 facts,
@@ -383,6 +397,61 @@ final class TaskExpectationStaticVerifier {
         return new AppendSectionObservation(true, true, sentenceFound, exact, finalSection, observed);
     }
 
+    private static void verifyAppendStatementExpectation(
+            Path root,
+            AppendStatementExpectation expectation,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems,
+            boolean recordExpectationTrace
+    ) {
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                expectation.targetPath(),
+                "append statement verification could not resolve target path.",
+                "append statement verification target is not a readable file.",
+                "append statement verification could not read target");
+        String pathHint = target.pathHint();
+        if (target.hasProblem()) {
+            problems.add(target.problem());
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendStatementExpectation(
+                    expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+
+        List<String> lines = logicalLines(target.content());
+        String finalLine = lines.isEmpty() ? "" : lines.getLast();
+        long matchingLines = lines.stream()
+                .filter(line -> AppendStatementMatcher.matches(
+                        line, expectation.label(), expectation.statement()))
+                .count();
+        boolean postStateMatched = matchingLines == 1
+                && AppendStatementMatcher.matches(finalLine, expectation.label(), expectation.statement());
+        boolean evidencePassed = postStateMatched
+                && TaskExpectationMutationEvidenceVerifier.verifyAppendStatementMutationEvidence(
+                        pathHint,
+                        expectation.label(),
+                        expectation.statement(),
+                        successfulMutations,
+                        facts,
+                        problems);
+        boolean matched = postStateMatched && evidencePassed;
+        if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendStatementExpectation(
+                expectation,
+                matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
+                finalLine);
+        if (matched) {
+            facts.add(pathHint + ": appended statement matched requested final line.");
+        } else if (matchingLines == 0) {
+            problems.add(pathHint + ": requested appended statement was not found.");
+        } else if (matchingLines > 1) {
+            problems.add(pathHint + ": requested appended statement was not unique.");
+        } else if (!AppendStatementMatcher.matches(
+                finalLine, expectation.label(), expectation.statement())) {
+            problems.add(pathHint + ": requested appended statement was not the final logical line.");
+        }
+    }
+
     private static List<String> logicalLines(String content) {
         if (content == null || content.isEmpty()) return List.of();
         List<String> lines = new ArrayList<>(List.of(content.split("\\R", -1)));
@@ -468,6 +537,7 @@ final class TaskExpectationStaticVerifier {
             boolean replacementRequired,
             boolean appendLineRequired,
             boolean appendSectionRequired,
+            boolean appendStatementRequired,
             boolean bulletCountRequired,
             boolean coversAllSuccessfulMutations,
             List<String> facts,
@@ -479,7 +549,7 @@ final class TaskExpectationStaticVerifier {
         }
 
         static Result empty() {
-            return new Result(false, false, false, false, false, false, List.of(), List.of());
+            return new Result(false, false, false, false, false, false, false, List.of(), List.of());
         }
     }
 

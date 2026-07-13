@@ -185,6 +185,58 @@ final class TaskExpectationMutationEvidenceVerifier {
         return true;
     }
 
+    static boolean verifyAppendStatementMutationEvidence(
+            String pathHint,
+            String label,
+            String statement,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (successfulMutations == null || successfulMutations.isEmpty()) {
+            problems.add(pathHint + ": append-statement verification had no mutation evidence.");
+            return false;
+        }
+        boolean sawRelevantMutation = false;
+        for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
+            if (outcome == null || !outcome.success()
+                    || !normalizePath(outcome.pathHint()).equals(pathHint)) {
+                continue;
+            }
+            sawRelevantMutation = true;
+            String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
+            ToolMutationEvidence evidence = outcome.mutationEvidence();
+            if ("write_file".equals(canonicalTool)) {
+                if (evidence == null || !evidence.fullWriteReplacement()) {
+                    problems.add(pathHint + ": talos.write_file cannot prove append-statement preservation "
+                            + "without complete same-turn read evidence.");
+                    return false;
+                }
+            } else if ("edit_file".equals(canonicalTool)) {
+                if (evidence == null || !evidence.exactEditReplacement()) {
+                    problems.add(pathHint + ": talos.edit_file cannot prove append-statement preservation "
+                            + "without exact edit evidence.");
+                    return false;
+                }
+            } else {
+                problems.add(pathHint + ": mutation tool cannot prove append-statement preservation.");
+                return false;
+            }
+            if (!appendsOnlyRequestedStatement(
+                    evidence.oldString(), evidence.newString(), label, statement)) {
+                problems.add(pathHint + ": append-statement mutation did not preserve prior content "
+                        + "before the requested statement.");
+                return false;
+            }
+        }
+        if (!sawRelevantMutation) {
+            problems.add(pathHint + ": append-statement verification had no matching mutation evidence.");
+            return false;
+        }
+        facts.add(pathHint + ": append-statement mutation evidence preserved prior content.");
+        return true;
+    }
+
     private static boolean replacementOnlyChangesRequestedText(
             String previousContent,
             String newContent,
@@ -251,6 +303,28 @@ final class TaskExpectationMutationEvidenceVerifier {
         return nonBlank.size() == 2
                 && MarkdownHeadingParser.headingText(nonBlank.get(0)).equals(sectionName)
                 && nonBlank.get(1).equals(expectedSentence);
+    }
+
+    private static boolean appendsOnlyRequestedStatement(
+            String oldString,
+            String newString,
+            String label,
+            String statement
+    ) {
+        if (oldString == null || newString == null
+                || label == null || label.isBlank()
+                || statement == null || statement.isBlank()) {
+            return false;
+        }
+        String oldNormalized = normalizeLineEndings(oldString);
+        String newNormalized = normalizeLineEndings(newString);
+        if (!newNormalized.startsWith(oldNormalized)) return false;
+        List<String> nonBlank = newNormalized.substring(oldNormalized.length()).lines()
+                .map(String::strip)
+                .filter(line -> !line.isBlank())
+                .toList();
+        return nonBlank.size() == 1
+                && AppendStatementMatcher.matches(nonBlank.getFirst(), label, statement);
     }
 
     private static String normalizeLineEndings(String value) {

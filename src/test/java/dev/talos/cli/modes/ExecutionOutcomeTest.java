@@ -2798,6 +2798,51 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void explicitAppendStatementWithPreservationEvidenceCompletesVerified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-append-statement-");
+        try {
+            String before = "# Decisions\n\n"
+                    + "Decision 001 keeps all storage local. Decision 002 requires explicit approval before "
+                    + "destructive maintenance. Decision 003 records verification evidence after changes.\n";
+            String after = before + "\nDecision 004: Health checks remain read-only.\n";
+            Files.createDirectories(ws.resolve("docs"));
+            Files.writeString(ws.resolve("docs/decisions.md"), after);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                            + "Preserve Decisions 001 through 003 and change no code."));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated docs/decisions.md.", 2, 2,
+                    List.of("talos.read_file", "talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "docs/decisions.md", true, true, false,
+                            "wrote docs/decisions.md", "", dev.talos.tools.VerificationStatus.PASS, "",
+                            null,
+                            ToolMutationEvidence.fullWriteReplacement(before, after))));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.finalAnswer().contains("Append statement verification passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void singleHtmlPolishEditWithoutFullWebSurfaceIsReadbackOnlyNotFailed() throws Exception {
         Path ws = Files.createTempDirectory("talos-single-html-polish-readback-");
         try {

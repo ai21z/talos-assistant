@@ -2,6 +2,7 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.expectation.AppendLineExpectation;
 import dev.talos.runtime.expectation.AppendSectionExpectation;
+import dev.talos.runtime.expectation.AppendStatementExpectation;
 import dev.talos.runtime.expectation.BulletListExpectation;
 import dev.talos.runtime.expectation.ExpectationVerificationStatus;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
@@ -95,6 +96,27 @@ final class TaskExpectationTraceRecorder {
                 LiteralContentExpectation.byteCount(observed),
                 LiteralContentExpectation.charCount(observed),
                 observed.isBlank() ? 0 : 2);
+    }
+
+    static void recordAppendStatementExpectation(
+            AppendStatementExpectation expectation,
+            ExpectationVerificationStatus status,
+            String observedStatement
+    ) {
+        String observed = observedStatement == null ? "" : observedStatement;
+        LocalTurnTraceCapture.recordExpectationVerified(
+                expectation == null ? "APPEND_STATEMENT" : expectation.kind(),
+                status == null ? "" : status.name(),
+                expectation == null ? "" : expectation.targetPath(),
+                expectation == null ? "" : expectation.sourcePattern(),
+                expectation == null ? "" : expectation.expectedHash(),
+                expectation == null ? 0 : expectation.expectedBytes(),
+                expectation == null ? 0 : expectation.expectedChars(),
+                1,
+                LiteralContentExpectation.hash(observed),
+                LiteralContentExpectation.byteCount(observed),
+                LiteralContentExpectation.charCount(observed),
+                observed.isBlank() ? 0 : 1);
     }
 
     static void recordBulletListExpectation(

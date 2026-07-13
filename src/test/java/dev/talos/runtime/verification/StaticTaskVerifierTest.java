@@ -423,6 +423,182 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void appendStatementFieldWordingPassesWithFullWritePreservationEvidence() throws Exception {
+        String before = "# Decisions\n\n"
+                + "Decision 001 keeps all storage local. Decision 002 requires explicit approval before "
+                + "destructive maintenance. Decision 003 records verification evidence after changes.\n";
+        String after = before + "\nDecision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.",
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("docs/decisions.md: appended statement matched")),
+                result.facts().toString());
+    }
+
+    @Test
+    void appendStatementAllowsCaseAndOneFinalTerminatorOnly() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004 says Health checks remain read-only!\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulFullWrite(
+                        "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
+    void appendStatementPassesWithExactEditEvidence() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        "Decision 001 remains.\n",
+                        "Decision 001 remains.\n\nDecision 004: health checks remain read-only.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
+    void appendStatementFailsClosedForWrongOrUnboundedPostState() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        List<String> invalidAfterStates = List.of(
+                before + "\nDecision 005: Health checks remain read-only.\n",
+                before + "\nDecision 004: Health checks may mutate files.\n",
+                before + "\nDecision 004: Health checks remain read-only for now.\n",
+                before + "\nDecision 004: Health checks remain read-only..\n",
+                before + "\nDecision 004, Health checks remain read-only.\n",
+                before + "\nDecision 004: Health checks remain read-only.\nExtra content.\n",
+                "Decision 004: Health checks remain read-only.\n" + before);
+        Files.createDirectories(workspace.resolve("docs"));
+
+        for (String after : invalidAfterStates) {
+            Files.writeString(workspace.resolve("docs/decisions.md"), after);
+            TaskVerificationResult result = StaticTaskVerifier.verify(
+                    workspace,
+                    "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                            + "Preserve Decision 001 and change no code.",
+                    loopResult(List.of(successfulFullWrite(
+                            "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                    0);
+            assertEquals(TaskVerificationStatus.FAILED, result.status(), after + "\n" + result);
+        }
+    }
+
+    @Test
+    void appendStatementRejectsExactEditThatChangesItsAnchor() throws Exception {
+        String after = "# Decisions\n\nChanged decision.\n\n"
+                + "Decision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decision 001 and change no code.",
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        "Decision 001 remains.\n",
+                        "Changed decision.\n\nDecision 004: Health checks remain read-only.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(problem -> problem.contains("did not preserve prior content")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendStatementFailsWithoutStructuredEvidenceOrWithUnrelatedMutation() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        Files.writeString(workspace.resolve("other.md"), "changed\n");
+        String prompt = "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                + "Preserve Decision 001 and change no code.";
+
+        TaskVerificationResult missingEvidence = StaticTaskVerifier.verify(
+                workspace,
+                prompt,
+                loopResult(List.of(successfulWrite("docs/decisions.md", VerificationStatus.PASS))),
+                0);
+        assertEquals(TaskVerificationStatus.FAILED, missingEvidence.status(), missingEvidence.toString());
+
+        TaskVerificationResult unrelatedMutation = StaticTaskVerifier.verify(
+                workspace,
+                prompt,
+                loopResult(List.of(
+                        successfulFullWrite("docs/decisions.md", before, after, VerificationStatus.PASS),
+                        successfulFullWrite("other.md", "before\n", "changed\n", VerificationStatus.PASS))),
+                0);
+        assertNotEquals(TaskVerificationStatus.PASSED, unrelatedMutation.status(), unrelatedMutation.toString());
+    }
+
+    @Test
+    void appendStatementExpectationTraceIsRedacted() throws Exception {
+        String before = "# Decisions\n\nDecision 001 remains.\n";
+        String after = before + "\nDecision 004: Health checks remain read-only.\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+        String prompt = "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                + "Preserve Decision 001 and change no code.";
+        LocalTurnTraceCapture.begin(
+                "trc-test-append-statement", "session-test", 1, "2026-07-13T00:00:00Z",
+                "workspace-hash", "auto", "llama_cpp", "granite-4.1-3b", prompt);
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    prompt,
+                    loopResult(List.of(successfulFullWrite(
+                            "docs/decisions.md", before, after, VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("APPEND_STATEMENT", event.data().get("kind"));
+            assertEquals("PASSED", event.data().get("status"));
+            assertFalse(event.data().containsValue("Decision 004"));
+            assertFalse(event.data().containsValue("health checks remain read-only"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void appendSectionFieldWordingFailsWhenHeadingIsMissing() throws Exception {
         String before = "# Atlas Notes\n\nExisting text.\n";
         String after = before + "\nRun tests before review.\n";

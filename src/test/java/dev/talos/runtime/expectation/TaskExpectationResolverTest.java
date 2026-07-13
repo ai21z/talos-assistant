@@ -226,6 +226,46 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsExplicitAppendStatementExpectationFromQualificationFieldWording() throws Exception {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        TaskExpectation expectation = expectations.getFirst();
+        assertEquals("APPEND_STATEMENT", expectation.kind());
+        assertEquals("docs/decisions.md", expectation.targetPath());
+        assertEquals("append-labeled-statement", expectation.sourcePattern());
+        assertEquals("Decision 004", expectation.getClass().getMethod("label").invoke(expectation));
+        assertEquals("health checks remain read-only",
+                expectation.getClass().getMethod("statement").invoke(expectation));
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void ignoresAppendStatementWordingWithoutCompleteExplicitEvidence() {
+        List<String> prompts = List.of(
+                "How do I append Decision 004 to docs/decisions.md saying health checks remain read-only?",
+                "Show an example: append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003.",
+                "Append a useful decision to docs/decisions.md and preserve the earlier decisions.",
+                "Append Decision 004 to docs/decisions.md. Preserve Decisions 001 through 003.",
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only.",
+                "Append the line Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.",
+                "Append Decision 004 saying health checks remain read-only. Preserve prior decisions.");
+
+        for (String prompt : prompts) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(prompt);
+            assertTrue(TaskExpectationResolver.resolve(contract).stream()
+                            .noneMatch(expectation -> "APPEND_STATEMENT".equals(expectation.kind())),
+                    prompt);
+        }
+    }
+
+    @Test
     void ignoresAppendSectionWordingWithoutAnExactSentence() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Append a useful Contributing section to README.md and preserve all current text.");

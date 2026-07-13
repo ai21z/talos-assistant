@@ -129,6 +129,10 @@ public final class TaskExpectationResolver {
         if (appendSection != null) {
             expectations.add(appendSection);
         }
+        AppendStatementExpectation appendStatement = appendStatementExpectation(request, normalizedTarget);
+        if (appendStatement != null) {
+            expectations.add(appendStatement);
+        }
         int bulletCount = exactBulletCount(request);
         if (bulletCount > 0) {
             expectations.add(new BulletListExpectation(
@@ -410,6 +414,73 @@ public final class TaskExpectationResolver {
             if (last != '.' && last != '!' && last != '?') return "";
         }
         return sentence;
+    }
+
+    private static AppendStatementExpectation appendStatementExpectation(
+            String request,
+            String normalizedTarget
+    ) {
+        if (request == null || request.isBlank()
+                || normalizedTarget == null || normalizedTarget.isBlank()) {
+            return null;
+        }
+        String quotedTarget = Pattern.quote(normalizedTarget);
+        Pattern pattern = Pattern.compile(
+                "(?is)^\\s*(?:please\\s+)?append\\s+"
+                        + "([A-Za-z0-9][A-Za-z0-9 _.-]{0,79}?)\\s+to\\s+`?"
+                        + quotedTarget
+                        + "`?\\s+(?:saying|that\\s+says)\\s+(.+?)"
+                        + "\\s*[.!?]?\\s+(?:preserve|keep|leave)\\s+(.+?)"
+                        + "\\s+and\\s+(?:change|edit|modify|touch)\\s+no\\s+code\\s*[.!?]?\\s*$");
+        Matcher matcher = pattern.matcher(request);
+        if (!matcher.matches()) return null;
+
+        String label = normalizeStatementLabel(matcher.group(1));
+        String statement = normalizeStatementText(matcher.group(2));
+        String preserved = matcher.group(3) == null ? "" : matcher.group(3).strip();
+        if (label.isBlank() || reservedAppendStatementLabel(label)
+                || statement.isBlank() || preserved.isBlank() || preserved.length() > 500) {
+            return null;
+        }
+        return new AppendStatementExpectation(
+                normalizedTarget,
+                label,
+                statement,
+                "append-labeled-statement");
+    }
+
+    private static String normalizeStatementLabel(String raw) {
+        String label = stripWrappingQuotes(raw == null ? "" : raw.strip())
+                .replaceAll("\\s+", " ");
+        return label.length() <= 80 ? label : "";
+    }
+
+    private static String normalizeStatementText(String raw) {
+        String statement = stripWrappingQuotes(raw == null ? "" : raw.strip()).strip();
+        if (statement.isBlank() || statement.length() > 500
+                || statement.indexOf('\n') >= 0 || statement.indexOf('\r') >= 0) {
+            return "";
+        }
+        if (isSentenceTerminator(statement.charAt(statement.length() - 1))) {
+            statement = statement.substring(0, statement.length() - 1).stripTrailing();
+        }
+        for (int i = 0; i < statement.length(); i++) {
+            if (isSentenceTerminator(statement.charAt(i))) return "";
+        }
+        return statement.replaceAll("\\s+", " ");
+    }
+
+    private static boolean reservedAppendStatementLabel(String label) {
+        String normalized = label == null ? "" : label.strip().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("line ")
+                || normalized.startsWith("the line ")
+                || normalized.startsWith("this line ")
+                || normalized.startsWith("one line ")
+                || normalized.endsWith(" section");
+    }
+
+    private static boolean isSentenceTerminator(char value) {
+        return value == '.' || value == '!' || value == '?';
     }
 
     private static ReplacementExpectation replacementExpectation(String request, String normalizedTarget) {
