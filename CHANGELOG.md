@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1068] llama.cpp profile resolution now combines declared catalog data with
+  typed artifact, engine, server, template, context, modality, and hardware
+  facts. Runtime evidence can preserve or narrow a profile, while missing or
+  mismatched identity cannot inherit its qualified tool capability.
 - [T990] Qwen3-8B Q4_K_M is now an experimental selectable profile bound to
   its protocol-v5 72-trial packet. Setup keeps non-thinking mode, requires and
   verifies the exact local artifact, and does not add it to wizard downloads or
