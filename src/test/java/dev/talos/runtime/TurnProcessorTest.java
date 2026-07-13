@@ -10,8 +10,11 @@ import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.phase.ExecutionPhaseState;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -400,21 +403,65 @@ class TurnProcessorTest {
         AtomicInteger approvals = new AtomicInteger();
         var tp = processorWithFileToolsAndApprovalCounter(approvals);
         var session = new Session(workspace, new Config());
-        var ctx = contextForWorkspace(workspace);
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, null))
+                .executionPhaseState(new ExecutionPhaseState())
+                .build();
 
-        ToolResult result = tp.executeTool(session,
-                new ToolCall("talos.edit_file", Map.of(
-                        "path", "style.css",
-                        "old_string", "body { background-color: #121212; }",
-                        "new_string", "body { background-color: #000000; }")), ctx);
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-preapproval",
+                "session-t1120",
+                1,
+                "2026-07-13T17:06:47Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "granite-4.1-3b",
+                "Update style.css.");
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.edit_file", Map.of(
+                            "path", "style.css",
+                            "old_string", "body { background-color: #121212; }",
+                            "new_string", "body { background-color: #000000; }")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.edit_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
+            TurnTraceEvent blocked = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
+                    .filter(event -> "talos.edit_file".equals(event.toolName()))
+                    .findFirst()
+                    .orElseThrow();
 
-        assertFalse(result.success());
-        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
-        assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("Call talos.read_file first"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
-        assertEquals(0, approvals.get());
-        assertTrue(Files.readString(workspace.resolve("style.css")).contains("#2C2C2C"));
+            assertFalse(result.success());
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("old_string not found"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("Call talos.read_file first"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle,
+                    "one parsed call must have exactly one terminal trace event");
+            assertEquals("APPLY", blocked.phase(), "terminal event must keep the real call phase");
+            assertEquals(List.of("new_string", "old_string", "path"),
+                    blocked.data().get("parameterNames"));
+            assertTrue(blocked.data().containsKey("oldStringHash"), blocked.data().toString());
+            assertTrue(blocked.data().containsKey("newStringHash"), blocked.data().toString());
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+            assertFalse(audit.toolCalls().getFirst().success());
+            assertTrue(audit.toolCalls().getFirst().reason().contains("old_string not found"),
+                    audit.toolCalls().toString());
+            assertTrue(Files.readString(workspace.resolve("style.css")).contains("#2C2C2C"));
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
@@ -1135,14 +1182,77 @@ class TurnProcessorTest {
         TurnUserRequestCapture.set(request);
         TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
 
-        ToolResult result = tp.executeTool(session,
-                new ToolCall("talos.read_file", Map.of("path", "notes.md")), ctx);
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-directory-listing", "session-t1120", 1,
+                "2026-07-13T00:00:00Z", "workspace-hash", "auto",
+                "llama_cpp", "granite-4.1-3b", request);
+        try {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.read_file", Map.of("path", "notes.md")), ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.read_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
 
-        assertFalse(result.success());
-        assertEquals(ToolError.DENIED, result.error().code());
-        assertTrue(result.errorMessage().contains("directory entries"), result.errorMessage());
-        assertTrue(result.errorMessage().contains("talos.list_dir"), result.errorMessage());
-        assertFalse(result.errorMessage().contains("ALPHA-742"), result.errorMessage());
+            assertFalse(result.success());
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertTrue(result.errorMessage().contains("directory entries"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("talos.list_dir"), result.errorMessage());
+            assertFalse(result.errorMessage().contains("ALPHA-742"), result.errorMessage());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle);
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void currentTurnToolSurfaceBlockHasOneTerminalTraceOwner(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, null))
+                .nativeToolSpecs(List.of(new ToolSpec("talos.edit_file", "Edit", "{}")))
+                .build();
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "index.html", "content", "<h1>blocked</h1>"));
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-tool-surface", "session-t1120", 1,
+                "2026-07-13T00:00:00Z", "workspace-hash", "auto",
+                "llama_cpp", "granite-4.1-3b", "Write index.html.");
+        try {
+            ToolResult result = tp.executeTool(session, call, ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.write_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
+
+            assertFalse(result.success());
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertTrue(result.errorMessage().contains("Allowed tools: talos.edit_file"),
+                    result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"), lifecycle);
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test void toolReceivesWorkspaceFromSession() {
@@ -1364,10 +1474,18 @@ class TurnProcessorTest {
 
         ToolResult toolResult = tp.executeTool(session, call, ctx);
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        TurnAuditCapture.end();
+        TurnAudit audit = TurnAuditCapture.end();
+        List<String> lifecycle = trace.events().stream()
+                .filter(event -> "talos.write_file".equals(event.toolName()))
+                .map(event -> event.type())
+                .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                        || "TOOL_CALL_BLOCKED".equals(type)
+                        || "TOOL_EXECUTED".equals(type))
+                .toList();
 
         assertTrue(toolResult.success(), toolResult.errorMessage());
-        assertTrue(trace.events().stream().anyMatch(event -> "TOOL_CALL_PARSED".equals(event.type())));
+        assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_EXECUTED"), lifecycle);
+        assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
         assertTrue(trace.events().stream().anyMatch(event -> "APPROVAL_REQUIRED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "APPROVAL_GRANTED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())));
@@ -1376,6 +1494,60 @@ class TurnProcessorTest {
         assertTrue(json.contains("\"contentHash\""), json);
         assertFalse(json.contains("SECRET=abc"), "write payload must be hashed, not stored raw");
         assertFalse(json.contains("<h1>ok</h1>"), "write payload must be hashed, not stored raw");
+    }
+
+    @Test
+    void localTurnTraceCapturesOneTerminalEventForSuccessfulRead(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "release notes\n");
+        AtomicInteger approvals = new AtomicInteger();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        var tp = new TurnProcessor(
+                ModeController.defaultController(),
+                approvalGate(approvals, new ArrayList<>(), true),
+                registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "read notes.md";
+
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-t1120-read",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-07-13T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "granite-4.1-3b",
+                request);
+        try {
+            ToolResult result = tp.executeTool(
+                    session,
+                    new ToolCall("talos.read_file", Map.of("path", "notes.md")),
+                    ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end();
+            List<String> lifecycle = trace.events().stream()
+                    .filter(event -> "talos.read_file".equals(event.toolName()))
+                    .map(event -> event.type())
+                    .filter(type -> "TOOL_CALL_PARSED".equals(type)
+                            || "TOOL_CALL_BLOCKED".equals(type)
+                            || "TOOL_EXECUTED".equals(type))
+                    .toList();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertEquals(0, approvals.get());
+            assertEquals(List.of("TOOL_CALL_PARSED", "TOOL_EXECUTED"), lifecycle);
+            assertEquals(1, audit.toolCalls().size(), audit.toolCalls().toString());
+            assertTrue(audit.toolCalls().getFirst().success());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test void traceIsClearedBetweenTurns() throws Exception {

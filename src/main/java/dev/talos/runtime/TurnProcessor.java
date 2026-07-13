@@ -341,12 +341,7 @@ public final class TurnProcessor {
         }
         ToolResult surfaceRejection = rejectIfOutsideCurrentToolSurface(
                 ctx, call, tool.name(), tracePhase);
-        if (surfaceRejection != null) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(), "", false,
-                    "current-turn tool surface denied " + tool.name());
-            return surfaceRejection;
-        }
+        if (surfaceRejection != null) return surfaceRejection;
 
         boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
         ToolRiskLevel risk = effectiveRisk(tool.descriptor().riskLevel(), call);
@@ -444,10 +439,11 @@ public final class TurnProcessor {
         String path = resolvePathParam(call);
 
         if (taskContract.type() == TaskType.DIRECTORY_LISTING && !isListDirTool(call.toolName())) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(), path == null ? "" : path, false,
-                    "directory-listing contract denied " + call.toolName());
-            LocalTurnTraceCapture.recordToolCallBlocked(tracePhase, call,
+            TurnAuditCapture.recordBlockedToolCall(
+                    call,
+                    path == null ? "" : path,
+                    tracePhase,
+                    "directory-listing contract denied " + call.toolName(),
                     "directory-listing contract allows only talos.list_dir");
             return ToolResult.fail(ToolError.denied(
                     "The user only asked to list directory entries on this turn, so do not call "
@@ -558,18 +554,16 @@ public final class TurnProcessor {
                     validateBeforeApproval(call, session, ctx, taskContract, mutatingTool,
                             commandProfiles);
             if (preApprovalValidation != null) {
-                TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
-                        preApprovalBlockReason(call, preApprovalValidation));
-                LocalTurnTraceCapture.recordToolCallBlocked(
-                        tracePhase,
+                String blockReason = preApprovalBlockReason(call, preApprovalValidation);
+                TurnAuditCapture.recordBlockedToolCall(
                         call,
-                        preApprovalBlockReason(call, preApprovalValidation));
+                        path == null ? "" : path,
+                        tracePhase,
+                        blockReason);
                 if (commandTool) {
-                    String reason = preApprovalBlockReason(call, preApprovalValidation);
                     LocalTurnTraceCapture.recordCommandPolicyDecision(
                             tracePhase, call, "DENY", "PRE_APPROVAL_VALIDATION");
-                    LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                    LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, blockReason);
                 }
                 return preApprovalValidation;
             }
@@ -1436,10 +1430,13 @@ public final class TurnProcessor {
                 ? call.toolName()
                 : canonicalToolName;
         String allowedText = allowed.isEmpty() ? "(none)" : String.join(", ", allowed);
-        LocalTurnTraceCapture.recordToolCallBlocked(
-                tracePhase,
+        String reason = "current-turn tool surface denied " + requested + "; allowed: " + allowedText;
+        TurnAuditCapture.recordBlockedToolCall(
                 call,
-                "current-turn tool surface denied " + requested + "; allowed: " + allowedText);
+                "",
+                tracePhase,
+                "current-turn tool surface denied " + requested,
+                reason);
         return ToolResult.fail(ToolError.denied(
                 "Current-turn tool surface did not allow " + requested
                         + ". Allowed tools: " + allowedText + "."));

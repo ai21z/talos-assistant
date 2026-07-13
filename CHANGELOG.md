@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1120] Rejected tool calls now have one owner for their audit summary and
+  terminal trace event. Preapproval, directory-listing, and current-turn tool
+  surface rejections preserve the real parsed call while emitting exactly one
+  blocked event, so qualification finalizers no longer see orphan duplicates.
 - [T1119] Explicit requests to append one labeled statement now receive
   deterministic post-apply verification. Talos requires one exact final line
   under bounded punctuation and case normalization, plus structured mutation

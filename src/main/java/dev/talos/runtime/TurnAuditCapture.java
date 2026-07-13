@@ -77,20 +77,61 @@ public final class TurnAuditCapture {
             boolean success,
             String reason
     ) {
-        Bag b = HOLDER.get();
-        if (b != null) {
-            String normalizedReason = reason == null ? "" : reason.strip();
-            b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason));
-            ToolCall synthetic = syntheticCall(name, pathHint);
-            if (success) {
-                LocalTurnTraceCapture.recordToolExecuted("", synthetic, true, "", pathHints);
-            } else {
-                LocalTurnTraceCapture.recordToolCallBlocked("", synthetic, normalizedReason);
-            }
-            if (!success && !normalizedReason.isBlank()) {
-                b.policyBlocks.add(normalizedReason);
-            }
+        if (!recordToolCallSummary(name, pathHint, pathHints, success, reason)) return;
+        String normalizedReason = reason == null ? "" : reason.strip();
+        ToolCall synthetic = syntheticCall(name, pathHint);
+        if (success) {
+            LocalTurnTraceCapture.recordToolExecuted("", synthetic, true, "", pathHints);
+        } else {
+            LocalTurnTraceCapture.recordToolCallBlocked("", synthetic, normalizedReason);
         }
+    }
+
+    /**
+     * Record one failed audit summary and one terminal trace event for the real
+     * parsed call. Rejection paths that already own the real call must use this
+     * method instead of combining {@link #recordToolCall} with a second trace
+     * write.
+     */
+    public static void recordBlockedToolCall(
+            ToolCall call,
+            String pathHint,
+            String phase,
+            String reason
+    ) {
+        recordBlockedToolCall(call, pathHint, phase, reason, reason);
+    }
+
+    /** Record one blocked call while preserving distinct audit and trace wording. */
+    public static void recordBlockedToolCall(
+            ToolCall call,
+            String pathHint,
+            String phase,
+            String auditReason,
+            String traceReason
+    ) {
+        String name = call == null ? "" : call.toolName();
+        recordToolCallSummary(name, pathHint, List.of(), false, auditReason);
+        if (call != null) {
+            LocalTurnTraceCapture.recordToolCallBlocked(phase, call, traceReason);
+        }
+    }
+
+    private static boolean recordToolCallSummary(
+            String name,
+            String pathHint,
+            List<String> pathHints,
+            boolean success,
+            String reason
+    ) {
+        Bag b = HOLDER.get();
+        if (b == null) return false;
+        String normalizedReason = reason == null ? "" : reason.strip();
+        b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason));
+        if (!success && !normalizedReason.isBlank()) {
+            b.policyBlocks.add(normalizedReason);
+        }
+        return true;
     }
 
     /** Record compact task contract / phase / tool-surface metadata. */
