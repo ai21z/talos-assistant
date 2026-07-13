@@ -195,6 +195,10 @@ public final class ServerProbe implements DoctorProbe {
             RateSampleOutcome sampleOutcome = RateSampleOutcome.NOT_ATTEMPTED;
             if (!rates.measured() && timingEvidenceSource.canImproveAfterSample(ctx, preflight)) {
                 sampleOutcome = runBoundedRateSample(chatEngine, runtime);
+                if (preflight.managed()) {
+                    // The redirected b9918 log may remain buffered until the owned process exits.
+                    registry.close();
+                }
                 rates = sampleOutcome == RateSampleOutcome.COMPLETED
                         || sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED
                         ? awaitRatesAfterSample(ctx, preflight)

@@ -2,10 +2,10 @@
 
 ## [Unreleased]
 
-- [T1124] Doctor now waits for a short, fixed settlement window after a
-  completed managed throughput sample. A llama.cpp timing line published just
-  after the final HTTP chunk is measured without repeating the model request,
-  while genuinely missing timing evidence still produces the existing warning.
+- [T1124] Doctor now releases its owned llama.cpp verification server before
+  reading the final throughput evidence, then waits for a short, fixed file
+  settlement window. Buffered timing lines are measured without repeating the
+  model request, while genuinely missing evidence keeps the existing warning.
 - [T1121] Granite 4.1 3B is now an experimental selectable profile bound to
   its exact official Q4_K_M artifact and immutable protocol-v5 scorecard.
   Setup requires and verifies the local GGUF, while wizard downloads, accepted
