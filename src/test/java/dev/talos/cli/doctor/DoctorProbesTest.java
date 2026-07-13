@@ -1,5 +1,7 @@
 package dev.talos.cli.doctor;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.LlamaCppLogEvidence;
@@ -503,6 +505,40 @@ class DoctorProbesTest {
     }
 
     @Test
+    void startModeUsesDeterministicBoundedControlsForExactSmokeToken() throws Exception {
+        AtomicInteger chatCalls = new AtomicInteger();
+        List<String> requestBodies = new CopyOnWriteArrayList<>();
+        HttpServer server = startChatServer(
+                MODEL_SMOKE_REPLY,
+                Duration.ZERO,
+                chatCalls,
+                requestBodies);
+        try {
+            Config cfg = llamaCppConfig(Map.of(
+                    "mode", "connect_only",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "smoke-model"));
+
+            new ServerProbe(true).run(ctx(cfg));
+
+            assertEquals(1, chatCalls.get(), "connect-only smoke must remain a single request");
+            JsonNode body = new ObjectMapper().readTree(requestBodies.getFirst());
+            assertTrue(body.has("temperature"));
+            assertTrue(body.has("top_p"));
+            assertTrue(body.has("top_k"));
+            assertTrue(body.has("max_tokens"));
+            assertEquals(0.0d, body.path("temperature").asDouble());
+            assertEquals(1.0d, body.path("top_p").asDouble());
+            assertEquals(1, body.path("top_k").asInt());
+            assertEquals(32, body.path("max_tokens").asInt());
+            assertFalse(body.has("seed"), "doctor must not invent deterministic-seed evidence");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void startModeWarnsWhenBoundedRateSampleHitsOutputCapEvenWhenRatesAreFast() throws IOException {
         AtomicInteger chatCalls = new AtomicInteger();
         HttpServer server = startChatServer(
@@ -639,7 +675,7 @@ class DoctorProbesTest {
     }
 
     @Test
-    void boundedRateSamplePromptHasWideNeutralContextMargin() throws IOException {
+    void boundedRateSamplePromptHasWideNeutralContextMargin() throws Exception {
         AtomicInteger chatCalls = new AtomicInteger();
         List<String> requestBodies = new CopyOnWriteArrayList<>();
         HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls, requestBodies);
@@ -671,6 +707,15 @@ class DoctorProbesTest {
                     "Local workspace assistant measurement context.");
             assertTrue(neutralContextRepeats >= 80,
                     "rate sample prompt needs broad tokenization margin, repeats=" + neutralContextRepeats);
+            JsonNode rateSampleBody = new ObjectMapper().readTree(requestBodies.get(1));
+            assertFalse(rateSampleBody.has("temperature"),
+                    "exact-smoke sampling controls must not change the throughput sample");
+            assertFalse(rateSampleBody.has("top_p"),
+                    "exact-smoke sampling controls must not change the throughput sample");
+            assertFalse(rateSampleBody.has("top_k"),
+                    "exact-smoke sampling controls must not change the throughput sample");
+            assertFalse(rateSampleBody.has("max_tokens"),
+                    "exact-smoke output cap must not change the throughput sample");
         } finally {
             server.stop(0);
         }

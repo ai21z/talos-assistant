@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1117] The exact `doctor --start` model smoke now uses greedy sampling and
+  a bounded 32-token response. A healthy local model no longer fails the
+  binary readiness gate because the diagnostic inherited stochastic backend
+  defaults. Exact-token, echo, identity, rate, and server-release checks remain
+  unchanged.
 - [T1116] Explicit requests to append one named Markdown section with one exact
   sentence now receive deterministic post-apply verification. Talos requires a
   unique final section, the exact sentence, and structured mutation evidence

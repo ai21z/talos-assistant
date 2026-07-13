@@ -8,7 +8,9 @@ import dev.talos.engine.llamacpp.LlamaCppPreflight;
 import dev.talos.engine.llamacpp.LlamaCppProfileIdentity;
 import dev.talos.spi.ChatModelEngine;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.SamplingControls;
 
 import java.net.ConnectException;
 import java.net.URI;
@@ -39,6 +41,10 @@ import java.util.Optional;
  */
 public final class ServerProbe implements DoctorProbe {
     static final String MODEL_SMOKE_TOKEN = "TALOS_MODEL_SMOKE_OK";
+    private static final int MODEL_SMOKE_MAX_OUTPUT_TOKENS = 32;
+    private static final ChatRequestControls MODEL_SMOKE_CONTROLS = ChatRequestControls.defaults()
+            .withSampling(new SamplingControls(0.0d, 1.0d, 1, null))
+            .withMaxOutputTokens(MODEL_SMOKE_MAX_OUTPUT_TOKENS);
     private static final Duration DEFAULT_SLOW_SMOKE_WARNING_THRESHOLD = Duration.ofSeconds(60);
     private static final long DEFAULT_LLM_TIMEOUT_MS = 300_000L;
     private static final int REFERENCE_PROMPT_TOKENS = 4_000;
@@ -155,7 +161,7 @@ public final class ServerProbe implements DoctorProbe {
                     runtime.backend(), runtime.model(), "",
                     "Reply with the smoke token formed by joining TALOS, MODEL, SMOKE, and OK with underscores. "
                             + "Return only that token.",
-                    List.of(), null));
+                    List.of(), null, List.of(), List.of(), MODEL_SMOKE_CONTROLS));
             Duration elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
             String normalized = reply == null ? "" : reply.strip();
             int replyChars = normalized.length();
