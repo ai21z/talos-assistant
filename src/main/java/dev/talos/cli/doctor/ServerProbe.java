@@ -51,6 +51,8 @@ public final class ServerProbe implements DoctorProbe {
     private static final int REFERENCE_GENERATED_TOKENS = 700;
     private static final int MIN_PROMPT_RATE_SAMPLE_TOKENS = 256;
     private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
+    private static final Duration RATE_EVIDENCE_SETTLEMENT_TIMEOUT = Duration.ofSeconds(1);
+    private static final Duration RATE_EVIDENCE_SETTLEMENT_POLL = Duration.ofMillis(20);
     private static final double SLOW_PROJECTION_TIMEOUT_FRACTION = 0.50d;
     private static final double PRACTICAL_REFERENCE_TURN_WARNING_SECONDS = 60.0d;
     private static final int RATE_SAMPLE_CONTEXT_REPETITIONS = 96;
@@ -193,7 +195,10 @@ public final class ServerProbe implements DoctorProbe {
             RateSampleOutcome sampleOutcome = RateSampleOutcome.NOT_ATTEMPTED;
             if (!rates.measured() && timingEvidenceSource.canImproveAfterSample(ctx, preflight)) {
                 sampleOutcome = runBoundedRateSample(chatEngine, runtime);
-                rates = assessRates(ctx, preflight);
+                rates = sampleOutcome == RateSampleOutcome.COMPLETED
+                        || sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED
+                        ? awaitRatesAfterSample(ctx, preflight)
+                        : assessRates(ctx, preflight);
             }
             if (sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED) {
                 return withIdentity(ProbeResult.warn(id(),
@@ -342,6 +347,21 @@ public final class ServerProbe implements DoctorProbe {
                 + "s practical edit work threshold"
                 : "");
         return new RateAssessment(true, warn, summary);
+    }
+
+    private RateAssessment awaitRatesAfterSample(DoctorContext ctx, LlamaCppPreflight.Report preflight) {
+        RateAssessment rates = assessRates(ctx, preflight);
+        long deadline = System.nanoTime() + RATE_EVIDENCE_SETTLEMENT_TIMEOUT.toNanos();
+        while (!rates.measured() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(RATE_EVIDENCE_SETTLEMENT_POLL.toMillis());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return rates;
+            }
+            rates = assessRates(ctx, preflight);
+        }
+        return rates;
     }
 
     private static Optional<LlamaCppLogEvidence.Timing> latestTiming(LlamaCppLogEvidence evidence,
