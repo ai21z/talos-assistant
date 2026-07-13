@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1116] Explicit requests to append one named Markdown section with one exact
+  sentence now receive deterministic post-apply verification. Talos requires a
+  unique final section, the exact sentence, and structured mutation evidence
+  that preserves the prior file before it can claim verified completion.
 - [T1114] File lookup answers that report no matching lines or no relevant
   key and value pair are now bounded to current-turn source evidence. A model
   can no longer contradict successful grep metadata or turn an unrelated

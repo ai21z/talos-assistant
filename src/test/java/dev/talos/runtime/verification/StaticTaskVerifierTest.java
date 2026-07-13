@@ -401,6 +401,232 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void appendSectionFieldWordingPassesWithExactPostStateAndPreservationEvidence() throws Exception {
+        String before = "# Atlas Notes\n\nA small local project for qualification tests.\n\n"
+                + "## Setup\n\nRun the local checks before committing.\n";
+        String after = before + "\n### Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append section verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("README.md: requested appended section matched")),
+                result.facts().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenHeadingIsMissing() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before + "\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: requested Markdown section heading was not found")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenExactSentenceIsMissing() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before + "\n## Contributing\nRun checks before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: requested section sentence was not found")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenPriorContentWasRewritten() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = "# Changed Notes\n\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: append-section mutation did not preserve prior content")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingPassesWithExactEditEvidence() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before + "\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "Existing text.\n",
+                        "Existing text.\n\n## Contributing\nRun tests before review.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenExactEditChangesItsAnchor() throws Exception {
+        String after = "# Atlas Notes\n\nChanged text.\n\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "Existing text.\n",
+                        "Changed text.\n\n## Contributing\nRun tests before review.\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("append-section mutation did not preserve prior content")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWithoutStructuredMutationEvidence() throws Exception {
+        Files.writeString(workspace.resolve("README.md"),
+                "# Atlas Notes\n\n## Contributing\nRun tests before review.\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("cannot prove append-section preservation")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsWhenRequestedSectionIsNotLast() throws Exception {
+        String before = "# Atlas Notes\n\nExisting text.\n";
+        String after = before
+                + "\n## Contributing\nRun tests before review.\n"
+                + "\n## Later section\nLater content.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("was not appended as the final document section")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionFieldWordingFailsForDuplicateRequestedHeadings() throws Exception {
+        String before = "# Atlas Notes\n\n## Contributing\nOld guidance.\n";
+        String after = before + "\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md", before, after, VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("heading was not unique")),
+                result.problems().toString());
+    }
+
+    @Test
+    void appendSectionExpectationTraceEventIsRedacted() throws Exception {
+        String before = "# Atlas Notes\n";
+        String after = before + "\n## Contributing\nRun tests before review.\n";
+        Files.writeString(workspace.resolve("README.md"), after);
+        String request = "Append a Contributing section to README.md with one sentence saying "
+                + "Run tests before review. Preserve all current text.";
+        LocalTurnTraceCapture.begin(
+                "trc-test-append-section",
+                "session-test",
+                1,
+                "2026-07-13T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "llama_cpp",
+                "granite-4.1-3b",
+                request);
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    request,
+                    loopResult(List.of(successfulFullWrite(
+                            "README.md", before, after, VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("APPEND_SECTION", event.data().get("kind"));
+            assertEquals("PASSED", event.data().get("status"));
+            assertFalse(event.data().containsValue("Contributing"),
+                    "default trace must not store the raw section heading");
+            assertFalse(event.data().containsValue("Run tests before review."),
+                    "default trace must not store the raw requested sentence");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void appendLineExpectationFailsWhenFullWriteEvidenceRewritesPriorContent() throws Exception {
         Files.writeString(workspace.resolve("README.md"), """
                 Different intro

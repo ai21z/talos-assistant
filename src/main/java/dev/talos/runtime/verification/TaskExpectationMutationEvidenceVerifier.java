@@ -133,6 +133,58 @@ final class TaskExpectationMutationEvidenceVerifier {
         return true;
     }
 
+    static boolean verifyAppendSectionMutationEvidence(
+            String pathHint,
+            String sectionName,
+            String expectedSentence,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (successfulMutations == null || successfulMutations.isEmpty()) {
+            problems.add(pathHint + ": append-section verification had no mutation evidence.");
+            return false;
+        }
+        boolean sawRelevantMutation = false;
+        for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
+            if (outcome == null || !outcome.success()
+                    || !normalizePath(outcome.pathHint()).equals(pathHint)) {
+                continue;
+            }
+            sawRelevantMutation = true;
+            String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
+            ToolMutationEvidence evidence = outcome.mutationEvidence();
+            if ("write_file".equals(canonicalTool)) {
+                if (evidence == null || !evidence.fullWriteReplacement()) {
+                    problems.add(pathHint + ": talos.write_file cannot prove append-section preservation "
+                            + "without complete same-turn read evidence.");
+                    return false;
+                }
+            } else if ("edit_file".equals(canonicalTool)) {
+                if (evidence == null || !evidence.exactEditReplacement()) {
+                    problems.add(pathHint + ": talos.edit_file cannot prove append-section preservation "
+                            + "without exact edit evidence.");
+                    return false;
+                }
+            } else {
+                problems.add(pathHint + ": mutation tool cannot prove append-section preservation.");
+                return false;
+            }
+            if (!appendsOnlyRequestedSection(
+                    evidence.oldString(), evidence.newString(), sectionName, expectedSentence)) {
+                problems.add(pathHint + ": append-section mutation did not preserve prior content "
+                        + "before the requested section.");
+                return false;
+            }
+        }
+        if (!sawRelevantMutation) {
+            problems.add(pathHint + ": append-section verification had no matching mutation evidence.");
+            return false;
+        }
+        facts.add(pathHint + ": append-section mutation evidence preserved prior content.");
+        return true;
+    }
+
     private static boolean replacementOnlyChangesRequestedText(
             String previousContent,
             String newContent,
@@ -175,6 +227,30 @@ final class TaskExpectationMutationEvidenceVerifier {
                 || suffix.equals(expectedNormalized + "\n")
                 || suffix.equals("\n" + expectedNormalized)
                 || suffix.equals("\n" + expectedNormalized + "\n");
+    }
+
+    private static boolean appendsOnlyRequestedSection(
+            String oldString,
+            String newString,
+            String sectionName,
+            String expectedSentence
+    ) {
+        if (oldString == null || newString == null
+                || sectionName == null || sectionName.isBlank()
+                || expectedSentence == null || expectedSentence.isBlank()) {
+            return false;
+        }
+        String oldNormalized = normalizeLineEndings(oldString);
+        String newNormalized = normalizeLineEndings(newString);
+        if (!newNormalized.startsWith(oldNormalized)) return false;
+        String suffix = newNormalized.substring(oldNormalized.length());
+        List<String> nonBlank = suffix.lines()
+                .map(String::strip)
+                .filter(line -> !line.isBlank())
+                .toList();
+        return nonBlank.size() == 2
+                && MarkdownHeadingParser.headingText(nonBlank.get(0)).equals(sectionName)
+                && nonBlank.get(1).equals(expectedSentence);
     }
 
     private static String normalizeLineEndings(String value) {

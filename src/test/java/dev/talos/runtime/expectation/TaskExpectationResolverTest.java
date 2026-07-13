@@ -194,6 +194,55 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsExplicitAppendSectionExpectationFromQualificationFieldWording() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review. Preserve all current text.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        TaskExpectation expectation = expectations.getFirst();
+        assertEquals("APPEND_SECTION", expectation.kind());
+        assertEquals("README.md", expectation.targetPath());
+        assertEquals("append-section-exact-sentence", expectation.sourcePattern());
+        AppendSectionExpectation section = (AppendSectionExpectation) expectation;
+        assertEquals("Contributing", section.sectionName());
+        assertEquals("Run tests before review.", section.expectedSentence());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsQuotedAppendSectionSentenceWithoutStoringQuoteDelimiters() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Please append a Contributing section to `README.md` with exactly one sentence saying "
+                        + "\"Run tests before review.\" Preserve all current text.");
+
+        AppendSectionExpectation expectation = (AppendSectionExpectation)
+                TaskExpectationResolver.resolve(contract).getFirst();
+
+        assertEquals("Contributing", expectation.sectionName());
+        assertEquals("Run tests before review.", expectation.expectedSentence());
+    }
+
+    @Test
+    void ignoresAppendSectionWordingWithoutAnExactSentence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append a useful Contributing section to README.md and preserve all current text.");
+
+        assertTrue(TaskExpectationResolver.resolve(contract).isEmpty());
+    }
+
+    @Test
+    void ignoresInstructionalAppendSectionQuestion() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "How do I append a Contributing section to README.md with one sentence saying "
+                        + "Run tests before review?");
+
+        assertTrue(TaskExpectationResolver.resolve(contract).isEmpty());
+    }
+
+    @Test
     void extractsReplacementExpectationForScopedPrefixForm() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "In notes.md, replace beta with BETA. Do not change anything else.");

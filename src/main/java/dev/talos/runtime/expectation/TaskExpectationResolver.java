@@ -125,6 +125,10 @@ public final class TaskExpectationResolver {
         if (appendLine != null) {
             expectations.add(appendLine);
         }
+        AppendSectionExpectation appendSection = appendSectionExpectation(request, normalizedTarget);
+        if (appendSection != null) {
+            expectations.add(appendSection);
+        }
         int bulletCount = exactBulletCount(request);
         if (bulletCount > 0) {
             expectations.add(new BulletListExpectation(
@@ -353,6 +357,59 @@ public final class TaskExpectationResolver {
         String line = normalizeAppendLine(matcher.group(1));
         if (line.isBlank()) return null;
         return new AppendLineExpectation(normalizedTarget, line, "append-line-exact");
+    }
+
+    private static AppendSectionExpectation appendSectionExpectation(
+            String request,
+            String normalizedTarget
+    ) {
+        if (request == null || request.isBlank()
+                || normalizedTarget == null || normalizedTarget.isBlank()) {
+            return null;
+        }
+        String quotedTarget = Pattern.quote(normalizedTarget);
+        Pattern pattern = Pattern.compile(
+                "(?is)^\\s*(?:please\\s+)?append\\s+(?:a|an|the)\\s+"
+                        + "([A-Za-z][A-Za-z0-9 _-]{0,79}?)\\s+section\\s+to\\s+`?"
+                        + quotedTarget
+                        + "`?\\s+with\\s+(?:exactly\\s+)?(?:one\\s+)?sentence\\s+"
+                        + "(?:saying|that\\s+says)\\s+(.+?)"
+                        + "\\s+preserve\\s+all\\s+current\\s+text\\s*[.!?]?\\s*$");
+        Matcher matcher = pattern.matcher(request);
+        if (!matcher.matches()) return null;
+
+        String sectionName = normalizeSectionName(matcher.group(1));
+        String sentence = normalizeSectionSentence(matcher.group(2));
+        if (sectionName.isBlank() || sentence.isBlank()) return null;
+        return new AppendSectionExpectation(
+                normalizedTarget,
+                sectionName,
+                sentence,
+                "append-section-exact-sentence");
+    }
+
+    private static String normalizeSectionName(String raw) {
+        String name = raw == null ? "" : raw.strip().replaceAll("\\s+", " ");
+        return name.length() <= 80 ? name : "";
+    }
+
+    private static String normalizeSectionSentence(String raw) {
+        String sentence = stripWrappingQuotes(raw == null ? "" : raw.strip()).strip();
+        if (sentence.isBlank() || sentence.length() > 500
+                || sentence.indexOf('\n') >= 0 || sentence.indexOf('\r') >= 0) {
+            return "";
+        }
+        int terminators = 0;
+        for (int i = 0; i < sentence.length(); i++) {
+            char value = sentence.charAt(i);
+            if (value == '.' || value == '!' || value == '?') terminators++;
+        }
+        if (terminators > 1) return "";
+        if (terminators == 1) {
+            char last = sentence.charAt(sentence.length() - 1);
+            if (last != '.' && last != '!' && last != '?') return "";
+        }
+        return sentence;
     }
 
     private static ReplacementExpectation replacementExpectation(String request, String normalizedTarget) {

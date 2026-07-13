@@ -2,6 +2,7 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.expectation.AppendLineExpectation;
+import dev.talos.runtime.expectation.AppendSectionExpectation;
 import dev.talos.runtime.expectation.BulletListExpectation;
 import dev.talos.runtime.expectation.ExpectationVerificationStatus;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
@@ -35,6 +36,7 @@ final class TaskExpectationStaticVerifier {
         boolean verifiedAny = false;
         boolean replacementRequired = false;
         boolean appendLineRequired = false;
+        boolean appendSectionRequired = false;
         boolean bulletCountRequired = false;
         Set<String> verifiedTargets = new LinkedHashSet<>();
 
@@ -65,6 +67,17 @@ final class TaskExpectationStaticVerifier {
                         facts,
                         problems,
                         recordExpectationTrace);
+            } else if (expectation instanceof AppendSectionExpectation appendSection) {
+                verifiedAny = true;
+                appendSectionRequired = true;
+                addExpectationTarget(verifiedTargets, appendSection);
+                verifyAppendSectionExpectation(
+                        root,
+                        appendSection,
+                        successfulMutations,
+                        facts,
+                        problems,
+                        recordExpectationTrace);
             } else if (expectation instanceof BulletListExpectation bullets) {
                 verifiedAny = true;
                 bulletCountRequired = true;
@@ -77,6 +90,7 @@ final class TaskExpectationStaticVerifier {
                 verifiedAny,
                 replacementRequired,
                 appendLineRequired,
+                appendSectionRequired,
                 bulletCountRequired,
                 coversAllSuccessfulMutations(verifiedTargets, successfulMutations),
                 facts,
@@ -272,6 +286,103 @@ final class TaskExpectationStaticVerifier {
         }
     }
 
+    private static void verifyAppendSectionExpectation(
+            Path root,
+            AppendSectionExpectation expectation,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems,
+            boolean recordExpectationTrace
+    ) {
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                expectation.targetPath(),
+                "append section verification could not resolve target path.",
+                "append section verification target is not a readable file.",
+                "append section verification could not read target");
+        String pathHint = target.pathHint();
+        if (target.hasProblem()) {
+            problems.add(target.problem());
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendSectionExpectation(
+                    expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+
+        AppendSectionObservation observation = observeAppendedSection(
+                target.content(), expectation.sectionName(), expectation.expectedSentence());
+        boolean evidencePassed = TaskExpectationMutationEvidenceVerifier.verifyAppendSectionMutationEvidence(
+                pathHint,
+                expectation.sectionName(),
+                expectation.expectedSentence(),
+                successfulMutations,
+                facts,
+                problems);
+        boolean matched = observation.matched() && evidencePassed;
+        if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendSectionExpectation(
+                expectation,
+                matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
+                observation.observedBlock());
+        if (!observation.headingFound()) {
+            problems.add(pathHint + ": requested Markdown section heading was not found.");
+        } else if (!observation.uniqueHeading()) {
+            problems.add(pathHint + ": requested Markdown section heading was not unique.");
+        } else if (!observation.sentenceFound()) {
+            problems.add(pathHint + ": requested section sentence was not found under its heading.");
+        } else if (!observation.exactOneSentenceSection()) {
+            problems.add(pathHint + ": requested section did not contain exactly the requested sentence.");
+        } else if (!observation.finalSection()) {
+            problems.add(pathHint + ": requested section was not appended as the final document section.");
+        } else if (evidencePassed) {
+            facts.add(pathHint + ": requested appended section matched heading and sentence.");
+        }
+    }
+
+    private static AppendSectionObservation observeAppendedSection(
+            String content,
+            String sectionName,
+            String expectedSentence
+    ) {
+        String normalized = content == null ? "" : content.replace("\r\n", "\n").replace('\r', '\n');
+        String[] lines = normalized.split("\n", -1);
+        int headingIndex = -1;
+        int headingCount = 0;
+        for (int i = 0; i < lines.length; i++) {
+            if (MarkdownHeadingParser.headingText(lines[i]).equals(sectionName)) {
+                headingIndex = i;
+                headingCount++;
+            }
+        }
+        if (headingCount == 0) {
+            return new AppendSectionObservation(false, false, false, false, false, "");
+        }
+        if (headingCount != 1) {
+            return new AppendSectionObservation(true, false, false, false, false, "");
+        }
+
+        List<String> sectionLines = new ArrayList<>();
+        int lastSectionContentIndex = -1;
+        for (int i = headingIndex + 1; i < lines.length; i++) {
+            String line = lines[i].strip();
+            if (!MarkdownHeadingParser.headingText(line).isBlank()) break;
+            if (!line.isBlank()) {
+                sectionLines.add(line);
+                lastSectionContentIndex = i;
+            }
+        }
+        int lastDocumentContentIndex = -1;
+        for (int i = lines.length - 1; i >= 0; i--) {
+            if (!lines[i].isBlank()) {
+                lastDocumentContentIndex = i;
+                break;
+            }
+        }
+        boolean sentenceFound = sectionLines.stream().anyMatch(expectedSentence::equals);
+        boolean exact = sectionLines.size() == 1 && sentenceFound;
+        boolean finalSection = lastSectionContentIndex == lastDocumentContentIndex;
+        String observed = sectionName + "\n" + String.join("\n", sectionLines);
+        return new AppendSectionObservation(true, true, sentenceFound, exact, finalSection, observed);
+    }
+
     private static List<String> logicalLines(String content) {
         if (content == null || content.isEmpty()) return List.of();
         List<String> lines = new ArrayList<>(List.of(content.split("\\R", -1)));
@@ -356,6 +467,7 @@ final class TaskExpectationStaticVerifier {
             boolean verifiedAny,
             boolean replacementRequired,
             boolean appendLineRequired,
+            boolean appendSectionRequired,
             boolean bulletCountRequired,
             boolean coversAllSuccessfulMutations,
             List<String> facts,
@@ -367,7 +479,20 @@ final class TaskExpectationStaticVerifier {
         }
 
         static Result empty() {
-            return new Result(false, false, false, false, false, List.of(), List.of());
+            return new Result(false, false, false, false, false, false, List.of(), List.of());
+        }
+    }
+
+    private record AppendSectionObservation(
+            boolean headingFound,
+            boolean uniqueHeading,
+            boolean sentenceFound,
+            boolean exactOneSentenceSection,
+            boolean finalSection,
+            String observedBlock
+    ) {
+        boolean matched() {
+            return headingFound && uniqueHeading && sentenceFound && exactOneSentenceSection && finalSection;
         }
     }
 }

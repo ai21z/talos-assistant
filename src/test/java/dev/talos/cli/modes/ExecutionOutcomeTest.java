@@ -10,6 +10,7 @@ import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.ProofKind;
 import dev.talos.runtime.verification.TaskVerificationStatus;
@@ -2745,6 +2746,48 @@ class ExecutionOutcomeTest {
             assertFalse(outcome.finalAnswer().contains("Task incomplete"), outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("File write/readback passed"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void explicitAppendSectionWithPreservationEvidenceCompletesVerified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-append-section-");
+        try {
+            String before = "# Atlas Notes\n\nExisting text.\n";
+            String after = before + "\n## Contributing\nRun tests before review.\n";
+            Files.writeString(ws.resolve("README.md"), after);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Append a Contributing section to README.md with one sentence saying "
+                            + "Run tests before review. Preserve all current text."));
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated README.md.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "README.md", true, true, false,
+                            "wrote README.md", "", dev.talos.tools.VerificationStatus.PASS, "",
+                            null,
+                            ToolMutationEvidence.fullWriteReplacement(before, after))));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.finalAnswer().contains("Append section verification passed"),
+                    outcome.finalAnswer());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {

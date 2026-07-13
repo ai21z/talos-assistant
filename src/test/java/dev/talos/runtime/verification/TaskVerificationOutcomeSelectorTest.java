@@ -153,6 +153,7 @@ class TaskVerificationOutcomeSelectorTest {
                 verifiedAny,
                 replacementRequired,
                 appendLineRequired,
+                false,
                 bulletCountRequired,
                 coversAllSuccessfulMutations,
                 List.of(),
