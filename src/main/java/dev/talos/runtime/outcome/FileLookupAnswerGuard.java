@@ -26,8 +26,12 @@ public final class FileLookupAnswerGuard {
                     + "file-backed|files?|information|value|key|port|setting|endpoint|dependency|"
                     + "version|script|fact)\\b.{0,100}\\b(?:was|were|is|are)\\s+"
                     + "(?:not found|not located|absent)\\b"),
-            Pattern.compile("(?is)\\b(?:no|zero)\\s+(?:matches?|matching files?|relevant files?|"
-                    + "results?|sources?|files?)\\b"),
+            Pattern.compile("(?is)\\b(?:no|zero)\\s+(?:matches?|matching files?|matching lines?|"
+                    + "relevant files?|results?|sources?|files?)\\b"),
+            Pattern.compile("(?is)(?<![\"'])\\bno\\s+(?:relevant\\s+)?"
+                    + "(?:key(?:[\\s\\p{Pd}_/]*value)?\\s+pairs?|values?|facts?|"
+                    + "information|entries?)\\b.{0,120}\\b"
+                    + "(?:(?:was|were|could\\s+be)\\s+)?found\\b"),
             Pattern.compile("(?is)\\b(?:nothing|none)\\s+(?:was\\s+)?found\\b"),
             Pattern.compile("(?is)\\b(?:files?|sources?|workspace)\\b.{0,100}"
                     + "\\b(?:does|do|did)\\s+not\\s+contain\\b"));

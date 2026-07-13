@@ -273,7 +273,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void unnamedFileLookupBoundsNegativeAnswerToActuallyReadSources() {
+    void unnamedFileLookupBoundsFieldObservedGrepContradictionToActualSources() {
         LocalTurnTraceCapture.begin(
                 "trc-file-lookup-bounded",
                 "sid-file-lookup-bounded",
@@ -297,7 +297,9 @@ class ExecutionOutcomeTest {
                 List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve"),
                 List.of());
         var loopResult = new ToolCallLoop.LoopResult(
-                "The service port information was not found in the provided files.",
+                "The grep search for port in JavaScript files returned no matching lines, "
+                        + "indicating that the service port is not defined in any of those files. "
+                        + "No relevant key\u2011value pair for the port was found.",
                 4, 4,
                 List.of("talos.grep", "talos.list_dir", "talos.read_file"),
                 List.of(),
@@ -330,7 +332,8 @@ class ExecutionOutcomeTest {
                 outcome.finalAnswer());
         assertTrue(outcome.finalAnswer().contains("src/App.java"), outcome.finalAnswer());
         assertTrue(outcome.finalAnswer().contains("does not prove"), outcome.finalAnswer());
-        assertFalse(outcome.finalAnswer().contains("not found in the provided files"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("returned no matching lines"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("No relevant key\u2011value pair"), outcome.finalAnswer());
         assertTrue(trace.events().stream().anyMatch(event ->
                         "PROTOCOL_SANITIZED".equals(event.type())
                                 && dev.talos.runtime.outcome.FileLookupAnswerGuard.TRACE_REASON.equals(

@@ -57,6 +57,19 @@ class FileLookupAnswerGuardTest {
     }
 
     @Test
+    void positiveSourceBackedAnswerMayQuoteNegativePhraseAsAFieldValue() {
+        String answer = "config.json contains \"message\": \"No relevant key-value pair was found\" "
+                + "and \"port\": 8080.";
+
+        assertEquals(
+                answer,
+                FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                        answer,
+                        lookupPlan(),
+                        loopWith(readOutcome("config.json", List.of("config.json")))));
+    }
+
+    @Test
     void firstPersonBroadNegativeClaimIsReplaced() {
         String answer = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
                 "I couldn't locate the service port in the workspace.",
@@ -64,6 +77,36 @@ class FileLookupAnswerGuardTest {
                 loopWith(readOutcome("src/App.java", List.of("src/App.java"))));
 
         assertTrue(answer.startsWith(FileLookupAnswerGuard.PREFIX), answer);
+    }
+
+    @Test
+    void successfulGrepMatchesCannotBeReportedAsNoMatchingLines() {
+        String fieldAnswer = "The grep search for port in JavaScript files returned no matching lines, "
+                + "indicating that the service port is not defined in any of those files. "
+                + "No relevant key\u2011value pair for the port was found.";
+
+        String answer = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                fieldAnswer,
+                lookupPlan(),
+                loopWith(grepOutcome(List.of("script.js", "scripts.js"))));
+
+        assertTrue(answer.startsWith(FileLookupAnswerGuard.PREFIX), answer);
+        assertTrue(answer.contains("script.js"), answer);
+        assertTrue(answer.contains("scripts.js"), answer);
+        assertTrue(answer.contains("does not prove"), answer);
+        assertFalse(answer.contains("returned no matching lines"), answer);
+        assertFalse(answer.contains("No relevant key\u2011value pair"), answer);
+    }
+
+    @Test
+    void unsupportedNoRelevantKeyValuePairClaimIsBounded() {
+        String answer = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                "No relevant key-value pair for the requested setting was found.",
+                lookupPlan(),
+                loopWith(grepOutcome(List.of())));
+
+        assertTrue(answer.startsWith(FileLookupAnswerGuard.PREFIX), answer);
+        assertTrue(answer.contains("did not establish"), answer);
     }
 
     @Test
@@ -99,6 +142,13 @@ class FileLookupAnswerGuardTest {
         return new ToolCallLoop.ToolOutcome(
                 "talos.read_file", path, true, false, false,
                 "read source", "", null, "", null,
+                ToolMutationEvidence.none(), ToolFailureReason.NONE, sourcePaths);
+    }
+
+    private static ToolCallLoop.ToolOutcome grepOutcome(List<String> sourcePaths) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.grep", ".", true, false, false,
+                sourcePaths.isEmpty() ? "No matches found." : "Found 2 match(es).", "", null, "", null,
                 ToolMutationEvidence.none(), ToolFailureReason.NONE, sourcePaths);
     }
 }
