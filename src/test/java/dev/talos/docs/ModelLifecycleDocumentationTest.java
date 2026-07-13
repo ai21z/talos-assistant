@@ -106,6 +106,21 @@ class ModelLifecycleDocumentationTest {
     }
 
     @Test
+    void runbookPinsQualificationHarnessFreezeAndResourceEvidenceRules() throws Exception {
+        String runbook = read("work-cycle-docs/runbooks/model-qualification.md");
+
+        assertContains(runbook, "derive the scenario-bank hash from the declared protocol resources");
+        assertContains(runbook, "compile the qualification harness before hashing its classes");
+        assertContains(runbook, "admission and full scenario banks for the declared protocol");
+        assertContains(runbook, "basic, context, privacy, and web fixtures");
+        assertContains(runbook, "UTC or an explicit numeric offset");
+        assertContains(runbook, "Reject timestamps without a time zone");
+        assertContains(runbook, "Windows pagefile usage is system-wide evidence");
+        assertContains(runbook, "Do not attribute a small host pagefile change to Talos");
+        assertContains(runbook, "4 GiB measured system-memory headroom");
+    }
+
+    @Test
     void publicDocsDoNotLeakTicketIdsFromTheModelProgram() throws Exception {
         Pattern ticket = Pattern.compile("\\bT\\d{3,}\\b");
         for (String file : List.of(

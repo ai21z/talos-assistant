@@ -91,6 +91,16 @@ Run focused qualification tests when harness code changed. Run the full check be
 
 The hash emitted by `modelQualificationBankHash` must equal the value frozen in the campaign.
 
+Freeze the harness from current inputs, not copied values from an older packet:
+
+1. derive the scenario-bank hash from the declared protocol resources
+2. compile the qualification harness before hashing its classes
+3. include the admission and full scenario banks for the declared protocol in the harness manifest
+4. include the basic, context, privacy, and web fixtures used by that protocol
+5. hash the compiled harness, build files, banks, and fixtures only after compilation succeeds
+
+Stop if the generator, bank-hash task, frozen manifest, or campaign disagree. Recompiling after the manifest is written invalidates that packet.
+
 ## Gate 4, run admission
 
 Admission contains 12 admission trials, one fresh trial per declared scenario.
@@ -131,6 +141,10 @@ Run physical hardware packets only for a candidate with a selectable model-quali
 Use a new machine and configuration identity for every OS and backend. Measure cold and warm load, first token, rates, process and system memory, pagefile or swap, page faults where available, VRAM, offload, context fit, and stability.
 
 Do not assign Low, Medium, or High from reference-host qualification.
+
+Store timing evidence in UTC or an explicit numeric offset. Reject timestamps without a time zone. Compute durations only from timestamps that use the same declared clock basis.
+
+Windows pagefile usage is system-wide evidence. Do not attribute a small host pagefile change to Talos. Apply the frozen campaign pagefile budget, keep at least 4 GiB measured system-memory headroom, and interpret pagefile changes together with process memory, available system memory, model logs, and trial timing. A host-level delta by itself does not prove that Talos caused paging.
 
 ## Stop the campaign
 
