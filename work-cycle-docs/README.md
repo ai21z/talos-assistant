@@ -11,4 +11,9 @@ Use:
 - [Release Candidate Runbook](runbooks/release-candidate.md)
 - [Live Audit Runbook](runbooks/live-audit.md)
 - [Installed Product Smoke](runbooks/installed-product-smoke.md)
+- [Model Qualification Runbook](runbooks/model-qualification.md)
 
+Templates:
+
+- [Model Calibration Guide](templates/model-calibration-guide.md)
+- [Model Scorecard](templates/model-scorecard.md)

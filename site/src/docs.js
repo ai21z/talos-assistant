@@ -140,6 +140,7 @@ function renderLandingHtml() {
       items: [
         ["Overview", "architecture/overview", "The main execution spine."],
         ["Execution model", "architecture/execution-model", "Contract, posture, tools, approval, verification."],
+        ["Model profile lifecycle", "architecture/model-profile-lifecycle", "How evidence, profile status, and hardware support stay separate."],
         ["Trust boundaries", "architecture/trust-boundaries", "Local safety and evidence boundaries."],
         ["Package map", "architecture/package-map", "High-level Java package ownership."],
       ],
@@ -148,6 +149,7 @@ function renderLandingHtml() {
       group: "Development",
       items: [
         ["Developer setup", "development/developer-setup", "Local tools for source contributors."],
+        ["Onboard new models", "development/onboard-new-models", "Freeze, test, qualify, and review a local model profile."],
         ["Build and test", "development/build-and-test", "Local build and verification commands."],
         ["CI/CD", "development/ci-cd", "Current workflow and staging policy."],
         ["Quality reports", "development/quality-reports", "Local report outputs and review evidence."],

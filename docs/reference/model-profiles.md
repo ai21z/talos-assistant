@@ -10,6 +10,14 @@ Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. The acce
 - **experimental selectable** means Talos can configure the profile, but its evidence is narrower. It is not a beta default.
 - Custom GGUF files remain unverified unless they are added to the catalog through the qualification process.
 
+Passing admission is not a support claim. Admission only shows that the exact model and runtime completed the smaller compatibility gate.
+
+Model quality and hardware support are separate decisions. A selectable profile can have strong model evidence and still lack a claim for CPU-only use, Linux, Vulkan, or a smaller GPU. Hardware guidance is limited to measured lanes.
+
+Legacy evidence remains legacy until a current protocol packet replaces it. Existing legacy profiles keep their explicit evidence label rather than inheriting a newer model's qualification result.
+
+See [Model profile lifecycle](../architecture/model-profile-lifecycle.md) for how evidence becomes a catalog disposition. Maintainers evaluating a candidate use [Onboard new models](../development/onboard-new-models.md).
+
 ## Available profiles
 
 | Profile | Support level | Tool mode | Setup |
