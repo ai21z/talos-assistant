@@ -15,6 +15,9 @@ final class AppendStatementMatcher {
                 || !observed.startsWith(expectedLabel)) {
             return false;
         }
+        if (observed.equals(expectedLabel + " " + expectedStatement)) {
+            return true;
+        }
         String suffix = observed.substring(expectedLabel.length()).strip();
         for (String separator : new String[]{":", "-", "says", "saying"}) {
             if (!suffix.startsWith(separator)) continue;

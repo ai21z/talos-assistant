@@ -8,8 +8,9 @@
   blocked event, so qualification finalizers no longer see orphan duplicates.
 - [T1119] Explicit requests to append one labeled statement now receive
   deterministic post-apply verification. Talos requires one exact final line
-  under bounded punctuation and case normalization, plus structured mutation
-  evidence that preserves the prior file, before it claims verified completion.
+  under bounded separator, punctuation, and case normalization, plus structured
+  mutation evidence that preserves the prior file, before it claims verified
+  completion.
 - [T1117] The exact `doctor --start` model smoke now uses greedy sampling and
   a bounded 32-token response. A healthy local model no longer fails the
   binary readiness gate because the diagnostic inherited stochastic backend

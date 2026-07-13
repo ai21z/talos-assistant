@@ -488,12 +488,39 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void appendStatementAllowsExactWhitespaceBoundaryFromFieldReplay() throws Exception {
+        String before = "# Decisions\n\n"
+                + "Decision 001 keeps all storage local. Decision 002 requires explicit approval before "
+                + "destructive maintenance. Decision 003 records verification evidence after changes.\n";
+        String appended = "Decision 004 health checks remain read-only.";
+        String after = before + "\n" + appended + "\n";
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/decisions.md"), after);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append Decision 004 to docs/decisions.md saying health checks remain read-only. "
+                        + "Preserve Decisions 001 through 003 and change no code.",
+                loopResult(List.of(successfulExactEdit(
+                        "docs/decisions.md",
+                        "Decision 003 records verification evidence after changes.\n",
+                        "Decision 003 records verification evidence after changes.\n\n" + appended + "\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Append statement verification passed"), result.summary());
+    }
+
+    @Test
     void appendStatementFailsClosedForWrongOrUnboundedPostState() throws Exception {
         String before = "# Decisions\n\nDecision 001 remains.\n";
         List<String> invalidAfterStates = List.of(
                 before + "\nDecision 005: Health checks remain read-only.\n",
+                before + "\nDecision 004a health checks remain read-only.\n",
                 before + "\nDecision 004: Health checks may mutate files.\n",
                 before + "\nDecision 004: Health checks remain read-only for now.\n",
+                before + "\nDecision 004 health checks remain read-only for now.\n",
                 before + "\nDecision 004: Health checks remain read-only..\n",
                 before + "\nDecision 004, Health checks remain read-only.\n",
                 before + "\nDecision 004: Health checks remain read-only.\nExtra content.\n",
