@@ -51,8 +51,6 @@ public final class ServerProbe implements DoctorProbe {
     private static final int REFERENCE_GENERATED_TOKENS = 700;
     private static final int MIN_PROMPT_RATE_SAMPLE_TOKENS = 256;
     private static final int MIN_GENERATION_RATE_SAMPLE_TOKENS = 64;
-    private static final Duration RATE_EVIDENCE_SETTLEMENT_TIMEOUT = Duration.ofSeconds(1);
-    private static final Duration RATE_EVIDENCE_SETTLEMENT_POLL = Duration.ofMillis(20);
     private static final double SLOW_PROJECTION_TIMEOUT_FRACTION = 0.50d;
     private static final double PRACTICAL_REFERENCE_TURN_WARNING_SECONDS = 60.0d;
     private static final int RATE_SAMPLE_CONTEXT_REPETITIONS = 96;
@@ -195,14 +193,7 @@ public final class ServerProbe implements DoctorProbe {
             RateSampleOutcome sampleOutcome = RateSampleOutcome.NOT_ATTEMPTED;
             if (!rates.measured() && timingEvidenceSource.canImproveAfterSample(ctx, preflight)) {
                 sampleOutcome = runBoundedRateSample(chatEngine, runtime);
-                if (preflight.managed()) {
-                    // The redirected b9918 log may remain buffered until the owned process exits.
-                    registry.close();
-                }
-                rates = sampleOutcome == RateSampleOutcome.COMPLETED
-                        || sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED
-                        ? awaitRatesAfterSample(ctx, preflight)
-                        : assessRates(ctx, preflight);
+                rates = assessRates(ctx, preflight);
             }
             if (sampleOutcome == RateSampleOutcome.OUTPUT_CAPPED) {
                 return withIdentity(ProbeResult.warn(id(),
@@ -353,21 +344,6 @@ public final class ServerProbe implements DoctorProbe {
         return new RateAssessment(true, warn, summary);
     }
 
-    private RateAssessment awaitRatesAfterSample(DoctorContext ctx, LlamaCppPreflight.Report preflight) {
-        RateAssessment rates = assessRates(ctx, preflight);
-        long deadline = System.nanoTime() + RATE_EVIDENCE_SETTLEMENT_TIMEOUT.toNanos();
-        while (!rates.measured() && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(RATE_EVIDENCE_SETTLEMENT_POLL.toMillis());
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return rates;
-            }
-            rates = assessRates(ctx, preflight);
-        }
-        return rates;
-    }
-
     private static Optional<LlamaCppLogEvidence.Timing> latestTiming(LlamaCppLogEvidence evidence,
                                                                      String kind,
                                                                      int minimumTokens) {
@@ -382,8 +358,8 @@ public final class ServerProbe implements DoctorProbe {
         return Math.max(1L, CfgUtil.longAt(limits, "llm_timeout_ms", DEFAULT_LLM_TIMEOUT_MS));
     }
 
-    private static LlamaCppLogEvidence readManagedLogEvidence(DoctorContext ctx,
-                                                              LlamaCppPreflight.Report preflight) {
+    static LlamaCppLogEvidence readManagedLogEvidence(DoctorContext ctx,
+                                                       LlamaCppPreflight.Report preflight) {
         if (preflight == null || !preflight.managed()) {
             return LlamaCppLogEvidence.parse("");
         }
@@ -392,7 +368,7 @@ public final class ServerProbe implements DoctorProbe {
             return LlamaCppLogEvidence.parse("");
         }
         try {
-            return LlamaCppLogEvidence.parse(Files.readString(logPath, StandardCharsets.UTF_8));
+            return LlamaCppLogEvidence.parse(new String(Files.readAllBytes(logPath), StandardCharsets.UTF_8));
         } catch (Exception ignored) {
             return LlamaCppLogEvidence.parse("");
         }

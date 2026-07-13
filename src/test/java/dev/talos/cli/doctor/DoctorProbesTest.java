@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DoctorProbesTest {
 
     @TempDir Path tempDir;
+
+    @Test
+    void managedTimingEvidenceSurvivesAnUnrelatedInvalidUtf8Byte() throws IOException {
+        Path talosHome = tempDir.resolve("talos-home");
+        Path log = talosHome.resolve("logs/llama_cpp-18163.log");
+        Files.createDirectories(log.getParent());
+        String timingLines = """
+                0.01 I slot print_timing: id 0 | task 11 | prompt eval time = 52.59 ms / 636 tokens (0.08 ms per token, 12092.40 tokens per second)
+                0.02 I slot print_timing: id 0 | task 11 | eval time = 345.25 ms / 87 tokens (3.97 ms per token, 251.99 tokens per second)
+                """;
+        byte[] ascii = timingLines.getBytes(StandardCharsets.US_ASCII);
+        byte[] mixedEncoding = Arrays.copyOf(ascii, ascii.length + 1);
+        mixedEncoding[mixedEncoding.length - 1] = (byte) 0x80;
+        Files.write(log, mixedEncoding);
+
+        LlamaCppLogEvidence evidence = ServerProbe.readManagedLogEvidence(
+                new DoctorContext(new Config(), tempDir, talosHome),
+                new dev.talos.engine.llamacpp.LlamaCppPreflight.Report(
+                        true, "", "http://127.0.0.1:18163", 18163));
+
+        assertEquals(2, evidence.timings().size(),
+                "one malformed diagnostic byte must not erase independent ASCII timing evidence");
+    }
 
     // ── config ───────────────────────────────────────────────────────────
 
@@ -499,53 +523,6 @@ class DoctorProbesTest {
             assertTrue(result.detail().contains("prompt eval 80.0 tok/s"), result.detail());
             assertTrue(chatCalls.get() >= 2, "doctor --start should run a second bounded sample when rates are absent");
             assertTrue(evidenceReads.get() >= 2, "doctor should re-read timing evidence after the bounded sample");
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void startModeWaitsForTimingEvidencePublishedAfterFinalStreamChunk() throws IOException {
-        AtomicInteger chatCalls = new AtomicInteger();
-        HttpServer server = startChatServer(MODEL_SMOKE_REPLY, Duration.ZERO, chatCalls);
-        AtomicInteger evidenceReads = new AtomicInteger();
-        LlamaCppLogEvidence rates = LlamaCppLogEvidence.parse("""
-                0.01.000.000 I slot print_timing: id  0 | task 11 | prompt eval time =     51.40 ms /   636 tokens (    0.08 ms per token, 12372.82 tokens per second)
-                0.02.000.000 I slot print_timing: id  0 | task 11 |        eval time =    681.48 ms /   176 tokens (    3.87 ms per token,   258.26 tokens per second)
-                """);
-        try {
-            Config cfg = llamaCppConfig(Map.of(
-                    "mode", "connect_only",
-                    "host", "http://127.0.0.1",
-                    "port", server.getAddress().getPort(),
-                    "model", "qwen2.5-coder-14b"));
-
-            ProbeResult result = new ServerProbe(
-                    true,
-                    Duration.ofSeconds(60),
-                    new ServerProbe.TimingEvidenceSource() {
-                        @Override
-                        public LlamaCppLogEvidence read(
-                                DoctorContext ctx,
-                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
-                            return evidenceReads.incrementAndGet() < 3
-                                    ? LlamaCppLogEvidence.parse("")
-                                    : rates;
-                        }
-
-                        @Override
-                        public boolean canImproveAfterSample(
-                                DoctorContext ctx,
-                                dev.talos.engine.llamacpp.LlamaCppPreflight.Report preflight) {
-                            return true;
-                        }
-                    }).run(ctx(cfg));
-
-            assertTrue(result.detail().contains("prompt eval 12372.8 tok/s"), result.detail());
-            assertTrue(result.detail().contains("generation 258.3 tok/s"), result.detail());
-            assertFalse(result.detail().contains("rate sample could not be measured"), result.detail());
-            assertEquals(2, chatCalls.get(), "settlement must not rerun the model sample");
-            assertTrue(evidenceReads.get() >= 3, "probe must re-read delayed timing evidence");
         } finally {
             server.stop(0);
         }
