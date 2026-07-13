@@ -3,10 +3,12 @@ package dev.talos.qualification;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -125,6 +127,49 @@ class QualificationEvidenceValidatorTest {
         assertFalse(result.valid());
         assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("unexpected")),
                 () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void calibrationPreflightAcceptsDistinctDirectPreflightLaunchArguments() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path rulesPath = packet.root().resolve("candidates/qwen14/calibration-rules.json");
+        ObjectNode rules = (ObjectNode) QualificationJson.readTree(rulesPath);
+        rules.putArray("directPreflightLaunchArguments")
+                .add("-m").add("model.gguf").add("--jinja").add("-lv").add("5");
+        QualificationJson.write(rulesPath, rules);
+        ObjectNode campaign = (ObjectNode) QualificationJson.readTree(packet.root().resolve("campaign.json"));
+        campaign.put("calibrationRulesSha256",
+                QualificationScenarioBank.sha256(Files.readAllBytes(rulesPath)));
+        QualificationJson.write(packet.root().resolve("campaign.json"), campaign);
+        removeRuns(packet);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validateCalibrationPreflight(packet.root(), catalog);
+
+        assertTrue(result.valid(), () -> String.join("\n", result.findings()));
+        assertTrue(result.calibrationRules().directPreflightLaunchArguments().contains("-lv"));
+    }
+
+    @Test
+    void calibrationPreflightKeepsHistoricalPacketsWithoutDirectLaunchReadable() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path rulesPath = packet.root().resolve("candidates/qwen14/calibration-rules.json");
+        ObjectNode rules = (ObjectNode) QualificationJson.readTree(rulesPath);
+        rules.remove("directPreflightLaunchArguments");
+        QualificationJson.write(rulesPath, rules);
+        ObjectNode campaign = (ObjectNode) QualificationJson.readTree(packet.root().resolve("campaign.json"));
+        campaign.put("calibrationRulesSha256",
+                QualificationScenarioBank.sha256(Files.readAllBytes(rulesPath)));
+        QualificationJson.write(packet.root().resolve("campaign.json"), campaign);
+        removeRuns(packet);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validateCalibrationPreflight(packet.root(), catalog);
+
+        assertTrue(result.valid(), () -> String.join("\n", result.findings()));
+        assertTrue(result.calibrationRules().directPreflightLaunchArguments().isEmpty());
     }
 
     @Test
@@ -837,6 +882,15 @@ class QualificationEvidenceValidatorTest {
             }
             QualificationJson.write(path, json);
         }
+    }
+
+    private static void removeRuns(QualificationTestPacket packet) throws IOException {
+        try (var paths = Files.walk(packet.root().resolve("runs"))) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(path);
+            }
+        }
+        Files.createDirectories(packet.root().resolve("runs"));
     }
 
     @Test

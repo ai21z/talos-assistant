@@ -200,9 +200,10 @@ final class QualificationTestPacket {
                 "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", "b".repeat(40), "model.gguf",
                 size(modelPath), modelSha256, "Apache-2.0", "official",
                 "qwen2-dense", 14_700_000_000L, 14_700_000_000L,
-                "a".repeat(40), protocolVersion, "b9918", executableSha256,
-                "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime"),
-                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "-lv", "4"), "native",
+                 "a".repeat(40), protocolVersion, "b9918", executableSha256,
+                 "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime"),
+                 List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "-lv", "4"),
+                 List.of(), "native",
                 "embedded-jinja", "standard-instruct", 16384,
                 new QualificationRecords.SamplingPolicy(
                         "Talos near-greedy controls", 0.2, 0.8, 20,

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1125] Model qualification calibration now records a distinct direct
+  preflight launch without weakening strict unknown-field checks. Historical
+  packets disclose an empty direct launch, and calibration-only validation runs
+  before the first immutable trial.
 - [T1124] Doctor now preserves valid ASCII timing evidence when a managed
   llama.cpp log also contains an unrelated non-UTF-8 diagnostic byte. Mixed
   encoding no longer turns a fast completed sample into an unmeasured warning,

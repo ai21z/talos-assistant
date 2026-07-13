@@ -178,6 +178,7 @@ final class QualificationRecords {
             String backend,
             List<String> launchArguments,
             List<String> verificationLaunchArguments,
+            List<String> directPreflightLaunchArguments,
             String toolMode,
             String chatTemplate,
             String reasoningBehavior,
@@ -197,6 +198,7 @@ final class QualificationRecords {
         CalibrationRules {
             launchArguments = immutable(launchArguments);
             verificationLaunchArguments = immutable(verificationLaunchArguments);
+            directPreflightLaunchArguments = immutable(directPreflightLaunchArguments);
             risks = immutable(risks);
             expectedFailureShapes = immutable(expectedFailureShapes);
             knownLimitations = immutable(knownLimitations);

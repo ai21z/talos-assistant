@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
@@ -108,9 +110,8 @@ final class QualificationEvidenceValidator {
         QualificationRecords.CandidateManifest candidate = candidateRoot == null ? null : read(
                 candidateRoot.resolve("candidate.json"), QualificationRecords.CandidateManifest.class,
                 findings, "candidate.json");
-        QualificationRecords.CalibrationRules calibration = candidateRoot == null ? null : read(
-                candidateRoot.resolve("calibration-rules.json"), QualificationRecords.CalibrationRules.class,
-                findings, "calibration-rules.json");
+        QualificationRecords.CalibrationRules calibration = candidateRoot == null ? null : readCalibration(
+                candidateRoot.resolve("calibration-rules.json"), findings);
         QualificationRecords.MachineFacts machine = machinePath == null ? null : read(
                 machinePath, QualificationRecords.MachineFacts.class, findings, "machine facts");
         QualificationRecords.EngineFacts engine = enginePath == null ? null : read(
@@ -1100,6 +1101,27 @@ final class QualificationEvidenceValidator {
             return QualificationJson.read(path, type);
         } catch (IOException | RuntimeException e) {
             findings.add("Invalid " + label + ": " + message(e));
+            return null;
+        }
+    }
+
+    private static QualificationRecords.CalibrationRules readCalibration(
+            Path path,
+            List<String> findings) {
+        if (path == null || !Files.isRegularFile(path)) {
+            findings.add("Missing calibration-rules.json: " + path);
+            return null;
+        }
+        try {
+            JsonNode tree = QualificationJson.readTree(path);
+            if (tree instanceof ObjectNode object && !object.has("directPreflightLaunchArguments")) {
+                object.putArray("directPreflightLaunchArguments");
+            }
+            return QualificationJson.read(
+                    QualificationJson.bytes(tree),
+                    QualificationRecords.CalibrationRules.class);
+        } catch (IOException | RuntimeException e) {
+            findings.add("Invalid calibration-rules.json: " + message(e));
             return null;
         }
     }
