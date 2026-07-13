@@ -41,6 +41,18 @@ class SetupCmdTest {
     }
 
     @Test
+    void profileOptionPointsToTheGeneratedCurrentListInsteadOfEmbeddingAliases() throws Exception {
+        CommandLine.Option option = SetupCmd.class
+                .getDeclaredField("profile")
+                .getAnnotation(CommandLine.Option.class);
+        String description = option.description()[0];
+
+        assertTrue(description.contains("Run talos setup models for the current list"), description);
+        assertFalse(description.contains("qwen2.5-coder-14b"), description);
+        assertFalse(description.contains("granite-4.1-3b"), description);
+    }
+
+    @Test
     void setupHelpPrintsUsageWithoutUnknownOptionError() {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         ByteArrayOutputStream stderr = new ByteArrayOutputStream();
@@ -77,6 +89,11 @@ class SetupCmdTest {
         assertTrue(help.contains("Qwen3-8B-Q4_K_M.gguf"), help);
         assertTrue(help.contains("experimental selectable"), help);
         assertTrue(help.contains("qwen3-8b-full-p5a15-3271f5f0-b9918-cuda13-20260712"), help);
+        assertTrue(help.contains("granite-4.1-3b"), help);
+        assertTrue(help.contains("granite-4.1-3b-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("granite-4.1-3b-full-p5-3b691d80-a10-b9918-cuda13-20260713"), help);
+        assertTrue(help.contains("16 of 24 scenario definitions and 47 of 72 trials"), help);
+        assertTrue(help.contains("win-x64-cuda-13.3:b9918"), help);
         assertTrue(help.contains("native/default"));
         assertTrue(help.contains("text/tool-prompt"));
         assertTrue(help.contains("docs/reference/model-profiles.md"), help);
@@ -285,6 +302,61 @@ class SetupCmdTest {
         assertEquals(2, exit);
         assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
         assertTrue(stderr.toString(StandardCharsets.UTF_8).contains("does not match the pinned qwen3-8b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void graniteExperimentalProfileUsesExactLocalArtifactAndStandardNativeRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("granite-4.1-3b-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "granite-4.1-3b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"granite-4.1-3b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args: []"), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context: 8192"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: granite-4.1-3b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void graniteSetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("granite-4.1-3b-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "granite-4.1-3b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
+                        "does not match the pinned granite-4.1-3b artifact"),
                 stderr.toString(StandardCharsets.UTF_8));
     }
 

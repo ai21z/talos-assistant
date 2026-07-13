@@ -21,6 +21,12 @@ class LlamaCppModelManifestTest {
         assertFalse(entries.stream().anyMatch(e -> e.alias().equals("qwen3-8b")),
                 "experimental profiles must not become wizard downloads");
         assertTrue(LlamaCppModelManifest.byAlias("qwen3-8b").isEmpty());
+        var granite = LlamaCppModelCatalog.byAlias("granite-4.1-3b").orElseThrow();
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE, granite.disposition());
+        assertFalse(granite.wizardDownload());
+        assertFalse(entries.stream().anyMatch(e -> e.alias().equals("granite-4.1-3b")),
+                "Granite experimental evidence must not become a wizard download");
+        assertTrue(LlamaCppModelManifest.byAlias("granite-4.1-3b").isEmpty());
 
         var qwen = LlamaCppModelManifest.byAlias("qwen2.5-coder-14b").orElseThrow();
         assertEquals("Qwen/Qwen2.5-Coder-14B-Instruct-GGUF", qwen.hfRepo());

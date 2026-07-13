@@ -2,7 +2,7 @@
 
 Talos model profiles pin a GGUF artifact, its runtime behavior, and the evidence used to classify it. A profile being selectable does not mean it is suitable for every machine. Run `talos doctor --start` after configuration to verify the selected model and engine on your hardware.
 
-Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. The accepted beta profiles are large local-model lanes. Qwen3.6-VibeForged and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles.
+Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. The accepted beta profiles are large local-model lanes. Qwen3-8B, Granite 4.1 3B, Qwen3.6-VibeForged, and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles.
 
 ## Support levels
 
@@ -25,6 +25,7 @@ See [Model profile lifecycle](../architecture/model-profile-lifecycle.md) for ho
 | `qwen2.5-coder-14b` | accepted beta stability | native/default | Wizard download or `talos setup models` |
 | `gpt-oss-20b` | accepted beta stability | native/default | Exact local GGUF path required by `talos setup models` |
 | `qwen3-8b` | experimental selectable | native/default, non-thinking | Exact local GGUF path required by `talos setup models` |
+| `granite-4.1-3b` | experimental selectable | native/default | Exact local GGUF path required by `talos setup models` |
 | `qwen36vf-q4km` | experimental selectable | native/default | `talos setup models` |
 | `qwen36vf-q6k` | experimental selectable | native/default | `talos setup models` |
 | `deepseek-v2lite-q4km` | experimental selectable | text/tool-prompt | `talos setup models` |
@@ -90,6 +91,28 @@ talos doctor --start
 Talos verifies the local file size and SHA-256 before writing this profile. The packet does not establish CPU-only, 8 GiB VRAM, Linux, or weak-PC support.
 
 The evidence value is an immutable local packet identifier. Raw qualification packets are retained as local review evidence and are not bundled in Talos release artifacts.
+
+### granite-4.1-3b
+
+Granite 4.1 3B is an experimental selectable profile. It is not an accepted beta profile or a weak-hardware claim. It is fast and memory-efficient on the tested reference lane, but it completed fewer complex and multi-file tasks than the larger current-protocol candidates.
+
+```powershell
+talos setup models --profile granite-4.1-3b --server-path C:/path/to/llama-server.exe --model-path D:/models/granite-4.1-3b-Q4_K_M.gguf --write
+talos doctor --start
+```
+
+- Repository: `ibm-granite/granite-4.1-3b-GGUF`
+- Revision: `ab4701481089b58a082ef63cc1cee738887293ff`
+- Artifact: `granite-4.1-3b-Q4_K_M.gguf`
+- SHA-256: `662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29`
+- License: Apache-2.0
+- Support level: experimental selectable
+- Runtime: native/default tool mode, 8,192-token context, no separate thinking mode
+- Qualified lane: pinned llama.cpp b9918, Windows x64 CUDA 13.3, 16 GiB-class VRAM and 32 GiB system RAM
+- Evidence: `local/model-qualification/granite-4.1-3b-full-p5-3b691d80-a10-b9918-cuda13-20260713`
+- Result: 16 of 24 scenario definitions and 47 of 72 trials passed, with zero Talos trust failures
+
+Talos verifies the local file size and SHA-256 before writing this profile. The packet does not establish CPU-only, Linux, WSL, Vulkan, or weak-PC support. Granite is not offered as a wizard download.
 
 ### qwen36vf-q4km
 

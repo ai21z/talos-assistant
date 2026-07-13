@@ -22,4 +22,17 @@ class ModelProfileCatalogDocumentationTest {
             assertTrue(docs.contains(profile.evidencePacket()), profile.alias());
         }
     }
+
+    @Test
+    void graniteReferencePinsExperimentalEvidenceAndUnsupportedLanes() throws Exception {
+        var granite = LlamaCppModelCatalog.byAlias("granite-4.1-3b").orElseThrow();
+        String docs = Files.readString(Path.of("docs/reference/model-profiles.md"));
+
+        assertTrue(docs.contains(granite.revision()), docs);
+        assertTrue(docs.contains(granite.artifactSha256()), docs);
+        assertTrue(docs.contains(granite.evidencePacket()), docs);
+        assertTrue(docs.contains("16 of 24 scenario definitions and 47 of 72 trials"), docs);
+        assertTrue(docs.contains("Exact local GGUF path required"), docs);
+        assertTrue(docs.contains("does not establish CPU-only, Linux, WSL, Vulkan, or weak-PC support"), docs);
+    }
 }

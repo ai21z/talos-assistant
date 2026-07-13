@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1121] Granite 4.1 3B is now an experimental selectable profile bound to
+  its exact official Q4_K_M artifact and immutable protocol-v5 scorecard.
+  Setup requires and verifies the local GGUF, while wizard downloads, accepted
+  beta wording, defaults, and untested hardware or platform claims remain
+  excluded.
 - [T1120] Rejected tool calls now have one owner for their audit summary and
   terminal trace event. Preapproval, directory-listing, and current-turn tool
   surface rejections preserve the real parsed call while emitting exactly one

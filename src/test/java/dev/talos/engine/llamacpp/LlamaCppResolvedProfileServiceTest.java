@@ -44,6 +44,34 @@ class LlamaCppResolvedProfileServiceTest {
     }
 
     @Test
+    void matchingGraniteFactsProjectTheDurableExperimentalProfile() {
+        var profile = LlamaCppModelCatalog.byAlias("granite-4.1-3b").orElseThrow();
+        Path graniteModel = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", graniteModel, serverPath(), true, List.of());
+        var service = service(
+                config,
+                exactArtifact(profile, graniteModel),
+                matchedEngine(profile),
+                availableProps(graniteModel, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.QUALIFIED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.NATIVE, snapshot.profile().effectiveToolMode());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE,
+                snapshot.profile().disposition());
+        assertEquals("granite-4.1-3b", snapshot.identity().configuredModel());
+        assertEquals("granite-4.1-3b", snapshot.identity().declaredProfile());
+        assertEquals("granite-4.1-3b", snapshot.identity().resolvedProfile());
+        assertEquals("granite-4.1-3b-Q4_K_M.gguf", snapshot.identity().observedModelFile());
+        assertEquals("experimental selectable", snapshot.identity().disposition());
+        assertEquals("NATIVE", snapshot.identity().effectiveToolMode());
+        assertTrue(snapshot.identity().qualified());
+        assertTrue(!snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+    }
+
+    @Test
     void qwen14Selected16kContextProjectsQualifiedIdentity() {
         var profile = LlamaCppModelCatalog.byAlias("qwen2.5-coder-14b").orElseThrow();
         Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
@@ -123,7 +151,7 @@ class LlamaCppResolvedProfileServiceTest {
     @Test
     void exactQualificationCandidateCanExposeNativeToolsWithoutCatalogPromotion() {
         LlamaCppConfig config = config(
-                "granite-4.1-3b", "managed", modelPath(), serverPath(), true, List.of());
+                "test-qualification-candidate", "managed", modelPath(), serverPath(), true, List.of());
         var candidate = qualificationCandidateProfile();
         var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
                 LlamaCppProfileResolver.ArtifactState.EXACT,
@@ -146,14 +174,14 @@ class LlamaCppResolvedProfileServiceTest {
         assertEquals(LlamaCppProfileResolver.ToolMode.NATIVE, snapshot.profile().effectiveToolMode());
         assertEquals(LlamaCppModelCatalog.Disposition.LAB_ONLY, snapshot.profile().disposition());
         assertTrue(snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
-        assertEquals("granite-4.1-3b", snapshot.identity().resolvedProfile());
-        assertTrue(LlamaCppModelCatalog.byAlias("granite-4.1-3b").isEmpty());
+        assertEquals("test-qualification-candidate", snapshot.identity().resolvedProfile());
+        assertTrue(LlamaCppModelCatalog.byAlias("test-qualification-candidate").isEmpty());
     }
 
     @Test
     void changedEngineAfterQualificationDeclarationLoadIsRefused() {
         LlamaCppConfig config = config(
-                "granite-4.1-3b", "managed", modelPath(), serverPath(), true, List.of());
+                "test-qualification-candidate", "managed", modelPath(), serverPath(), true, List.of());
         var candidate = qualificationCandidateProfile();
         var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
                 LlamaCppProfileResolver.ArtifactState.EXACT,
@@ -180,7 +208,7 @@ class LlamaCppResolvedProfileServiceTest {
     @Test
     void changedModelAfterQualificationDeclarationLoadIsRefused() {
         LlamaCppConfig config = config(
-                "granite-4.1-3b", "managed", modelPath(), serverPath(), true, List.of());
+                "test-qualification-candidate", "managed", modelPath(), serverPath(), true, List.of());
         var candidate = qualificationCandidateProfile();
         var changedArtifact = new LlamaCppProfileResolver.ArtifactIdentity(
                 LlamaCppProfileResolver.ArtifactState.SHA256_MISMATCH,
@@ -413,7 +441,7 @@ class LlamaCppResolvedProfileServiceTest {
 
     private LlamaCppModelCatalog.Profile qualificationCandidateProfile() {
         return new LlamaCppModelCatalog.Profile(
-                "granite-4.1-3b",
+                "test-qualification-candidate",
                 new LlamaCppModelCatalog.ModelArtifact(
                         "ibm-granite/granite-4.1-3b-GGUF", "a".repeat(40),
                         "granite-4.1-3b-Q4_K_M.gguf", "b".repeat(64), 123L, "Apache-2.0"),
@@ -428,5 +456,14 @@ class LlamaCppResolvedProfileServiceTest {
                         "not-scored", java.time.LocalDate.of(1970, 1, 1),
                         "Qualification candidate declaration, no support claim."),
                 "", "Qualification host only");
+    }
+
+    private LlamaCppProfileResolver.ArtifactIdentity exactArtifact(
+            LlamaCppModelCatalog.Profile profile,
+            Path model) {
+        return new LlamaCppProfileResolver.ArtifactIdentity(
+                LlamaCppProfileResolver.ArtifactState.EXACT,
+                model.toString(), profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                profile.artifactSha256(), profile.artifactSha256(), "verified-record");
     }
 }

@@ -90,6 +90,19 @@ class ModelsCommandTest {
     }
 
     @Test
+    void renderMarksGraniteAsExperimentalRatherThanAccepted() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("granite-4.1-3b")
+                .orElseThrow();
+
+        String text = ModelsCommand.renderInstalledModels(
+                List.of(ModelRef.of("llama_cpp", profile.alias())), List.of());
+
+        assertTrue(text.contains("llama_cpp/granite-4.1-3b  (catalog experimental selectable)"), text);
+        assertFalse(text.contains("accepted beta stability"), text);
+    }
+
+    @Test
     void activeModelUsesResolvedRuntimeIdentityRatherThanCatalogAlias() {
         ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
                 .backend("llama_cpp")

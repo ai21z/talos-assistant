@@ -44,7 +44,9 @@ public class SetupCmd implements Callable<Integer> {
     @CommandLine.Option(names = "--dry-run", description = "Render setup wizard decisions without installing, downloading, writing config, or starting models")
     boolean dryRun;
 
-    @CommandLine.Option(names = "--profile", description = "Managed llama.cpp profile, for example qwen2.5-coder-14b, gpt-oss-20b, qwen3-8b, qwen36vf-q6k, or deepseek-v2lite-q4km")
+    @CommandLine.Option(
+            names = "--profile",
+            description = "Managed llama.cpp profile. Run talos setup models for the current list.")
     String profile;
 
     @CommandLine.Option(names = "--server-path", description = "Path to llama-server.exe")

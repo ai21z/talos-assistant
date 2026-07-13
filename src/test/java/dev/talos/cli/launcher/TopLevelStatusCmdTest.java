@@ -140,6 +140,51 @@ class TopLevelStatusCmdTest {
     }
 
     @Test
+    void verboseEngineStatusProjectsQualifiedGraniteAsExperimental() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("granite-4.1-3b")
+                .orElseThrow();
+        Config cfg = new Config(null);
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of(
+                "default_backend", "llama_cpp",
+                "model", profile.alias())));
+        cfg.data.put("engines", new LinkedHashMap<>(Map.of(
+                "llama_cpp", new LinkedHashMap<>(Map.of(
+                        "mode", "managed",
+                        "model", profile.alias())))));
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(profile.alias())
+                .configuredModelFile("C:/private/" + profile.artifactFile())
+                .declaredProfile(profile.alias())
+                .resolvedProfile(profile.alias())
+                .observedModelFile("D:/served/" + profile.artifactFile())
+                .artifactState("EXACT")
+                .artifactVerificationIdentity(profile.artifactSha256())
+                .engineLane(profile.runtime().compatibleEngineLanes().getFirst())
+                .engineExecutableIdentity("b".repeat(64))
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveContextTokens(profile.runtime().contextTokens())
+                .disposition(profile.disposition().label())
+                .propsState("AVAILABLE")
+                .propsResponseSha256("c".repeat(64))
+                .chatAvailable(true)
+                .build();
+
+        String output = TopLevelStatusCmd.renderEngineStatus(cfg, identity);
+
+        assertTrue(output.contains("Configured  : granite-4.1-3b"), output);
+        assertTrue(output.contains("Resolved    : granite-4.1-3b"), output);
+        assertTrue(output.contains("Disposition : experimental selectable"), output);
+        assertTrue(output.contains("Engine lane : win-x64-cuda-13.3:b9918"), output);
+        assertTrue(output.contains("Resolution  : qualified"), output);
+        assertFalse(output.contains("C:/private"), output);
+        assertFalse(output.contains("D:/served"), output);
+    }
+
+    @Test
     void verboseEngineStatusReportsEffectiveContextWhenManagedFloorRaisesIt() {
         Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of(

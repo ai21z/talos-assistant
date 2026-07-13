@@ -56,4 +56,48 @@ class LocalTurnTraceModelIdentityTest {
         assertEquals("qwen3-8b", event.data().get("resolvedProfile"));
         assertFalse(event.data().toString().contains("C:/private"));
     }
+
+    @Test
+    void recordsQualifiedGraniteDispositionWithoutLeakingPaths() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("granite-4.1-3b")
+                .orElseThrow();
+        LocalTurnTraceCapture.begin(
+                "trc-granite-identity",
+                "sid-granite-identity",
+                1,
+                "2026-07-13T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                profile.alias(),
+                "read README.md");
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(profile.alias())
+                .configuredModelFile("C:/configured/" + profile.artifactFile())
+                .declaredProfile(profile.alias())
+                .resolvedProfile(profile.alias())
+                .observedModelFile("C:/private/" + profile.artifactFile())
+                .artifactState("EXACT")
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveContextTokens(profile.runtime().contextTokens())
+                .disposition(profile.disposition().label())
+                .propsResponseSha256("d".repeat(64))
+                .build();
+
+        LocalTurnTraceCapture.recordModelIdentity(identity);
+
+        TurnTraceEvent event = LocalTurnTraceCapture.complete().events().stream()
+                .filter(candidate -> "MODEL_IDENTITY_RESOLVED".equals(candidate.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("granite-4.1-3b", event.data().get("configuredModel"));
+        assertEquals("granite-4.1-3b", event.data().get("resolvedProfile"));
+        assertEquals("experimental selectable", event.data().get("disposition"));
+        assertEquals("granite-4.1-3b-Q4_K_M.gguf", event.data().get("observedModelFile"));
+        assertFalse(event.data().toString().contains("C:/private"));
+    }
 }

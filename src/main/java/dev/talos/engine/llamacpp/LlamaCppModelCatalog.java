@@ -208,6 +208,7 @@ public final class LlamaCppModelCatalog {
         profiles.add(vibeForgedQ6());
         profiles.add(deepSeekV2Lite());
         profiles.add(qwen3EightB());
+        profiles.add(granite41ThreeB());
         validateProfiles(profiles);
         LinkedHashMap<String, Profile> indexed = new LinkedHashMap<>();
         for (Profile profile : profiles) {
@@ -411,6 +412,44 @@ public final class LlamaCppModelCatalog {
                         "experimental full-bank evidence: 18 of 24 scenario definitions and 57 of 72 trials passed, with zero trust failures; not accepted beta or weak-hardware evidence"),
                 MODEL_PROFILES_GUIDE,
                 "32 GiB system RAM and a 16 GiB-class CUDA reference lane; experimental evidence only; no weak-hardware claim");
+    }
+
+    private static Profile granite41ThreeB() {
+        return new Profile(
+                "granite-4.1-3b",
+                new ModelArtifact(
+                        "ibm-granite/granite-4.1-3b-GGUF",
+                        "ab4701481089b58a082ef63cc1cee738887293ff",
+                        "granite-4.1-3b-Q4_K_M.gguf",
+                        "662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29",
+                        2_099_501_664L,
+                        "Apache-2.0"),
+                new RuntimeDefaults(
+                        "Granite dense decoder-only text model, 40 layers, hidden size 2560, 40 query heads, and 8 KV heads",
+                        "3.40283648B total parameters, dense-active",
+                        true,
+                        "native/default",
+                        "no separate thinking mode, b9918 reports thinking disabled",
+                        "embedded Granite template with tools_system_message_prefix",
+                        8_192,
+                        8_192,
+                        "Talos standard request controls, three uncontrolled qualification repetitions",
+                        List.of(),
+                        List.of("win-x64-cuda-13.3:b9918"),
+                        "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM and 32 GiB system RAM, no weak-hardware claim",
+                        true),
+                new QualificationEvidence(
+                        Disposition.EXPERIMENTAL_SELECTABLE,
+                        true,
+                        false,
+                        5,
+                        "local/model-qualification/granite-4.1-3b-full-p5-3b691d80-a10-b9918-cuda13-20260713",
+                        "3b691d801f54f3dfa006e2270f689ae6e2f94305",
+                        "4848a952a99dca994f31765779a2e999faa95021b6179193fcc6b0bb56c7945b",
+                        LocalDate.of(2026, 7, 13),
+                        "experimental full-bank evidence: 16 of 24 scenario definitions and 47 of 72 trials passed, with zero trust failures, not accepted beta or weak-hardware evidence"),
+                MODEL_PROFILES_GUIDE,
+                "32 GiB system RAM and a 16 GiB-class CUDA reference lane, experimental evidence only, no weak-hardware claim");
     }
 
     private static QualificationEvidence legacyEvidence(

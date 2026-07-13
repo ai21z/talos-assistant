@@ -25,14 +25,15 @@ class LlamaCppModelCatalogTest {
             boolean localPathRequired) {}
 
     @Test
-    void ownsExistingProfilesAndEvidenceQualifiedQwen3() {
+    void ownsAllSelectableProfilesInStableDisplayOrder() {
         assertEquals(List.of(
                         "qwen2.5-coder-14b",
                         "gpt-oss-20b",
                         "qwen36vf-q4km",
                         "qwen36vf-q6k",
                         "deepseek-v2lite-q4km",
-                        "qwen3-8b"),
+                        "qwen3-8b",
+                        "granite-4.1-3b"),
                 LlamaCppModelCatalog.selectableProfiles().stream()
                         .map(LlamaCppModelCatalog.Profile::alias)
                         .toList());
@@ -81,6 +82,41 @@ class LlamaCppModelCatalogTest {
         assertEquals("91aa1e6a60aed548948d182fe17dab55b09d00a247a78dd9a3c5cf43ab573467",
                 qwen3.qualification().scorecardSha256());
         assertEquals(LocalDate.of(2026, 7, 12), qwen3.qualification().qualifiedOn());
+    }
+
+    @Test
+    void graniteProjectsTheExactImmutableExperimentalQualification() {
+        var granite = LlamaCppModelCatalog.byAlias("granite-4.1-3b").orElseThrow();
+
+        assertEquals("ibm-granite/granite-4.1-3b-GGUF", granite.repository());
+        assertEquals("ab4701481089b58a082ef63cc1cee738887293ff", granite.revision());
+        assertEquals("granite-4.1-3b-Q4_K_M.gguf", granite.artifactFile());
+        assertEquals("662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29",
+                granite.artifactSha256());
+        assertEquals(2_099_501_664L, granite.artifactSizeBytes());
+        assertEquals("Apache-2.0", granite.license());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE, granite.disposition());
+        assertTrue(granite.selectable());
+        assertTrue(granite.requiresLocalModelPath());
+        assertEquals(false, granite.wizardDownload());
+        assertEquals(true, granite.nativeCalling());
+        assertEquals("native/default", granite.toolMode());
+        assertEquals(8_192, granite.runtime().contextTokens());
+        assertEquals(8_192, granite.runtime().maxContextTokens());
+        assertEquals(List.of(), granite.runtime().managedServerArgs());
+        assertEquals(List.of("win-x64-cuda-13.3:b9918"), granite.runtime().compatibleEngineLanes());
+        assertEquals(5, granite.qualification().protocolRevision());
+        assertEquals(
+                "local/model-qualification/granite-4.1-3b-full-p5-3b691d80-a10-b9918-cuda13-20260713",
+                granite.evidencePacket());
+        assertEquals("3b691d801f54f3dfa006e2270f689ae6e2f94305", granite.qualification().talosCommit());
+        assertEquals("4848a952a99dca994f31765779a2e999faa95021b6179193fcc6b0bb56c7945b",
+                granite.qualification().scorecardSha256());
+        assertEquals(LocalDate.of(2026, 7, 13), granite.qualification().qualifiedOn());
+        assertTrue(granite.evidenceSummary().contains("16 of 24 scenario definitions"),
+                granite.evidenceSummary());
+        assertTrue(granite.evidenceSummary().contains("zero trust failures"),
+                granite.evidenceSummary());
     }
 
     @Test
