@@ -31,6 +31,7 @@ public final class QualificationPtyCaptureMain {
     private static final String PROMPT = QualificationPtyOutcomeRace.PROMPT_MARKER;
 
     private final Path campaignRoot;
+    private final QualificationRecords.CampaignManifest campaign;
     private final Path runRoot;
     private final Path workspace;
     private final Path monitorScript;
@@ -60,11 +61,13 @@ public final class QualificationPtyCaptureMain {
             String scenarioId,
             int repetition) throws Exception {
         this.campaignRoot = campaignRoot.toAbsolutePath().normalize();
-        JsonNode campaign = JSON.readTree(this.campaignRoot.resolve("campaign.json").toFile());
-        String candidateAlias = requiredText(campaign, "candidateAlias");
-        String machineId = requiredText(campaign, "machineId");
-        String configId = requiredText(campaign, "configId");
-        this.protocolVersion = campaign.path("protocolVersion").asInt(-1);
+        JsonNode campaignNode = JSON.readTree(this.campaignRoot.resolve("campaign.json").toFile());
+        this.campaign = JSON.treeToValue(
+                campaignNode, QualificationRecords.CampaignManifest.class);
+        String candidateAlias = required(campaign.candidateAlias(), "candidateAlias");
+        String machineId = required(campaign.machineId(), "machineId");
+        String configId = required(campaign.configId(), "configId");
+        this.protocolVersion = campaign.protocolVersion();
         if (protocolVersion <= 0) {
             throw new IllegalStateException("campaign protocolVersion is missing or invalid");
         }
@@ -284,13 +287,31 @@ public final class QualificationPtyCaptureMain {
                 winpty.toString(), "-Xallow-non-tty", "--", installedTalos.toString())
                 .directory(workspace.toFile())
                 .redirectErrorStream(true);
-        builder.environment().put("JAVA_OPTS", "-Duser.home=" + campaignRoot.resolve("home"));
+        Path canonicalRoot = campaignRoot.toRealPath();
+        Path calibration = canonicalRoot.resolve(Path.of(
+                "candidates", campaign.candidateAlias(), "calibration-rules.json")).toRealPath();
+        String javaOptions = String.join(" ",
+                jvmProperty("user.home", canonicalRoot.resolve("home").toString()),
+                jvmProperty("talos.qualification.root", canonicalRoot.toString()),
+                jvmProperty("talos.qualification.calibration", calibration.toString()),
+                jvmProperty("talos.qualification.calibrationSha256",
+                        campaign.calibrationRulesSha256()));
+        builder.environment().put("JAVA_OPTS", javaOptions);
         builder.environment().put("COLUMNS", "120");
         builder.environment().put("LINES", "40");
         talosStartedNotBefore = Instant.now();
         talos = builder.start();
         outputReader = Thread.ofPlatform().daemon().start(
                 () -> capture.copyFrom(talos.getInputStream()));
+    }
+
+    private static String jvmProperty(String key, String value) {
+        String safeKey = required(key, "JVM property key");
+        String safeValue = required(value, "JVM property value");
+        if (safeKey.contains("=") || safeKey.contains("\"") || safeValue.contains("\"")) {
+            throw new IllegalStateException("qualification JVM property contains an unsupported character");
+        }
+        return "\"-D" + safeKey + "=" + safeValue + "\"";
     }
 
     private void interruptDuringGeneration() throws Exception {
@@ -469,6 +490,12 @@ public final class QualificationPtyCaptureMain {
 
     private static String forwardSlashes(Path path) {
         return path.toAbsolutePath().normalize().toString().replace('\\', '/');
+    }
+
+    private static String required(String value, String field) {
+        String clean = value == null ? "" : value.strip();
+        if (clean.isEmpty()) throw new IllegalStateException("missing campaign field: " + field);
+        return clean;
     }
 
     private static String requiredText(JsonNode node, String field) {

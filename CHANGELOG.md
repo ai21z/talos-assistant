@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1104] Frozen model-qualification campaigns can now supply one exact,
+  process-scoped capability ceiling for an uncatalogued candidate. The overlay
+  verifies the calibration, Talos build, model bytes, engine bytes, launch
+  shape, isolated home, and runtime observations, remains lab only, and cannot
+  shadow the durable model catalog.
 - [T1069] llama.cpp setup, launch, status, doctor, model listing, prompt
   planning, prompt debug, trace, and request tools now consume one resolved
   model identity. Exact artifact evidence is cached against file metadata,

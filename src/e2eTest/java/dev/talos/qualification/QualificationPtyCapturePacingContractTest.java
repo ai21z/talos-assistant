@@ -42,6 +42,17 @@ class QualificationPtyCapturePacingContractTest {
         assertTrue(source.contains("private void waitForSettledIdlePrompt("), source);
     }
 
+    @Test
+    void installedProcessReceivesFrozenQualificationDeclarationIdentity() throws Exception {
+        String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
+        String startMethod = between(source, "private void startTalos()", "private void interruptDuringGeneration");
+
+        assertTrue(startMethod.contains("talos.qualification.root"), startMethod);
+        assertTrue(startMethod.contains("talos.qualification.calibration"), startMethod);
+        assertTrue(startMethod.contains("talos.qualification.calibrationSha256"), startMethod);
+        assertTrue(startMethod.contains("campaign.calibrationRulesSha256()"), startMethod);
+    }
+
     private static String between(String source, String start, String end) {
         int startIndex = source.indexOf(start);
         int endIndex = source.indexOf(end, startIndex);

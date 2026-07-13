@@ -121,6 +121,109 @@ class LlamaCppResolvedProfileServiceTest {
     }
 
     @Test
+    void exactQualificationCandidateCanExposeNativeToolsWithoutCatalogPromotion() {
+        LlamaCppConfig config = config(
+                "granite-4.1-3b", "managed", modelPath(), serverPath(), true, List.of());
+        var candidate = qualificationCandidateProfile();
+        var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
+                LlamaCppProfileResolver.ArtifactState.EXACT,
+                modelPath().toString(), candidate.artifactSizeBytes(), candidate.artifactSizeBytes(),
+                candidate.artifactSha256(), candidate.artifactSha256(), "candidate-record");
+        var service = new LlamaCppResolvedProfileService(
+                config,
+                temp.resolve("home"),
+                (path, alias, expected, home, verify) -> artifact,
+                base -> availableProps(modelPath(), true),
+                (cfg, declared, observed, verify) -> new LlamaCppProfileResolver.EngineFacts(
+                        candidate.runtime().compatibleEngineLanes().getFirst(),
+                        "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
+                (cfg, home) -> Optional.of(new LlamaCppQualificationCandidateLoader.LoadedCandidate(
+                        candidate, "b".repeat(64), artifact, "engine-hash")));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.QUALIFIED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.NATIVE, snapshot.profile().effectiveToolMode());
+        assertEquals(LlamaCppModelCatalog.Disposition.LAB_ONLY, snapshot.profile().disposition());
+        assertTrue(snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+        assertEquals("granite-4.1-3b", snapshot.identity().resolvedProfile());
+        assertTrue(LlamaCppModelCatalog.byAlias("granite-4.1-3b").isEmpty());
+    }
+
+    @Test
+    void changedEngineAfterQualificationDeclarationLoadIsRefused() {
+        LlamaCppConfig config = config(
+                "granite-4.1-3b", "managed", modelPath(), serverPath(), true, List.of());
+        var candidate = qualificationCandidateProfile();
+        var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
+                LlamaCppProfileResolver.ArtifactState.EXACT,
+                modelPath().toString(), candidate.artifactSizeBytes(), candidate.artifactSizeBytes(),
+                candidate.artifactSha256(), candidate.artifactSha256(), "candidate-record");
+        var service = new LlamaCppResolvedProfileService(
+                config,
+                temp.resolve("home"),
+                (path, alias, expected, home, verify) -> artifact,
+                base -> availableProps(modelPath(), true),
+                (cfg, declared, observed, verify) -> new LlamaCppProfileResolver.EngineFacts(
+                        candidate.runtime().compatibleEngineLanes().getFirst(),
+                        "changed-engine", LlamaCppProfileResolver.MatchState.MATCHED),
+                (cfg, home) -> Optional.of(new LlamaCppQualificationCandidateLoader.LoadedCandidate(
+                        candidate, "b".repeat(64), artifact, "expected-engine")));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.REFUSED, snapshot.profile().resolution());
+        assertTrue(snapshot.identity().reasonCodes().contains("ENGINE_EXECUTABLE_MISMATCH"));
+        assertEquals(LlamaCppProfileResolver.ToolMode.CHAT_ONLY, snapshot.profile().effectiveToolMode());
+    }
+
+    @Test
+    void changedModelAfterQualificationDeclarationLoadIsRefused() {
+        LlamaCppConfig config = config(
+                "granite-4.1-3b", "managed", modelPath(), serverPath(), true, List.of());
+        var candidate = qualificationCandidateProfile();
+        var changedArtifact = new LlamaCppProfileResolver.ArtifactIdentity(
+                LlamaCppProfileResolver.ArtifactState.SHA256_MISMATCH,
+                modelPath().toString(), candidate.artifactSizeBytes(), candidate.artifactSizeBytes(),
+                candidate.artifactSha256(), "c".repeat(64), "");
+        var service = new LlamaCppResolvedProfileService(
+                config,
+                temp.resolve("home"),
+                (path, alias, expected, home, verify) -> changedArtifact,
+                base -> availableProps(modelPath(), true),
+                (cfg, declared, observed, verify) -> new LlamaCppProfileResolver.EngineFacts(
+                        candidate.runtime().compatibleEngineLanes().getFirst(),
+                        "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
+                (cfg, home) -> Optional.of(new LlamaCppQualificationCandidateLoader.LoadedCandidate(
+                        candidate, "b".repeat(64), changedArtifact, "engine-hash")));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.REFUSED, snapshot.profile().resolution());
+        assertTrue(snapshot.identity().reasonCodes().contains("ARTIFACT_SHA256_MISMATCH"));
+        assertEquals(LlamaCppProfileResolver.ToolMode.CHAT_ONLY, snapshot.profile().effectiveToolMode());
+    }
+
+    @Test
+    void qualificationCandidateCannotShadowDurableCatalogProfile() {
+        LlamaCppConfig config = config("qwen3-8b", "managed", modelPath(), serverPath(), true,
+                List.of("--reasoning", "off"));
+        var profile = LlamaCppModelCatalog.byAlias("qwen3-8b").orElseThrow();
+        var service = new LlamaCppResolvedProfileService(
+                config,
+                temp.resolve("home"),
+                (path, alias, expected, home, verify) -> exactArtifact(profile),
+                base -> availableProps(modelPath(), true),
+                (cfg, declared, observed, verify) -> matchedEngine(profile),
+                (cfg, home) -> { throw new AssertionError("catalog profile must win"); });
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals("qwen3-8b", snapshot.identity().resolvedProfile());
+        assertTrue(!snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+    }
+
+    @Test
     void connectOnlyWithoutPropsStaysChatCapableAndUnverified() {
         LlamaCppConfig config = config("qwen3-8b", "connect_only", modelPath(), serverPath(), true,
                 List.of("--reasoning", "off"));
@@ -306,5 +409,24 @@ class LlamaCppResolvedProfileServiceTest {
     private Path serverPath() {
         return temp.resolve(".talos/engines/llama.cpp/b9918/win-x64-cuda-13.3/llama-server.exe")
                 .toAbsolutePath().normalize();
+    }
+
+    private LlamaCppModelCatalog.Profile qualificationCandidateProfile() {
+        return new LlamaCppModelCatalog.Profile(
+                "granite-4.1-3b",
+                new LlamaCppModelCatalog.ModelArtifact(
+                        "ibm-granite/granite-4.1-3b-GGUF", "a".repeat(40),
+                        "granite-4.1-3b-Q4_K_M.gguf", "b".repeat(64), 123L, "Apache-2.0"),
+                new LlamaCppModelCatalog.RuntimeDefaults(
+                        "granite", "3.4B dense", true, "native", "none",
+                        "embedded Granite role template", 8192, 8192,
+                        "Talos standard request controls", List.of(),
+                        List.of("win-x64-cuda-13.3:b9918"), "qualification host", true),
+                new LlamaCppModelCatalog.QualificationEvidence(
+                        LlamaCppModelCatalog.Disposition.LAB_ONLY, false, false, 5,
+                        "qualification-candidate:test", "3df57f2f" + "0".repeat(32),
+                        "not-scored", java.time.LocalDate.of(1970, 1, 1),
+                        "Qualification candidate declaration, no support claim."),
+                "", "Qualification host only");
     }
 }

@@ -115,6 +115,12 @@ final class LlamaCppServerManager implements AutoCloseable {
     List<String> buildCommand() {
         List<String> command = new ArrayList<>();
         command.add(config.serverPath());
+        command.addAll(buildArguments(config));
+        return command;
+    }
+
+    static List<String> buildArguments(LlamaCppConfig config) {
+        List<String> command = new ArrayList<>();
         if (config.hasHfSource()) {
             command.add("--hf-repo");
             command.add(config.hfRepo());
@@ -158,7 +164,7 @@ final class LlamaCppServerManager implements AutoCloseable {
             appendManagedAgentDefault(command, config.serverArgs(), VERBOSITY_FLAGS, "-lv", VERIFICATION_LOG_VERBOSITY);
         }
         command.addAll(LlamaCppContextArgs.sanitize(config.serverArgs()));
-        return command;
+        return List.copyOf(command);
     }
 
     Map<String, String> buildEnvironment() {

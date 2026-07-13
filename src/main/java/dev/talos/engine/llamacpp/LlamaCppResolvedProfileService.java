@@ -8,6 +8,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -42,6 +43,13 @@ public final class LlamaCppResolvedProfileService {
                 boolean verify);
     }
 
+    @FunctionalInterface
+    interface CandidateSource {
+        Optional<LlamaCppQualificationCandidateLoader.LoadedCandidate> resolve(
+                LlamaCppConfig config,
+                Path talosHome);
+    }
+
     public record Snapshot(
             LlamaCppProfileResolver.ResolvedLlamaCppProfile profile,
             LlamaCppPropsClient.State propsState,
@@ -49,7 +57,8 @@ public final class LlamaCppResolvedProfileService {
             String propsResponseSha256,
             String observedModelFile,
             String engineBuildInfo,
-            boolean chatAvailable) {
+            boolean chatAvailable,
+            boolean qualificationCandidate) {
 
         public Snapshot {
             Objects.requireNonNull(profile, "profile");
@@ -64,6 +73,9 @@ public final class LlamaCppResolvedProfileService {
             String resolvedProfile = profile.resolution() == LlamaCppProfileResolver.ResolutionState.QUALIFIED
                     ? profile.declaredAlias()
                     : "";
+            List<String> reasons = new ArrayList<>(
+                    profile.reasons().stream().map(Enum::name).toList());
+            if (qualificationCandidate) reasons.add("QUALIFICATION_CANDIDATE");
             return ModelIdentitySnapshot.builder()
                     .backend(LlamaCppEngine.BACKEND)
                     .configuredModel(profile.configuredFacts().alias())
@@ -84,7 +96,7 @@ public final class LlamaCppResolvedProfileService {
                     .propsResponseSha256(propsResponseSha256)
                     .engineBuildInfo(engineBuildInfo)
                     .chatAvailable(chatAvailable)
-                    .reasonCodes(profile.reasons().stream().map(Enum::name).toList())
+                    .reasonCodes(reasons)
                     .build();
         }
     }
@@ -97,10 +109,14 @@ public final class LlamaCppResolvedProfileService {
     private final ArtifactSource artifacts;
     private final PropsSource props;
     private final EngineFactsSource engines;
+    private final Optional<LlamaCppModelCatalog.Profile> catalogProfile;
+    private final Optional<LlamaCppQualificationCandidateLoader.LoadedCandidate> qualificationCandidate;
 
     public LlamaCppResolvedProfileService(LlamaCppConfig config, Path talosHome) {
         this(config, talosHome, defaultArtifactSource(), new LlamaCppPropsClient()::fetch,
-                LlamaCppResolvedProfileService::defaultEngineFacts);
+                LlamaCppResolvedProfileService::defaultEngineFacts,
+                (candidateConfig, home) -> new LlamaCppQualificationCandidateLoader()
+                        .loadFromSystemProperties(candidateConfig, home));
     }
 
     LlamaCppResolvedProfileService(
@@ -109,11 +125,27 @@ public final class LlamaCppResolvedProfileService {
             ArtifactSource artifacts,
             PropsSource props,
             EngineFactsSource engines) {
+        this(config, talosHome, artifacts, props, engines, (candidateConfig, home) -> Optional.empty());
+    }
+
+    LlamaCppResolvedProfileService(
+            LlamaCppConfig config,
+            Path talosHome,
+            ArtifactSource artifacts,
+            PropsSource props,
+            EngineFactsSource engines,
+            CandidateSource candidates) {
         this.config = Objects.requireNonNull(config, "config");
         this.talosHome = (talosHome == null ? defaultTalosHome() : talosHome).toAbsolutePath().normalize();
         this.artifacts = Objects.requireNonNull(artifacts, "artifacts");
         this.props = Objects.requireNonNull(props, "props");
         this.engines = Objects.requireNonNull(engines, "engines");
+        CandidateSource candidateSource = Objects.requireNonNull(candidates, "candidates");
+        this.catalogProfile = LlamaCppModelCatalog.byAlias(config.model());
+        this.qualificationCandidate = catalogProfile.isPresent()
+                ? Optional.empty()
+                : Objects.requireNonNullElseGet(
+                        candidateSource.resolve(config, this.talosHome), Optional::empty);
     }
 
     /** Resolves cached and live facts without hashing the model artifact. */
@@ -145,7 +177,9 @@ public final class LlamaCppResolvedProfileService {
             LlamaCppPropsClient.Result propsResult,
             boolean verifyArtifact,
             boolean serverWasQueried) {
-        Optional<LlamaCppModelCatalog.Profile> declared = LlamaCppModelCatalog.byAlias(config.model());
+        Optional<LlamaCppModelCatalog.Profile> declared = catalogProfile.isPresent()
+                ? catalogProfile
+                : qualificationCandidate.map(LlamaCppQualificationCandidateLoader.LoadedCandidate::profile);
         LlamaCppPropsClient.Result safeResult = propsResult == null
                 ? LlamaCppPropsClient.Result.unavailable("server facts unavailable")
                 : propsResult;
@@ -159,6 +193,16 @@ public final class LlamaCppResolvedProfileService {
                 modelPath, declared, verifyArtifact);
         LlamaCppProfileResolver.EngineFacts engine = engines.resolve(
                 config, declared, observedProps, verifyArtifact);
+        if (verifyArtifact && qualificationCandidate.isPresent()) {
+            String expectedEngine = qualificationCandidate.get().engineExecutableSha256();
+            if (!expectedEngine.isBlank()
+                    && !expectedEngine.equals(engine.executableIdentity())) {
+                engine = new LlamaCppProfileResolver.EngineFacts(
+                        engine.lane(),
+                        engine.executableIdentity(),
+                        LlamaCppProfileResolver.MatchState.MISMATCHED);
+            }
+        }
         LlamaCppProfileResolver.ObservedServerFacts observed = observedFacts(
                 declared, safeResult, observedProps);
         LlamaCppProfileResolver.ConfiguredFacts configured = configuredFacts(declared, modelPath, artifact);
@@ -183,7 +227,8 @@ public final class LlamaCppResolvedProfileService {
                 observedProps.responseSha256(),
                 observedProps.modelPath(),
                 observedProps.buildInfo(),
-                chatAvailable);
+                chatAvailable,
+                qualificationCandidate.isPresent());
     }
 
     private LlamaCppProfileResolver.ArtifactIdentity artifactIdentity(
@@ -320,7 +365,7 @@ public final class LlamaCppResolvedProfileService {
                         : LlamaCppProfileResolver.MatchState.MATCHED);
     }
 
-    private static String engineLane(Path executable) {
+    static String engineLane(Path executable) {
         if (executable == null) return "";
         Path normalized = executable.toAbsolutePath().normalize();
         for (int i = 0; i + 2 < normalized.getNameCount(); i++) {
