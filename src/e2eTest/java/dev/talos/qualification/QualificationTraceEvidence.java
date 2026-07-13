@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.FileLookupAnswerGuard;
 import dev.talos.tools.ToolAliasPolicy;
 
@@ -51,7 +52,8 @@ final class QualificationTraceEvidence {
             List<QualificationRecords.DecisionResult> decisions,
             boolean approvalGranted,
             boolean approvalDenied,
-            boolean boundedFileLookupNegative) {
+            boolean boundedFileLookupNegative,
+            boolean missingEvidenceContained) {
         Facts {
             calls = List.copyOf(calls);
             decisions = List.copyOf(decisions);
@@ -72,7 +74,26 @@ final class QualificationTraceEvidence {
                 boolean approvalDenied) {
             this(traceId, modelId, taskType, mutationAllowed, actionObligation,
                     terminalState, outcomeStatus, verificationStatus, calls, decisions,
-                    approvalGranted, approvalDenied, false);
+                    approvalGranted, approvalDenied, false, false);
+        }
+
+        Facts(
+                String traceId,
+                String modelId,
+                String taskType,
+                boolean mutationAllowed,
+                String actionObligation,
+                String terminalState,
+                String outcomeStatus,
+                String verificationStatus,
+                List<Call> calls,
+                List<QualificationRecords.DecisionResult> decisions,
+                boolean approvalGranted,
+                boolean approvalDenied,
+                boolean boundedFileLookupNegative) {
+            this(traceId, modelId, taskType, mutationAllowed, actionObligation,
+                    terminalState, outcomeStatus, verificationStatus, calls, decisions,
+                    approvalGranted, approvalDenied, boundedFileLookupNegative, false);
         }
 
         List<QualificationRecords.ToolCallResult> toolCallResults() {
@@ -119,6 +140,7 @@ final class QualificationTraceEvidence {
         boolean approvalGranted = false;
         boolean approvalDenied = false;
         boolean boundedFileLookupNegative = false;
+        boolean missingEvidenceContainmentEvent = false;
         for (JsonNode event : events) {
             String type = event.path("type").asText("");
             String tool = canonicalTool(event.path("toolName").asText(""));
@@ -148,6 +170,21 @@ final class QualificationTraceEvidence {
                     && FileLookupAnswerGuard.TRACE_REASON.equals(
                     event.path("data").path("reason").asText(""))) {
                 boundedFileLookupNegative = true;
+            } else if (type.equals("PROTOCOL_SANITIZED")
+                    && EvidenceContainmentAnswerGuard.TRACE_REASON.equals(
+                    event.path("data").path("reason").asText(""))) {
+                missingEvidenceContainmentEvent = true;
+            }
+        }
+
+        boolean missingEvidenceWarning = false;
+        JsonNode warnings = root.path("warnings");
+        if (warnings.isArray()) {
+            for (JsonNode warning : warnings) {
+                if ("MISSING_EVIDENCE".equals(warning.path("code").asText(""))) {
+                    missingEvidenceWarning = true;
+                    break;
+                }
             }
         }
 
@@ -165,7 +202,8 @@ final class QualificationTraceEvidence {
         return new Facts(traceId, modelId, taskType, mutationAllowed, actionObligation,
                 terminalState, outcomeStatus, verificationStatus,
                 frozenCalls, decisions(scenario, frozenCalls), approvalGranted, approvalDenied,
-                boundedFileLookupNegative);
+                boundedFileLookupNegative,
+                missingEvidenceContainmentEvent && missingEvidenceWarning);
     }
 
     private static List<QualificationRecords.DecisionResult> decisions(

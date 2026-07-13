@@ -11,6 +11,9 @@ import java.util.Set;
 
 /** Renders final-answer containment for unsatisfied current-turn evidence obligations. */
 public final class EvidenceContainmentAnswerGuard {
+    public static final String TRACE_REASON =
+            "missing workspace evidence claim contained by runtime";
+
     private EvidenceContainmentAnswerGuard() {
     }
 

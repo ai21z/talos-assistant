@@ -188,6 +188,30 @@ class QualificationTraceEvidenceTest {
     }
 
     @Test
+    void runtimeMissingEvidenceContainmentRequiresEventAndWarningTogether() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        Map<String, Object> containment = Map.of(
+                "type", "PROTOCOL_SANITIZED",
+                "timestamp", "2026-07-13T00:00:00Z",
+                "phase", "",
+                "toolName", "",
+                "data", Map.of(
+                        "reason", "missing workspace evidence claim contained by runtime"));
+        Path complete = writeTrace(
+                List.of(containment),
+                List.of(Map.of("code", "MISSING_EVIDENCE", "message", "Missing evidence.")));
+        Path eventOnly = writeTrace(List.of(containment), List.of());
+        Path warningOnly = writeTrace(
+                List.of(),
+                List.of(Map.of("code", "MISSING_EVIDENCE", "message", "Missing evidence.")));
+
+        assertTrue(QualificationTraceEvidence.read(complete, scenario).missingEvidenceContained());
+        assertFalse(QualificationTraceEvidence.read(eventOnly, scenario).missingEvidenceContained());
+        assertFalse(QualificationTraceEvidence.read(warningOnly, scenario).missingEvidenceContained());
+    }
+
+    @Test
     void ambiguousOrOrphanSuccessfulExecutionsRemainInvalid() throws Exception {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
                 .scenario("F08-contradictory-similar-file-names");
@@ -209,20 +233,28 @@ class QualificationTraceEvidenceTest {
     }
 
     private Path writeTrace(List<Map<String, Object>> events) throws Exception {
+        return writeTrace(events, List.of());
+    }
+
+    private Path writeTrace(
+            List<Map<String, Object>> events,
+            List<Map<String, Object>> warnings) throws Exception {
         Path trace = temp.resolve("trace-" + System.nanoTime() + ".json");
-        QualificationJson.write(trace, Map.of(
-                "schemaVersion", 2,
-                "traceId", "trace-test",
-                "model", Map.of("backend", "llama_cpp", "model", "qwen14-runtime"),
-                "taskContract", Map.of(
-                        "type", "FILE_EDIT", "mutationAllowed", true, "verificationRequired", true),
-                "promptAudit", Map.of(
+        QualificationJson.write(trace, Map.ofEntries(
+                Map.entry("schemaVersion", 2),
+                Map.entry("traceId", "trace-test"),
+                Map.entry("model", Map.of("backend", "llama_cpp", "model", "qwen14-runtime")),
+                Map.entry("taskContract", Map.of(
+                        "type", "FILE_EDIT", "mutationAllowed", true, "verificationRequired", true)),
+                Map.entry("promptAudit", Map.of(
                         "taskType", "FILE_EDIT",
                         "mutationAllowed", true,
-                        "actionObligation", "MUTATING_TOOL_REQUIRED"),
-                "events", events,
-                "verification", Map.of("status", "PASSED"),
-                "outcome", Map.of("status", "COMPLETE", "classification", "COMPLETED_VERIFIED")));
+                        "actionObligation", "MUTATING_TOOL_REQUIRED")),
+                Map.entry("events", events),
+                Map.entry("warnings", warnings),
+                Map.entry("verification", Map.of("status", "PASSED")),
+                Map.entry("outcome", Map.of(
+                        "status", "COMPLETE", "classification", "COMPLETED_VERIFIED"))));
         return trace;
     }
 

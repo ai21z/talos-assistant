@@ -304,6 +304,8 @@ record ExecutionOutcome(
                     evidenceObligation,
                     evidenceResult,
                     EVIDENCE_CONTAINMENT_MARKERS);
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    EvidenceContainmentAnswerGuard.TRACE_REASON);
         } else {
             ProtectedReadAnswerGuard.PostconditionResult protectedReadPostcondition =
                     ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(
@@ -626,6 +628,8 @@ record ExecutionOutcome(
                     evidenceObligation,
                     evidenceResult,
                     EVIDENCE_CONTAINMENT_MARKERS);
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    EvidenceContainmentAnswerGuard.TRACE_REASON);
         } else {
             shaped = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
                     shaped,

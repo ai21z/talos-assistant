@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1109] Model qualification now distinguishes a runtime-contained missing-
+  evidence refusal from an ungrounded answer. The safe refusal preserves the
+  trust gate but earns no task credit, while forbidden reads and answers
+  without structural containment proof still fail closed.
 - [T1108] Model qualification now treats a successful directory listing as
   read evidence only for a dedicated listing scenario whose allowed target
   matches the listed directory. A discovery listing still cannot stand in for

@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
@@ -3400,14 +3401,34 @@ class ExecutionOutcomeTest {
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Read README.md and summarize it."));
 
-        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
-                "README.md describes the project.", messages, null, true);
+        LocalTurnTraceCapture.begin(
+                "trc-no-tool-missing-evidence-contained",
+                "sid",
+                1,
+                "2026-07-13T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Read README.md and summarize it.");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                    "README.md describes the project.", messages, null, true);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
-        assertTrue(outcome.finalAnswer().startsWith(
-                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
-        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
-        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith(
+                    "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "PROTOCOL_SANITIZED".equals(event.type())
+                                    && EvidenceContainmentAnswerGuard.TRACE_REASON.equals(
+                                    event.data().get("reason"))),
+                    "qualification needs structural proof for no-tool containment too");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
@@ -3667,13 +3688,33 @@ class ExecutionOutcomeTest {
                         "talos.read_file", "README.md", false, false, false,
                         "", "README.md was not found.", null, ToolError.NOT_FOUND)));
 
-        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                "README.md was not found.", messages, loopResult, null, 0);
+        LocalTurnTraceCapture.begin(
+                "trc-missing-evidence-contained",
+                "sid",
+                1,
+                "2026-07-13T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Read README.md and summarize it.");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "README.md was not found.", messages, loopResult, null, 0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
-        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
-        assertTrue(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+            assertTrue(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                            "PROTOCOL_SANITIZED".equals(event.type())
+                                    && EvidenceContainmentAnswerGuard.TRACE_REASON.equals(
+                                    event.data().get("reason"))),
+                    "qualification needs structural proof that runtime containment ran");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
