@@ -252,7 +252,7 @@ public final class AssistantTurnExecutor {
                         // is silent to the user. The partial must not be
                         // shaped, ground-retried, or executed as a tool call.
                         streamed = true;
-                        recordLlmAbortOutcome();
+                        recordLlmAbortOutcome(streamResult, answer);
                         emitStreamingAbortNotice(answer, ctx);
                         out.append(answer);
                     } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
@@ -309,7 +309,7 @@ public final class AssistantTurnExecutor {
                 String answer = streamResult.text();
                 if (answer != null) {
                     if (isAbortedGeneration(streamResult, answer)) {
-                        recordLlmAbortOutcome();
+                        recordLlmAbortOutcome(streamResult, answer);
                         answer = withOutputLimitNotice(answer, streamResult, ctx, false);
                     } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
@@ -480,8 +480,18 @@ public final class AssistantTurnExecutor {
                 classification);
     }
 
-    private static void recordLlmAbortOutcome() {
+    static void recordLlmAbortOutcome(LlmClient.StreamResult result, String answer) {
+        LocalTurnTraceCapture.recordModelGenerationAborted(
+                result == null ? "" : result.abortReason(),
+                hasAbortPartialOutput(answer));
         recordBackendFailureOutcome("LLM_ABORTED");
+    }
+
+    private static boolean hasAbortPartialOutput(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        return answer.lines()
+                .map(String::strip)
+                .anyMatch(line -> !line.isBlank() && !line.startsWith(UiChrome.TURN_ABORTED_PREFIX));
     }
 
     /**

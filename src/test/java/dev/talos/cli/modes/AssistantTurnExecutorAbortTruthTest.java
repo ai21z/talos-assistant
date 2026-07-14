@@ -44,6 +44,87 @@ class AssistantTurnExecutorAbortTruthTest {
             PASS_2B_TOOL_JSON_PARTIAL + "\n[turn aborted: stream transport failed after partial output]";
 
     @Test
+    void bufferedRepetitionAbortRecordsCanonicalReasonWithoutPartialOutput(@TempDir Path workspace) {
+        String marker = "[turn aborted: non-streaming chat entered a repetition loop]";
+        LlmClient.StreamResult result = new LlmClient.StreamResult(
+                marker, List.of(), "", "repetition loop");
+
+        LocalTurnTraceCapture.begin(
+                "trc-abort-repetition",
+                "sid",
+                1,
+                "2026-07-14T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Read README.md and summarize it.");
+        try {
+            AssistantTurnExecutor.recordLlmAbortOutcome(result, marker);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var abortEvents = trace.events().stream()
+                    .filter(event -> "MODEL_GENERATION_ABORTED".equals(event.type()))
+                    .toList();
+            assertEquals(1, abortEvents.size(), trace.events().toString());
+            assertEquals("REPETITION_LOOP", abortEvents.getFirst().data().get("reasonCode"));
+            assertEquals(Boolean.FALSE, abortEvents.getFirst().data().get("partialOutput"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void abortTraceUsesOnlyBoundedReasonCodesAndKeepsPartialOutputSeparate() {
+        assertAbortEvent("wall-clock budget exceeded", "[turn aborted: budget]",
+                "WALL_CLOCK_BUDGET_EXCEEDED", false);
+        assertAbortEvent("idle timeout - no tokens", "[turn aborted: idle]",
+                "IDLE_TIMEOUT", false);
+        assertAbortEvent("interrupted", "[turn aborted: interrupted]",
+                "INTERRUPTED", false);
+        assertAbortEvent(
+                "stream transport failed after partial output, retry skipped to avoid duplicate output",
+                PARTIAL + "\n[turn aborted: stream transport failed after partial output]",
+                "TRANSPORT_FAILURE",
+                true);
+        assertAbortEvent("provider detail that must not be persisted", "[turn aborted: provider detail]",
+                "UNKNOWN", false);
+        assertAbortEvent("", "[turn aborted: repetition loop]",
+                "UNKNOWN", false);
+    }
+
+    private static void assertAbortEvent(
+            String rawReason,
+            String answer,
+            String expectedCode,
+            boolean expectedPartialOutput) {
+        LocalTurnTraceCapture.begin(
+                "trc-abort-code-" + expectedCode,
+                "sid",
+                1,
+                "2026-07-14T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Test abort capture.");
+        try {
+            AssistantTurnExecutor.recordLlmAbortOutcome(
+                    new LlmClient.StreamResult(answer, List.of(), "", rawReason),
+                    answer);
+            var event = LocalTurnTraceCapture.complete().events().stream()
+                    .filter(candidate -> "MODEL_GENERATION_ABORTED".equals(candidate.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(expectedCode, event.data().get("reasonCode"));
+            assertEquals(expectedPartialOutput, event.data().get("partialOutput"));
+            assertFalse(event.data().toString().contains("provider detail"), event.data().toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void streamingAbortAfterPartialOutputRecordsLlmAbortedAndShowsTheMarker(@TempDir Path workspace) {
         LlmClient llm = ScriptedNativeLlmClient.transientAfterPartialOutput(PARTIAL);
         List<String> chunks = new ArrayList<>();

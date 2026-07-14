@@ -15,6 +15,7 @@ import dev.talos.spi.types.ModelIdentitySnapshot;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -106,6 +107,15 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         ModelResponseTraceRecorder.record(bag.builder, assistantText);
+    }
+
+    /** Records bounded abort metadata without persisting provider or model text. */
+    public static void recordModelGenerationAborted(String abortReason, boolean partialOutput) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(TurnTraceEvent.simple("MODEL_GENERATION_ABORTED", now(), Map.of(
+                "reasonCode", canonicalAbortReason(abortReason),
+                "partialOutput", partialOutput)));
     }
 
     public static void recordToolCallParsed(String phase, ToolCall call) {
@@ -605,6 +615,19 @@ public final class LocalTurnTraceCapture {
 
     private static String safe(String value) {
         return value == null ? "" : value.strip();
+    }
+
+    private static String canonicalAbortReason(String value) {
+        String reason = safe(value).toLowerCase(Locale.ROOT);
+        return switch (reason) {
+            case "repetition loop" -> "REPETITION_LOOP";
+            case "wall-clock budget exceeded" -> "WALL_CLOCK_BUDGET_EXCEEDED";
+            case "idle timeout - no tokens" -> "IDLE_TIMEOUT";
+            case "interrupted" -> "INTERRUPTED";
+            default -> reason.startsWith("stream transport failed")
+                    ? "TRANSPORT_FAILURE"
+                    : "UNKNOWN";
+        };
     }
 
 }

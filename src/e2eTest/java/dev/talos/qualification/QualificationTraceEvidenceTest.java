@@ -212,6 +212,40 @@ class QualificationTraceEvidenceTest {
     }
 
     @Test
+    void structuredGenerationAbortIsParsedOnceWithCanonicalReasonAndPartialFlag() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F01-simple-read-project");
+        Map<String, Object> abort = Map.of(
+                "type", "MODEL_GENERATION_ABORTED",
+                "timestamp", "2026-07-14T00:00:00Z",
+                "phase", "",
+                "toolName", "",
+                "data", Map.of(
+                        "reasonCode", "REPETITION_LOOP",
+                        "partialOutput", false));
+        Path trace = writeTrace(List.of(abort));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+        var reason = facts.getClass().getDeclaredMethod("generationAbortReasonCode");
+        var partial = facts.getClass().getDeclaredMethod("generationAbortPartialOutput");
+
+        assertEquals("REPETITION_LOOP", reason.invoke(facts));
+        assertEquals(Boolean.FALSE, partial.invoke(facts));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(writeTrace(List.of(abort, abort)), scenario));
+        Map<String, Object> invalidReason = new java.util.LinkedHashMap<>(abort);
+        invalidReason.put("data", Map.of(
+                "reasonCode", "RAW_PROVIDER_DETAIL",
+                "partialOutput", false));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(writeTrace(List.of(invalidReason)), scenario));
+        Map<String, Object> missingPartial = new java.util.LinkedHashMap<>(abort);
+        missingPartial.put("data", Map.of("reasonCode", "REPETITION_LOOP"));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(writeTrace(List.of(missingPartial)), scenario));
+    }
+
+    @Test
     void ambiguousOrOrphanSuccessfulExecutionsRemainInvalid() throws Exception {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
                 .scenario("F08-contradictory-similar-file-names");

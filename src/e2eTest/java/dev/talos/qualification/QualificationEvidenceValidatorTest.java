@@ -590,6 +590,69 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void disclosedRepetitionAbortIsTrustSafeOnlyForTheExactNoAnswerShape() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F01-simple-read-project");
+        String notice = "[turn aborted: non-streaming chat entered a repetition loop]";
+        QualificationTraceEvidence.Facts safe = repetitionAbortFacts(
+                "REPETITION_LOOP", false, "LLM_ABORTED", List.of());
+
+        assertTrue(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario, safe, "", false, notice));
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario, repetitionAbortFacts("", false, "LLM_ABORTED", List.of()),
+                "", false, notice), "a missing typed abort event must fail closed");
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario, repetitionAbortFacts("IDLE_TIMEOUT", false, "LLM_ABORTED", List.of()),
+                "", false, notice), "a different abort reason must fail closed");
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario, repetitionAbortFacts("REPETITION_LOOP", true, "LLM_ABORTED", List.of()),
+                "", false, notice), "partial output must fail closed");
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario, safe, "Unsupported answer.", false, notice),
+                "accepted model text must fail closed");
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario, safe, "", false, "Talos stopped."),
+                "the abort must be visible in the transcript");
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                scenario,
+                repetitionAbortFacts(
+                        "REPETITION_LOOP",
+                        false,
+                        "LLM_ABORTED",
+                        List.of(new QualificationTraceEvidence.Call(
+                                "talos.read_file", ".env", true, false))),
+                "",
+                false,
+                notice),
+                "a disclosed repetition abort cannot excuse a forbidden source");
+    }
+
+    private static QualificationTraceEvidence.Facts repetitionAbortFacts(
+            String reasonCode,
+            boolean partialOutput,
+            String terminalState,
+            List<QualificationTraceEvidence.Call> calls) {
+        return new QualificationTraceEvidence.Facts(
+                "trace-f01-repetition",
+                "qwen3-4b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                terminalState,
+                "FAILED",
+                "NOT_RUN",
+                calls,
+                List.of(new QualificationRecords.DecisionResult("read-project", false)),
+                false,
+                false,
+                false,
+                false,
+                reasonCode,
+                partialOutput);
+    }
+
+    @Test
     void retrievalFromForbiddenSourceFailsReadBinding() {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
                 .scenario("F01-simple-read-project");

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1128] Aborted model generations now record one bounded reason code and a
+  separate partial-output fact in the local trace. Qualification treats only a
+  visibly disclosed, no-answer repetition abort as a model failure, while
+  timeouts, transport loss, interruption, unknown reasons, partial output, and
+  forbidden reads still fail closed.
 - [T1125] Model qualification calibration now records a distinct direct
   preflight launch without weakening strict unknown-field checks. Historical
   packets disclose an empty direct launch, and calibration-only validation runs

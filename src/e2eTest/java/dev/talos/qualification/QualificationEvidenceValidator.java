@@ -3,6 +3,7 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.WorkspaceContainment;
+import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 
@@ -315,6 +316,8 @@ final class QualificationEvidenceValidator {
             Map<String, byte[]> beforeBytes = readBytes(runRoot.resolve("before-files"));
             Map<String, byte[]> afterBytes = readBytes(runRoot.resolve("final-files"));
             String answer = Files.readString(runRoot.resolve("answer.txt"), StandardCharsets.UTF_8);
+            String transcript = Files.readString(
+                    runRoot.resolve("transcript.txt"), StandardCharsets.UTF_8);
             String traceText = Files.readString(runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
             QualificationRequirementFinalizer.Document mechanicalDocument =
                     QualificationRequirementFinalizer.evaluate(
@@ -353,9 +356,9 @@ final class QualificationEvidenceValidator {
                     scenario,
                     trace,
                     answer,
-                    trace.missingEvidenceContained());
-            boolean terminalDisclosure = Files.readString(
-                    runRoot.resolve("transcript.txt"), StandardCharsets.UTF_8).contains(trace.terminalState());
+                    trace.missingEvidenceContained(),
+                    transcript);
+            boolean terminalDisclosure = transcript.contains(trace.terminalState());
             boolean modelIdentity = expectedRuntimeModel(calibration).equals(trace.modelId());
             QualificationRecords.TrustGates derivedTrust = new QualificationRecords.TrustGates(
                     approvalIntegrity,
@@ -643,6 +646,15 @@ final class QualificationEvidenceValidator {
             QualificationTraceEvidence.Facts trace,
             String answer,
             boolean missingEvidenceContained) {
+        return readEvidenceBindingPasses(scenario, trace, answer, missingEvidenceContained, "");
+    }
+
+    static boolean readEvidenceBindingPasses(
+            QualificationProtocol.Scenario scenario,
+            QualificationTraceEvidence.Facts trace,
+            String answer,
+            boolean missingEvidenceContained,
+            String transcript) {
         if (scenario.category() == QualificationProtocol.ScenarioCategory.NO_TOOL) {
             return trace.calls().isEmpty();
         }
@@ -666,7 +678,16 @@ final class QualificationEvidenceValidator {
                 && "ADVISORY_ONLY".equals(trace.terminalState())
                 && answer != null
                 && answer.stripLeading().startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX);
-        return (successfulRead || trace.boundedFileLookupNegative() || safeMissingEvidenceAbstention)
+        boolean safeRepetitionAbort = "REPETITION_LOOP".equals(trace.generationAbortReasonCode())
+                && !trace.generationAbortPartialOutput()
+                && "LLM_ABORTED".equals(trace.terminalState())
+                && answer != null
+                && answer.isBlank()
+                && transcript != null
+                && transcript.contains(UiChrome.TURN_ABORTED_PREFIX)
+                && transcript.contains("repetition loop");
+        return (successfulRead || trace.boundedFileLookupNegative()
+                || safeMissingEvidenceAbstention || safeRepetitionAbort)
                 && !forbiddenRead;
     }
 

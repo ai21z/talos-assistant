@@ -17,6 +17,13 @@ import java.util.Set;
 final class QualificationTraceEvidence {
     private static final Set<String> MUTATION_INSPECTION_AUXILIARIES = Set.of(
             "talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
+    private static final Set<String> GENERATION_ABORT_REASON_CODES = Set.of(
+            "REPETITION_LOOP",
+            "WALL_CLOCK_BUDGET_EXCEEDED",
+            "IDLE_TIMEOUT",
+            "INTERRUPTED",
+            "TRANSPORT_FAILURE",
+            "UNKNOWN");
 
     private QualificationTraceEvidence() {}
 
@@ -53,10 +60,15 @@ final class QualificationTraceEvidence {
             boolean approvalGranted,
             boolean approvalDenied,
             boolean boundedFileLookupNegative,
-            boolean missingEvidenceContained) {
+            boolean missingEvidenceContained,
+            String generationAbortReasonCode,
+            boolean generationAbortPartialOutput) {
         Facts {
             calls = List.copyOf(calls);
             decisions = List.copyOf(decisions);
+            generationAbortReasonCode = generationAbortReasonCode == null
+                    ? ""
+                    : generationAbortReasonCode.strip();
         }
 
         Facts(
@@ -74,7 +86,7 @@ final class QualificationTraceEvidence {
                 boolean approvalDenied) {
             this(traceId, modelId, taskType, mutationAllowed, actionObligation,
                     terminalState, outcomeStatus, verificationStatus, calls, decisions,
-                    approvalGranted, approvalDenied, false, false);
+                    approvalGranted, approvalDenied, false, false, "", false);
         }
 
         Facts(
@@ -93,7 +105,28 @@ final class QualificationTraceEvidence {
                 boolean boundedFileLookupNegative) {
             this(traceId, modelId, taskType, mutationAllowed, actionObligation,
                     terminalState, outcomeStatus, verificationStatus, calls, decisions,
-                    approvalGranted, approvalDenied, boundedFileLookupNegative, false);
+                    approvalGranted, approvalDenied, boundedFileLookupNegative, false, "", false);
+        }
+
+        Facts(
+                String traceId,
+                String modelId,
+                String taskType,
+                boolean mutationAllowed,
+                String actionObligation,
+                String terminalState,
+                String outcomeStatus,
+                String verificationStatus,
+                List<Call> calls,
+                List<QualificationRecords.DecisionResult> decisions,
+                boolean approvalGranted,
+                boolean approvalDenied,
+                boolean boundedFileLookupNegative,
+                boolean missingEvidenceContained) {
+            this(traceId, modelId, taskType, mutationAllowed, actionObligation,
+                    terminalState, outcomeStatus, verificationStatus, calls, decisions,
+                    approvalGranted, approvalDenied, boundedFileLookupNegative,
+                    missingEvidenceContained, "", false);
         }
 
         List<QualificationRecords.ToolCallResult> toolCallResults() {
@@ -141,6 +174,9 @@ final class QualificationTraceEvidence {
         boolean approvalDenied = false;
         boolean boundedFileLookupNegative = false;
         boolean missingEvidenceContainmentEvent = false;
+        String generationAbortReasonCode = "";
+        boolean generationAbortPartialOutput = false;
+        int generationAbortEvents = 0;
         for (JsonNode event : events) {
             String type = event.path("type").asText("");
             String tool = canonicalTool(event.path("toolName").asText(""));
@@ -174,6 +210,21 @@ final class QualificationTraceEvidence {
                     && EvidenceContainmentAnswerGuard.TRACE_REASON.equals(
                     event.path("data").path("reason").asText(""))) {
                 missingEvidenceContainmentEvent = true;
+            } else if (type.equals("MODEL_GENERATION_ABORTED")) {
+                generationAbortEvents++;
+                if (generationAbortEvents > 1) {
+                    throw new IllegalArgumentException("trace has multiple model generation abort events");
+                }
+                JsonNode data = requiredObject(event.path("data"), "model generation abort data");
+                generationAbortReasonCode = required(
+                        data.path("reasonCode").asText(""), "model generation abort reason code");
+                if (!GENERATION_ABORT_REASON_CODES.contains(generationAbortReasonCode)) {
+                    throw new IllegalArgumentException(
+                            "model generation abort reason code is not canonical: "
+                                    + generationAbortReasonCode);
+                }
+                generationAbortPartialOutput = requiredBoolean(
+                        data.path("partialOutput"), "model generation abort partialOutput");
             }
         }
 
@@ -203,7 +254,9 @@ final class QualificationTraceEvidence {
                 terminalState, outcomeStatus, verificationStatus,
                 frozenCalls, decisions(scenario, frozenCalls), approvalGranted, approvalDenied,
                 boundedFileLookupNegative,
-                missingEvidenceContainmentEvent && missingEvidenceWarning);
+                missingEvidenceContainmentEvent && missingEvidenceWarning,
+                generationAbortReasonCode,
+                generationAbortPartialOutput);
     }
 
     private static List<QualificationRecords.DecisionResult> decisions(
