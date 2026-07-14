@@ -72,6 +72,35 @@ class LlamaCppResolvedProfileServiceTest {
     }
 
     @Test
+    void matchingGraniteEightBFactsProjectTheExactExperimentalProfile() {
+        var profile = LlamaCppModelCatalog.byAlias("granite-4.1-8b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", model, serverPath(), true, List.of());
+        var service = service(
+                config,
+                exactArtifact(profile, model),
+                matchedEngine(profile),
+                availableProps(model, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.QUALIFIED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.NATIVE, snapshot.profile().effectiveToolMode());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE,
+                snapshot.profile().disposition());
+        assertEquals("granite-4.1-8b", snapshot.identity().configuredModel());
+        assertEquals("granite-4.1-8b", snapshot.identity().declaredProfile());
+        assertEquals("granite-4.1-8b", snapshot.identity().resolvedProfile());
+        assertEquals("granite-4.1-8b-Q4_K_M.gguf", snapshot.identity().observedModelFile());
+        assertEquals("experimental selectable", snapshot.identity().disposition());
+        assertEquals("NATIVE", snapshot.identity().effectiveToolMode());
+        assertEquals(8192, snapshot.identity().effectiveContextTokens());
+        assertTrue(snapshot.identity().qualified());
+        assertTrue(!snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+    }
+
+    @Test
     void matchingQwen3FourBFactsProjectTheControlledExperimentalProfile() {
         var profile = LlamaCppModelCatalog.byAlias("qwen3-4b").orElseThrow();
         Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();

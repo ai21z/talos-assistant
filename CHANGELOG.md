@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1134] Granite 4.1 8B is now an experimental selectable profile bound to
+  its exact official Q4_K_M artifact and immutable protocol-v5 scorecard.
+  Setup requires and verifies the local GGUF, while wizard downloads, accepted
+  beta wording, defaults, and untested hardware or platform claims remain
+  excluded.
 - [T1131] Exact quoted replacement requests now preserve complete old and new
   literals across scoped and trailing target forms. Natural `the exact text`
   wording and `change nothing else` now activate deterministic replacement and

@@ -91,15 +91,15 @@ class ModelsCommandTest {
 
     @Test
     void renderMarksGraniteAsExperimentalRatherThanAccepted() {
-        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
-                .byAlias("granite-4.1-3b")
-                .orElseThrow();
+        for (String alias : List.of("granite-4.1-3b", "granite-4.1-8b")) {
+            var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog.byAlias(alias).orElseThrow();
 
-        String text = ModelsCommand.renderInstalledModels(
-                List.of(ModelRef.of("llama_cpp", profile.alias())), List.of());
+            String text = ModelsCommand.renderInstalledModels(
+                    List.of(ModelRef.of("llama_cpp", profile.alias())), List.of());
 
-        assertTrue(text.contains("llama_cpp/granite-4.1-3b  (catalog experimental selectable)"), text);
-        assertFalse(text.contains("accepted beta stability"), text);
+            assertTrue(text.contains("llama_cpp/" + alias + "  (catalog experimental selectable)"), text);
+            assertFalse(text.contains("accepted beta stability"), text);
+        }
     }
 
     @Test
