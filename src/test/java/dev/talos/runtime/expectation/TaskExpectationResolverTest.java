@@ -300,6 +300,67 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsCompleteQuotedReplacementFromInstalledSmokeWording() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In README.md, replace the exact text \"The profile smoke is pending.\" "
+                        + "with \"The profile smoke passed.\" Change nothing else.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size(), expectations.toString());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("README.md", replacement.targetPath());
+        assertEquals("The profile smoke is pending.", replacement.oldText());
+        assertEquals("The profile smoke passed.", replacement.newText());
+        assertEquals("replacement-scoped-prefix-replace-with", replacement.sourcePattern());
+        assertTrue(replacement.preserveRest());
+    }
+
+    @Test
+    void extractsCompleteQuotedReplacementFromTrailingTargetWording() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Replace the exact text \"old phrase\" with \"new phrase\" in README.md.");
+
+        ReplacementExpectation replacement = replacementFor(
+                TaskExpectationResolver.resolve(contract),
+                "README.md");
+
+        assertEquals("old phrase", replacement.oldText());
+        assertEquals("new phrase", replacement.newText());
+        assertEquals("replacement-replace-with-in-target", replacement.sourcePattern());
+    }
+
+    @Test
+    void extractsCompleteSingleQuotedAndBacktickReplacementLiterals() {
+        TaskContract singleQuoted = TaskContractResolver.fromUserRequest(
+                "In README.md, replace the exact phrase 'old phrase' with 'new phrase'.");
+        TaskContract backtickQuoted = TaskContractResolver.fromUserRequest(
+                "In README.md, replace the exact string `old value` with `new value`.");
+
+        ReplacementExpectation single = replacementFor(
+                TaskExpectationResolver.resolve(singleQuoted),
+                "README.md");
+        ReplacementExpectation backtick = replacementFor(
+                TaskExpectationResolver.resolve(backtickQuoted),
+                "README.md");
+
+        assertEquals("old phrase", single.oldText());
+        assertEquals("new phrase", single.newText());
+        assertEquals("old value", backtick.oldText());
+        assertEquals("new value", backtick.newText());
+    }
+
+    @Test
+    void incompleteQuotedReplacementDoesNotCreateAPartialExpectation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "In README.md, replace the exact text \"old phrase with \"new phrase\".");
+
+        assertTrue(TaskExpectationResolver.resolve(contract).stream()
+                        .noneMatch(ReplacementExpectation.class::isInstance),
+                TaskExpectationResolver.resolve(contract).toString());
+    }
+
+    @Test
     void extractsAppendLineExpectationForScopedPrefixForm() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "In notes.md, append the line: DONE");

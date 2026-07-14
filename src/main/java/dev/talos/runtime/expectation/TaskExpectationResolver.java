@@ -35,6 +35,7 @@ public final class TaskExpectationResolver {
                     + "(?:rest|remainder|remaining\\s+content|everything\\s+else|other\\s+content)\\b"
                     + "|\\bdo\\s+not\\s+change\\s+"
                     + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
+                    + "|\\b(?:change|edit|modify|touch)\\s+nothing\\s+else\\b"
                     + "|\\bwithout\\s+changing\\s+"
                     + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b");
     private static final Pattern EXACT_CONTENT_TRAILING_SCOPE = Pattern.compile(
@@ -62,6 +63,12 @@ public final class TaskExpectationResolver {
             "\\bin\\s+`?[A-Za-z0-9_./\\\\-]+\\.[A-Za-z0-9][A-Za-z0-9_-]*`?";
     private static final String REPLACEMENT_TEXT =
             "(?:(?!(?:" + NEXT_MUTATION_CLAUSE + "|" + TARGET_REFERENCE_CLAUSE + ")).)+?";
+    private static final String QUOTED_REPLACEMENT_TEXT =
+            "(?:\"[^\"\\r\\n]+\"|'[^'\\r\\n]+'|`[^`\\r\\n]+`)";
+    private static final String REPLACEMENT_OPERAND =
+            "(?:" + QUOTED_REPLACEMENT_TEXT + "|" + REPLACEMENT_TEXT + ")";
+    private static final String EXACT_REPLACEMENT_DESCRIPTOR =
+            "(?:the\\s+exact\\s+(?:text|string|word|phrase)\\s+)?";
 
     private TaskExpectationResolver() {}
 
@@ -502,8 +509,9 @@ public final class TaskExpectationResolver {
         // preserve-rest verifier and exact guards engage for both.
         Pattern scopedPrefixReplaceWith = Pattern.compile(
                 "(?is)(?:^|[.!?]\\s+)(?:in|inside|within)\\s+`?" + quoted
-                        + "`?\\s*[,:]\\s*(?:please\\s+)?replace\\s+(" + REPLACEMENT_TEXT
-                        + ")\\s+with\\s+(" + REPLACEMENT_TEXT
+                        + "`?\\s*[,:]\\s*(?:please\\s+)?replace\\s+"
+                        + EXACT_REPLACEMENT_DESCRIPTOR + "(" + REPLACEMENT_OPERAND
+                        + ")\\s+with\\s+(" + REPLACEMENT_OPERAND
                         + ")(?=$|[.!?]|\\s*$|\\s+[a-z(`'\"])");
         Matcher matcher = scopedPrefixReplaceWith.matcher(request);
         if (matcher.find()) {
@@ -515,8 +523,9 @@ public final class TaskExpectationResolver {
                     preserveRest);
         }
         Pattern replaceWithInTarget = Pattern.compile(
-                "(?is)\\breplace\\s+(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                "(?is)\\breplace\\s+" + EXACT_REPLACEMENT_DESCRIPTOR
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+with\\s+"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = replaceWithInTarget.matcher(request);
         if (matcher.find()) {
@@ -529,8 +538,8 @@ public final class TaskExpectationResolver {
         }
         Pattern continuedReplaceWithInTarget = Pattern.compile(
                 "(?is)\\b(?:and|then|also|next|second|third)\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+with\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+with\\s+"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = continuedReplaceWithInTarget.matcher(request);
         if (matcher.find()) {
@@ -545,8 +554,8 @@ public final class TaskExpectationResolver {
         Pattern changeFromToInTarget = Pattern.compile(
                 "(?is)\\b(?:change|update|set)\\s+(?:the\\s+)?(?:page\\s+)?"
                         + "(?:title|text|label|string|word|phrase)\\s+from\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+to\\s+"
-                        + "(" + REPLACEMENT_TEXT + ")\\s+in\\s+`?"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+to\\s+"
+                        + "(" + REPLACEMENT_OPERAND + ")\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = changeFromToInTarget.matcher(request);
         if (matcher.find()) {
@@ -576,6 +585,9 @@ public final class TaskExpectationResolver {
             String sourcePattern,
             boolean preserveRest
     ) {
+        if (hasIncompleteBoundaryQuote(rawOldText) || hasIncompleteBoundaryQuote(rawNewText)) {
+            return null;
+        }
         String oldText = normalizeReplacementText(rawOldText);
         String newText = normalizeReplacementText(rawNewText);
         if (oldText.isBlank() || newText.isBlank()) return null;
@@ -594,6 +606,14 @@ public final class TaskExpectationResolver {
             trimmed = trimmed.substring(0, newline).strip();
         }
         return stripWrappingQuotes(trimmed).strip();
+    }
+
+    private static boolean hasIncompleteBoundaryQuote(String raw) {
+        String trimmed = raw == null ? "" : raw.strip();
+        if (trimmed.isEmpty()) return false;
+        char first = trimmed.charAt(0);
+        if (first != '"' && first != '\'' && first != '`') return false;
+        return trimmed.length() < 2 || trimmed.charAt(trimmed.length() - 1) != first;
     }
 
     private static String normalizeAppendLine(String raw) {

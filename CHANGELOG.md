@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1131] Exact quoted replacement requests now preserve complete old and new
+  literals across scoped and trailing target forms. Natural `the exact text`
+  wording and `change nothing else` now activate deterministic replacement and
+  preserve-rest verification instead of producing a truncated expectation.
 - [T1130] Qwen3 4B Instruct 2507 is now an experimental selectable profile
   bound to the exact controlled Q4_K_M conversion and protocol-v5 scorecard.
   Setup requires and verifies local bytes, preserves `--reasoning off`, and

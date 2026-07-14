@@ -3871,6 +3871,29 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void exactQuotedReplacementPassesForTheInstalledSmokeWording() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                # Smoke
+
+                The profile smoke passed.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "In README.md, replace the exact text \"The profile smoke is pending.\" "
+                        + "with \"The profile smoke passed.\" Change nothing else.",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "The profile smoke is pending.",
+                        "The profile smoke passed.",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
+    }
+
+    @Test
     void replacementExpectationFailsWhenOldTextRemains() throws Exception {
         Files.writeString(workspace.resolve("script.js"), """
                 document.querySelector('.missing-button');
