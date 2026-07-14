@@ -36,7 +36,7 @@ class TrustClaimsHonestyTest {
     private static final String LARGE_MODEL_BOUNDARY =
             "The accepted beta profiles are large local-model lanes";
     private static final String EXPERIMENTAL_MODEL_BOUNDARY =
-            "Qwen3-8B, Granite 4.1 3B, Qwen3.6-VibeForged, and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles";
+            "Qwen3-8B, Granite 4.1 3B, Qwen3 4B Instruct 2507, Qwen3.6-VibeForged, and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles";
     private static final String GPT_OSS_LOCAL_GGUF_BOUNDARY =
             "gpt-oss-20b requires a concrete local GGUF model path";
     private static final String DEEPSEEK_TOOL_MODE_BOUNDARY =
@@ -45,6 +45,8 @@ class TrustClaimsHonestyTest {
             "Qwen3-8B is an experimental selectable profile";
     private static final String GRANITE_EXPERIMENTAL_BOUNDARY =
             "Granite 4.1 3B is an experimental selectable profile";
+    private static final String QWEN3_FOUR_B_EXPERIMENTAL_BOUNDARY =
+            "Qwen3 4B Instruct 2507 is an experimental selectable profile";
 
     private static final Pattern MISUSED_AGENTHALLU_STAT =
             Pattern.compile("11\\.6%.{0,120}(detect|detection|solution|solves|prove|proves)",
@@ -103,7 +105,8 @@ class TrustClaimsHonestyTest {
                 GPT_OSS_LOCAL_GGUF_BOUNDARY,
                 DEEPSEEK_TOOL_MODE_BOUNDARY,
                 QWEN3_EXPERIMENTAL_BOUNDARY,
-                GRANITE_EXPERIMENTAL_BOUNDARY)) {
+                GRANITE_EXPERIMENTAL_BOUNDARY,
+                QWEN3_FOUR_B_EXPERIMENTAL_BOUNDARY)) {
             assertContainsNormalized(docs, required);
         }
     }
@@ -148,6 +151,7 @@ class TrustClaimsHonestyTest {
         assertContainsNormalized(modelProfiles, DEEPSEEK_TOOL_MODE_BOUNDARY);
         assertContainsNormalized(modelProfiles, QWEN3_EXPERIMENTAL_BOUNDARY);
         assertContainsNormalized(modelProfiles, GRANITE_EXPERIMENTAL_BOUNDARY);
+        assertContainsNormalized(modelProfiles, QWEN3_FOUR_B_EXPERIMENTAL_BOUNDARY);
         assertContains(modelProfiles, "talos setup models --profile qwen2.5-coder-14b");
         assertContains(modelProfiles, "talos setup models --profile gpt-oss-20b");
         assertContains(modelProfiles, "talos doctor --start");

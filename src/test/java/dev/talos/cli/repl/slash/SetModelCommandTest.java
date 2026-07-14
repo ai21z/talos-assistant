@@ -116,6 +116,24 @@ class SetModelCommandTest {
     }
 
     @Test
+    void qwen3FourBGuidanceRequiresTheControlledLocalArtifact() {
+        var downloaded = List.of(ModelRef.of("llama_cpp", "qwen3-4b-instruct-2507-Q4_K_M"));
+        var profile = LlamaCppModelCatalog
+                .profileForGgufFile("qwen3-4b-instruct-2507-Q4_K_M")
+                .orElseThrow();
+
+        String text = SetModelCommand.modelNotFoundMessage(
+                "qwen3-4b-instruct-2507-Q4_K_M", downloaded, profile);
+
+        assertTrue(text.contains("exact local GGUF path"), text);
+        assertTrue(text.contains("--profile qwen3-4b"), text);
+        assertTrue(text.contains("--model-path"), text);
+        assertTrue(text.contains("qwen3-4b-instruct-2507-Q4_K_M.gguf"), text);
+        assertFalse(text.contains("hf_repo:"), text);
+        assertFalse(text.contains("hf_file:"), text);
+    }
+
+    @Test
     void unknownNameWithDownloadedListFallsBackToGenericHint() {
         var downloaded = List.of(ModelRef.of("llama_cpp", "qwen2.5-coder-14b-instruct-q4_k_m"));
 

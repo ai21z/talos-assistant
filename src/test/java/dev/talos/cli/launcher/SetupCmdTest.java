@@ -50,6 +50,7 @@ class SetupCmdTest {
         assertTrue(description.contains("Run talos setup models for the current list"), description);
         assertFalse(description.contains("qwen2.5-coder-14b"), description);
         assertFalse(description.contains("granite-4.1-3b"), description);
+        assertFalse(description.contains("qwen3-4b"), description);
     }
 
     @Test
@@ -93,6 +94,11 @@ class SetupCmdTest {
         assertTrue(help.contains("granite-4.1-3b-Q4_K_M.gguf"), help);
         assertTrue(help.contains("granite-4.1-3b-full-p5-3b691d80-a10-b9918-cuda13-20260713"), help);
         assertTrue(help.contains("16 of 24 scenario definitions and 47 of 72 trials"), help);
+        assertTrue(help.contains("qwen3-4b"), help);
+        assertTrue(help.contains("qwen3-4b-instruct-2507-Q4_K_M.gguf"), help);
+        assertTrue(help.contains("qwen3-4b-full-p5-f6a2edf6-a8-b9918-cuda13-20260714"), help);
+        assertTrue(help.contains("20 of 24 scenario definitions and 58 of 72 trials"), help);
+        assertTrue(help.contains("47 of 54 required-tool decisions"), help);
         assertTrue(help.contains("win-x64-cuda-13.3:b9918"), help);
         assertTrue(help.contains("native/default"));
         assertTrue(help.contains("text/tool-prompt"));
@@ -361,6 +367,97 @@ class SetupCmdTest {
     }
 
     @Test
+    void qwen3FourBExperimentalProfileUsesExactLocalArtifactAndNonThinkingRuntime() {
+        Path server = tempDir.resolve("llama-server.exe");
+        Path model = tempDir.resolve("models").resolve("qwen3-4b-instruct-2507-Q4_K_M.gguf");
+
+        String yaml = SetupCmd.renderManagedLlamaCppProfileConfig(
+                "qwen3-4b",
+                server,
+                model,
+                tempDir.resolve(".talos").resolve("models").resolve("huggingface"),
+                18115);
+
+        assertTrue(yaml.contains("model: \"qwen3-4b\""), yaml);
+        assertTrue(yaml.contains("model_path: \"" + model.toString().replace('\\', '/') + "\""), yaml);
+        assertTrue(yaml.contains("hf_repo: \"\""), yaml);
+        assertTrue(yaml.contains("hf_file: \"\""), yaml);
+        assertTrue(yaml.contains("server_args:\n      - \"--reasoning\"\n      - \"off\""), yaml);
+        assertTrue(yaml.contains("native_calling: true"), yaml);
+        assertTrue(yaml.contains("context: 8192"), yaml);
+        assertTrue(yaml.contains("context_reason: \"8192 selected: qwen3-4b experimental selectable"), yaml);
+        assertFalse(yaml.contains("unverified profile"), yaml);
+    }
+
+    @Test
+    void qwen3FourBSetupRefusesSameNamedBytesThatDoNotMatchQualification() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("models").resolve("qwen3-4b-instruct-2507-Q4_K_M.gguf");
+        Files.createDirectories(model.getParent());
+        Files.writeString(model, "not the qualified model", StandardCharsets.UTF_8);
+        Path config = tempDir.resolve("qwen3-4b-config.yaml");
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+
+        int exit;
+        try {
+            System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+            exit = new CommandLine(new SetupCmd()).execute(
+                    "models",
+                    "--profile", "qwen3-4b",
+                    "--server-path", server.toString(),
+                    "--model-path", model.toString(),
+                    "--write",
+                    "--config", config.toString());
+        } finally {
+            System.setErr(previousErr);
+        }
+
+        assertEquals(2, exit);
+        assertFalse(Files.exists(config), "mismatched bytes must not produce a qualified-profile config");
+        assertTrue(stderr.toString(StandardCharsets.UTF_8).contains(
+                        "does not match the pinned qwen3-4b artifact"),
+                stderr.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void experimentalLocalOnlyProfilesNeverClaimTheWizardCanDownloadThem() throws Exception {
+        Path server = tempDir.resolve("llama-server.exe");
+        Files.writeString(server, "fake server", StandardCharsets.UTF_8);
+        Path home = tempDir.resolve("isolated-home");
+        Path cache = tempDir.resolve("empty-cache");
+        Files.createDirectories(cache);
+
+        for (String alias : java.util.List.of("qwen3-8b", "granite-4.1-3b", "qwen3-4b")) {
+            Path config = tempDir.resolve(alias + "-missing.yaml");
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            PrintStream previousErr = System.err;
+            int exit;
+            try {
+                System.setErr(new PrintStream(stderr, true, StandardCharsets.UTF_8));
+                exit = withUserHome(home, () -> new CommandLine(new SetupCmd()).execute(
+                        "models",
+                        "--profile", alias,
+                        "--server-path", server.toString(),
+                        "--cache-dir", cache.toString(),
+                        "--write",
+                        "--config", config.toString()));
+            } finally {
+                System.setErr(previousErr);
+            }
+
+            String error = stderr.toString(StandardCharsets.UTF_8);
+            assertEquals(2, exit, error);
+            assertFalse(Files.exists(config), "missing local bytes must not produce config for " + alias);
+            assertTrue(error.contains(alias + " requires an exact local GGUF"), error);
+            assertTrue(error.contains("not available as a wizard download"), error);
+            assertTrue(error.contains("docs/reference/model-profiles.md"), error);
+            assertFalse(error.contains("run talos setup wizard to download"), error);
+        }
+    }
+
+    @Test
     void generatedUserOwnedModelConfigUsesModelPathAndDoesNotSetHuggingFaceSource() {
         Path server = tempDir.resolve("llama-server.exe");
         Path model = tempDir.resolve("models").resolve("agent.gguf");
@@ -477,7 +574,7 @@ class SetupCmdTest {
         assertEquals(2, exit);
         assertFalse(Files.exists(config), "unresolved GPT-OSS setup must not write a non-startable config");
         String text = stderr.toString(StandardCharsets.UTF_8);
-        assertTrue(text.contains("gpt-oss-20b requires a local GGUF"), text);
+        assertTrue(text.contains("gpt-oss-20b requires an exact local GGUF"), text);
         assertTrue(text.contains("--model-path"), text);
         assertTrue(text.contains("talos setup wizard"), text);
     }

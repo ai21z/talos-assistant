@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1130] Qwen3 4B Instruct 2507 is now an experimental selectable profile
+  bound to the exact controlled Q4_K_M conversion and protocol-v5 scorecard.
+  Setup requires and verifies local bytes, preserves `--reasoning off`, and
+  excludes wizard downloads, accepted beta wording, and untested hardware or
+  platform claims.
 - [T1128] Aborted model generations now record one bounded reason code and a
   separate partial-output fact in the local trace. Qualification treats only a
   visibly disclosed, no-answer repetition abort as a model failure, while

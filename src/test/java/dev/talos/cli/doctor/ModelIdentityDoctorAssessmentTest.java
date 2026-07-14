@@ -75,6 +75,43 @@ class ModelIdentityDoctorAssessmentTest {
     }
 
     @Test
+    void qualifiedQwen3FourBIdentityPassesAsTheExactCatalogProfile() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("qwen3-4b")
+                .orElseThrow();
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(profile.alias())
+                .configuredModelFile("C:/private/" + profile.artifactFile())
+                .declaredProfile(profile.alias())
+                .resolvedProfile(profile.alias())
+                .observedModelFile("D:/private/" + profile.artifactFile())
+                .artifactState("EXACT")
+                .artifactVerificationIdentity(profile.artifactSha256())
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveContextTokens(profile.runtime().contextTokens())
+                .engineLane(profile.runtime().compatibleEngineLanes().getFirst())
+                .disposition(profile.disposition().label())
+                .propsState("AVAILABLE")
+                .propsResponseSha256("b".repeat(64))
+                .chatAvailable(true)
+                .build();
+
+        ModelIdentityDoctorAssessment assessment = ModelIdentityDoctorAssessment.assess(identity);
+
+        assertEquals(ProbeResult.Status.PASS, assessment.status());
+        assertTrue(assessment.detail().contains("identity qualified"), assessment.detail());
+        assertTrue(assessment.detail().contains("qwen3-4b"), assessment.detail());
+        assertTrue(assessment.detail().contains("artifact exact"), assessment.detail());
+        assertTrue(assessment.detail().contains("serving matched"), assessment.detail());
+        assertTrue(assessment.detail().contains("tools native"), assessment.detail());
+        assertFalse(assessment.detail().contains("C:/private"), assessment.detail());
+        assertFalse(assessment.detail().contains("D:/private"), assessment.detail());
+    }
+
+    @Test
     void reachableConnectOnlyServerWithoutPropsWarnsRatherThanPassesOrFails() {
         ModelIdentitySnapshot identity = base()
                 .artifactState("UNCHECKED")

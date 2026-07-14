@@ -33,7 +33,8 @@ class LlamaCppModelCatalogTest {
                         "qwen36vf-q6k",
                         "deepseek-v2lite-q4km",
                         "qwen3-8b",
-                        "granite-4.1-3b"),
+                        "granite-4.1-3b",
+                        "qwen3-4b"),
                 LlamaCppModelCatalog.selectableProfiles().stream()
                         .map(LlamaCppModelCatalog.Profile::alias)
                         .toList());
@@ -117,6 +118,46 @@ class LlamaCppModelCatalogTest {
                 granite.evidenceSummary());
         assertTrue(granite.evidenceSummary().contains("zero trust failures"),
                 granite.evidenceSummary());
+    }
+
+    @Test
+    void qwen3FourBProjectsTheExactControlledExperimentalQualification() {
+        var qwen = LlamaCppModelCatalog.byAlias("qwen3-4b").orElseThrow();
+
+        assertEquals("Qwen/Qwen3-4B-Instruct-2507", qwen.repository());
+        assertEquals("cdbee75f17c01a7cc42f958dc650907174af0554", qwen.revision());
+        assertEquals("qwen3-4b-instruct-2507-Q4_K_M.gguf", qwen.artifactFile());
+        assertEquals("1e5b123fcb51bcffa922c21f00e47a8ee3450c455cdacb0aafba0573827b3f73",
+                qwen.artifactSha256());
+        assertEquals(2_497_279_008L, qwen.artifactSizeBytes());
+        assertEquals("Apache-2.0", qwen.license());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE, qwen.disposition());
+        assertTrue(qwen.selectable());
+        assertTrue(qwen.requiresLocalModelPath());
+        assertEquals(false, qwen.wizardDownload());
+        assertEquals(true, qwen.nativeCalling());
+        assertEquals("native/default", qwen.toolMode());
+        assertEquals(8_192, qwen.runtime().contextTokens());
+        assertEquals(8_192, qwen.runtime().maxContextTokens());
+        assertEquals(List.of("--reasoning", "off"), qwen.runtime().managedServerArgs());
+        assertEquals(List.of("win-x64-cuda-13.3:b9918"), qwen.runtime().compatibleEngineLanes());
+        assertTrue(qwen.runtime().architecture().contains("36 layers"), qwen.runtime().architecture());
+        assertTrue(qwen.runtime().parameterShape().contains("4.022468096B"), qwen.runtime().parameterShape());
+        assertEquals(5, qwen.qualification().protocolRevision());
+        assertEquals(
+                "local/model-qualification/qwen3-4b-full-p5-f6a2edf6-a8-b9918-cuda13-20260714",
+                qwen.evidencePacket());
+        assertEquals("f6a2edf644512d90100b871a90876469eeb2482d", qwen.qualification().talosCommit());
+        assertEquals("118c04c92758ce068cd06c69e3ac77995dd6ad18fd05cd866a4dce7cb008cb94",
+                qwen.qualification().scorecardSha256());
+        assertEquals(LocalDate.of(2026, 7, 14), qwen.qualification().qualifiedOn());
+        assertTrue(qwen.evidenceSummary().contains("20 of 24 scenario definitions"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("58 of 72 trials"), qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("47 of 54 required-tool decisions"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("zero trust failures"), qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("not accepted beta"), qwen.evidenceSummary());
     }
 
     @Test

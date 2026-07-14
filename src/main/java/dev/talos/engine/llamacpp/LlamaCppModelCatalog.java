@@ -209,6 +209,7 @@ public final class LlamaCppModelCatalog {
         profiles.add(deepSeekV2Lite());
         profiles.add(qwen3EightB());
         profiles.add(granite41ThreeB());
+        profiles.add(qwen3FourB());
         validateProfiles(profiles);
         LinkedHashMap<String, Profile> indexed = new LinkedHashMap<>();
         for (Profile profile : profiles) {
@@ -450,6 +451,44 @@ public final class LlamaCppModelCatalog {
                         "experimental full-bank evidence: 16 of 24 scenario definitions and 47 of 72 trials passed, with zero trust failures, not accepted beta or weak-hardware evidence"),
                 MODEL_PROFILES_GUIDE,
                 "32 GiB system RAM and a 16 GiB-class CUDA reference lane, experimental evidence only, no weak-hardware claim");
+    }
+
+    private static Profile qwen3FourB() {
+        return new Profile(
+                "qwen3-4b",
+                new ModelArtifact(
+                        "Qwen/Qwen3-4B-Instruct-2507",
+                        "cdbee75f17c01a7cc42f958dc650907174af0554",
+                        "qwen3-4b-instruct-2507-Q4_K_M.gguf",
+                        "1e5b123fcb51bcffa922c21f00e47a8ee3450c455cdacb0aafba0573827b3f73",
+                        2_497_279_008L,
+                        "Apache-2.0"),
+                new RuntimeDefaults(
+                        "Qwen3 dense decoder-only text model, 36 layers, hidden size 2560, 32 query heads, and 8 KV heads",
+                        "4.022468096B total parameters, dense-active",
+                        true,
+                        "native/default",
+                        "non-thinking Qwen3 Instruct 2507 via llama.cpp --reasoning off",
+                        "embedded Qwen3 Jinja template from the controlled local conversion",
+                        8_192,
+                        8_192,
+                        "Talos standard request controls, three uncontrolled qualification repetitions",
+                        List.of("--reasoning", "off"),
+                        List.of("win-x64-cuda-13.3:b9918"),
+                        "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM, 32 GiB system RAM campaign floor, no low-resource claim",
+                        true),
+                new QualificationEvidence(
+                        Disposition.EXPERIMENTAL_SELECTABLE,
+                        true,
+                        false,
+                        5,
+                        "local/model-qualification/qwen3-4b-full-p5-f6a2edf6-a8-b9918-cuda13-20260714",
+                        "f6a2edf644512d90100b871a90876469eeb2482d",
+                        "118c04c92758ce068cd06c69e3ac77995dd6ad18fd05cd866a4dce7cb008cb94",
+                        LocalDate.of(2026, 7, 14),
+                        "experimental full-bank evidence: 20 of 24 scenario definitions and 58 of 72 trials passed, 114 of 129 requirements and 47 of 54 required-tool decisions passed, with zero trust failures, not accepted beta or low-resource evidence"),
+                MODEL_PROFILES_GUIDE,
+                "Windows x64 CUDA 13.3 reference evidence with 16 GiB-class VRAM and a 32 GiB system RAM campaign floor, no minimum-hardware or low-resource claim");
     }
 
     private static QualificationEvidence legacyEvidence(

@@ -64,7 +64,8 @@ public final class LlamaCppModelArtifactVerifier {
             LlamaCppModelCatalog.ModelArtifact artifact,
             String detail) {
         return new IllegalArgumentException("Local GGUF does not match the pinned " + alias
-                + " artifact: " + detail + ". Use " + artifact.fileName()
-                + " from repository revision " + artifact.revision() + ".");
+                + " artifact: " + detail + ". Use the exact artifact described by profile "
+                + alias + ": " + artifact.fileName() + ", source " + artifact.repository()
+                + "@" + artifact.revision() + ".");
     }
 }

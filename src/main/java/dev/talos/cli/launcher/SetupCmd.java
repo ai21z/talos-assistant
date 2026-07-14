@@ -451,11 +451,17 @@ public class SetupCmd implements Callable<Integer> {
             return new ModelPathSelection(cached, true);
         }
         if (known.requiresLocalModelPath()) {
-            throw new IllegalArgumentException(known.alias()
-                    + " requires a local GGUF before setup can write a startable config. "
+            String guidance = known.alias()
+                    + " requires an exact local GGUF before setup can write a startable config. "
                     + "Pass --model-path " + known.artifactFile()
-                    + ", place " + known.artifactFile() + " in the standard Hugging Face cache, "
-                    + "or run talos setup wizard to download the pinned model.");
+                    + " or place the exact file in a configured local cache.";
+            if (known.wizardDownload()) {
+                guidance += " You can also run talos setup wizard to download the pinned model.";
+            } else {
+                guidance += " This profile is local-path-only and is not available as a wizard download. "
+                        + "See " + known.guidePath() + ".";
+            }
+            throw new IllegalArgumentException(guidance);
         }
         return new ModelPathSelection(null, false);
     }

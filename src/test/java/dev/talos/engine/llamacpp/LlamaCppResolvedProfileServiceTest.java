@@ -72,6 +72,35 @@ class LlamaCppResolvedProfileServiceTest {
     }
 
     @Test
+    void matchingQwen3FourBFactsProjectTheControlledExperimentalProfile() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3-4b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", model, serverPath(), true, List.of("--reasoning", "off"));
+        var service = service(
+                config,
+                exactArtifact(profile, model),
+                matchedEngine(profile),
+                availableProps(model, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.QUALIFIED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.NATIVE, snapshot.profile().effectiveToolMode());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE,
+                snapshot.profile().disposition());
+        assertEquals("qwen3-4b", snapshot.identity().configuredModel());
+        assertEquals("qwen3-4b", snapshot.identity().declaredProfile());
+        assertEquals("qwen3-4b", snapshot.identity().resolvedProfile());
+        assertEquals("qwen3-4b-instruct-2507-Q4_K_M.gguf", snapshot.identity().observedModelFile());
+        assertEquals("experimental selectable", snapshot.identity().disposition());
+        assertEquals("NATIVE", snapshot.identity().effectiveToolMode());
+        assertEquals(8192, snapshot.identity().effectiveContextTokens());
+        assertTrue(snapshot.identity().qualified());
+        assertTrue(!snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+    }
+
+    @Test
     void qwen14Selected16kContextProjectsQualifiedIdentity() {
         var profile = LlamaCppModelCatalog.byAlias("qwen2.5-coder-14b").orElseThrow();
         Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();

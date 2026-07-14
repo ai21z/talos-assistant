@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,6 +55,30 @@ class LlamaCppModelArtifactVerifierTest {
                         model, "test-profile", artifact(actual.length + 1, sha256(actual))));
 
         assertTrue(error.getMessage().contains("size"), error.getMessage());
+    }
+
+    @Test
+    void controlledConversionMismatchDoesNotClaimTheGgufIsPublishedInTheSourceRepository() throws Exception {
+        byte[] actual = "actual".getBytes(StandardCharsets.UTF_8);
+        byte[] expected = "expect".getBytes(StandardCharsets.UTF_8);
+        Path model = tempDir.resolve("qwen3-4b-instruct-2507-Q4_K_M.gguf");
+        Files.write(model, actual);
+        var controlled = new LlamaCppModelCatalog.ModelArtifact(
+                "Qwen/Qwen3-4B-Instruct-2507",
+                "cdbee75f17c01a7cc42f958dc650907174af0554",
+                "qwen3-4b-instruct-2507-Q4_K_M.gguf",
+                sha256(expected),
+                actual.length,
+                "Apache-2.0");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> LlamaCppModelArtifactVerifier.requireMatch(model, "qwen3-4b", controlled));
+
+        assertTrue(error.getMessage().contains("exact artifact described by profile qwen3-4b"),
+                error.getMessage());
+        assertTrue(error.getMessage().contains("source Qwen/Qwen3-4B-Instruct-2507@cdbee75f"),
+                error.getMessage());
+        assertFalse(error.getMessage().contains("from repository revision"), error.getMessage());
     }
 
     @Test

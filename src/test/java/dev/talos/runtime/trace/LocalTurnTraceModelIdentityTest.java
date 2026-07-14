@@ -100,4 +100,48 @@ class LocalTurnTraceModelIdentityTest {
         assertEquals("granite-4.1-3b-Q4_K_M.gguf", event.data().get("observedModelFile"));
         assertFalse(event.data().toString().contains("C:/private"));
     }
+
+    @Test
+    void recordsQualifiedQwen3FourBDispositionWithoutLeakingPaths() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("qwen3-4b")
+                .orElseThrow();
+        LocalTurnTraceCapture.begin(
+                "trc-qwen3-4b-identity",
+                "sid-qwen3-4b-identity",
+                1,
+                "2026-07-14T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                profile.alias(),
+                "read README.md");
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(profile.alias())
+                .configuredModelFile("C:/configured/" + profile.artifactFile())
+                .declaredProfile(profile.alias())
+                .resolvedProfile(profile.alias())
+                .observedModelFile("C:/private/" + profile.artifactFile())
+                .artifactState("EXACT")
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveContextTokens(profile.runtime().contextTokens())
+                .disposition(profile.disposition().label())
+                .propsResponseSha256("d".repeat(64))
+                .build();
+
+        LocalTurnTraceCapture.recordModelIdentity(identity);
+
+        TurnTraceEvent event = LocalTurnTraceCapture.complete().events().stream()
+                .filter(candidate -> "MODEL_IDENTITY_RESOLVED".equals(candidate.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("qwen3-4b", event.data().get("configuredModel"));
+        assertEquals("qwen3-4b", event.data().get("resolvedProfile"));
+        assertEquals("experimental selectable", event.data().get("disposition"));
+        assertEquals("qwen3-4b-instruct-2507-Q4_K_M.gguf", event.data().get("observedModelFile"));
+        assertFalse(event.data().toString().contains("C:/private"));
+    }
 }

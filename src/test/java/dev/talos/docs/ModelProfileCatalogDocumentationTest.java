@@ -35,4 +35,20 @@ class ModelProfileCatalogDocumentationTest {
         assertTrue(docs.contains("Exact local GGUF path required"), docs);
         assertTrue(docs.contains("does not establish CPU-only, Linux, WSL, Vulkan, or weak-PC support"), docs);
     }
+
+    @Test
+    void qwen3FourBReferencePinsControlledExperimentalEvidenceAndUnsupportedLanes() throws Exception {
+        var qwen = LlamaCppModelCatalog.byAlias("qwen3-4b").orElseThrow();
+        String docs = Files.readString(Path.of("docs/reference/model-profiles.md"));
+
+        assertTrue(docs.contains(qwen.revision()), docs);
+        assertTrue(docs.contains(qwen.artifactSha256()), docs);
+        assertTrue(docs.contains(qwen.evidencePacket()), docs);
+        assertTrue(docs.contains("controlled local conversion"), docs);
+        assertTrue(docs.contains("20 of 24 scenario definitions and 58 of 72 trials"), docs);
+        assertTrue(docs.contains("47 of 54 required-tool decisions"), docs);
+        assertTrue(docs.contains("Exact local GGUF path required"), docs);
+        assertTrue(docs.contains("not available as a wizard download"), docs);
+        assertTrue(docs.contains("does not establish CPU-only, Linux, WSL, Vulkan, or weak-PC support"), docs);
+    }
 }

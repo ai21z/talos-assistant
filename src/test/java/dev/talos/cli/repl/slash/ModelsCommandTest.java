@@ -103,6 +103,19 @@ class ModelsCommandTest {
     }
 
     @Test
+    void renderMarksQwen3FourBAsExperimentalRatherThanAccepted() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("qwen3-4b")
+                .orElseThrow();
+
+        String text = ModelsCommand.renderInstalledModels(
+                List.of(ModelRef.of("llama_cpp", profile.alias())), List.of());
+
+        assertTrue(text.contains("llama_cpp/qwen3-4b  (catalog experimental selectable)"), text);
+        assertFalse(text.contains("accepted beta stability"), text);
+    }
+
+    @Test
     void activeModelUsesResolvedRuntimeIdentityRatherThanCatalogAlias() {
         ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
                 .backend("llama_cpp")
