@@ -34,7 +34,16 @@ public final class FileLookupAnswerGuard {
                     + "(?:(?:was|were|could\\s+be)\\s+)?found\\b"),
             Pattern.compile("(?is)\\b(?:nothing|none)\\s+(?:was\\s+)?found\\b"),
             Pattern.compile("(?is)\\b(?:files?|sources?|workspace)\\b.{0,100}"
-                    + "\\b(?:does|do|did)\\s+not\\s+contain\\b"));
+                    + "\\b(?:does|do|did)\\s+not\\s+contain\\b"),
+            Pattern.compile("(?is)(?:^|[.!?]\\s+|[\\r\\n]+)(?:the\\s+)?"
+                    + "(?:requested|relevant|service|configuration|config|workspace|file-backed|"
+                    + "files?|information|value|key|port|setting|endpoint|dependency|version|"
+                    + "script|fact)\\b.{0,100}\\b(?:was|were|is|are)\\s+not\\s+"
+                    + "(?:defined|present|available)\\b"),
+            Pattern.compile("(?is)(?:^|[.!?]\\s+|[\\r\\n]+)(?:the\\s+)?"
+                    + "(?:files?|sources?|documents?|workspace)\\b.{0,120}"
+                    + "\\bcontains?\\s+no\\s+(?:relevant\\s+)?"
+                    + "(?:information|facts?|values?|entries?|details?)\\b"));
     private static final Set<String> CONTENT_TOOLS = Set.of(
             "talos.read_file", "talos.grep", "talos.retrieve");
     private static final int MAX_DISCLOSED_SOURCES = 8;

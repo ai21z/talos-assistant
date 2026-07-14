@@ -38,10 +38,10 @@
   sentence now receive deterministic post-apply verification. Talos requires a
   unique final section, the exact sentence, and structured mutation evidence
   that preserves the prior file before it can claim verified completion.
-- [T1114] File lookup answers that report no matching lines or no relevant
-  key and value pair are now bounded to current-turn source evidence. A model
-  can no longer contradict successful grep metadata or turn an unrelated
-  search into a workspace-wide absence claim.
+- [T1114] File lookup answers that report no matching lines, no relevant key
+  and value pair, or no information in an inspected file are now bounded to
+  current-turn source evidence. A model can no longer contradict successful
+  tool metadata or turn an unrelated read into a broader absence claim.
 - [T1112] Model qualification now finalizes provider evidence through one
   tracked Java owner. An identity-only managed server startup no longer
   conflicts with authoritative no-provider evidence, while real provider

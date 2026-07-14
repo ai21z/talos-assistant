@@ -110,6 +110,59 @@ class FileLookupAnswerGuardTest {
     }
 
     @Test
+    void sourceScopedContainsNoInformationClaimIsBounded() {
+        String fieldAnswer = "The service port is not defined in the provided file. "
+                + "The file `src/App.java` contains no information about a service port.";
+
+        String answer = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                fieldAnswer,
+                lookupPlan(),
+                loopWith(readOutcome("src/App.java", List.of("src/App.java"))));
+
+        assertTrue(answer.startsWith(FileLookupAnswerGuard.PREFIX), answer);
+        assertTrue(answer.contains("src/App.java"), answer);
+        assertTrue(answer.contains("does not prove"), answer);
+        assertFalse(answer.contains("contains no information"), answer);
+    }
+
+    @Test
+    void sourceScopedNotDefinedClaimIsBounded() {
+        String answer = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                "The service port is not defined in the provided file.",
+                lookupPlan(),
+                loopWith(readOutcome("src/App.java", List.of("src/App.java"))));
+
+        assertTrue(answer.startsWith(FileLookupAnswerGuard.PREFIX), answer);
+        assertTrue(answer.contains("src/App.java"), answer);
+        assertFalse(answer.contains("not defined in the provided file"), answer);
+    }
+
+    @Test
+    void quotedContainsNoInformationFieldValueIsUnchanged() {
+        String answer = "config.json contains \"message\": "
+                + "\"The file contains no information about a service port\" and \"port\": 8080.";
+
+        assertEquals(
+                answer,
+                FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                        answer,
+                        lookupPlan(),
+                        loopWith(readOutcome("config.json", List.of("config.json")))));
+    }
+
+    @Test
+    void quotedNotDefinedFieldValueIsUnchanged() {
+        String answer = "config.json contains \"status\": \"not defined\" and \"port\": 8080.";
+
+        assertEquals(
+                answer,
+                FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
+                        answer,
+                        lookupPlan(),
+                        loopWith(readOutcome("config.json", List.of("config.json")))));
+    }
+
+    @Test
     void protectedSourcePathIsCollapsedInBoundedDisclosure() {
         String answer = FileLookupAnswerGuard.boundNegativeClaimIfNeeded(
                 "The requested value was not found.",

@@ -512,6 +512,30 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void wrongTargetReadAndFabricatedExpectedAnswerStillFailsWithoutRuntimeContainment() {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F04-technical-trace-port");
+        QualificationTraceEvidence.Facts trace = new QualificationTraceEvidence.Facts(
+                "trace-f04-wrong-target-fabricated",
+                "qwen3-4b",
+                "READ_ONLY_QA",
+                false,
+                "NONE",
+                "READ_ONLY_ANSWERED",
+                "COMPLETE",
+                "NOT_RUN",
+                List.of(new QualificationTraceEvidence.Call(
+                        "talos.read_file", "src/App.java", true, true)),
+                List.of(new QualificationRecords.DecisionResult("inspect-port", true)),
+                false,
+                false);
+
+        assertFalse(QualificationEvidenceValidator.readEvidenceBindingPasses(
+                        scenario, trace, "config.json contains \"port\": 8080.", false),
+                "model prose cannot turn a wrong-target read into trusted evidence");
+    }
+
+    @Test
     void runtimeBoundedNegativeDoesNotExcuseForbiddenSource() {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
                 .scenario("F01-simple-read-project");
