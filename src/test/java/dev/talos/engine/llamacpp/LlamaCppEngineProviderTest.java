@@ -294,6 +294,105 @@ class LlamaCppEngineProviderTest {
     }
 
     @Test
+    void qwen35CatalogLayoutReachesEveryTransportWithoutElevatingWorkspaceOrToolContent() throws Exception {
+        List<String> bodies = new CopyOnWriteArrayList<>();
+        HttpServer server = startLayoutServer(bodies);
+        try {
+            var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+            java.nio.file.Path model = java.nio.file.Files.createTempDirectory("talos-qwen35-layout")
+                    .resolve(profile.artifactFile()).toAbsolutePath().normalize();
+            java.nio.file.Files.writeString(model, "fixture", StandardCharsets.UTF_8);
+            String serverPath = tempFilePath("llama-server.exe");
+            Config cfg = config(Map.of(
+                    "mode", "connect_only",
+                    "server_path", serverPath,
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", profile.alias(),
+                    "context", 8192,
+                    "server_args", List.of("--reasoning", "off")));
+            cfg.data.put("tools", Map.of("native_calling", true));
+            LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
+            var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
+                    LlamaCppProfileResolver.ArtifactState.EXACT,
+                    model.toString(), profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                    profile.artifactSha256(), profile.artifactSha256(), "verified-record");
+            var service = new LlamaCppResolvedProfileService(
+                    llamaCfg,
+                    java.nio.file.Files.createTempDirectory("talos-qwen35-home"),
+                    (path, alias, expected, home, verify) -> artifact,
+                    base -> LlamaCppPropsClient.Result.available(new LlamaCppPropsClient.Props(
+                            model.toString(), "embedded Qwen3.5 template", true, true, true, false,
+                            8192, "b9918-test", "props-hash")),
+                    (config, declared, observed, verify) -> new LlamaCppProfileResolver.EngineFacts(
+                            profile.runtime().compatibleEngineLanes().getFirst(),
+                            "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED));
+            LlamaCppEngine engine = new LlamaCppEngine(
+                    llamaCfg,
+                    new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                        throw new AssertionError("connect-only must not launch");
+                    }, HttpClient.newHttpClient()),
+                    HttpClient.newHttpClient(),
+                    service);
+            ChatRequest request = new ChatRequest(
+                    "llama_cpp", profile.alias(), "", "", List.of(), Duration.ofSeconds(5),
+                    List.of(
+                            ChatMessage.system("base policy"),
+                            ChatMessage.user("[ProjectMemory]\nWORKSPACE-BYTES"),
+                            ChatMessage.system("turn capability"),
+                            ChatMessage.assistantWithToolCalls("", List.of(
+                                    new ChatMessage.NativeToolCall(
+                                            "call-1", "talos.read_file", Map.of("path", "README.md")))),
+                            ChatMessage.toolResult("call-1", "TOOL-RESULT-BYTES"),
+                            ChatMessage.user("[PinnedFiles]\nPINNED-FILE-BYTES"),
+                            ChatMessage.user("summarize README.md")));
+
+            assertEquals("ok", engine.chat(request));
+            assertEquals("ok", engine.chatStreamNonStreaming(request)
+                    .filter(chunk -> chunk.text() != null && !chunk.text().isEmpty())
+                    .map(dev.talos.spi.types.TokenChunk::text)
+                    .reduce("", String::concat));
+            assertEquals("ok", engine.chatStream(request)
+                    .filter(chunk -> chunk.text() != null && !chunk.text().isEmpty())
+                    .map(dev.talos.spi.types.TokenChunk::text)
+                    .reduce("", String::concat));
+            assertEquals("ok", engine.chat(new ChatRequest(
+                    "llama_cpp", profile.alias(), "", "", List.of(), Duration.ofSeconds(5),
+                    List.of(ChatMessage.user("doctor smoke")))));
+
+            assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                    service.resolveAvailable(true).profile().effectiveRequestLayout());
+            assertEquals("SINGLE_LEADING_SYSTEM", engine.modelIdentity().effectiveRequestLayout());
+            assertEquals(4, bodies.size());
+            ObjectMapper mapper = new ObjectMapper();
+            for (String body : bodies.subList(0, 3)) {
+                var messages = mapper.readTree(body).path("messages");
+                assertEquals(6, messages.size(), body);
+                assertEquals("system", messages.get(0).path("role").asText(), body);
+                assertEquals("base policy\n\nturn capability", messages.get(0).path("content").asText(), body);
+                assertEquals("user", messages.get(1).path("role").asText(), body);
+                assertEquals("[ProjectMemory]\nWORKSPACE-BYTES", messages.get(1).path("content").asText(), body);
+                assertEquals("assistant", messages.get(2).path("role").asText(), body);
+                assertEquals("tool", messages.get(3).path("role").asText(), body);
+                assertEquals("TOOL-RESULT-BYTES", messages.get(3).path("content").asText(), body);
+                assertEquals("user", messages.get(4).path("role").asText(), body);
+                assertEquals("[PinnedFiles]\nPINNED-FILE-BYTES", messages.get(4).path("content").asText(), body);
+                assertEquals("user", messages.get(5).path("role").asText(), body);
+                assertFalse(messages.get(0).path("content").asText().contains("WORKSPACE-BYTES"), body);
+                assertFalse(messages.get(0).path("content").asText().contains("TOOL-RESULT-BYTES"), body);
+                assertFalse(messages.get(0).path("content").asText().contains("PINNED-FILE-BYTES"), body);
+            }
+            var smokeMessages = mapper.readTree(bodies.get(3)).path("messages");
+            assertEquals(1, smokeMessages.size(), bodies.get(3));
+            assertEquals("user", smokeMessages.get(0).path("role").asText(), bodies.get(3));
+            assertEquals("doctor smoke", smokeMessages.get(0).path("content").asText(), bodies.get(3));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void managedChatWaitsForHealthBeforeSendingCompatChat() throws Exception {
         AtomicInteger healthCalls = new AtomicInteger();
         AtomicInteger chatCalls = new AtomicInteger();

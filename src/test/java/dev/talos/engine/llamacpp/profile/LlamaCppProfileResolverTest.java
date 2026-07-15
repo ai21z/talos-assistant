@@ -114,6 +114,7 @@ class LlamaCppProfileResolverTest {
             assertEquals(profile.disposition(), resolved.disposition(), profile.alias());
             assertEquals(profile.nativeCalling() ? ToolMode.NATIVE : ToolMode.TEXT_TOOL_PROMPT,
                     resolved.effectiveToolMode(), profile.alias());
+            assertEquals(profile.runtime().requestLayout(), resolved.effectiveRequestLayout(), profile.alias());
             assertTrue(resolved.reasons().isEmpty(), profile.alias() + ": " + resolved.reasons());
         }
     }

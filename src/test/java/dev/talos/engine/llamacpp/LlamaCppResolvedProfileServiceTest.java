@@ -3,6 +3,7 @@ package dev.talos.engine.llamacpp;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.RequestMessageLayout;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -127,6 +128,131 @@ class LlamaCppResolvedProfileServiceTest {
         assertEquals(8192, snapshot.identity().effectiveContextTokens());
         assertTrue(snapshot.identity().qualified());
         assertTrue(!snapshot.identity().reasonCodes().contains("QUALIFICATION_CANDIDATE"));
+    }
+
+    @Test
+    void matchingQwen35FactsProjectTheEvidenceGatedRequestLayout() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", model, serverPath(), true, List.of("--reasoning", "off"));
+        var service = service(
+                config,
+                exactArtifact(profile, model),
+                matchedEngine(profile),
+                availableProps(model, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.QUALIFIED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.NATIVE, snapshot.profile().effectiveToolMode());
+        assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                snapshot.profile().effectiveRequestLayout());
+        assertEquals("qwen3.5-9b", snapshot.identity().configuredModel());
+        assertEquals("qwen3.5-9b", snapshot.identity().declaredProfile());
+        assertEquals("qwen3.5-9b", snapshot.identity().resolvedProfile());
+        assertEquals("Qwen3.5-9B-Q4_K_M.gguf", snapshot.identity().observedModelFile());
+        assertEquals("experimental selectable", snapshot.identity().disposition());
+        assertEquals("NATIVE", snapshot.identity().effectiveToolMode());
+        assertEquals("SINGLE_LEADING_SYSTEM", snapshot.identity().effectiveRequestLayout());
+        assertEquals(8192, snapshot.identity().effectiveContextTokens());
+        assertTrue(snapshot.identity().qualified());
+    }
+
+    @Test
+    void qwen35CannotActivateToolsOrAdaptedLayoutWithoutRequiredLaunchArguments() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(profile.alias(), "managed", model, serverPath(), true, List.of());
+        var service = service(
+                config,
+                exactArtifact(profile, model),
+                matchedEngine(profile),
+                availableProps(model, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.REFUSED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.CHAT_ONLY, snapshot.profile().effectiveToolMode());
+        assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                snapshot.profile().effectiveRequestLayout());
+        assertTrue(snapshot.identity().reasonCodes().contains("REQUIRED_LAUNCH_ARGUMENTS_MISSING"),
+                snapshot.identity().reasonCodes().toString());
+    }
+
+    @Test
+    void qwen35CannotActivateToolsOrAdaptedLayoutForAlteredBytes() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", model, serverPath(), true, List.of("--reasoning", "off"));
+        var altered = new LlamaCppProfileResolver.ArtifactIdentity(
+                LlamaCppProfileResolver.ArtifactState.SHA256_MISMATCH,
+                model.toString(), profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                profile.artifactSha256(), "f".repeat(64), "");
+        var service = service(config, altered, matchedEngine(profile), availableProps(model, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.REFUSED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.CHAT_ONLY, snapshot.profile().effectiveToolMode());
+        assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                snapshot.profile().effectiveRequestLayout());
+        assertTrue(snapshot.identity().reasonCodes().contains("ARTIFACT_SHA256_MISMATCH"),
+                snapshot.identity().reasonCodes().toString());
+    }
+
+    @Test
+    void qwen35CannotActivateAdaptedLayoutWithoutBoundArtifactEvidence() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", model, serverPath(), true, List.of("--reasoning", "off"));
+        var unbound = new LlamaCppProfileResolver.ArtifactIdentity(
+                LlamaCppProfileResolver.ArtifactState.EXACT,
+                model.toString(), profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                profile.artifactSha256(), profile.artifactSha256(), "");
+        var service = service(config, unbound, matchedEngine(profile), availableProps(model, true));
+
+        var snapshot = service.resolveAvailable(true);
+
+        assertEquals(LlamaCppProfileResolver.ResolutionState.UNVERIFIED, snapshot.profile().resolution());
+        assertEquals(LlamaCppProfileResolver.ToolMode.CHAT_ONLY, snapshot.profile().effectiveToolMode());
+        assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                snapshot.profile().effectiveRequestLayout());
+        assertTrue(snapshot.identity().reasonCodes().contains("ARTIFACT_VERIFICATION_UNBOUND"),
+                snapshot.identity().reasonCodes().toString());
+    }
+
+    @Test
+    void qwen35CannotActivateAdaptedLayoutForWrongEngineOrServedModel() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        Path model = temp.resolve("models").resolve(profile.artifactFile()).toAbsolutePath().normalize();
+        LlamaCppConfig config = config(
+                profile.alias(), "managed", model, serverPath(), true, List.of("--reasoning", "off"));
+        var wrongEngine = service(
+                config,
+                exactArtifact(profile, model),
+                new LlamaCppProfileResolver.EngineFacts(
+                        "win-x64-cpu:b9918", "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
+                availableProps(model, true)).resolveAvailable(true);
+        Path differentModel = temp.resolve("models").resolve("different.gguf").toAbsolutePath().normalize();
+        var wrongServing = service(
+                config,
+                exactArtifact(profile, model),
+                matchedEngine(profile),
+                availableProps(differentModel, true)).resolveAvailable(true);
+
+        for (var snapshot : List.of(wrongEngine, wrongServing)) {
+            assertEquals(LlamaCppProfileResolver.ResolutionState.REFUSED, snapshot.profile().resolution());
+            assertEquals(LlamaCppProfileResolver.ToolMode.CHAT_ONLY, snapshot.profile().effectiveToolMode());
+            assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                    snapshot.profile().effectiveRequestLayout());
+        }
+        assertTrue(wrongEngine.identity().reasonCodes().contains("ENGINE_LANE_INCOMPATIBLE"),
+                wrongEngine.identity().reasonCodes().toString());
+        assertTrue(wrongServing.identity().reasonCodes().contains("SERVER_MODEL_MISMATCH"),
+                wrongServing.identity().reasonCodes().toString());
     }
 
     @Test

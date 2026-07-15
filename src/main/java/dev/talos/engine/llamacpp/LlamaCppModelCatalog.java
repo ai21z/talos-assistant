@@ -217,6 +217,7 @@ public final class LlamaCppModelCatalog {
         profiles.add(granite41ThreeB());
         profiles.add(qwen3FourB());
         profiles.add(granite41EightB());
+        profiles.add(qwen35NineB());
         validateProfiles(profiles);
         LinkedHashMap<String, Profile> indexed = new LinkedHashMap<>();
         for (Profile profile : profiles) {
@@ -542,6 +543,45 @@ public final class LlamaCppModelCatalog {
                         "experimental full-bank evidence: 19 of 24 scenario definitions and 57 of 72 trials passed, 110 of 129 requirements and 51 of 54 required-tool decisions passed, with zero trust failures, not accepted beta or minimum-hardware evidence"),
                 MODEL_PROFILES_GUIDE,
                 "Windows x64 CUDA 13.3 reference evidence with 16 GiB-class VRAM, no minimum-hardware or low-resource claim");
+    }
+
+    private static Profile qwen35NineB() {
+        return new Profile(
+                "qwen3.5-9b",
+                new ModelArtifact(
+                        "Qwen/Qwen3.5-9B",
+                        "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+                        "Qwen3.5-9B-Q4_K_M.gguf",
+                        "1fddc46c7ebc2180481b59c2111b83ebc0e397c183d3746a6548d07d30f63a9f",
+                        5_780_090_592L,
+                        "Apache-2.0"),
+                new RuntimeDefaults(
+                        "Qwen3.5 dense hybrid text model, 32 base layers and one MTP layer, source vision stack excluded",
+                        "9.197093888B total parameters, 8.953803264B base text parameters and 0.243290624B MTP parameters",
+                        true,
+                        "native/default",
+                        "reasoning disabled through llama.cpp --reasoning off",
+                        "embedded Qwen3.5 Jinja template from the controlled text-only conversion",
+                        8_192,
+                        8_192,
+                        "Talos standard request controls, three uncontrolled qualification repetitions",
+                        RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                        List.of("--reasoning", "off"),
+                        List.of("win-x64-cuda-13.3:b9918"),
+                        "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM and a 32 GiB system RAM campaign floor, no minimum-hardware claim",
+                        true),
+                new QualificationEvidence(
+                        Disposition.EXPERIMENTAL_SELECTABLE,
+                        true,
+                        false,
+                        5,
+                        "local/model-qualification/qwen3.5-9b-full-p5-aa4bb8dc-fq2-b9918-cuda13-20260715",
+                        "aa4bb8dc9743b367dd46143bdd03d835688c65fd",
+                        "72e7b15dc965bdc5c97f75c77be49ac19cd7039c70e5ffb19fa3de7f2d6b3f6d",
+                        LocalDate.of(2026, 7, 15),
+                        "experimental full-bank evidence: 19 of 24 scenario definitions and 56 of 72 trial outcomes passed, 117 of 129 requirements, 52 of 54 required-tool decisions, 15 of 15 no-tool decisions, and 135 of 135 valid native calls passed, every trust gate passed, not accepted beta or hardware support evidence"),
+                MODEL_PROFILES_GUIDE,
+                "Windows x64 CUDA 13.3 reference evidence with 16 GiB-class VRAM and a 32 GiB system RAM campaign floor, no minimum-hardware or low-resource claim");
     }
 
     private static QualificationEvidence legacyEvidence(

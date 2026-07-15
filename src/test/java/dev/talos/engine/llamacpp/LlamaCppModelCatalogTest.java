@@ -14,11 +14,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LlamaCppModelCatalogTest {
 
     @Test
-    void everyExistingProfilePreservesTheHistoricalProviderMessageLayout() {
-        for (var profile : LlamaCppModelCatalog.profiles().values()) {
+    void onlyQwen35UsesTheEvidenceGatedSingleLeadingSystemLayout() {
+        for (String alias : List.of(
+                "qwen2.5-coder-14b",
+                "gpt-oss-20b",
+                "qwen36vf-q4km",
+                "qwen36vf-q6k",
+                "deepseek-v2lite-q4km",
+                "qwen3-8b",
+                "granite-4.1-3b",
+                "qwen3-4b",
+                "granite-4.1-8b")) {
+            var profile = LlamaCppModelCatalog.byAlias(alias).orElseThrow();
             assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
-                    profile.runtime().requestLayout(), profile.alias());
+                    profile.runtime().requestLayout(), alias);
         }
+
+        var qwen35 = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                qwen35.runtime().requestLayout());
     }
 
     private record ExistingProfile(
@@ -44,7 +58,8 @@ class LlamaCppModelCatalogTest {
                         "qwen3-8b",
                         "granite-4.1-3b",
                         "qwen3-4b",
-                        "granite-4.1-8b"),
+                        "granite-4.1-8b",
+                        "qwen3.5-9b"),
                 LlamaCppModelCatalog.selectableProfiles().stream()
                         .map(LlamaCppModelCatalog.Profile::alias)
                         .toList());
@@ -210,6 +225,58 @@ class LlamaCppModelCatalogTest {
                 granite.evidenceSummary());
         assertTrue(granite.evidenceSummary().contains("zero trust failures"), granite.evidenceSummary());
         assertTrue(granite.evidenceSummary().contains("not accepted beta"), granite.evidenceSummary());
+    }
+
+    @Test
+    void qwen35ProjectsTheExactControlledExperimentalQualification() {
+        var qwen = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+
+        assertEquals("Qwen/Qwen3.5-9B", qwen.repository());
+        assertEquals("c202236235762e1c871ad0ccb60c8ee5ba337b9a", qwen.revision());
+        assertEquals("Qwen3.5-9B-Q4_K_M.gguf", qwen.artifactFile());
+        assertEquals("1fddc46c7ebc2180481b59c2111b83ebc0e397c183d3746a6548d07d30f63a9f",
+                qwen.artifactSha256());
+        assertEquals(5_780_090_592L, qwen.artifactSizeBytes());
+        assertEquals("Apache-2.0", qwen.license());
+        assertEquals(LlamaCppModelCatalog.Disposition.EXPERIMENTAL_SELECTABLE, qwen.disposition());
+        assertTrue(qwen.selectable());
+        assertTrue(qwen.requiresLocalModelPath());
+        assertEquals(false, qwen.wizardDownload());
+        assertEquals(true, qwen.nativeCalling());
+        assertEquals("native/default", qwen.toolMode());
+        assertEquals(8_192, qwen.runtime().contextTokens());
+        assertEquals(8_192, qwen.runtime().maxContextTokens());
+        assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM, qwen.runtime().requestLayout());
+        assertEquals(List.of("--reasoning", "off"), qwen.runtime().managedServerArgs());
+        assertEquals(List.of("win-x64-cuda-13.3:b9918"), qwen.runtime().compatibleEngineLanes());
+        assertTrue(qwen.runtime().architecture().contains("32 base layers and one MTP layer"),
+                qwen.runtime().architecture());
+        assertTrue(qwen.runtime().parameterShape().contains("9.197093888B total parameters"),
+                qwen.runtime().parameterShape());
+        assertTrue(qwen.runtime().parameterShape().contains("8.953803264B base text parameters"),
+                qwen.runtime().parameterShape());
+        assertEquals(5, qwen.qualification().protocolRevision());
+        assertEquals(
+                "local/model-qualification/qwen3.5-9b-full-p5-aa4bb8dc-fq2-b9918-cuda13-20260715",
+                qwen.evidencePacket());
+        assertEquals("aa4bb8dc9743b367dd46143bdd03d835688c65fd",
+                qwen.qualification().talosCommit());
+        assertEquals("72e7b15dc965bdc5c97f75c77be49ac19cd7039c70e5ffb19fa3de7f2d6b3f6d",
+                qwen.qualification().scorecardSha256());
+        assertEquals(LocalDate.of(2026, 7, 15), qwen.qualification().qualifiedOn());
+        assertTrue(qwen.evidenceSummary().contains("19 of 24 scenario definitions"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("56 of 72 trial outcomes"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("117 of 129 requirements"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("52 of 54 required-tool decisions"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("135 of 135 valid native calls"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("every trust gate passed"),
+                qwen.evidenceSummary());
+        assertTrue(qwen.evidenceSummary().contains("not accepted beta"), qwen.evidenceSummary());
     }
 
     @Test

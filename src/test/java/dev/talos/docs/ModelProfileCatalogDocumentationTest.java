@@ -78,6 +78,45 @@ class ModelProfileCatalogDocumentationTest {
         assertFalse(section.contains("8 GiB GPU"), section);
     }
 
+    @Test
+    void qwen35ReferencePinsControlledLayoutEvidenceAndAvoidsUnsupportedClaims() throws Exception {
+        var qwen = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        String docs = Files.readString(Path.of("docs/reference/model-profiles.md"));
+        String section = section(docs, "### qwen3.5-9b");
+
+        assertTrue(section.contains(qwen.repository()), section);
+        assertTrue(section.contains(qwen.revision()), section);
+        assertTrue(section.contains(qwen.artifactFile()), section);
+        assertTrue(section.contains(qwen.artifactSha256()), section);
+        assertTrue(section.contains("5,780,090,592 bytes"), section);
+        assertTrue(section.contains("controlled local text-only conversion"), section);
+        assertTrue(section.contains("aec84316f65d58e467f629b24caa2bd9f573f0c247b355a7e3b06408e2b4afac"),
+                section);
+        assertTrue(section.contains("2d31c79e89a3ef3bdcd59deb1a94f489ff0edf0863471b480d25aff556720a53"),
+                section);
+        assertTrue(section.contains("576fc386802e77eee25fa0f4b850817cff8ff805748f4599193e339f7ff76cd2"),
+                section);
+        assertTrue(section.contains(qwen.evidencePacket()), section);
+        assertTrue(section.contains("19 of 24 scenario definitions and 56 of 72 trial outcomes"), section);
+        assertTrue(section.contains("117 of 129 requirements"), section);
+        assertTrue(section.contains("52 of 54 required-tool decisions"), section);
+        assertTrue(section.contains("135 of 135 native calls"), section);
+        assertTrue(section.contains("Exact local GGUF path required"), section);
+        assertTrue(section.contains("not available as a wizard download"), section);
+        assertTrue(section.contains("--reasoning off"), section);
+        assertTrue(section.contains("SINGLE_LEADING_SYSTEM"), section);
+        assertTrue(section.contains("merges only Talos system frames"), section);
+        assertTrue(section.contains("User, workspace, assistant, and tool messages keep their roles"), section);
+        assertTrue(section.contains(
+                "does not establish CPU-only, Linux, WSL, Vulkan, low-VRAM, or weak-PC support"),
+                section);
+        assertTrue(section.contains("does not establish compatibility with other Qwen3.5 GGUF files"), section);
+        assertFalse(section.contains("accepted beta stability"), section);
+        assertFalse(section.contains("default profile"), section);
+        assertFalse(section.contains("official published GGUF"), section);
+        assertFalse(section.contains("wizard-downloadable"), section);
+    }
+
     private static String section(String docs, String heading) {
         int start = docs.indexOf(heading);
         assertTrue(start >= 0, heading);

@@ -22,7 +22,7 @@ class ModelIdentityPresentationTest {
                     .servedIdentityState("MATCHED")
                     .resolution("QUALIFIED")
                     .effectiveToolMode("NATIVE")
-                    .effectiveRequestLayout("SINGLE_LEADING_SYSTEM")
+                    .effectiveRequestLayout(profile.runtime().requestLayout().name())
                     .effectiveContextTokens(profile.runtime().contextTokens())
                     .disposition(profile.disposition().label())
                     .propsState("AVAILABLE")
@@ -35,7 +35,7 @@ class ModelIdentityPresentationTest {
                             && row.value().equals("experimental selectable")));
             assertTrue(ModelIdentityPresentation.statusRows(identity).stream()
                     .anyMatch(row -> row.label().equals("Request layout")
-                            && row.value().equals("single-leading-system")));
+                            && row.value().equals("preserve-as-written")));
         }
     }
 
@@ -61,5 +61,33 @@ class ModelIdentityPresentationTest {
         assertTrue(ModelIdentityPresentation.statusRows(identity).stream()
                 .anyMatch(row -> row.label().equals("Disposition")
                         && row.value().equals("experimental selectable")));
+    }
+
+    @Test
+    void qualifiedQwen35UsesTheCanonicalBannerAndAdaptedLayout() {
+        var profile = LlamaCppModelCatalog.byAlias("qwen3.5-9b").orElseThrow();
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(profile.alias())
+                .declaredProfile(profile.alias())
+                .resolvedProfile(profile.alias())
+                .artifactState("EXACT")
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveRequestLayout(profile.runtime().requestLayout().name())
+                .effectiveContextTokens(profile.runtime().contextTokens())
+                .disposition(profile.disposition().label())
+                .propsState("AVAILABLE")
+                .chatAvailable(true)
+                .build();
+
+        assertEquals("qwen3.5-9b", ModelIdentityPresentation.bannerModelLabel(identity, "fallback"));
+        assertTrue(ModelIdentityPresentation.statusRows(identity).stream()
+                .anyMatch(row -> row.label().equals("Disposition")
+                        && row.value().equals("experimental selectable")));
+        assertTrue(ModelIdentityPresentation.statusRows(identity).stream()
+                .anyMatch(row -> row.label().equals("Request layout")
+                        && row.value().equals("single-leading-system")));
     }
 }

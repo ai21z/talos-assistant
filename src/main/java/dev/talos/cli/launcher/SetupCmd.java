@@ -167,6 +167,14 @@ public class SetupCmd implements Callable<Integer> {
                     .append("    guide: ").append(profile.guidePath()).append("\n")
                     .append("    evidence packet: ").append(profile.evidencePacket()).append("\n")
                     .append("    evidence: ").append(profile.evidenceSummary()).append("\n");
+            if (profile.runtime().requestLayout()
+                    != dev.talos.spi.types.RequestMessageLayout.PRESERVE_AS_WRITTEN) {
+                out.append("    request layout: ")
+                        .append(profile.runtime().requestLayout().name()
+                                .toLowerCase(Locale.ROOT)
+                                .replace('_', '-'))
+                        .append(", applied only after exact qualification\n");
+            }
         }
     }
 

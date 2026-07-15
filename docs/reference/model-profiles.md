@@ -2,7 +2,7 @@
 
 Talos model profiles pin a GGUF artifact, its runtime behavior, and the evidence used to classify it. A profile being selectable does not mean it is suitable for every machine. Run `talos doctor --start` after configuration to verify the selected model and engine on your hardware.
 
-Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. The accepted beta profiles are large local-model lanes. Qwen3-8B, Granite 4.1 3B, Qwen3 4B Instruct 2507, Granite 4.1 8B, Qwen3.6-VibeForged, and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles.
+Accepted beta stability profiles are qwen2.5-coder-14b and gpt-oss-20b. The accepted beta profiles are large local-model lanes. Qwen3-8B, Granite 4.1 3B, Qwen3 4B Instruct 2507, Granite 4.1 8B, Qwen3.5 9B, Qwen3.6-VibeForged, and DeepSeek-Coder-V2-Lite profiles are experimental selectable profiles.
 
 ## Support levels
 
@@ -28,6 +28,7 @@ See [Model profile lifecycle](../architecture/model-profile-lifecycle.md) for ho
 | `granite-4.1-3b` | experimental selectable | native/default | Exact local GGUF path required by `talos setup models` |
 | `qwen3-4b` | experimental selectable | native/default, non-thinking | Exact local GGUF path required by `talos setup models` |
 | `granite-4.1-8b` | experimental selectable | native/default | Exact local GGUF path required by `talos setup models` |
+| `qwen3.5-9b` | experimental selectable | native/default, reasoning off | Exact local GGUF path required by `talos setup models` |
 | `qwen36vf-q4km` | experimental selectable | native/default | `talos setup models` |
 | `qwen36vf-q6k` | experimental selectable | native/default | `talos setup models` |
 | `deepseek-v2lite-q4km` | experimental selectable | text/tool-prompt | `talos setup models` |
@@ -163,6 +164,35 @@ talos doctor --start
 - Result: 19 of 24 scenario definitions and 57 of 72 trials passed, with 110 of 129 requirements, 51 of 54 required-tool decisions, and zero Talos trust failures
 
 Talos verifies the local file size and SHA-256 before writing this profile. It is not available as a wizard download. The evidence applies only to the exact GGUF and pinned engine lane above. It does not establish CPU-only, Linux, WSL, Vulkan, or weak-PC support, and it does not establish compatibility with other Granite 4.1 8B GGUF files.
+
+### qwen3.5-9b
+
+Qwen3.5 9B is an experimental selectable profile. It completed 19 of 24 scenario definitions. The accepted beta threshold is 20. Every trust gate passed in the qualification campaign.
+
+```powershell
+talos setup models --profile qwen3.5-9b --server-path C:/path/to/llama-server.exe --model-path D:/models/Qwen3.5-9B-Q4_K_M.gguf --write
+talos doctor --start
+```
+
+- Source repository: `Qwen/Qwen3.5-9B`
+- Source revision: `c202236235762e1c871ad0ccb60c8ee5ba337b9a`
+- Artifact: `Qwen3.5-9B-Q4_K_M.gguf`
+- SHA-256: `1fddc46c7ebc2180481b59c2111b83ebc0e397c183d3746a6548d07d30f63a9f`
+- Size: 5,780,090,592 bytes
+- License: Apache-2.0
+- Provenance: controlled local text-only conversion from the complete official source snapshot with pinned llama.cpp b9918 conversion and quantization tools. Two independent BF16 and Q4_K_M outputs were byte-identical.
+- Source manifest SHA-256: `aec84316f65d58e467f629b24caa2bd9f573f0c247b355a7e3b06408e2b4afac`
+- Conversion environment SHA-256: `2d31c79e89a3ef3bdcd59deb1a94f489ff0edf0863471b480d25aff556720a53`
+- Conversion result SHA-256: `576fc386802e77eee25fa0f4b850817cff8ff805748f4599193e339f7ff76cd2`
+- Support level: experimental selectable
+- Setup: Exact local GGUF path required
+- Runtime: native/default tool mode, 8,192-token context, reasoning disabled through llama.cpp `--reasoning off`
+- Request layout: `SINGLE_LEADING_SYSTEM`. This evidence-gated layout merges only Talos system frames before the provider request. User, workspace, assistant, and tool messages keep their roles.
+- Qualified lane: pinned llama.cpp b9918, Windows x64 CUDA 13.3 reference host with 16 GiB-class VRAM and a 32 GiB system RAM campaign floor
+- Evidence: `local/model-qualification/qwen3.5-9b-full-p5-aa4bb8dc-fq2-b9918-cuda13-20260715`
+- Result: 19 of 24 scenario definitions and 56 of 72 trial outcomes passed, with 117 of 129 requirements, 52 of 54 required-tool decisions, 15 of 15 no-tool decisions, 135 of 135 native calls, and every trust gate passed
+
+Talos verifies the local file size and SHA-256 before writing this profile. The final GGUF is a controlled local conversion. The source repository does not publish this GGUF, and Talos does not distribute it. It is not available as a wizard download. The evidence applies only to the exact file and pinned engine lane above. It does not establish CPU-only, Linux, WSL, Vulkan, low-VRAM, or weak-PC support. It also does not establish compatibility with other Qwen3.5 GGUF files.
 
 ### qwen36vf-q4km
 

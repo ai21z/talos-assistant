@@ -190,4 +190,50 @@ class LocalTurnTraceModelIdentityTest {
         assertEquals("granite-4.1-8b-Q4_K_M.gguf", event.data().get("observedModelFile"));
         assertFalse(event.data().toString().contains("C:/private"));
     }
+
+    @Test
+    void recordsQualifiedQwen35DispositionAndRequestLayoutWithoutLeakingPaths() {
+        var profile = dev.talos.engine.llamacpp.LlamaCppModelCatalog
+                .byAlias("qwen3.5-9b")
+                .orElseThrow();
+        LocalTurnTraceCapture.begin(
+                "trc-qwen35-identity",
+                "sid-qwen35-identity",
+                1,
+                "2026-07-15T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                profile.alias(),
+                "read README.md");
+        ModelIdentitySnapshot identity = ModelIdentitySnapshot.builder()
+                .backend("llama_cpp")
+                .configuredModel(profile.alias())
+                .configuredModelFile("C:/configured/" + profile.artifactFile())
+                .declaredProfile(profile.alias())
+                .resolvedProfile(profile.alias())
+                .observedModelFile("C:/private/" + profile.artifactFile())
+                .artifactState("EXACT")
+                .servedIdentityState("MATCHED")
+                .resolution("QUALIFIED")
+                .effectiveToolMode("NATIVE")
+                .effectiveRequestLayout(profile.runtime().requestLayout().name())
+                .effectiveContextTokens(profile.runtime().contextTokens())
+                .disposition(profile.disposition().label())
+                .propsResponseSha256("d".repeat(64))
+                .build();
+
+        LocalTurnTraceCapture.recordModelIdentity(identity);
+
+        TurnTraceEvent event = LocalTurnTraceCapture.complete().events().stream()
+                .filter(candidate -> "MODEL_IDENTITY_RESOLVED".equals(candidate.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("qwen3.5-9b", event.data().get("configuredModel"));
+        assertEquals("qwen3.5-9b", event.data().get("resolvedProfile"));
+        assertEquals("experimental selectable", event.data().get("disposition"));
+        assertEquals("Qwen3.5-9B-Q4_K_M.gguf", event.data().get("observedModelFile"));
+        assertEquals("SINGLE_LEADING_SYSTEM", event.data().get("effectiveRequestLayout"));
+        assertFalse(event.data().toString().contains("C:/private"));
+    }
 }

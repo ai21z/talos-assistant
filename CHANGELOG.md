@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1147] Qwen3.5 9B is now an experimental selectable profile bound to its
+  exact controlled Q4_K_M conversion and protocol-v5 scorecard. Setup requires
+  verified local bytes and `--reasoning off`. The qualified provider layout
+  merges only Talos system frames, while wizard downloads, accepted beta
+  wording, defaults, and untested hardware claims remain excluded.
 - [T1146] Model qualification now binds each tool approval decision to its
   parsed call. An approved mutation may execute even when a later proposal is
   denied and blocked, while denied, unapproved, mismatched, and orphaned calls
