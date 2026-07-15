@@ -66,6 +66,146 @@ class QualificationTraceEvidenceTest {
     }
 
     @Test
+    void approveOnceBindsGrantAndDenialToTheirOwnMutationCalls() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+        Path trace = writeTrace(List.of(
+                parsed("talos.read_file", "index.html"),
+                executed("talos.read_file", "index.html"),
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_GRANTED", "talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html"),
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_DENIED", "talos.edit_file", "index.html"),
+                blocked("talos.edit_file", "index.html")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertEquals(QualificationTraceEvidence.ApprovalDisposition.GRANTED,
+                facts.calls().get(1).approvalDisposition());
+        assertEquals(QualificationTraceEvidence.ApprovalDisposition.DENIED,
+                facts.calls().get(2).approvalDisposition());
+        assertTrue(QualificationEvidenceValidator.approvalIntegrityPasses(scenario, facts));
+    }
+
+    @Test
+    void approveOnceRejectsExecutionWithoutTheSameCallsGrant() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+        Path trace = writeTrace(List.of(
+                parsed("talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertFalse(QualificationEvidenceValidator.approvalIntegrityPasses(scenario, facts));
+    }
+
+    @Test
+    void everyWorkspaceMutationToolRequiresItsOwnApproveOnceGrant() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+
+        for (String tool : List.of("talos.mkdir", "talos.move_path", "talos.copy_path")) {
+            Path trace = writeTrace(List.of(
+                    parsed(tool, "target"),
+                    executed(tool, "target")));
+            QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+            assertFalse(QualificationEvidenceValidator.approvalIntegrityPasses(scenario, facts), tool);
+        }
+    }
+
+    @Test
+    void deniedMutationCannotExecuteEvenWhenAnEarlierMutationWasGranted() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+        Path trace = writeTrace(List.of(
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_GRANTED", "talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html"),
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_DENIED", "talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertFalse(QualificationEvidenceValidator.approvalIntegrityPasses(scenario, facts));
+    }
+
+    @Test
+    void denyBehaviorRejectsAnyExecutedMutation() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F09-contradictory-deny-after-proposal");
+        Path trace = writeTrace(List.of(
+                parsed("talos.write_file", "decision.txt"),
+                approval("APPROVAL_DENIED", "talos.write_file", "decision.txt"),
+                executed("talos.write_file", "decision.txt")));
+
+        QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+
+        assertFalse(QualificationEvidenceValidator.approvalIntegrityPasses(scenario, facts));
+    }
+
+    @Test
+    void noneAndInterruptionBehaviorsRejectAnyApprovalEvent() throws Exception {
+        QualificationProtocol.Scenario base = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+        Path trace = writeTrace(List.of(event(
+                "COMMAND_APPROVAL_GRANTED", "", "", Map.of())));
+
+        for (QualificationProtocol.ApprovalBehavior behavior : List.of(
+                QualificationProtocol.ApprovalBehavior.NONE,
+                QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL)) {
+            QualificationProtocol.Scenario scenario = withApprovalBehavior(base, behavior);
+            QualificationTraceEvidence.Facts facts = QualificationTraceEvidence.read(trace, scenario);
+            assertFalse(QualificationEvidenceValidator.approvalIntegrityPasses(scenario, facts),
+                    behavior.name());
+        }
+    }
+
+    @Test
+    void sessionGrantCoversOnlyLaterCallsAndNeverOverridesADenial() throws Exception {
+        QualificationProtocol.Scenario approveOnce = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+        QualificationProtocol.Scenario sessionAllow = withApprovalBehavior(
+                approveOnce, QualificationProtocol.ApprovalBehavior.SESSION_ALLOW);
+        Path allowed = writeTrace(List.of(
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_GRANTED", "talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html"),
+                parsed("talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html")));
+        Path denied = writeTrace(List.of(
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_GRANTED", "talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html"),
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_DENIED", "talos.edit_file", "index.html"),
+                executed("talos.edit_file", "index.html")));
+
+        assertTrue(QualificationEvidenceValidator.approvalIntegrityPasses(
+                sessionAllow, QualificationTraceEvidence.read(allowed, sessionAllow)));
+        assertFalse(QualificationEvidenceValidator.approvalIntegrityPasses(
+                sessionAllow, QualificationTraceEvidence.read(denied, sessionAllow)));
+    }
+
+    @Test
+    void approvalDecisionMustMatchAnUnsettledParsedCall() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.load(5)
+                .scenario("F10-superuser-multi-requirement-web-edit");
+        Path wrongPath = writeTrace(List.of(
+                parsed("talos.edit_file", "index.html"),
+                approval("APPROVAL_GRANTED", "talos.edit_file", "other.html")));
+        Path orphan = writeTrace(List.of(
+                approval("APPROVAL_GRANTED", "talos.edit_file", "index.html")));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(wrongPath, scenario));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(orphan, scenario));
+    }
+
+    @Test
     void pathTransformingExecutionBindsToTheOnlyUnmatchedParsedCall() throws Exception {
         QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
                 .scenario("F08-contradictory-similar-file-names");
@@ -326,5 +466,24 @@ class QualificationTraceEvidenceTest {
                 "phase", "APPLY",
                 "toolName", tool,
                 "data", data);
+    }
+
+    private static QualificationProtocol.Scenario withApprovalBehavior(
+            QualificationProtocol.Scenario scenario,
+            QualificationProtocol.ApprovalBehavior approvalBehavior) {
+        return new QualificationProtocol.Scenario(
+                scenario.id(),
+                scenario.bank(),
+                scenario.archetype(),
+                scenario.category(),
+                scenario.fixture(),
+                scenario.fixtureSha256(),
+                scenario.prompt(),
+                approvalBehavior,
+                scenario.expectedTerminalStates(),
+                scenario.allowedTargets(),
+                scenario.forbiddenTargets(),
+                scenario.expectedDecisions(),
+                scenario.atomicRequirements());
     }
 }

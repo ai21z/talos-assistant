@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1146] Model qualification now binds each tool approval decision to its
+  parsed call. An approved mutation may execute even when a later proposal is
+  denied and blocked, while denied, unapproved, mismatched, and orphaned calls
+  still fail closed.
 - [T1142] Canonical model qualification now records the verified provider
   request layout and binds adapted layouts to an immutable direct-preflight
   evidence manifest. Historical packets default to the unchanged request

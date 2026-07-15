@@ -27,18 +27,37 @@ final class QualificationTraceEvidence {
 
     private QualificationTraceEvidence() {}
 
+    enum ApprovalDisposition {
+        NONE,
+        GRANTED,
+        DENIED
+    }
+
     record Call(
             String toolName,
             String pathHint,
             boolean executed,
             boolean allowed,
-            List<String> sourcePaths) {
+            List<String> sourcePaths,
+            ApprovalDisposition approvalDisposition) {
         Call {
             sourcePaths = normalizedSourcePaths(sourcePaths, pathHint);
+            approvalDisposition = approvalDisposition == null
+                    ? ApprovalDisposition.NONE
+                    : approvalDisposition;
+        }
+
+        Call(
+                String toolName,
+                String pathHint,
+                boolean executed,
+                boolean allowed,
+                List<String> sourcePaths) {
+            this(toolName, pathHint, executed, allowed, sourcePaths, ApprovalDisposition.NONE);
         }
 
         Call(String toolName, String pathHint, boolean executed, boolean allowed) {
-            this(toolName, pathHint, executed, allowed, List.of());
+            this(toolName, pathHint, executed, allowed, List.of(), ApprovalDisposition.NONE);
         }
 
         QualificationRecords.ToolCallResult toResult() {
@@ -198,6 +217,12 @@ final class QualificationTraceEvidence {
                 match.settled = true;
                 match.executed = event.path("data").path("success").asBoolean(false);
                 match.sourcePaths.addAll(sourcePaths(event.path("data"), pathHint));
+            } else if (type.equals("APPROVAL_GRANTED")) {
+                approvalGranted = true;
+                bindApproval(calls, tool, pathHint, ApprovalDisposition.GRANTED);
+            } else if (type.equals("APPROVAL_DENIED")) {
+                approvalDenied = true;
+                bindApproval(calls, tool, pathHint, ApprovalDisposition.DENIED);
             } else if (type.endsWith("APPROVAL_GRANTED")) {
                 approvalGranted = true;
             } else if (type.endsWith("APPROVAL_DENIED")) {
@@ -248,7 +273,7 @@ final class QualificationTraceEvidence {
                 .map(call -> new Call(call.toolName, call.pathHint, call.executed,
                         expectedTools.contains(call.toolName)
                                 || (mutationLike && MUTATION_INSPECTION_AUXILIARIES.contains(call.toolName)),
-                        List.copyOf(call.sourcePaths)))
+                        List.copyOf(call.sourcePaths), call.approvalDisposition))
                 .toList();
         return new Facts(traceId, modelId, taskType, mutationAllowed, actionObligation,
                 terminalState, outcomeStatus, verificationStatus,
@@ -296,6 +321,43 @@ final class QualificationTraceEvidence {
                 .toList();
         if (exact.size() == 1) return exact.getFirst();
         if (!exact.isEmpty()) return null;
+        return candidates.size() == 1 ? candidates.getFirst() : null;
+    }
+
+    private static void bindApproval(
+            List<MutableCall> calls,
+            String tool,
+            String pathHint,
+            ApprovalDisposition disposition) {
+        if (tool.isBlank()) {
+            throw new IllegalArgumentException("tool approval event lacks toolName");
+        }
+        MutableCall match = uniquePendingApproval(calls, tool, pathHint);
+        if (match == null) {
+            throw new IllegalArgumentException("tool approval lacks a unique parsed call: " + tool);
+        }
+        if (match.approvalDisposition != ApprovalDisposition.NONE) {
+            throw new IllegalArgumentException("tool call has multiple approval decisions: " + tool);
+        }
+        match.approvalDisposition = disposition;
+    }
+
+    private static MutableCall uniquePendingApproval(
+            List<MutableCall> calls,
+            String tool,
+            String pathHint) {
+        List<MutableCall> candidates = calls.stream()
+                .filter(call -> !call.settled && call.toolName.equals(tool))
+                .toList();
+        if (candidates.isEmpty()) return null;
+        if (!pathHint.isBlank()) {
+            List<MutableCall> exact = candidates.stream()
+                    .filter(call -> call.pathHint.equals(pathHint))
+                    .toList();
+            if (exact.size() == 1) return exact.getFirst();
+            if (!exact.isEmpty()) return null;
+            if (candidates.stream().anyMatch(call -> !call.pathHint.isBlank())) return null;
+        }
         return candidates.size() == 1 ? candidates.getFirst() : null;
     }
 
@@ -363,6 +425,7 @@ final class QualificationTraceEvidence {
         private final java.util.LinkedHashSet<String> sourcePaths = new java.util.LinkedHashSet<>();
         private boolean settled;
         private boolean executed;
+        private ApprovalDisposition approvalDisposition = ApprovalDisposition.NONE;
 
         private MutableCall(String toolName, String pathHint) {
             this.toolName = toolName;
