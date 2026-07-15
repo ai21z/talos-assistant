@@ -203,8 +203,8 @@ final class QualificationTestPacket {
                  "a".repeat(40), protocolVersion, "b9918", executableSha256,
                  "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime"),
                  List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "-lv", "4"),
-                 List.of(), "native",
-                "embedded-jinja", "standard-instruct", 16384,
+                 List.of(), "PRESERVE_AS_WRITTEN", "", "native",
+                 "embedded-jinja", "standard-instruct", 16384,
                 new QualificationRecords.SamplingPolicy(
                         "Talos near-greedy controls", 0.2, 0.8, 20,
                         "request fields omitted, pinned backend defaults apply",

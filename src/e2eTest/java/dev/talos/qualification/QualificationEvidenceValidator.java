@@ -6,6 +6,7 @@ import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
+import dev.talos.spi.types.RequestMessageLayout;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,6 +28,9 @@ import java.util.Set;
 final class QualificationEvidenceValidator {
     private static final Set<String> FILE_CONTENT_EVIDENCE_TOOLS = Set.of(
             "talos.read_file", "talos.grep", "talos.retrieve");
+    private static final Set<String> REQUEST_LAYOUTS = Set.of(
+            RequestMessageLayout.PRESERVE_AS_WRITTEN.name(),
+            RequestMessageLayout.SINGLE_LEADING_SYSTEM.name());
     private static final List<String> CALIBRATION_GUIDE_HEADINGS = List.of(
             "## Identity and provenance",
             "## Runtime and tool mode",
@@ -1010,6 +1014,17 @@ final class QualificationEvidenceValidator {
                 || rules.hardware() == null) {
             findings.add("Calibration runtime policy is incomplete");
         }
+        if (!REQUEST_LAYOUTS.contains(rules.requestLayout())) {
+            findings.add("Calibration request layout is unsupported");
+        }
+        String directEvidenceHash = rules.directPreflightEvidenceManifestSha256();
+        if (RequestMessageLayout.SINGLE_LEADING_SYSTEM.name().equals(rules.requestLayout())) {
+            requireHash(directEvidenceHash, 64,
+                    "direct preflight evidence manifest SHA-256", findings);
+        } else if (directEvidenceHash != null && !directEvidenceHash.isBlank()) {
+            requireHash(directEvidenceHash, 64,
+                    "direct preflight evidence manifest SHA-256", findings);
+        }
         if (!List.of("STANDARD", "TUNED").contains(rules.configurationKind())) {
             findings.add("Calibration configurationKind must be STANDARD or TUNED");
         }
@@ -1135,8 +1150,16 @@ final class QualificationEvidenceValidator {
         }
         try {
             JsonNode tree = QualificationJson.readTree(path);
-            if (tree instanceof ObjectNode object && !object.has("directPreflightLaunchArguments")) {
-                object.putArray("directPreflightLaunchArguments");
+            if (tree instanceof ObjectNode object) {
+                if (!object.has("directPreflightLaunchArguments")) {
+                    object.putArray("directPreflightLaunchArguments");
+                }
+                if (!object.has("requestLayout")) {
+                    object.put("requestLayout", RequestMessageLayout.PRESERVE_AS_WRITTEN.name());
+                }
+                if (!object.has("directPreflightEvidenceManifestSha256")) {
+                    object.put("directPreflightEvidenceManifestSha256", "");
+                }
             }
             return QualificationJson.read(
                     QualificationJson.bytes(tree),

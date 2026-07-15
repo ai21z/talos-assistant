@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1142] Canonical model qualification now records the verified provider
+  request layout and binds adapted layouts to an immutable direct-preflight
+  evidence manifest. Historical packets default to the unchanged request
+  layout, while unknown layouts and unbound adapted layouts fail closed.
 - [T1140] The single-leading-system provider layout now preserves systemless
   diagnostic requests unchanged. Adapted models can complete doctor smoke and
   rate probes without adding an empty authority frame, while requests that do

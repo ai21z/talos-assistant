@@ -179,6 +179,8 @@ final class QualificationRecords {
             List<String> launchArguments,
             List<String> verificationLaunchArguments,
             List<String> directPreflightLaunchArguments,
+            String requestLayout,
+            String directPreflightEvidenceManifestSha256,
             String toolMode,
             String chatTemplate,
             String reasoningBehavior,

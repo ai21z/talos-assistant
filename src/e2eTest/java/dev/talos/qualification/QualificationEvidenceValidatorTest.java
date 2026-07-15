@@ -152,12 +152,85 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void calibrationPreflightAcceptsEvidenceGatedRequestLayout() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path rulesPath = packet.root().resolve("candidates/qwen14/calibration-rules.json");
+        ObjectNode rules = (ObjectNode) QualificationJson.readTree(rulesPath);
+        rules.put("requestLayout", "SINGLE_LEADING_SYSTEM");
+        rules.put("directPreflightEvidenceManifestSha256", "d".repeat(64));
+        QualificationJson.write(rulesPath, rules);
+        ObjectNode campaign = (ObjectNode) QualificationJson.readTree(packet.root().resolve("campaign.json"));
+        campaign.put("calibrationRulesSha256",
+                QualificationScenarioBank.sha256(Files.readAllBytes(rulesPath)));
+        QualificationJson.write(packet.root().resolve("campaign.json"), campaign);
+        removeRuns(packet);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validateCalibrationPreflight(packet.root(), catalog);
+
+        assertTrue(result.valid(), () -> String.join("\n", result.findings()));
+        assertTrue("SINGLE_LEADING_SYSTEM".equals(result.calibrationRules().requestLayout()));
+        assertTrue("d".repeat(64).equals(
+                result.calibrationRules().directPreflightEvidenceManifestSha256()));
+    }
+
+    @Test
+    void calibrationPreflightRejectsUnknownRequestLayout() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path rulesPath = packet.root().resolve("candidates/qwen14/calibration-rules.json");
+        ObjectNode rules = (ObjectNode) QualificationJson.readTree(rulesPath);
+        rules.put("requestLayout", "UNVERIFIED_LAYOUT");
+        rules.put("directPreflightEvidenceManifestSha256", "d".repeat(64));
+        QualificationJson.write(rulesPath, rules);
+        ObjectNode campaign = (ObjectNode) QualificationJson.readTree(packet.root().resolve("campaign.json"));
+        campaign.put("calibrationRulesSha256",
+                QualificationScenarioBank.sha256(Files.readAllBytes(rulesPath)));
+        QualificationJson.write(packet.root().resolve("campaign.json"), campaign);
+        removeRuns(packet);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validateCalibrationPreflight(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("request layout")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void calibrationPreflightRequiresDirectEvidenceForAdaptedLayout() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
+        Path rulesPath = packet.root().resolve("candidates/qwen14/calibration-rules.json");
+        ObjectNode rules = (ObjectNode) QualificationJson.readTree(rulesPath);
+        rules.put("requestLayout", "SINGLE_LEADING_SYSTEM");
+        rules.remove("directPreflightEvidenceManifestSha256");
+        QualificationJson.write(rulesPath, rules);
+        ObjectNode campaign = (ObjectNode) QualificationJson.readTree(packet.root().resolve("campaign.json"));
+        campaign.put("calibrationRulesSha256",
+                QualificationScenarioBank.sha256(Files.readAllBytes(rulesPath)));
+        QualificationJson.write(packet.root().resolve("campaign.json"), campaign);
+        removeRuns(packet);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validateCalibrationPreflight(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream()
+                        .anyMatch(finding -> finding.contains("direct preflight evidence manifest SHA-256")),
+                () -> String.join("\n", result.findings()));
+    }
+
+    @Test
     void calibrationPreflightKeepsHistoricalPacketsWithoutDirectLaunchReadable() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path rulesPath = packet.root().resolve("candidates/qwen14/calibration-rules.json");
         ObjectNode rules = (ObjectNode) QualificationJson.readTree(rulesPath);
         rules.remove("directPreflightLaunchArguments");
+        rules.remove("requestLayout");
+        rules.remove("directPreflightEvidenceManifestSha256");
         QualificationJson.write(rulesPath, rules);
         ObjectNode campaign = (ObjectNode) QualificationJson.readTree(packet.root().resolve("campaign.json"));
         campaign.put("calibrationRulesSha256",
@@ -170,6 +243,8 @@ class QualificationEvidenceValidatorTest {
 
         assertTrue(result.valid(), () -> String.join("\n", result.findings()));
         assertTrue(result.calibrationRules().directPreflightLaunchArguments().isEmpty());
+        assertTrue("PRESERVE_AS_WRITTEN".equals(result.calibrationRules().requestLayout()));
+        assertTrue(result.calibrationRules().directPreflightEvidenceManifestSha256().isEmpty());
     }
 
     @Test
