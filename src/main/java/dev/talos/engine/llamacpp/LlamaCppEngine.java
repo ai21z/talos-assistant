@@ -9,6 +9,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.EmbeddingResult;
 import dev.talos.spi.types.Health;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.TokenChunk;
 
 import java.net.http.HttpClient;
@@ -80,19 +81,19 @@ final class LlamaCppEngine implements ModelEngine {
     @Override
     public String chat(ChatRequest req) throws Exception {
         prepareCapabilities();
-        return chatClient.chat(req);
+        return chatClient.chat(req, requestLayout());
     }
 
     @Override
     public Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
         prepareCapabilities();
-        return chatClient.chatStream(req);
+        return chatClient.chatStream(req, requestLayout());
     }
 
     @Override
     public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest req) throws Exception {
         prepareCapabilities();
-        return chatClient.chatStreamNonStreaming(req);
+        return chatClient.chatStreamNonStreaming(req, requestLayout());
     }
 
     @Override
@@ -121,6 +122,13 @@ final class LlamaCppEngine implements ModelEngine {
                 nativeTools,
                 true,
                 config.managed());
+    }
+
+    private RequestMessageLayout requestLayout() {
+        LlamaCppResolvedProfileService.Snapshot snapshot = preparedProfile;
+        return snapshot == null
+                ? RequestMessageLayout.PRESERVE_AS_WRITTEN
+                : snapshot.profile().effectiveRequestLayout();
     }
 
     private static java.nio.file.Path defaultTalosHome() {

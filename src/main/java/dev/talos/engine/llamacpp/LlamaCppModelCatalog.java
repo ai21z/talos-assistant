@@ -1,5 +1,7 @@
 package dev.talos.engine.llamacpp;
 
+import dev.talos.spi.types.RequestMessageLayout;
+
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -69,12 +71,16 @@ public final class LlamaCppModelCatalog {
             int contextTokens,
             int maxContextTokens,
             String samplingProfile,
+            RequestMessageLayout requestLayout,
             List<String> managedServerArgs,
             List<String> compatibleEngineLanes,
             String hardwareEnvelope,
             boolean requiresLocalModelPath) {
 
         public RuntimeDefaults {
+            requestLayout = requestLayout == null
+                    ? RequestMessageLayout.PRESERVE_AS_WRITTEN
+                    : requestLayout;
             managedServerArgs = List.copyOf(managedServerArgs == null ? List.of() : managedServerArgs);
             compatibleEngineLanes = List.copyOf(compatibleEngineLanes == null ? List.of() : compatibleEngineLanes);
         }
@@ -239,6 +245,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         16_384,
                         "Talos request defaults; near-greedy mutation obligations",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of(),
                         PINNED_CROSS_PLATFORM_LANES,
                         "16 GB RAM minimum; 24 GB or more for CPU-only; not the low-resource lane",
@@ -273,6 +280,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos request defaults; near-greedy mutation obligations",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of(),
                         PINNED_CROSS_PLATFORM_LANES,
                         "24 GB RAM minimum; 32 GB or more for CPU-only; not the low-resource lane",
@@ -330,6 +338,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos request defaults; experimental profile",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of(),
                         PINNED_WINDOWS_LANES,
                         hardware,
@@ -364,6 +373,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos text/tool-prompt defaults; experimental profile",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of(),
                         PINNED_WINDOWS_LANES,
                         "24 GB or more system RAM or a 16 GB GPU screening lane",
@@ -398,6 +408,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos standard request controls; three uncontrolled qualification repetitions",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of("--reasoning", "off"),
                         List.of("win-x64-cuda-13.3:b9918"),
                         "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM and 32 GiB system RAM; no weak-hardware claim",
@@ -436,6 +447,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos standard request controls, three uncontrolled qualification repetitions",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of(),
                         List.of("win-x64-cuda-13.3:b9918"),
                         "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM and 32 GiB system RAM, no weak-hardware claim",
@@ -474,6 +486,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos standard request controls, three uncontrolled qualification repetitions",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of("--reasoning", "off"),
                         List.of("win-x64-cuda-13.3:b9918"),
                         "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM, 32 GiB system RAM campaign floor, no low-resource claim",
@@ -512,6 +525,7 @@ public final class LlamaCppModelCatalog {
                         8_192,
                         8_192,
                         "Talos standard request controls, three uncontrolled qualification repetitions",
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
                         List.of(),
                         List.of("win-x64-cuda-13.3:b9918"),
                         "Windows x64 CUDA 13.3 reference lane with 16 GiB-class VRAM, no minimum-hardware claim",

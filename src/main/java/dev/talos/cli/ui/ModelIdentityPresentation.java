@@ -31,6 +31,9 @@ public final class ModelIdentityPresentation {
                 + ", " + value(lower(identity.servedIdentityState()), "unverified");
         rows.add(new Row("Serving", serving));
         rows.add(new Row("Tool mode", value(lower(identity.effectiveToolMode()), "chat-only")));
+        if (!identity.effectiveRequestLayout().isBlank()) {
+            rows.add(new Row("Request layout", lower(identity.effectiveRequestLayout())));
+        }
         if (identity.effectiveContextTokens() > 0) {
             rows.add(new Row("Resolved ctx", Integer.toString(identity.effectiveContextTokens())));
         }

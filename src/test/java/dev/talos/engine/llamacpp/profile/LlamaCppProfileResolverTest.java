@@ -1,6 +1,7 @@
 package dev.talos.engine.llamacpp.profile;
 
 import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
+import dev.talos.spi.types.RequestMessageLayout;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -36,6 +37,8 @@ class LlamaCppProfileResolverTest {
         assertEquals(MatchState.MATCHED, resolved.engineCompatibility());
         assertEquals(MatchState.MATCHED, resolved.servedIdentity());
         assertEquals(ToolMode.NATIVE, resolved.effectiveToolMode());
+        assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                resolved.effectiveRequestLayout());
         assertEquals(profile.runtime().reasoningMode(), resolved.effectiveReasoningMode());
         assertEquals(profile.runtime().contextTokens(), resolved.effectiveContextTokens());
         assertEquals(profile.runtime().managedServerArgs(), resolved.effectiveLaunchArguments());
@@ -47,6 +50,32 @@ class LlamaCppProfileResolverTest {
         assertEquals(request.observed(), resolved.observedFacts());
         assertEquals(request.hardware(), resolved.hardwareFacts());
         assertTrue(resolved.reasons().isEmpty(), resolved.reasons().toString());
+    }
+
+    @Test
+    void exactBoundProfileCanSelectSingleLeadingSystemLayout() {
+        var profile = withRequestLayout(qwen3(), RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+
+        var resolved = LlamaCppProfileResolver.resolve(exactRequest(profile));
+
+        assertEquals(ResolutionState.QUALIFIED, resolved.resolution());
+        assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                resolved.effectiveRequestLayout());
+    }
+
+    @Test
+    void unboundProfileCannotActivateSingleLeadingSystemLayout() {
+        var profile = withRequestLayout(qwen3(), RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+        var exact = exactRequest(profile);
+        var unverifiedEngine = new LlamaCppProfileResolver.Request(
+                exact.declaredProfile(), exact.configured(), exact.artifact(),
+                new LlamaCppProfileResolver.EngineFacts(LANE, "", MatchState.UNVERIFIED),
+                exact.observed(), exact.hardware());
+
+        var resolved = LlamaCppProfileResolver.resolve(unverifiedEngine);
+
+        assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                resolved.effectiveRequestLayout());
     }
 
     @Test
@@ -497,6 +526,22 @@ class LlamaCppProfileResolverTest {
 
     private static LlamaCppModelCatalog.Profile qwen3() {
         return LlamaCppModelCatalog.byAlias("qwen3-8b").orElseThrow();
+    }
+
+    private static LlamaCppModelCatalog.Profile withRequestLayout(
+            LlamaCppModelCatalog.Profile source,
+            RequestMessageLayout layout) {
+        var runtime = source.runtime();
+        return new LlamaCppModelCatalog.Profile(
+                source.alias(),
+                source.artifact(),
+                new LlamaCppModelCatalog.RuntimeDefaults(
+                        runtime.architecture(), runtime.parameterShape(), runtime.nativeCalling(),
+                        runtime.toolMode(), runtime.reasoningMode(), runtime.chatTemplate(),
+                        runtime.contextTokens(), runtime.maxContextTokens(), runtime.samplingProfile(),
+                        layout, runtime.managedServerArgs(), runtime.compatibleEngineLanes(),
+                        runtime.hardwareEnvelope(), runtime.requiresLocalModelPath()),
+                source.qualification(), source.guidePath(), source.ramGuidance());
     }
 
     private static LlamaCppProfileResolver.Request exactRequest(LlamaCppModelCatalog.Profile profile) {

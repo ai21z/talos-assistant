@@ -2,6 +2,7 @@ package dev.talos.engine.llamacpp.profile;
 
 import dev.talos.engine.llamacpp.LlamaCppModelCatalog;
 import dev.talos.engine.llamacpp.ManagedContextSelector;
+import dev.talos.spi.types.RequestMessageLayout;
 
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -248,6 +249,7 @@ public final class LlamaCppProfileResolver {
             MatchState engineCompatibility,
             MatchState servedIdentity,
             ToolMode effectiveToolMode,
+            RequestMessageLayout effectiveRequestLayout,
             String effectiveReasoningMode,
             int effectiveContextTokens,
             List<String> effectiveLaunchArguments,
@@ -277,6 +279,9 @@ public final class LlamaCppProfileResolver {
             engineCompatibility = engineCompatibility == null ? MatchState.UNVERIFIED : engineCompatibility;
             servedIdentity = servedIdentity == null ? MatchState.UNVERIFIED : servedIdentity;
             effectiveToolMode = effectiveToolMode == null ? ToolMode.CHAT_ONLY : effectiveToolMode;
+            effectiveRequestLayout = effectiveRequestLayout == null
+                    ? RequestMessageLayout.PRESERVE_AS_WRITTEN
+                    : effectiveRequestLayout;
             effectiveReasoningMode = clean(effectiveReasoningMode);
             effectiveContextTokens = Math.max(256, effectiveContextTokens);
             effectiveLaunchArguments = immutableStrings(effectiveLaunchArguments);
@@ -343,6 +348,11 @@ public final class LlamaCppProfileResolver {
         HardwareSupportState effectiveHardware = resolveHardware(hardware, reasons);
 
         ResolutionState resolution = flags.resolution();
+        RequestMessageLayout effectiveRequestLayout = resolution == ResolutionState.QUALIFIED
+                && profileIdentityBound
+                && runtime != null
+                ? runtime.requestLayout()
+                : RequestMessageLayout.PRESERVE_AS_WRITTEN;
         LlamaCppModelCatalog.Disposition disposition = resolution == ResolutionState.QUALIFIED
                 ? declared.map(LlamaCppModelCatalog.Profile::disposition)
                         .orElse(LlamaCppModelCatalog.Disposition.CUSTOM_UNVERIFIED)
@@ -362,6 +372,7 @@ public final class LlamaCppProfileResolver {
                 engineCompatibility,
                 servedIdentity,
                 effectiveTools,
+                effectiveRequestLayout,
                 effectiveReasoning,
                 effectiveContext,
                 effectiveArguments,

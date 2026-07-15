@@ -27,6 +27,7 @@ class ModelIdentitySnapshotTest {
                 .servedIdentityState("MATCHED")
                 .resolution("QUALIFIED")
                 .effectiveToolMode("NATIVE")
+                .effectiveRequestLayout("SINGLE_LEADING_SYSTEM")
                 .effectiveContextTokens(8192)
                 .disposition("experimental selectable")
                 .propsState("AVAILABLE")
@@ -44,6 +45,10 @@ class ModelIdentitySnapshotTest {
         assertFalse(snapshot.diagnostics().toString().contains("C:/Users/arisz"));
         assertFalse(snapshot.traceData().toString().contains("private/models"));
         assertTrue(snapshot.qualified());
+        assertEquals("SINGLE_LEADING_SYSTEM",
+                snapshot.diagnostics().get("model.requestLayout"));
+        assertEquals("SINGLE_LEADING_SYSTEM",
+                snapshot.traceData().get("effectiveRequestLayout"));
     }
 
     @Test

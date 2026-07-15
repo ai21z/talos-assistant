@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.Config;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
+import dev.talos.spi.types.RequestMessageLayout;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -35,6 +36,8 @@ class LlamaCppQualificationCandidateLoaderTest {
 
         assertEquals("granite-4.1-3b", loaded.profile().alias());
         assertEquals("native", loaded.profile().runtime().toolMode());
+        assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                loaded.profile().runtime().requestLayout());
         assertTrue(loaded.profile().runtime().nativeCalling());
         assertEquals(LlamaCppModelCatalog.Disposition.LAB_ONLY, loaded.profile().disposition());
         assertFalse(loaded.profile().selectable());
@@ -44,6 +47,24 @@ class LlamaCppQualificationCandidateLoaderTest {
         assertEquals(LlamaCppProfileResolver.ArtifactState.EXACT,
                 loaded.artifactIdentity().state());
         assertEquals(sha256(fixture.engine()), loaded.engineExecutableSha256());
+    }
+
+    @Test
+    void frozenCalibrationCanExplicitlySelectSingleLeadingSystemLayout() throws Exception {
+        Fixture fixture = fixture(Map.of("requestLayout", "SINGLE_LEADING_SYSTEM"));
+
+        var loaded = loader().load(fixture.settings(), fixture.config(), fixture.talosHome()).orElseThrow();
+
+        assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                loaded.profile().runtime().requestLayout());
+    }
+
+    @Test
+    void unknownRequestLayoutIsRefused() throws Exception {
+        Fixture fixture = fixture(Map.of("requestLayout", "guess-from-model-name"));
+
+        assertThrows(IllegalStateException.class,
+                () -> loader().load(fixture.settings(), fixture.config(), fixture.talosHome()));
     }
 
     @Test

@@ -90,6 +90,7 @@ public final class LlamaCppResolvedProfileService {
                     .servedIdentityState(profile.servedIdentity().name())
                     .resolution(profile.resolution().name())
                     .effectiveToolMode(profile.effectiveToolMode().name())
+                    .effectiveRequestLayout(profile.effectiveRequestLayout().name())
                     .effectiveContextTokens(profile.effectiveContextTokens())
                     .disposition(profile.disposition().label())
                     .propsState(propsState.name())

@@ -39,6 +39,7 @@ class LocalTurnTraceModelIdentityTest {
                 .servedIdentityState("MATCHED")
                 .resolution("QUALIFIED")
                 .effectiveToolMode("NATIVE")
+                .effectiveRequestLayout("SINGLE_LEADING_SYSTEM")
                 .effectiveContextTokens(8192)
                 .propsResponseSha256("d".repeat(64))
                 .reasonCodes(List.of("HARDWARE_UNVERIFIED"))
@@ -54,6 +55,7 @@ class LocalTurnTraceModelIdentityTest {
         assertEquals("Qwen3-8B-Q4_K_M.gguf", event.data().get("configuredModelFile"));
         assertEquals("Qwen3-8B-Q4_K_M.gguf", event.data().get("observedModelFile"));
         assertEquals("qwen3-8b", event.data().get("resolvedProfile"));
+        assertEquals("SINGLE_LEADING_SYSTEM", event.data().get("effectiveRequestLayout"));
         assertFalse(event.data().toString().contains("C:/private"));
     }
 

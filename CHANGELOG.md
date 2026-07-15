@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- [T1137] Exact qualification identities can now select a single-leading-system
+  provider layout for llama.cpp templates that reject multiple system messages.
+  Existing profiles preserve their current request shape, while status, doctor,
+  prompt debug, and trace evidence disclose the effective layout without moving
+  workspace data, tool results, or user messages into system authority.
 - [T1134] Granite 4.1 8B is now an experimental selectable profile bound to
   its exact official Q4_K_M artifact and immutable protocol-v5 scorecard.
   Setup requires and verifies the local GGUF, while wizard downloads, accepted

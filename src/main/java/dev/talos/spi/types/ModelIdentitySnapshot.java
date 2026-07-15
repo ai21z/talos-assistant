@@ -24,6 +24,7 @@ public record ModelIdentitySnapshot(
         String servedIdentityState,
         String resolution,
         String effectiveToolMode,
+        String effectiveRequestLayout,
         int effectiveContextTokens,
         String disposition,
         String propsState,
@@ -51,6 +52,7 @@ public record ModelIdentitySnapshot(
         servedIdentityState = token(servedIdentityState, 64);
         resolution = token(resolution, 64);
         effectiveToolMode = token(effectiveToolMode, 64);
+        effectiveRequestLayout = token(effectiveRequestLayout, 64);
         effectiveContextTokens = Math.max(0, effectiveContextTokens);
         disposition = bounded(disposition, 120);
         propsState = token(propsState, 64);
@@ -96,6 +98,7 @@ public record ModelIdentitySnapshot(
         put(out, "model.servedIdentity", servedIdentityState);
         put(out, "model.resolution", resolution);
         put(out, "model.toolMode", effectiveToolMode);
+        put(out, "model.requestLayout", effectiveRequestLayout);
         if (effectiveContextTokens > 0) {
             out.put("model.contextTokens", Integer.toString(effectiveContextTokens));
         }
@@ -127,6 +130,7 @@ public record ModelIdentitySnapshot(
         putObject(out, "servedIdentityState", servedIdentityState);
         putObject(out, "resolution", resolution);
         putObject(out, "effectiveToolMode", effectiveToolMode);
+        putObject(out, "effectiveRequestLayout", effectiveRequestLayout);
         if (effectiveContextTokens > 0) out.put("effectiveContextTokens", effectiveContextTokens);
         putObject(out, "disposition", disposition);
         putObject(out, "propsState", propsState);
@@ -218,6 +222,7 @@ public record ModelIdentitySnapshot(
         private String servedIdentityState = "";
         private String resolution = "";
         private String effectiveToolMode = "";
+        private String effectiveRequestLayout = "";
         private int effectiveContextTokens;
         private String disposition = "";
         private String propsState = "";
@@ -239,6 +244,7 @@ public record ModelIdentitySnapshot(
         public Builder servedIdentityState(String value) { servedIdentityState = value; return this; }
         public Builder resolution(String value) { resolution = value; return this; }
         public Builder effectiveToolMode(String value) { effectiveToolMode = value; return this; }
+        public Builder effectiveRequestLayout(String value) { effectiveRequestLayout = value; return this; }
         public Builder effectiveContextTokens(int value) { effectiveContextTokens = value; return this; }
         public Builder disposition(String value) { disposition = value; return this; }
         public Builder propsState(String value) { propsState = value; return this; }
@@ -251,7 +257,8 @@ public record ModelIdentitySnapshot(
             return new ModelIdentitySnapshot(
                     backend, configuredModel, configuredModelFile, declaredProfile, resolvedProfile, observedModelFile,
                     artifactState, artifactVerificationIdentity, engineLane, engineExecutableIdentity,
-                    servedIdentityState, resolution, effectiveToolMode, effectiveContextTokens,
+                    servedIdentityState, resolution, effectiveToolMode, effectiveRequestLayout,
+                    effectiveContextTokens,
                     disposition, propsState, propsResponseSha256, engineBuildInfo, chatAvailable,
                     reasonCodes);
         }

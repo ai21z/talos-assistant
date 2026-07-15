@@ -1,6 +1,7 @@
 package dev.talos.engine.llamacpp;
 
 import org.junit.jupiter.api.Test;
+import dev.talos.spi.types.RequestMessageLayout;
 
 import java.time.LocalDate;
 import java.util.EnumSet;
@@ -11,6 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlamaCppModelCatalogTest {
+
+    @Test
+    void everyExistingProfilePreservesTheHistoricalProviderMessageLayout() {
+        for (var profile : LlamaCppModelCatalog.profiles().values()) {
+            assertEquals(RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                    profile.runtime().requestLayout(), profile.alias());
+        }
+    }
 
     private record ExistingProfile(
             String alias,

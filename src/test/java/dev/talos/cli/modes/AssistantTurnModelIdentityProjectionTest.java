@@ -35,6 +35,7 @@ class AssistantTurnModelIdentityProjectionTest {
                 .servedIdentityState("MATCHED")
                 .resolution("QUALIFIED")
                 .effectiveToolMode("NATIVE")
+                .effectiveRequestLayout("SINGLE_LEADING_SYSTEM")
                 .effectiveContextTokens(8192)
                 .propsState("AVAILABLE")
                 .propsResponseSha256("e".repeat(64))
@@ -45,7 +46,8 @@ class AssistantTurnModelIdentityProjectionTest {
         PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
                 new ChatRequest("llama_cpp", "qwen3-8b", "", "", List.of(),
                         Duration.ofSeconds(5)),
-                false));
+                false).withDiagnostics(java.util.Map.of(
+                        "provider.requestLayout", "SINGLE_LEADING_SYSTEM")));
 
         var capture = PromptDebugCapture.latest().orElseThrow();
         var diagnostics = capture.diagnostics();
@@ -53,6 +55,8 @@ class AssistantTurnModelIdentityProjectionTest {
         assertEquals("qwen3-8b", diagnostics.get("model.resolvedProfile"));
         assertEquals("Qwen3-8B-Q4_K_M.gguf", diagnostics.get("model.observedFile"));
         assertEquals("NATIVE", diagnostics.get("model.toolMode"));
+        assertEquals("SINGLE_LEADING_SYSTEM", diagnostics.get("model.requestLayout"));
+        assertEquals("SINGLE_LEADING_SYSTEM", diagnostics.get("provider.requestLayout"));
         assertFalse(diagnostics.toString().contains("C:/private"));
 
         String rendered = PromptDebugInspector.format(capture);
@@ -62,6 +66,8 @@ class AssistantTurnModelIdentityProjectionTest {
         assertTrue(rendered.contains("- Resolved: qwen3-8b"), rendered);
         assertTrue(rendered.contains("- Observed file: Qwen3-8B-Q4_K_M.gguf"), rendered);
         assertTrue(rendered.contains("- Effective tools: NATIVE"), rendered);
+        assertTrue(rendered.contains("- Request layout: SINGLE_LEADING_SYSTEM"), rendered);
+        assertTrue(rendered.contains("- Provider request layout: SINGLE_LEADING_SYSTEM"), rendered);
         assertFalse(rendered.contains("C:/private"), rendered);
     }
 }

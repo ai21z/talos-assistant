@@ -22,6 +22,7 @@ class ModelIdentityPresentationTest {
                     .servedIdentityState("MATCHED")
                     .resolution("QUALIFIED")
                     .effectiveToolMode("NATIVE")
+                    .effectiveRequestLayout("SINGLE_LEADING_SYSTEM")
                     .effectiveContextTokens(profile.runtime().contextTokens())
                     .disposition(profile.disposition().label())
                     .propsState("AVAILABLE")
@@ -32,6 +33,9 @@ class ModelIdentityPresentationTest {
             assertTrue(ModelIdentityPresentation.statusRows(identity).stream()
                     .anyMatch(row -> row.label().equals("Disposition")
                             && row.value().equals("experimental selectable")));
+            assertTrue(ModelIdentityPresentation.statusRows(identity).stream()
+                    .anyMatch(row -> row.label().equals("Request layout")
+                            && row.value().equals("single-leading-system")));
         }
     }
 

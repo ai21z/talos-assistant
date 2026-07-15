@@ -11,6 +11,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -66,10 +67,14 @@ public final class CompatChatClient {
     }
 
     public String chat(ChatRequest request) throws Exception {
+        return chat(request, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+    }
+
+    public String chat(ChatRequest request, RequestMessageLayout layout) throws Exception {
         ChatRequest req = safeRequest(request);
-        String json = mapper.writeValueAsString(buildBody(req, false));
-        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
-                req, false, json, PROVIDER_BODY_STAGE));
+        RequestMessageLayout selected = safeLayout(layout);
+        String json = mapper.writeValueAsString(buildBody(req, false, selected));
+        recordProviderBody(req, false, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, false)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
@@ -89,10 +94,16 @@ public final class CompatChatClient {
     }
 
     public Stream<TokenChunk> chatStream(ChatRequest request) throws Exception {
+        return chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+    }
+
+    public Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            RequestMessageLayout layout) throws Exception {
         ChatRequest req = safeRequest(request);
-        String json = mapper.writeValueAsString(buildBody(req, true));
-        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
-                req, true, json, PROVIDER_BODY_STAGE));
+        RequestMessageLayout selected = safeLayout(layout);
+        String json = mapper.writeValueAsString(buildBody(req, true, selected));
+        recordProviderBody(req, true, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, true)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
@@ -121,10 +132,16 @@ public final class CompatChatClient {
     }
 
     public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
+        return chatStreamNonStreaming(request, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+    }
+
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            RequestMessageLayout layout) throws Exception {
         ChatRequest req = safeRequest(request);
-        String json = mapper.writeValueAsString(buildBody(req, false));
-        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
-                req, false, json, PROVIDER_BODY_STAGE));
+        RequestMessageLayout selected = safeLayout(layout);
+        String json = mapper.writeValueAsString(buildBody(req, false, selected));
+        recordProviderBody(req, false, json, selected);
 
         HttpRequest httpReq = requestBuilder(req, false)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
@@ -144,10 +161,17 @@ public final class CompatChatClient {
     }
 
     Map<String, Object> buildBody(ChatRequest req, boolean stream) {
+        return buildBody(req, stream, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+    }
+
+    Map<String, Object> buildBody(
+            ChatRequest req,
+            boolean stream,
+            RequestMessageLayout layout) {
         String model = req.model == null || req.model.isBlank() ? defaultModel : req.model;
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("messages", serializeMessages(req));
+        body.put("messages", serializeMessages(req, safeLayout(layout)));
         body.put("stream", stream);
 
         List<Map<String, Object>> tools = convertToolSpecs(req.tools);
@@ -205,7 +229,9 @@ public final class CompatChatClient {
                 .header("Content-Type", "application/json");
     }
 
-    private List<Map<String, Object>> serializeMessages(ChatRequest req) {
+    private List<Map<String, Object>> serializeMessages(
+            ChatRequest req,
+            RequestMessageLayout layout) {
         List<ChatMessage> source = req.messages;
         if (source == null || source.isEmpty()) {
             List<ChatMessage> fallback = new ArrayList<>();
@@ -219,11 +245,26 @@ public final class CompatChatClient {
             source = fallback;
         }
 
-        List<Map<String, Object>> messages = new ArrayList<>(source.size());
-        for (ChatMessage message : source) {
+        List<ChatMessage> providerMessages = ProviderMessageLayoutAdapter.apply(source, layout);
+        List<Map<String, Object>> messages = new ArrayList<>(providerMessages.size());
+        for (ChatMessage message : providerMessages) {
             messages.add(serializeMessage(message));
         }
         return messages;
+    }
+
+    private void recordProviderBody(
+            ChatRequest request,
+            boolean stream,
+            String json,
+            RequestMessageLayout layout) {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                        request, stream, json, PROVIDER_BODY_STAGE)
+                .withDiagnostics(Map.of("provider.requestLayout", layout.name())));
+    }
+
+    private static RequestMessageLayout safeLayout(RequestMessageLayout layout) {
+        return layout == null ? RequestMessageLayout.PRESERVE_AS_WRITTEN : layout;
     }
 
     private Map<String, Object> serializeMessage(ChatMessage message) {

@@ -22,6 +22,7 @@ record ModelIdentityDoctorAssessment(ProbeResult.Status status, String detail) {
         suffix += fact("artifact", safe.artifactState());
         suffix += fact("serving", safe.servedIdentityState());
         suffix += fact("tools", safe.effectiveToolMode());
+        suffix += fact("layout", safe.effectiveRequestLayout());
         suffix += fact("props", safe.propsState());
         if (!reasons.isBlank()) suffix += ", reasons " + reasons;
 

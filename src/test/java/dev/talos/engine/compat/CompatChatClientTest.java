@@ -8,6 +8,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.TokenChunk;
@@ -31,6 +32,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -104,6 +106,69 @@ class CompatChatClientTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void optedInLayoutChangesOnlyProviderMessagesAndKeepsLogicalPromptEvidence() throws Exception {
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
+                {"choices":[{"message":{"role":"assistant","content":"ok"}}]}
+                """, "application/json");
+        try {
+            CompatChatClient client = client(server);
+            List<ChatMessage> logicalMessages = List.of(
+                    ChatMessage.system("base policy"),
+                    ChatMessage.user("[ProjectMemory]\nworkspace bytes"),
+                    ChatMessage.system("turn capability"),
+                    ChatMessage.user("read README.md"));
+            ChatRequest request = new ChatRequest(
+                    "llama_cpp", "agent.gguf", "", "", List.of(), Duration.ofSeconds(5),
+                    logicalMessages, List.of(), ChatRequestControls.defaults());
+
+            assertEquals("ok", client.chat(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM));
+
+            JsonNode provider = MAPPER.readTree(bodyRef.get());
+            assertEquals(3, provider.path("messages").size());
+            assertEquals("system", provider.path("messages").get(0).path("role").asText());
+            assertEquals("base policy\n\nturn capability",
+                    provider.path("messages").get(0).path("content").asText());
+            assertEquals("user", provider.path("messages").get(1).path("role").asText());
+            assertEquals("[ProjectMemory]\nworkspace bytes",
+                    provider.path("messages").get(1).path("content").asText());
+
+            var snapshot = PromptDebugCapture.latest().orElseThrow();
+            assertEquals(logicalMessages, snapshot.messages());
+            assertEquals(2, snapshot.messages().stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .count());
+            assertEquals("SINGLE_LEADING_SYSTEM",
+                    snapshot.diagnostics().get("provider.requestLayout"));
+            assertEquals(bodyRef.get(), snapshot.providerBodyJson());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void streamAndNonStreamingBodiesUseTheSameOptedInMessageLayout() {
+        CompatChatClient client = new CompatChatClient(
+                "http://127.0.0.1:1", "agent.gguf", HttpClient.newHttpClient(), MAPPER);
+        ChatRequest request = new ChatRequest(
+                "llama_cpp", "agent.gguf", "", "", List.of(), Duration.ofSeconds(5),
+                List.of(
+                        ChatMessage.system("base policy"),
+                        ChatMessage.system("turn capability"),
+                        ChatMessage.user("hello")),
+                List.of(), ChatRequestControls.defaults());
+
+        Map<String, Object> streaming = client.buildBody(
+                request, true, RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+        Map<String, Object> nonStreaming = client.buildBody(
+                request, false, RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+
+        assertEquals(streaming.get("messages"), nonStreaming.get("messages"));
+        assertEquals(true, streaming.get("stream"));
+        assertEquals(false, nonStreaming.get("stream"));
     }
 
     /**

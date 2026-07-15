@@ -1,6 +1,7 @@
 package dev.talos.engine.llamacpp;
 
 import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.spi.types.Capabilities;
@@ -18,6 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CopyOnWriteArrayList;
+import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -205,6 +208,92 @@ class LlamaCppEngineProviderTest {
     }
 
     @Test
+    void exactQualificationLayoutReachesEveryCompatTransportPath() throws Exception {
+        List<String> bodies = new CopyOnWriteArrayList<>();
+        HttpServer server = startLayoutServer(bodies);
+        try {
+            String alias = "test-single-system-candidate";
+            String modelPath = tempFilePath("single-system.gguf");
+            String serverPath = tempFilePath("llama-server.exe");
+            Config cfg = config(Map.of(
+                    "mode", "connect_only",
+                    "server_path", serverPath,
+                    "model_path", modelPath,
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", alias,
+                    "context", 8192,
+                    "server_args", List.of()));
+            cfg.data.put("tools", Map.of("native_calling", true));
+            LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
+            var profile = qualificationCandidate(alias, RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+            var artifact = new LlamaCppProfileResolver.ArtifactIdentity(
+                    LlamaCppProfileResolver.ArtifactState.EXACT,
+                    java.nio.file.Path.of(modelPath).toAbsolutePath().normalize().toString(),
+                    profile.artifactSizeBytes(), profile.artifactSizeBytes(),
+                    profile.artifactSha256(), profile.artifactSha256(), "candidate-record");
+            var service = new LlamaCppResolvedProfileService(
+                    llamaCfg,
+                    java.nio.file.Files.createTempDirectory("talos-layout-candidate"),
+                    (path, model, expected, home, verify) -> artifact,
+                    base -> LlamaCppPropsClient.Result.available(new LlamaCppPropsClient.Props(
+                            modelPath, "embedded template", true, true, false, false,
+                            8192, "b9918-test", "props-hash")),
+                    (config, declared, observed, verify) -> new LlamaCppProfileResolver.EngineFacts(
+                            profile.runtime().compatibleEngineLanes().getFirst(),
+                            "engine-hash", LlamaCppProfileResolver.MatchState.MATCHED),
+                    (config, home) -> java.util.Optional.of(
+                            new LlamaCppQualificationCandidateLoader.LoadedCandidate(
+                                    profile, "c".repeat(64), artifact, "engine-hash")));
+            LlamaCppEngine engine = new LlamaCppEngine(
+                    llamaCfg,
+                    new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                        throw new AssertionError("connect-only must not launch");
+                    }, HttpClient.newHttpClient()),
+                    HttpClient.newHttpClient(),
+                    service);
+            ChatRequest request = new ChatRequest(
+                    "llama_cpp", alias, "", "", List.of(), Duration.ofSeconds(5),
+                    List.of(
+                            ChatMessage.system("base policy"),
+                            ChatMessage.user("[ProjectMemory]\nworkspace bytes"),
+                            ChatMessage.system("turn capability"),
+                            ChatMessage.user("read README.md")));
+
+            assertEquals("ok", engine.chat(request));
+            assertEquals("ok", engine.chatStreamNonStreaming(request)
+                    .filter(chunk -> chunk.text() != null && !chunk.text().isEmpty())
+                    .map(dev.talos.spi.types.TokenChunk::text)
+                    .reduce("", String::concat));
+            assertEquals("ok", engine.chatStream(request)
+                    .filter(chunk -> chunk.text() != null && !chunk.text().isEmpty())
+                    .map(dev.talos.spi.types.TokenChunk::text)
+                    .reduce("", String::concat));
+
+            assertEquals(RequestMessageLayout.SINGLE_LEADING_SYSTEM,
+                    service.resolveAvailable(true).profile().effectiveRequestLayout());
+            assertEquals("SINGLE_LEADING_SYSTEM", engine.modelIdentity().effectiveRequestLayout());
+            assertEquals(3, bodies.size());
+            ObjectMapper mapper = new ObjectMapper();
+            for (String body : bodies) {
+                var messages = mapper.readTree(body).path("messages");
+                assertEquals(3, messages.size(), body);
+                assertEquals("system", messages.get(0).path("role").asText(), body);
+                assertEquals("base policy\n\nturn capability",
+                        messages.get(0).path("content").asText(), body);
+                assertEquals("[ProjectMemory]\nworkspace bytes",
+                        messages.get(1).path("content").asText(), body);
+                assertEquals(1, java.util.stream.StreamSupport.stream(
+                                java.util.Spliterators.spliteratorUnknownSize(messages.iterator(), 0), false)
+                        .filter(message -> "system".equals(message.path("role").asText()))
+                        .count(), body);
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void managedChatWaitsForHealthBeforeSendingCompatChat() throws Exception {
         AtomicInteger healthCalls = new AtomicInteger();
         AtomicInteger chatCalls = new AtomicInteger();
@@ -331,6 +420,51 @@ class LlamaCppEngineProviderTest {
         });
         server.start();
         return server;
+    }
+
+    private static HttpServer startLayoutServer(List<String> bodies) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/health", exchange -> {
+            byte[] bytes = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.createContext("/v1/chat/completions", exchange -> {
+            String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            bodies.add(requestBody);
+            boolean stream = new ObjectMapper().readTree(requestBody).path("stream").asBoolean();
+            byte[] bytes = (stream
+                    ? "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"
+                            + "data: [DONE]\n\n"
+                    : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", stream ? "text/event-stream" : "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    private static LlamaCppModelCatalog.Profile qualificationCandidate(
+            String alias,
+            RequestMessageLayout layout) {
+        return new LlamaCppModelCatalog.Profile(
+                alias,
+                new LlamaCppModelCatalog.ModelArtifact(
+                        "example/test", "a".repeat(40), "test.gguf", "b".repeat(64),
+                        4L, "Apache-2.0"),
+                new LlamaCppModelCatalog.RuntimeDefaults(
+                        "test", "test", true, "native", "none", "embedded",
+                        8192, 8192, "test", layout, List.of(),
+                        List.of("win-x64-cuda-13.3:b9918"), "test", true),
+                new LlamaCppModelCatalog.QualificationEvidence(
+                        LlamaCppModelCatalog.Disposition.LAB_ONLY, false, false, 5,
+                        "qualification-candidate:test", "c".repeat(40), "not-scored",
+                        java.time.LocalDate.of(1970, 1, 1), "test only"),
+                "", "test only");
     }
 
     private static String tempFilePath(String name) throws IOException {

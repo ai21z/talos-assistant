@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.engine.llamacpp.profile.LlamaCppArtifactVerificationStore;
 import dev.talos.engine.llamacpp.profile.LlamaCppProfileResolver;
+import dev.talos.spi.types.RequestMessageLayout;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -183,6 +184,7 @@ final class LlamaCppQualificationCandidateLoader {
             long activeParameters = positiveLong(rules, "activeParameters");
             if (activeParameters > totalParameters) throw invalid("active parameters exceed total parameters");
             String reasoning = text(rules, "reasoningBehavior");
+            RequestMessageLayout requestLayout = requestLayout(optionalText(rules, "requestLayout"));
             LlamaCppModelCatalog.Profile profile = new LlamaCppModelCatalog.Profile(
                     alias,
                     new LlamaCppModelCatalog.ModelArtifact(
@@ -202,6 +204,7 @@ final class LlamaCppQualificationCandidateLoader {
                             context,
                             context,
                             "frozen qualification calibration",
+                            requestLayout,
                             config.serverArgs(),
                             List.of(engineLane),
                             "qualification campaign host only",
@@ -307,6 +310,14 @@ final class LlamaCppQualificationCandidateLoader {
             out.add(entry.textValue());
         }
         return List.copyOf(out);
+    }
+
+    private static RequestMessageLayout requestLayout(String value) {
+        try {
+            return RequestMessageLayout.parse(value);
+        } catch (IllegalArgumentException error) {
+            throw invalid("requestLayout is not recognized", error);
+        }
     }
 
     private static String text(JsonNode root, String field) {

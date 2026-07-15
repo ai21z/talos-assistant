@@ -136,6 +136,10 @@ public final class PromptDebugInspector {
             }
             out.append('\n');
         }
+        String providerRequestLayout = diagnostics.get("provider.requestLayout");
+        if (providerRequestLayout != null && !providerRequestLayout.isBlank()) {
+            out.append("- Provider request layout: ").append(providerRequestLayout).append('\n');
+        }
     }
 
     private static void appendModelIdentity(StringBuilder out, Map<String, String> diagnostics) {
@@ -157,6 +161,7 @@ public final class PromptDebugInspector {
         appendModelFact(out, diagnostics, "model.servedIdentity", "Serving identity");
         appendModelFact(out, diagnostics, "model.resolution", "Resolution");
         appendModelFact(out, diagnostics, "model.toolMode", "Effective tools");
+        appendModelFact(out, diagnostics, "model.requestLayout", "Request layout");
         appendModelFact(out, diagnostics, "model.contextTokens", "Effective context");
         appendModelFact(out, diagnostics, "model.disposition", "Disposition");
         appendModelFact(out, diagnostics, "model.propsState", "Props");

@@ -506,7 +506,9 @@ class LlamaCppResolvedProfileServiceTest {
                 new LlamaCppModelCatalog.RuntimeDefaults(
                         "granite", "3.4B dense", true, "native", "none",
                         "embedded Granite role template", 8192, 8192,
-                        "Talos standard request controls", List.of(),
+                        "Talos standard request controls",
+                        dev.talos.spi.types.RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        List.of(),
                         List.of("win-x64-cuda-13.3:b9918"), "qualification host", true),
                 new LlamaCppModelCatalog.QualificationEvidence(
                         LlamaCppModelCatalog.Disposition.LAB_ONLY, false, false, 5,

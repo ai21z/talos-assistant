@@ -20,6 +20,7 @@ class ModelIdentityDoctorAssessmentTest {
                 .servedIdentityState("MATCHED")
                 .resolution("QUALIFIED")
                 .effectiveToolMode("NATIVE")
+                .effectiveRequestLayout("SINGLE_LEADING_SYSTEM")
                 .propsState("AVAILABLE")
                 .propsResponseSha256("b".repeat(64))
                 .chatAvailable(true)
@@ -33,6 +34,7 @@ class ModelIdentityDoctorAssessmentTest {
         assertTrue(assessment.detail().contains("artifact exact"), assessment.detail());
         assertTrue(assessment.detail().contains("serving matched"), assessment.detail());
         assertTrue(assessment.detail().contains("tools native"), assessment.detail());
+        assertTrue(assessment.detail().contains("layout single-leading-system"), assessment.detail());
         assertTrue(assessment.detail().contains("props available"), assessment.detail());
         assertFalse(assessment.detail().contains("C:/private"), assessment.detail());
     }

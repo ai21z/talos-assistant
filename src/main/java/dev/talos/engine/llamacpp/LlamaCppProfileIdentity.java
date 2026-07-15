@@ -2,6 +2,7 @@ package dev.talos.engine.llamacpp;
 
 import dev.talos.spi.EngineConfig;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.RequestMessageLayout;
 
 import java.nio.file.Path;
 
@@ -40,6 +41,7 @@ public final class LlamaCppProfileIdentity {
                     .configuredModel(configured)
                     .resolution("UNVERIFIED")
                     .effectiveToolMode("CHAT_ONLY")
+                    .effectiveRequestLayout(RequestMessageLayout.PRESERVE_AS_WRITTEN.name())
                     .effectiveContextTokens(context)
                     .propsState("UNAVAILABLE")
                     .reasonCodes(java.util.List.of("IDENTITY_INSPECTION_FAILED"))
