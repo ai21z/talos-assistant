@@ -186,12 +186,23 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
     private void applyCurrentTaskAnchor(String userTask) {
         if (userTask == null || userTask.isBlank()) return;
         String pinned = userTask.length() <= 500 ? userTask : userTask.substring(0, 500) + "…";
-        addSystem("[Current task - stay focused on this] " + pinned, "[Current task");
+        addUser("[Current task - stay focused on this] " + pinned, "[Current task");
     }
 
     private void addSystem(String content, String cleanupPrefix) {
-        state.messages.add(ChatMessage.system(content));
-        temporaryMessages.add(new TemporaryMessage(state.messages.size() - 1, cleanupPrefix));
+        addTemporary(ChatMessage.system(content), cleanupPrefix);
+    }
+
+    private void addUser(String content, String cleanupPrefix) {
+        addTemporary(ChatMessage.user(content), cleanupPrefix);
+    }
+
+    private void addTemporary(ChatMessage message, String cleanupPrefix) {
+        state.messages.add(message);
+        temporaryMessages.add(new TemporaryMessage(
+                state.messages.size() - 1,
+                message.role(),
+                cleanupPrefix));
     }
 
     @Override
@@ -202,7 +213,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
             TemporaryMessage temporary = temporaryMessages.get(i);
             if (temporary.index() < 0 || temporary.index() >= state.messages.size()) continue;
             ChatMessage message = state.messages.get(temporary.index());
-            if ("system".equals(message.role())
+            if (temporary.role().equals(message.role())
                     && message.content() != null
                     && message.content().startsWith(temporary.cleanupPrefix())) {
                 state.messages.remove(temporary.index());
@@ -222,7 +233,7 @@ final class ToolRepromptMessageOverlay implements AutoCloseable {
         }
     }
 
-    private record TemporaryMessage(int index, String cleanupPrefix) {}
+    private record TemporaryMessage(int index, String role, String cleanupPrefix) {}
 
     private record RestoredToolResult(int index, String compactedContent) {}
 }

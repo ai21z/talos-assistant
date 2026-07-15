@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- [T1148] Tool continuations now keep the bounded current-task reminder in
+  user role. Raw user request bytes no longer gain system authority when an
+  evidence-gated provider layout merges Talos policy frames.
 - [T1147] Qwen3.5 9B is now an experimental selectable profile bound to its
   exact controlled Q4_K_M conversion and protocol-v5 scorecard. Setup requires
   verified local bytes and `--reasoning off`. The qualified provider layout

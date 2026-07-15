@@ -63,6 +63,29 @@ class ProviderMessageLayoutAdapterTest {
     }
 
     @Test
+    void singleLeadingSystemKeepsAContinuationReminderInUserRole() {
+        String marker = "USER-CONTROLLED-CONTINUATION";
+        ChatMessage original = ChatMessage.user("Edit notes.txt. " + marker);
+        ChatMessage reminder = ChatMessage.user(
+                "[Current task - stay focused on this] Edit notes.txt. " + marker);
+
+        List<ChatMessage> adapted = ProviderMessageLayoutAdapter.apply(
+                List.of(
+                        ChatMessage.system("Talos policy."),
+                        original,
+                        ChatMessage.system("[CurrentTurnCapability] edit notes.txt"),
+                        reminder),
+                RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+
+        assertEquals(3, adapted.size());
+        assertEquals("system", adapted.getFirst().role());
+        assertFalse(adapted.getFirst().content().contains(marker));
+        assertSame(original, adapted.get(1));
+        assertSame(reminder, adapted.get(2));
+        assertEquals("user", adapted.get(2).role());
+    }
+
+    @Test
     void singleLeadingSystemRefusesSystemMessagesWithToolMetadata() {
         ChatMessage malformed = new ChatMessage(
                 "system",

@@ -51,9 +51,22 @@ class ToolRepromptOverlayContinuationTest {
         assertTrue(continueLoop);
         assertEquals("Reprompt answer.", state.currentText);
         assertEquals(1, recorded.requests().size());
-        String payload = messageContents(recorded.requests().getFirst());
+        ChatRequest request = recorded.requests().getFirst();
+        String payload = messageContents(request);
         assertTrue(payload.contains("[Expected target progress]"), payload);
         assertTrue(payload.contains("[Current task - stay focused on this]"), payload);
+        assertTrue(request.messages.stream()
+                        .filter(message -> "user".equals(message.role()))
+                        .map(ChatMessage::content)
+                        .anyMatch(content -> content != null
+                                && content.startsWith("[Current task - stay focused on this]")),
+                "the continuation reminder must retain user authority");
+        assertFalse(request.messages.stream()
+                        .filter(message -> "system".equals(message.role()))
+                        .map(ChatMessage::content)
+                        .anyMatch(content -> content != null
+                                && content.contains("Create index.html, styles.css, and scripts.js.")),
+                "raw user task bytes must not gain system authority");
         assertFalse(state.messages.stream()
                         .map(ChatMessage::content)
                         .filter(content -> content != null)
