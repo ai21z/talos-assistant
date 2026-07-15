@@ -51,10 +51,15 @@ class ProviderMessageLayoutAdapterTest {
     }
 
     @Test
-    void singleLeadingSystemRefusesARequestWithoutSystemAuthority() {
-        assertThrows(IllegalArgumentException.class, () -> ProviderMessageLayoutAdapter.apply(
-                List.of(ChatMessage.user("hello")),
-                RequestMessageLayout.SINGLE_LEADING_SYSTEM));
+    void singleLeadingSystemPreservesARequestWithoutSystemFrames() {
+        ChatMessage user = ChatMessage.user("doctor smoke");
+
+        List<ChatMessage> adapted = ProviderMessageLayoutAdapter.apply(
+                List.of(user),
+                RequestMessageLayout.SINGLE_LEADING_SYSTEM);
+
+        assertEquals(List.of(user), adapted);
+        assertSame(user, adapted.getFirst());
     }
 
     @Test

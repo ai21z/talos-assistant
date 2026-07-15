@@ -24,8 +24,7 @@ final class ProviderMessageLayoutAdapter {
                 .filter(message -> "system".equals(message.role()))
                 .toList();
         if (systems.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "single-leading-system layout requires at least one system message");
+            return source;
         }
         for (ChatMessage system : systems) {
             if (system.hasNativeToolCalls()

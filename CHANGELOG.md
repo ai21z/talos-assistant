@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- [T1140] The single-leading-system provider layout now preserves systemless
+  diagnostic requests unchanged. Adapted models can complete doctor smoke and
+  rate probes without adding an empty authority frame, while requests that do
+  contain system frames retain the existing merge and role-separation rules.
 - [T1137] Exact qualification identities can now select a single-leading-system
   provider layout for llama.cpp templates that reject multiple system messages.
   Existing profiles preserve their current request shape, while status, doctor,

@@ -150,6 +150,37 @@ class CompatChatClientTest {
     }
 
     @Test
+    void optedInLayoutPreservesSystemlessDiagnosticRequest() throws Exception {
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
+                {"choices":[{"message":{"role":"assistant","content":"TALOS_MODEL_SMOKE_OK"}}]}
+                """, "application/json");
+        try {
+            CompatChatClient client = client(server);
+            ChatMessage smoke = ChatMessage.user("Return only TALOS_MODEL_SMOKE_OK.");
+            ChatRequest request = new ChatRequest(
+                    "llama_cpp", "agent.gguf", "", "", List.of(), Duration.ofSeconds(5),
+                    List.of(smoke), List.of(), ChatRequestControls.defaults());
+
+            assertEquals("TALOS_MODEL_SMOKE_OK",
+                    client.chat(request, RequestMessageLayout.SINGLE_LEADING_SYSTEM));
+
+            JsonNode provider = MAPPER.readTree(bodyRef.get());
+            assertEquals(1, provider.path("messages").size());
+            assertEquals("user", provider.path("messages").get(0).path("role").asText());
+            assertEquals(smoke.content(), provider.path("messages").get(0).path("content").asText());
+
+            var snapshot = PromptDebugCapture.latest().orElseThrow();
+            assertEquals(List.of(smoke), snapshot.messages());
+            assertEquals("SINGLE_LEADING_SYSTEM",
+                    snapshot.diagnostics().get("provider.requestLayout"));
+            assertEquals(bodyRef.get(), snapshot.providerBodyJson());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void streamAndNonStreamingBodiesUseTheSameOptedInMessageLayout() {
         CompatChatClient client = new CompatChatClient(
                 "http://127.0.0.1:1", "agent.gguf", HttpClient.newHttpClient(), MAPPER);
