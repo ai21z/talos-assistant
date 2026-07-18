@@ -226,7 +226,13 @@ public final class TurnProcessor {
                 TurnAuditCapture.updateFinalPhase(ctx.executionPhaseState().phase().name());
             }
             String assistantText = MemoryUpdateListener.extractText(result.get());
-            LocalTurnTraceCapture.recordModelResponseReceived(assistantText);
+            String committedAssistantText = assistantText == null
+                    ? ""
+                    : MemoryUpdateListener.assistantTextForPersistence(assistantText, userInput);
+            LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                    committedAssistantText,
+                    LocalTurnTraceCapture.AnswerTransformationReason.SESSION_COMMIT_NORMALIZATION);
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(committedAssistantText);
             String resultStatus = JsonTurnLogAppender.statusOf(result.get())
                     .toUpperCase(java.util.Locale.ROOT);
             LocalTurnTraceCapture.recordOutcomeIfAbsent(
@@ -320,7 +326,7 @@ public final class TurnProcessor {
      * <p>Scope guarding, policy decisions, and approval outcomes are also
      * recorded into the active {@link TurnAuditCapture} bag if one is
      * running on this thread.
-     */
+    */
     public ToolResult executeTool(Session session, ToolCall call, RuntimeTurnContext ctx) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
@@ -328,15 +334,50 @@ public final class TurnProcessor {
         if (session == null || ctx == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
         }
+        LocalTurnTraceCapture.ParsedToolCallPermit permit = null;
+        if (LocalTurnTraceCapture.isActive()) {
+            permit = LocalTurnTraceCapture.beginParsedToolCallForExecution(
+                    tracePhase(ctx), call, null, 0);
+            if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Tool execution requires an exact parsed-call trace lineage"));
+            }
+        }
+        return executeTool(session, call, ctx, permit);
+    }
+
+    /** Executes a call whose one-use parse permit was minted by the tool-loop stage. */
+    public ToolResult executeToolAfterParsed(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
+        if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Tool execution requires the current exact parsed-call trace lineage"));
+        }
+        return executeTool(session, call, ctx, parsedPermit);
+    }
+
+    private ToolResult executeTool(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
+        if (call == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
+        }
+        if (session == null || ctx == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
+        }
         String tracePhase = tracePhase(ctx);
-        LocalTurnTraceCapture.recordToolCallParsed(tracePhase, call);
         ToolAliasPolicy.Decision aliasDecision = ToolAliasPolicy.resolve(call.toolName());
         LocalTurnTraceCapture.recordToolAliasDecision(aliasDecision);
 
         // Check if the tool exists
         TalosTool tool = toolRegistry.get(call.toolName());
         if (tool == null) {
-            TurnAuditCapture.recordToolCall(call.toolName(), "", false, "unknown tool");
+            TurnAuditCapture.recordToolCall(call, "", false, "unknown tool");
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
         }
         ToolResult surfaceRejection = rejectIfOutsideCurrentToolSurface(
@@ -369,7 +410,13 @@ public final class TurnProcessor {
                         change.rawPath(),
                         change.normalizedPath());
             }
-            call = protectedAliasNormalization.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    protectedAliasNormalization.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .PROTECTED_ALIAS_NORMALIZATION);
         }
         // Markdown-commentary sanitization runs HERE, before pre-approval
         // validation and the approval preview, so approved bytes == written
@@ -390,7 +437,13 @@ public final class TurnProcessor {
                         sanitization.strippedChars(),
                         sanitization.beforeValue(),
                         sanitization.afterValue());
-                call = sanitization.call();
+                call = transformedToolCall(
+                        parsedPermit,
+                        tracePhase,
+                        call,
+                        sanitization.call(),
+                        LocalTurnTraceCapture.ToolCallTransformationReason
+                                .MARKDOWN_COMMENTARY_SANITIZATION);
             }
         }
         ExactLiteralWriteCallCorrector.Correction exactCorrection =
@@ -405,7 +458,13 @@ public final class TurnProcessor {
                     exactCorrection.observedHash(),
                     exactCorrection.observedBytes(),
                     exactCorrection.observedLines());
-            call = exactCorrection.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    exactCorrection.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .EXACT_LITERAL_WRITE_CORRECTION);
         }
         PathArgumentCanonicalizer.ToolCallNormalization pathNormalization =
                 PathArgumentCanonicalizer.canonicalizeToolCall(session.workspace(), call, pathParameterKeys());
@@ -418,7 +477,13 @@ public final class TurnProcessor {
                         change.rawPath(),
                         change.normalizedPath());
             }
-            call = pathNormalization.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    pathNormalization.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .PATH_ARGUMENT_NORMALIZATION);
         }
         // Byte-faithful existing-file writes (T1012): re-apply the target's
         // BOM, line-ending style, and terminal-newline state to the proposed
@@ -434,7 +499,13 @@ public final class TurnProcessor {
                     "REPAIRED",
                     formatPreservation.description(),
                     "WRITE_FORMAT_PRESERVED_BEFORE_APPROVAL");
-            call = formatPreservation.call();
+            call = transformedToolCall(
+                    parsedPermit,
+                    tracePhase,
+                    call,
+                    formatPreservation.call(),
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .WRITE_FORMAT_PRESERVATION);
         }
         String path = resolvePathParam(call);
 
@@ -455,7 +526,7 @@ public final class TurnProcessor {
                 && userRequest != null
                 && !taskContract.mutationAllowed()) {
             TurnAuditCapture.recordToolCall(
-                    call.toolName(), path == null ? "" : path, false,
+                    call, path == null ? "" : path, false,
                     "task-contract read-only denied " + call.toolName());
             return ToolResult.fail(ToolError.denied(
                     "The user did not ask to modify files on this turn, so do not call "
@@ -469,7 +540,7 @@ public final class TurnProcessor {
                     ctx.executionPhaseState().phase(), tool.name(), risk);
             if (phaseRejection != null) {
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "phase " + ctx.executionPhaseState().phase() + " denied " + call.toolName());
                 if (commandTool) {
                     String reason = "Phase policy blocked " + call.toolName()
@@ -498,7 +569,7 @@ public final class TurnProcessor {
             if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                 String msg = TemplatePlaceholderGuard.rejectionMessage(call.toolName(), k, v);
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "placeholder path parameter `" + k + "` rejected");
                 return ToolResult.fail(ToolError.invalidParams(msg));
             }
@@ -543,7 +614,7 @@ public final class TurnProcessor {
                 // definitionally bad, but from a trust-accounting perspective
                 // it is a denied mutation, not a success.
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "placeholder content parameter `" + placeholderParam + "` rejected");
                 return ToolResult.fail(ToolError.invalidParams(msg));
             }
@@ -581,6 +652,11 @@ public final class TurnProcessor {
                 LocalTurnTraceCapture.recordCommandPolicyDecision(
                         tracePhase, call, "DENY", "PLAN_REJECTED");
                 LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                TurnAuditCapture.recordBlockedToolCall(
+                        call,
+                        path == null ? "" : path,
+                        tracePhase,
+                        reason);
                 return ToolResult.fail(ToolError.invalidParams(reason));
             }
         }
@@ -655,7 +731,7 @@ public final class TurnProcessor {
                 }
             }
             TurnAuditCapture.recordToolCall(
-                    call.toolName(), path == null ? "" : path, false,
+                    call, path == null ? "" : path, false,
                     "permission policy denied " + call.toolName()
                             + " (" + permissionDecision.reasonCode() + ")");
             if (commandTool) {
@@ -715,7 +791,7 @@ public final class TurnProcessor {
                             "User did not approve " + call.toolName());
                 }
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "approval denied by user for " + call.toolName());
                 // Phrasing matters: previously "Operation denied by user" caused
                 // qwen2.5-coder to hallucinate a "permissions" excuse and tell
@@ -760,7 +836,7 @@ public final class TurnProcessor {
                     checkpoint.capturedFiles());
             if (!checkpoint.success()) {
                 TurnAuditCapture.recordToolCall(
-                        call.toolName(), path == null ? "" : path, false,
+                        call, path == null ? "" : path, false,
                         "checkpoint failed before " + call.toolName());
                 return ToolResult.fail(ToolError.internal(
                         "Required checkpoint failed before mutation: " + checkpoint.message()));
@@ -785,19 +861,14 @@ public final class TurnProcessor {
                     "Tool execution failed unexpectedly: "
                             + e.getClass().getSimpleName() + ": " + SafeLogFormatter.throwableMessage(e)));
         }
-        if (result.success()) {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(),
-                    auditPathHints(call, path, result),
-                    true,
-                    "");
-        } else {
-            TurnAuditCapture.recordToolCall(
-                    call.toolName(),
-                    path == null ? "" : path,
-                    false,
-                    toolFailureReason(result));
-        }
+        List<String> resultPathHints = result.success()
+                ? auditPathHints(call, path, result)
+                : (path == null || path.isBlank() ? List.of() : List.of(path));
+        TurnAuditCapture.recordExecutedToolCall(
+                call,
+                resultPathHints,
+                result.success(),
+                result.success() ? "" : toolFailureReason(result));
         return result;
     }
 
@@ -1364,6 +1435,22 @@ public final class TurnProcessor {
     private static String shortReason(String message) {
         String oneLine = message.replace('\r', ' ').replace('\n', ' ').strip();
         return oneLine.length() <= 160 ? oneLine : oneLine.substring(0, 157) + "...";
+    }
+
+    private static ToolCall transformedToolCall(
+            LocalTurnTraceCapture.ParsedToolCallPermit permit,
+            String phase,
+            ToolCall from,
+            ToolCall to,
+            LocalTurnTraceCapture.ToolCallTransformationReason reason) {
+        if (from.equals(to)) return to;
+        if (permit == null) return to;
+        if (!LocalTurnTraceCapture.recordToolCallTransformedForExecution(
+                permit, phase, to, reason)) {
+            throw new IllegalStateException(
+                    "Could not advance the exact parsed-call evidence lineage for " + reason);
+        }
+        return to;
     }
 
     private static String resolveParam(ToolCall call, String canonical, String... aliases) {

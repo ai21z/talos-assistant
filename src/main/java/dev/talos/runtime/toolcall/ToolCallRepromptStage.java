@@ -21,7 +21,13 @@ public final class ToolCallRepromptStage {
         }
 
         if (outcome.mutatingDeniedThisIteration()) {
-            state.finishWithAnswer(DeniedMutationResponseOnlySynthesizer.synthesize(state));
+            DeniedMutationResponseOnlySynthesizer.Result synthesis =
+                    DeniedMutationResponseOnlySynthesizer.synthesize(state);
+            if (synthesis.capturedGeneration()) {
+                state.finishWithCapturedAnswer(synthesis.text(), synthesis.receipt());
+            } else {
+                state.finishWithAnswer(synthesis.text());
+            }
             LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
             return false;
         }
@@ -40,7 +46,7 @@ public final class ToolCallRepromptStage {
         TerminalReadOnlyStopAnswer.Answer terminalReadOnlyAnswer =
                 TerminalReadOnlyStopAnswer.select(state, outcome);
         if (terminalReadOnlyAnswer != null) {
-            state.finishWithAnswer(terminalReadOnlyAnswer.text());
+            state.finishWithToolAnswer(terminalReadOnlyAnswer.text());
             LOG.debug(terminalReadOnlyAnswer.logMessage());
             return false;
         }

@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
@@ -54,6 +55,7 @@ public final class AskMode implements Mode {
         Matcher m1 = EXACT_P.matcher(rawLine);
         if (m1.find()) {
             String out = m1.group(1);
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(out);
             return Optional.of(new Result.Ok(out));
         }
         // Fast-path: <think>…</think> stripping + trailing text preserve
@@ -62,6 +64,7 @@ public final class AskMode implements Mode {
             String inner = m2.group(1);
             String tail  = m2.group(2) == null ? "" : m2.group(2);
             String out = (inner + (tail.isBlank() ? "" : " " + tail)).trim();
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(out);
             return Optional.of(new Result.Ok(out));
         }
 
@@ -69,10 +72,14 @@ public final class AskMode implements Mode {
                 TaskContractResolver.fromUserRequest(rawLine),
                 workspace);
         if (ReadOnlyCommandRefusal.matches(askContract)) {
-            return Optional.of(ReadOnlyCommandRefusal.resultFor(name()));
+            Result.Ok refusal = ReadOnlyCommandRefusal.resultFor(name());
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(refusal.text);
+            return Optional.of(refusal);
         }
         if (askContract.mutationRequested()) {
-            return Optional.of(new Result.Ok("\n" + READ_ONLY_MUTATION_NUDGE + "\n\n"));
+            String answer = "\n" + READ_ONLY_MUTATION_NUDGE + "\n\n";
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(answer);
+            return Optional.of(new Result.Ok(answer));
         }
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
                 CapabilityPosturePolicy.apply(CapabilityPosture.ASK_READ_ONLY, askContract);
@@ -135,6 +142,9 @@ public final class AskMode implements Mode {
                 AssistantTurnExecutor.execute(messages, workspace, ctx, opts);
 
         String body = "\n" + turnOut.text() + "\n\n";
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                body,
+                LocalTurnTraceCapture.AnswerTransformationReason.MODE_PRESENTATION_LAYOUT);
 
         if (turnOut.streamed()) {
             return Optional.of(new Result.Streamed(body, ""));

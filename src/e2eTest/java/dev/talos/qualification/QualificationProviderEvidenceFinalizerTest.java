@@ -32,8 +32,7 @@ class QualificationProviderEvidenceFinalizerTest {
                 StandardCharsets.UTF_8);
 
         QualificationProviderEvidenceFinalizer.Result result =
-                QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT);
+                finalizeEvidence(fixture);
 
         assertFalse(result.providerPromptSent());
         assertArrayEquals(prompt, Files.readAllBytes(result.promptDebug()));
@@ -50,15 +49,15 @@ class QualificationProviderEvidenceFinalizerTest {
                 StandardCharsets.UTF_8);
 
         QualificationProviderEvidenceFinalizer.Result result =
-                QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT);
+                finalizeEvidence(fixture);
 
         assertTrue(result.providerPromptSent());
         assertArrayEquals(Files.readAllBytes(render), Files.readAllBytes(result.promptDebug()));
         assertArrayEquals(Files.readAllBytes(fixture.sourceLog()), Files.readAllBytes(result.modelLog()));
-        assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT));
+        QualificationProviderEvidenceFinalizer.Result repeated = finalizeEvidence(fixture);
+        assertTrue(repeated.providerPromptSent());
+        assertArrayEquals(Files.readAllBytes(render), Files.readAllBytes(repeated.promptDebug()));
+        assertArrayEquals(Files.readAllBytes(fixture.sourceLog()), Files.readAllBytes(repeated.modelLog()));
     }
 
     @Test
@@ -69,8 +68,7 @@ class QualificationProviderEvidenceFinalizerTest {
         Files.writeString(fixture.sourceLog(), "model loaded\n", StandardCharsets.UTF_8);
 
         assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT));
+                () -> finalizeEvidence(fixture));
     }
 
     @Test
@@ -83,8 +81,7 @@ class QualificationProviderEvidenceFinalizerTest {
                 StandardCharsets.UTF_8);
 
         assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT));
+                () -> finalizeEvidence(fixture));
     }
 
     @Test
@@ -98,8 +95,7 @@ class QualificationProviderEvidenceFinalizerTest {
                 "# Provider request\n", StandardCharsets.UTF_8);
 
         assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT));
+                () -> finalizeEvidence(fixture));
     }
 
     @Test
@@ -109,8 +105,24 @@ class QualificationProviderEvidenceFinalizerTest {
                 "# Provider request\n", StandardCharsets.UTF_8);
 
         assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT));
+                () -> finalizeEvidence(fixture));
+    }
+
+    @Test
+    void secondMemberConflictNeverDeletesThePublishedProviderPrompt() throws Exception {
+        Path prompt = temp.resolve("prompt-debug.txt");
+        Path model = temp.resolve("llama.log");
+        byte[] promptBytes = "# Provider request\n".getBytes(StandardCharsets.UTF_8);
+        byte[] modelBytes = "prompt eval time\n".getBytes(StandardCharsets.UTF_8);
+        Files.writeString(model, "frozen conflict\n", StandardCharsets.UTF_8);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationProviderEvidenceFinalizer.writePair(
+                        prompt, promptBytes, model, modelBytes));
+
+        assertArrayEquals(promptBytes, Files.readAllBytes(prompt));
+        assertTrue(Files.readString(model, StandardCharsets.UTF_8)
+                .equals("frozen conflict\n"));
     }
 
     @Test
@@ -123,8 +135,7 @@ class QualificationProviderEvidenceFinalizerTest {
         Files.writeString(fixture.sourceLog(), "prompt eval time\n", StandardCharsets.UTF_8);
 
         assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT));
+                () -> finalizeEvidence(fixture));
     }
 
     @Test
@@ -135,7 +146,7 @@ class QualificationProviderEvidenceFinalizerTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), outside, SCENARIO, PORT));
+                        fixture.packetRoot(), outside, SCENARIO, PORT, fixture.catalog()));
     }
 
     @Test
@@ -144,17 +155,31 @@ class QualificationProviderEvidenceFinalizerTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        fixture.packetRoot(), fixture.runRoot(), "F08-wrong-scenario", PORT));
+                        fixture.packetRoot(), fixture.runRoot(), "F08-wrong-scenario", PORT,
+                        fixture.catalog()));
     }
 
     private Fixture fixture(String name) throws Exception {
         Path root = temp.resolve(name);
-        Path run = root.resolve("runs/granite/machine/config/" + SCENARIO + "/trial-01");
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                root, catalog, catalog.scenario(SCENARIO));
         Path source = root.resolve("home/.talos/logs/llama_cpp-" + PORT + ".log");
-        Files.createDirectories(run);
         Files.createDirectories(source.getParent());
-        return new Fixture(root, run, source);
+        Files.deleteIfExists(packet.runRoot().resolve("prompt-debug.txt"));
+        Files.deleteIfExists(packet.runRoot().resolve("llama.log"));
+        return new Fixture(root, packet.runRoot(), source, catalog);
     }
 
-    private record Fixture(Path packetRoot, Path runRoot, Path sourceLog) {}
+    private static QualificationProviderEvidenceFinalizer.Result finalizeEvidence(Fixture fixture)
+            throws Exception {
+        return QualificationProviderEvidenceFinalizer.finalizeEvidence(
+                fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT, fixture.catalog());
+    }
+
+    private record Fixture(
+            Path packetRoot,
+            Path runRoot,
+            Path sourceLog,
+            QualificationScenarioBank.Catalog catalog) {}
 }

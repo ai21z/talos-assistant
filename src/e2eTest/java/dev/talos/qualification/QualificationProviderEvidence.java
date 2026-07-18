@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 
 final class QualificationProviderEvidence {
     static final String NO_PROVIDER_PROMPT = "No provider prompt was sent for the last turn.";
@@ -13,7 +12,8 @@ final class QualificationProviderEvidence {
 
     private QualificationProviderEvidence() {}
 
-    static void capture(Path runRoot, String commandOutput) throws IOException {
+    static void capture(Path runRoot, String commandOutput, int protocolVersion) throws IOException {
+        QualificationArtifactPublication.requireWritableProtocol(protocolVersion);
         if (hasProviderRender(runRoot)) return;
         if (commandOutput == null || !commandOutput.contains(NO_PROVIDER_PROMPT)) {
             throw new IllegalStateException(
@@ -21,13 +21,14 @@ final class QualificationProviderEvidence {
         }
         Path promptDebug = runRoot.resolve("prompt-debug.txt");
         Path modelLog = runRoot.resolve("llama.log");
-        if (Files.exists(promptDebug) || Files.exists(modelLog)) {
-            throw new IllegalStateException("refusing to overwrite provider qualification evidence");
-        }
-        Files.writeString(promptDebug, promptNotApplicableText(), StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE_NEW);
-        Files.writeString(modelLog, modelRuntimeNotApplicableText(), StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE_NEW);
+        byte[] promptBytes = promptNotApplicableText().getBytes(StandardCharsets.UTF_8);
+        byte[] modelBytes = modelRuntimeNotApplicableText().getBytes(StandardCharsets.UTF_8);
+        // A published immutable member is never rolled back: another publisher may
+        // already have observed it. T1192 owns atomic visibility of the complete pair.
+        QualificationArtifactPublication.publishNewOrVerifyExact(
+                promptDebug, promptBytes, "provider NOT_APPLICABLE prompt evidence");
+        QualificationArtifactPublication.publishNewOrVerifyExact(
+                modelLog, modelBytes, "provider NOT_APPLICABLE runtime evidence");
     }
 
     static String promptNotApplicableText() {

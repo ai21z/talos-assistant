@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -88,6 +89,150 @@ class QualificationScenarioBankTest {
                 assertEquals(entry.getValue(), QualificationScenarioBank.sha256(canonical), entry.getKey());
             }
         }
+    }
+
+    @Test
+    void allProtocolVersionsLoadAndResponseOwnershipIsVersionBound() {
+        Set<String> deterministicV6 = Set.of(
+                "A04-technical-list-root",
+                "A07-simple-create-file",
+                "A08-technical-exact-edit",
+                "A09-contradictory-denied-mutation",
+                "A10-technical-similar-name-scope",
+                "A11-recovery-append-anchor",
+                "F02-simple-create-welcome-page",
+                "F05-technical-java-exact-edit",
+                "F07-contradictory-do-not-change-but-edit",
+                "F08-contradictory-similar-file-names",
+                "F09-contradictory-deny-after-proposal",
+                "F10-superuser-multi-requirement-web-edit",
+                "F13-privacy-protected-read-denial",
+                "F16-recovery-append-section",
+                "F17-recovery-full-file-preservation",
+                "F21-context-multi-requirement-edit",
+                "F23-weak-hardware-tiny-edit");
+        for (int version = 1; version <= QualificationProtocol.VERSION; version++) {
+            QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(version);
+            assertEquals(version, catalog.protocolVersion());
+            for (QualificationProtocol.Scenario scenario : Stream.concat(
+                    catalog.admission().scenarios().stream(), catalog.full().scenarios().stream()).toList()) {
+                QualificationRecords.ResponseOwnerContract expected =
+                        scenario.approvalBehavior()
+                                == QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL
+                                ? QualificationRecords.ResponseOwnerContract.OPERATOR_OWNED
+                                : version == 6 && deterministicV6.contains(scenario.id())
+                                        ? QualificationRecords.ResponseOwnerContract.DETERMINISTIC_RUNTIME_ALLOWED
+                                        : QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED;
+                assertEquals(expected, scenario.responseOwnerContract(), version + ":" + scenario.id());
+            }
+        }
+        assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.load(0));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationScenarioBank.load(QualificationProtocol.VERSION + 1));
+    }
+
+    @Test
+    void v6AddsExplicitResponseOwnershipAndVersionedFixtureIdentityWithoutOtherScenarioDrift() {
+        QualificationScenarioBank.Catalog v5 = QualificationScenarioBank.load(5);
+        QualificationScenarioBank.Catalog v6 = QualificationScenarioBank.load(6);
+
+        for (QualificationProtocol.Scenario before : Stream.concat(
+                v5.admission().scenarios().stream(), v5.full().scenarios().stream()).toList()) {
+            QualificationProtocol.Scenario after = v6.scenario(before.id());
+            assertEquals(before.id(), after.id(), before.id());
+            assertEquals(before.bank(), after.bank(), before.id());
+            assertEquals(before.archetype(), after.archetype(), before.id());
+            assertEquals(before.category(), after.category(), before.id());
+            assertEquals(before.prompt(), after.prompt(), before.id());
+            assertEquals(before.approvalBehavior(), after.approvalBehavior(), before.id());
+            assertEquals(before.expectedTerminalStates(), after.expectedTerminalStates(), before.id());
+            assertEquals(before.allowedTargets(), after.allowedTargets(), before.id());
+            assertEquals(before.forbiddenTargets(), after.forbiddenTargets(), before.id());
+            assertEquals(before.expectedDecisions(), after.expectedDecisions(), before.id());
+            assertEquals(before.atomicRequirements(), after.atomicRequirements(), before.id());
+            assertEquals(v5.fixtures().get(before.fixture()).manifest().files(),
+                    v6.fixtures().get(after.fixture()).manifest().files(), before.id());
+            assertEquals(before.fixture().replace("-v5.json", "-v6.json"), after.fixture(), before.id());
+            assertNotEquals(before.fixtureSha256(), after.fixtureSha256(), before.id());
+        }
+    }
+
+    @Test
+    void v6RequiresARecognizedExplicitResponseOwner() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+
+        var missing = (com.fasterxml.jackson.databind.node.ObjectNode)
+                QualificationJson.tree(catalog.admission());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) missing.withArray("scenarios").get(0))
+                .remove("responseOwnerContract");
+        assertThrows(java.io.IOException.class, () -> QualificationJson.read(
+                QualificationJson.bytes(missing), QualificationProtocol.ScenarioBank.class));
+
+        var nullOwner = (com.fasterxml.jackson.databind.node.ObjectNode)
+                QualificationJson.tree(catalog.admission());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) nullOwner.withArray("scenarios").get(0))
+                .putNull("responseOwnerContract");
+        assertThrows(java.io.IOException.class, () -> QualificationJson.read(
+                QualificationJson.bytes(nullOwner), QualificationProtocol.ScenarioBank.class));
+
+        var unknown = (com.fasterxml.jackson.databind.node.ObjectNode)
+                QualificationJson.tree(catalog.admission());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) unknown.withArray("scenarios").get(0))
+                .put("responseOwnerContract", "MODEL_OR_RUNTIME_MAYBE");
+        assertThrows(java.io.IOException.class, () -> QualificationJson.read(
+                QualificationJson.bytes(unknown), QualificationProtocol.ScenarioBank.class));
+    }
+
+    @Test
+    void legacyScenarioSchemaRejectsSyntheticV6OwnershipFields() throws Exception {
+        byte[] raw;
+        try (var input = getClass().getClassLoader().getResourceAsStream(
+                "model-qualification/banks/admission-v5.json")) {
+            assertTrue(input != null);
+            raw = input.readAllBytes();
+        }
+        var legacy = (com.fasterxml.jackson.databind.node.ObjectNode)
+                QualificationJson.readTree(raw);
+        ((com.fasterxml.jackson.databind.node.ObjectNode)
+                legacy.withArray("scenarios").get(0)).put(
+                "responseOwnerContract",
+                QualificationRecords.ResponseOwnerContract.DETERMINISTIC_RUNTIME_ALLOWED.name());
+
+        assertThrows(IllegalArgumentException.class, () -> QualificationJson.read(
+                QualificationJson.bytes(legacy), QualificationProtocol.ScenarioBank.class));
+    }
+
+    @Test
+    void interruptionCategoryApprovalAndResponseOwnerMustAgree() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationProtocol.Scenario ordinary = catalog.scenario("A01-simple-arithmetic-abstention");
+        QualificationProtocol.Scenario interruption = catalog.scenario("A12-recovery-interruption");
+
+        assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.validateScenario(
+                withResponseOwner(ordinary, QualificationRecords.ResponseOwnerContract.OPERATOR_OWNED),
+                catalog.fixtures()));
+        assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.validateScenario(
+                withResponseOwner(interruption,
+                        QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED),
+                catalog.fixtures()));
+    }
+
+    @Test
+    void oneScenarioCannotDeclareMultipleScoreBearingDecisions() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(6);
+        QualificationProtocol.Scenario original =
+                catalog.scenario("A01-simple-arithmetic-abstention");
+        List<QualificationProtocol.ExpectedDecision> decisions = new java.util.ArrayList<>(
+                original.expectedDecisions());
+        decisions.add(new QualificationProtocol.ExpectedDecision(
+                "second-score-bearing-decision",
+                QualificationProtocol.DecisionKind.REQUIRED_TOOL,
+                List.of("talos.read_file"),
+                true));
+
+        assertThrows(IllegalArgumentException.class, () ->
+                QualificationScenarioBank.validateScenario(
+                        withExpectedDecisions(original, decisions), catalog.fixtures()));
     }
 
     @Test
@@ -219,7 +364,7 @@ class QualificationScenarioBankTest {
     void defaultBankHasFrozenAdmissionAndFullShapes() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
 
-        assertEquals(5, catalog.protocolVersion());
+        assertEquals(6, catalog.protocolVersion());
         assertEquals(12, catalog.admission().scenarios().size());
         assertEquals(24, catalog.full().scenarios().size());
         assertEquals(8, catalog.full().scenarios().stream()
@@ -273,7 +418,7 @@ class QualificationScenarioBankTest {
     @Test
     void privacyFixtureUsesCanariesRecognizedByTheRuntimeScanner() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
-        var files = catalog.fixtures().get("privacy-workspace-v5.json").manifest().files();
+        var files = catalog.fixtures().get("privacy-workspace-v6.json").manifest().files();
 
         assertTrue(ProtectedContentPolicy.containsRawCanary(files.get(".env")),
                 "the protected-file canary must use Talos's production canary vocabulary");
@@ -289,5 +434,28 @@ class QualificationScenarioBankTest {
                 .expectedTerminalStates().contains("READ_ONLY_ANSWERED"));
         assertTrue(catalog.scenario("A09-contradictory-denied-mutation")
                 .expectedTerminalStates().contains("BLOCKED_BY_APPROVAL"));
+    }
+
+    private static QualificationProtocol.Scenario withResponseOwner(
+            QualificationProtocol.Scenario scenario,
+            QualificationRecords.ResponseOwnerContract responseOwnerContract) {
+        return new QualificationProtocol.Scenario(
+                scenario.id(), scenario.bank(), scenario.archetype(), scenario.category(),
+                scenario.fixture(), scenario.fixtureSha256(), scenario.prompt(),
+                scenario.approvalBehavior(), responseOwnerContract, scenario.expectedTerminalStates(),
+                scenario.allowedTargets(), scenario.forbiddenTargets(), scenario.expectedDecisions(),
+                scenario.atomicRequirements());
+    }
+
+    private static QualificationProtocol.Scenario withExpectedDecisions(
+            QualificationProtocol.Scenario scenario,
+            List<QualificationProtocol.ExpectedDecision> expectedDecisions) {
+        return new QualificationProtocol.Scenario(
+                scenario.id(), scenario.bank(), scenario.archetype(), scenario.category(),
+                scenario.fixture(), scenario.fixtureSha256(), scenario.prompt(),
+                scenario.approvalBehavior(), scenario.responseOwnerContract(),
+                scenario.expectedTerminalStates(), scenario.allowedTargets(),
+                scenario.forbiddenTargets(), expectedDecisions,
+                scenario.atomicRequirements());
     }
 }

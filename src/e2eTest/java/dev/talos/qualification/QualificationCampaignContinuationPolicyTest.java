@@ -11,15 +11,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QualificationCampaignContinuationPolicyTest {
 
     @Test
-    void validModelFailureDoesNotStopLaterScenarios() {
-        QualificationCampaignContinuationPolicy.Decision decision = evaluate(
-                true,
-                true,
-                QualificationRecords.TrustGates.allPassed(),
-                QualificationRecords.FailureClass.MODEL_FAILURE);
+    void modelFailureContinuesOnlyWithMechanicallyMatchedProviderAnswer() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationRecords.RunResult result = QualificationTestPacket.runResult(
+                        catalog, catalog.admission().scenarios().getFirst(), 1, false, false)
+                .withFailure(
+                        QualificationRecords.FailureClass.MODEL_FAILURE,
+                        QualificationRecords.AnswerOrigin.MODEL_PROVIDER,
+                        QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED,
+                        QualificationRecords.CausalOwner.MODEL,
+                        List.of(new QualificationRecords.CausalLedgerEntry(
+                                1, QualificationRecords.CausalStage.UTILITY,
+                                QualificationRecords.CausalOwner.MODEL,
+                                QualificationRecords.CausalFact.CANONICAL_REQUIREMENTS_FAILED,
+                                QualificationRecords.CausalReason.MODEL_RESPONSE_FAILED_REQUIREMENT,
+                                "trace.json#PROVIDER_GENERATION_RECEIVED", true)));
+
+        QualificationCampaignContinuationPolicy.Decision decision =
+                QualificationCampaignContinuationPolicy.evaluate(result, true);
 
         assertFalse(decision.stop());
         assertEquals(List.of(), decision.reasons());
+    }
+
+    @Test
+    void unprovenModelFailureStopsCampaign() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationRecords.RunResult result = QualificationTestPacket.runResult(
+                        catalog, catalog.admission().scenarios().getFirst(), 1, false, false)
+                .withFailure(
+                        QualificationRecords.FailureClass.MODEL_FAILURE,
+                        QualificationRecords.AnswerOrigin.MODEL_PROVIDER,
+                        QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED,
+                        QualificationRecords.CausalOwner.MODEL,
+                        List.of(new QualificationRecords.CausalLedgerEntry(
+                                1, QualificationRecords.CausalStage.UTILITY,
+                                QualificationRecords.CausalOwner.MODEL,
+                                QualificationRecords.CausalFact.CANONICAL_REQUIREMENTS_FAILED,
+                                QualificationRecords.CausalReason.MODEL_RESPONSE_FAILED_REQUIREMENT,
+                                "trace.json#PROVIDER_GENERATION_RECEIVED", true)));
+
+        QualificationCampaignContinuationPolicy.Decision decision =
+                QualificationCampaignContinuationPolicy.evaluate(result, false);
+
+        assertTrue(decision.stop());
+        assertTrue(decision.reasons().contains(
+                "causal-evidence:MODEL_FAILURE_LACKS_MATCHED_MODEL_RESPONSE"));
     }
 
     @Test

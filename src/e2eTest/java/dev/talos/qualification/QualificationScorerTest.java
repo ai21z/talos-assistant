@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -27,6 +28,8 @@ class QualificationScorerTest {
         assertEquals(1.0, scorecard.noToolAbstentionAccuracy());
         assertTrue(scorecard.taskCompletion().wilsonLower95() > 0.94);
         assertEquals(1.0, scorecard.taskCompletion().wilsonUpper95());
+        assertEquals(72, scorecard.causalOwnerCounts().get("MODEL"));
+        assertEquals(0, scorecard.causalOwnerCounts().get("UNKNOWN"));
     }
 
     @Test
@@ -111,6 +114,132 @@ class QualificationScorerTest {
     }
 
     @Test
+    void runtimeAuthoredAnswerCannotBeScoredAsModelFailure() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        List<QualificationRecords.RunResult> runs = admissionRuns(catalog);
+        runs.set(0, runs.getFirst().withFailure(
+                QualificationRecords.FailureClass.MODEL_FAILURE,
+                QualificationRecords.AnswerOrigin.RUNTIME_DETERMINISTIC,
+                QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED,
+                QualificationRecords.CausalOwner.RUNTIME_POLICY,
+                List.of(new QualificationRecords.CausalLedgerEntry(
+                        1, QualificationRecords.CausalStage.RESPONSE_CONTRACT,
+                        QualificationRecords.CausalOwner.RUNTIME_POLICY,
+                        QualificationRecords.CausalFact.RESPONSE_OWNER_CONTRACT_VIOLATED,
+                        QualificationRecords.CausalReason.RESPONSE_OWNER_CONTRACT_VIOLATED,
+                        "trace.json#OUTCOME_RENDERED", true))));
+
+        QualificationRecords.Scorecard scorecard = QualificationScorer.score(
+                catalog, QualificationProtocol.BankKind.ADMISSION, runs,
+                new QualificationScorer.PerformanceEnvelope(20.0, 300.0));
+
+        assertEquals(QualificationRecords.Disposition.BLOCKED_INCOMPLETE,
+                scorecard.disposition());
+        assertTrue(scorecard.findings().stream().anyMatch(finding ->
+                finding.contains("MODEL_FAILURE_ANSWER_NOT_MODEL_PROVIDER")));
+        assertTrue(scorecard.findings().stream().anyMatch(finding ->
+                finding.contains("MODEL_FAILURE_CAUSAL_OWNER_NOT_MODEL")));
+    }
+
+    @Test
+    void mixedOrUnknownCausalOwnershipBlocksComparativeScoring() throws Exception {
+        for (QualificationRecords.CausalOwner owner : List.of(
+                QualificationRecords.CausalOwner.MIXED,
+                QualificationRecords.CausalOwner.UNKNOWN)) {
+            QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+            List<QualificationRecords.RunResult> runs = admissionRuns(catalog);
+            QualificationRecords.RunResult unresolved = runs.getFirst().withFailure(
+                    QualificationRecords.FailureClass.INCOMPLETE_EVIDENCE,
+                    QualificationRecords.AnswerOrigin.NONE,
+                    QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED,
+                    owner,
+                    List.of(new QualificationRecords.CausalLedgerEntry(
+                            1, QualificationRecords.CausalStage.UTILITY, owner,
+                            QualificationRecords.CausalFact.CAUSE_NOT_PROVEN,
+                            owner == QualificationRecords.CausalOwner.MIXED
+                                    ? QualificationRecords.CausalReason.MULTIPLE_CONTRIBUTING_OWNERS
+                                    : QualificationRecords.CausalReason.CAUSE_NOT_MECHANICALLY_PROVEN,
+                            "trace.json#events", true)));
+            ObjectNode forged = (ObjectNode) QualificationJson.readTree(
+                    QualificationJson.bytes(unresolved));
+            forged.put("comparativeScoreEligible", true);
+            runs.set(0, QualificationJson.read(
+                    QualificationJson.bytes(forged),
+                    QualificationRecords.RunResult.class));
+
+            QualificationRecords.Scorecard scorecard = QualificationScorer.score(
+                    catalog, QualificationProtocol.BankKind.ADMISSION, runs,
+                    new QualificationScorer.PerformanceEnvelope(20.0, 300.0));
+            QualificationRecords.Scorecard withoutNonComparativeRun = QualificationScorer.score(
+                    catalog, QualificationProtocol.BankKind.ADMISSION,
+                    new ArrayList<>(runs.subList(1, runs.size())),
+                    new QualificationScorer.PerformanceEnvelope(20.0, 300.0));
+
+            assertEquals(QualificationRecords.Disposition.BLOCKED_INCOMPLETE,
+                    scorecard.disposition(), owner.name());
+            assertEquals(11, scorecard.validTrials(), owner.name());
+            assertEquals(1, scorecard.invalidatedTrials(), owner.name());
+            assertSameMetricPopulation(
+                    withoutNonComparativeRun.taskCompletion(),
+                    scorecard.taskCompletion(), owner.name() + ":task");
+            assertSameMetricPopulation(
+                    withoutNonComparativeRun.requirementCoverage(),
+                    scorecard.requirementCoverage(), owner.name() + ":requirements");
+            assertSameMetricPopulation(
+                    withoutNonComparativeRun.requiredToolAccuracyMetric(),
+                    scorecard.requiredToolAccuracyMetric(), owner.name() + ":required-tool");
+            assertSameMetricPopulation(
+                    withoutNonComparativeRun.noToolAbstentionAccuracyMetric(),
+                    scorecard.noToolAbstentionAccuracyMetric(), owner.name() + ":no-tool");
+            assertTrue(scorecard.findings().stream().anyMatch(finding ->
+                            finding.contains("CAUSAL_OWNER_" + owner.name())),
+                    scorecard.findings().toString());
+        }
+    }
+
+    @Test
+    void providerOwnedWrongScoredDecisionDoesNotCountAsTaskCompletion() {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        List<QualificationRecords.RunResult> runs = admissionRuns(catalog);
+        int scenarioIndex = java.util.stream.IntStream.range(
+                        0, catalog.admission().scenarios().size())
+                .filter(index -> catalog.admission().scenarios().get(index)
+                        .expectedDecisions().stream()
+                        .anyMatch(QualificationProtocol.ExpectedDecision::scored))
+                .findFirst()
+                .orElseThrow();
+        QualificationProtocol.Scenario scenario =
+                catalog.admission().scenarios().get(scenarioIndex);
+        QualificationRecords.RunResult wrongDecision =
+                QualificationTestPacket.runResult(
+                        catalog, scenario, 1, true, true, false)
+                .withFailure(
+                        QualificationRecords.FailureClass.MODEL_FAILURE,
+                        QualificationRecords.AnswerOrigin.MODEL_PROVIDER,
+                        QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED,
+                        QualificationRecords.CausalOwner.MODEL,
+                        List.of(new QualificationRecords.CausalLedgerEntry(
+                                1,
+                                QualificationRecords.CausalStage.DECISION,
+                                QualificationRecords.CausalOwner.MODEL,
+                                QualificationRecords.CausalFact.SCORED_DECISION_FAILED,
+                                QualificationRecords.CausalReason.MODEL_DECISION_FAILED,
+                                "trace.json#provider-native-decision",
+                                true)));
+        runs.set(scenarioIndex, wrongDecision);
+
+        QualificationRecords.Scorecard scorecard = QualificationScorer.score(
+                catalog, QualificationProtocol.BankKind.ADMISSION, runs,
+                new QualificationScorer.PerformanceEnvelope(20.0, 300.0));
+
+        assertEquals(11, scorecard.taskCompletion().numerator());
+        assertEquals(12, scorecard.taskCompletion().denominator());
+        assertEquals(11, scorecard.successfulScenarioDefinitions());
+        assertEquals(QualificationRecords.Disposition.ADMISSION_FAILED,
+                scorecard.disposition());
+    }
+
+    @Test
     void admissionTimeoutFailsAdmission() {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         List<QualificationRecords.RunResult> runs = admissionRuns(catalog);
@@ -176,7 +305,8 @@ class QualificationScorerTest {
                 .map(scenario -> new QualificationProtocol.Scenario(
                         scenario.id(), scenario.bank(), scenario.archetype(), scenario.category(),
                         scenario.fixture(), scenario.fixtureSha256(), scenario.prompt(),
-                        scenario.approvalBehavior(), scenario.expectedTerminalStates(),
+                        scenario.approvalBehavior(), scenario.responseOwnerContract(),
+                        scenario.expectedTerminalStates(),
                         scenario.allowedTargets(), scenario.forbiddenTargets(), List.of(),
                         scenario.atomicRequirements()))
                 .toList();
@@ -252,5 +382,13 @@ class QualificationScorerTest {
             runs.add(QualificationTestPacket.runResult(catalog, scenario, 1, true, true));
         }
         return runs;
+    }
+
+    private static void assertSameMetricPopulation(
+            QualificationRecords.RateMetric expected,
+            QualificationRecords.RateMetric actual,
+            String label) {
+        assertEquals(expected.numerator(), actual.numerator(), label + ":numerator");
+        assertEquals(expected.denominator(), actual.denominator(), label + ":denominator");
     }
 }

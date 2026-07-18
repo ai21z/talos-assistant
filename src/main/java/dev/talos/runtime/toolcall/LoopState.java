@@ -6,6 +6,7 @@ import dev.talos.runtime.Session;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -26,6 +27,7 @@ public final class LoopState {
 
     public String currentText;
     public List<NativeToolCall> currentNativeCalls;
+    public ProviderResponseCapture.Receipt currentResponseReceipt;
 
     public int iterations;
     public int totalToolsInvoked;
@@ -88,8 +90,19 @@ public final class LoopState {
     public LoopState(String initialText, List<NativeToolCall> initialNativeCalls,
                      List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx,
                      Session toolSession, int maxIterations, int aliasRescueBaseline) {
+        this(initialText, initialNativeCalls, ProviderResponseCapture.Receipt.none(),
+                messages, workspace, ctx, toolSession, maxIterations, aliasRescueBaseline);
+    }
+
+    public LoopState(String initialText, List<NativeToolCall> initialNativeCalls,
+                     ProviderResponseCapture.Receipt initialResponseReceipt,
+                     List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx,
+                     Session toolSession, int maxIterations, int aliasRescueBaseline) {
         this.currentText = initialText;
         this.currentNativeCalls = initialNativeCalls;
+        this.currentResponseReceipt = initialResponseReceipt == null
+                ? ProviderResponseCapture.Receipt.none()
+                : initialResponseReceipt;
         this.messages = messages;
         this.workspace = workspace;
         this.readEvidence = new ReadEvidenceLedger(workspace);
@@ -118,6 +131,66 @@ public final class LoopState {
     public void finishWithAnswer(String answer) {
         currentText = answer;
         currentNativeCalls = List.of();
+        currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected(answer);
+    }
+
+    public void finishWithProviderAnswer(
+            String answer,
+            ProviderResponseCapture.Receipt receipt) {
+        finishWithCapturedAnswer(answer, receipt);
+    }
+
+    public void finishWithCapturedAnswer(
+            String answer,
+            ProviderResponseCapture.Receipt receipt) {
+        currentText = answer;
+        currentNativeCalls = List.of();
+        currentResponseReceipt = receipt == null
+                ? ProviderResponseCapture.Receipt.none()
+                : receipt;
+        LocalTurnTraceCapture.recordProviderAnswerSelectedAfterTransformation(
+                answer,
+                currentResponseReceipt,
+                LocalTurnTraceCapture.AnswerTransformationReason.PROVIDER_RESPONSE_NORMALIZATION);
+    }
+
+    public void finishWithToolAnswer(String answer) {
+        currentText = answer;
+        currentNativeCalls = List.of();
+        currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        LocalTurnTraceCapture.recordToolAnswerSelected(answer);
+    }
+
+    public void finishWithOperatorAnswer(String answer) {
+        currentText = answer;
+        currentNativeCalls = List.of();
+        currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        LocalTurnTraceCapture.recordOperatorAnswerSelected(answer);
+    }
+
+    public void transformAnswer(
+            String answer,
+            LocalTurnTraceCapture.AnswerTransformationReason reason) {
+        LocalTurnTraceCapture.ensureExactProviderAnswerCandidate(
+                currentText,
+                currentResponseReceipt);
+        currentText = Objects.toString(answer, "");
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(currentText, reason);
+    }
+
+    public void applyProviderResult(dev.talos.core.llm.LlmClient.StreamResult result) {
+        currentText = result == null ? "" : result.text();
+        currentNativeCalls = result == null ? List.of() : result.toolCalls();
+        currentResponseReceipt = result == null
+                ? ProviderResponseCapture.Receipt.none()
+                : result.provenance();
+    }
+
+    public void setRuntimeNativeCalls(String text, List<NativeToolCall> nativeCalls) {
+        currentText = text == null ? "" : text;
+        currentNativeCalls = nativeCalls == null ? List.of() : List.copyOf(nativeCalls);
+        currentResponseReceipt = ProviderResponseCapture.Receipt.none();
     }
 
     public void stopWithFailure(dev.talos.runtime.failure.FailureDecision decision, String answer) {

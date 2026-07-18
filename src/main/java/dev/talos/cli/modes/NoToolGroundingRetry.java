@@ -6,6 +6,7 @@ import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
@@ -45,6 +46,8 @@ final class NoToolGroundingRetry {
         messages.add(ChatMessage.assistant(answer));
         messages.add(ChatMessage.user(correctionPrompt()));
 
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
         try {
             LlmClient.StreamResult retry = chat.chat(messages);
             String retryText = retry.text();
@@ -53,12 +56,33 @@ final class NoToolGroundingRetry {
                         answer.length(), retryText.length());
                 return retryText;
             }
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    retryText == null || retryText.isBlank()
+                            ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
+                            : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
             LOG.warn("Grounding retry did not produce a substantive new answer. "
                     + "Annotating original.");
         } catch (Exception e) {
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_FAILED);
             LOG.warn("Grounding retry failed: {}. Annotating original.", SafeLogFormatter.throwableMessage(e));
         }
-        return NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION + answer;
+        String annotated = NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION + answer;
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                annotated,
+                LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+        return annotated;
+    }
+
+    private static void restoreOriginalCandidate(
+            LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint,
+            String answer,
+            LocalTurnTraceCapture.AnswerCandidateRestorationReason reason) {
+        LocalTurnTraceCapture.restoreExactAnswerCandidate(checkpoint, answer, reason);
     }
 
     static String correctionPrompt() {

@@ -110,7 +110,21 @@ public final class ToolCallExecutionStage {
 
         for (int i = 0; i < parsed.calls().size(); i++) {
             ToolCall call = parsed.calls().get(i);
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit = null;
+            if (LocalTurnTraceCapture.isActive()) {
+                parsedPermit = LocalTurnTraceCapture.beginParsedToolCallForExecution(
+                            "tool_loop",
+                            call,
+                            state.currentResponseReceipt,
+                            parsed.useNativePath() ? i + 1 : 0);
+            }
+
             ToolCall effective = ToolCallSupport.repairMissingPath(call);
+            recordTransformation(
+                    parsedPermit,
+                    call,
+                    effective,
+                    LocalTurnTraceCapture.ToolCallTransformationReason.MISSING_PATH_REPAIR);
             TaskContract currentTaskContract = TurnTaskContractCapture.get();
             if (currentTaskContract != null) {
                 PathArgumentCanonicalizer.ToolCallNormalization protectedAliasNormalization =
@@ -126,7 +140,14 @@ public final class ToolCallExecutionStage {
                                 change.rawPath(),
                                 change.normalizedPath());
                     }
+                    ToolCall beforeNormalization = effective;
                     effective = protectedAliasNormalization.call();
+                    recordTransformation(
+                            parsedPermit,
+                            beforeNormalization,
+                            effective,
+                            LocalTurnTraceCapture.ToolCallTransformationReason
+                                    .PROTECTED_ALIAS_NORMALIZATION);
                 }
             }
 
@@ -147,7 +168,8 @@ public final class ToolCallExecutionStage {
                     parsed.useNativePath(),
                     i,
                     staleRereadRequiredAtStart,
-                    fullRewriteRepairTargets);
+                    fullRewriteRepairTargets,
+                    parsedPermit);
             failuresThisIter += guardResult.failuresThisIteration();
             if (guardResult.pathPolicyBlockedThisIteration()) {
                 pathPolicyBlockedThisIter = true;
@@ -170,7 +192,10 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            ToolResult rawResult = turnProcessor.executeTool(state.toolSession, effective, state.ctx);
+            ToolResult rawResult = parsedPermit == null
+                    ? turnProcessor.executeTool(state.toolSession, effective, state.ctx)
+                    : turnProcessor.executeToolAfterParsed(
+                            state.toolSession, effective, state.ctx, parsedPermit);
             ToolResultModelContextHandoff.Decision handoffDecision =
                     ToolResultModelContextHandoff.decide(
                             effective,
@@ -278,6 +303,20 @@ public final class ToolCallExecutionStage {
                 pathPolicyBlockedThisIter,
                 successesThisIter,
                 unsupportedReadPathsThisIter);
+    }
+
+    private static void recordTransformation(
+            LocalTurnTraceCapture.ParsedToolCallPermit permit,
+            ToolCall from,
+            ToolCall to,
+            LocalTurnTraceCapture.ToolCallTransformationReason reason) {
+        if (from.equals(to)) return;
+        if (permit == null) return;
+        if (!LocalTurnTraceCapture.recordToolCallTransformedForExecution(
+                permit, "tool_loop", to, reason)) {
+            throw new IllegalStateException(
+                    "Could not advance the exact parsed-call evidence lineage for " + reason);
+        }
     }
 
     private static void recordContextLedgerDecision(

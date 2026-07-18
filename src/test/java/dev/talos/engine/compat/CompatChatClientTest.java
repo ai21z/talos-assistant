@@ -1,5 +1,6 @@
 package dev.talos.engine.compat;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -8,6 +9,8 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.SamplingControls;
@@ -30,12 +33,19 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.net.ssl.SSLContext;
@@ -54,6 +64,7 @@ class CompatChatClientTest {
     @AfterEach
     void clearPromptDebug() {
         PromptDebugCapture.clear();
+        ProviderResponseCapture.clear();
     }
 
     @Test
@@ -83,7 +94,9 @@ class CompatChatClientTest {
                             "",
                             List.of("expected-target-repair")).withMaxOutputTokens(512));
 
-            String result = client.chat(request);
+            DispatchCapture handoff = new DispatchCapture();
+            String result = client.chat(
+                    request, RequestMessageLayout.PRESERVE_AS_WRITTEN, handoff);
 
             assertEquals("ok", result);
             assertEquals("/v1/chat/completions", pathRef.get());
@@ -96,6 +109,12 @@ class CompatChatClientTest {
             assertEquals("json_object", body.path("response_format").path("type").asText());
             assertEquals(512, body.path("max_tokens").asInt());
             assertEquals("talos.write_file", body.path("tools").get(0).path("function").path("name").asText());
+            assertEquals(0, handoff.unboundDispatches);
+            assertEquals(1, handoff.evidence.size());
+            assertEquals(sha256Utf8(bodyRef.get()),
+                    handoff.evidence.getFirst().providerBodyHash());
+            assertEquals(List.of("talos.write_file"),
+                    handoff.evidence.getFirst().nativeTools());
 
             var snapshot = PromptDebugCapture.latest().orElseThrow();
             assertEquals("COMPAT_CHAT_HTTP_BODY", snapshot.stage());
@@ -200,6 +219,119 @@ class CompatChatClientTest {
         assertEquals(streaming.get("messages"), nonStreaming.get("messages"));
         assertEquals(true, streaming.get("stream"));
         assertEquals(false, nonStreaming.get("stream"));
+    }
+
+    @Test
+    void localSerializationFailureDoesNotClaimProviderTransportDispatch() {
+        AtomicInteger dispatches = new AtomicInteger();
+        CompatChatClient client = new CompatChatClient(
+                "http://127.0.0.1:1",
+                "agent.gguf",
+                HttpClient.newHttpClient(),
+                new FailingSerializationMapper());
+
+        assertThrows(
+                JsonProcessingException.class,
+                () -> client.chatStream(
+                        requestForStream(),
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        dispatches::incrementAndGet));
+
+        assertEquals(0, dispatches.get());
+    }
+
+    @Test
+    void localUriConstructionFailureDoesNotClaimProviderTransportDispatch() {
+        AtomicInteger dispatches = new AtomicInteger();
+        CompatChatClient client = new CompatChatClient(
+                "http://[invalid-host",
+                "agent.gguf",
+                HttpClient.newHttpClient(),
+                MAPPER);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> client.chatStream(
+                        requestForStream(),
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        dispatches::incrementAndGet));
+
+        assertEquals(0, dispatches.get());
+    }
+
+    @Test
+    void transportHandoffIsRecordedBeforeSendThrows() {
+        AtomicInteger dispatches = new AtomicInteger();
+        ThrowingSendHttpClient http = new ThrowingSendHttpClient();
+        CompatChatClient client = new CompatChatClient(
+                "http://127.0.0.1:18115",
+                "agent.gguf",
+                http,
+                MAPPER);
+
+        assertThrows(
+                IOException.class,
+                () -> client.chatStream(
+                        requestForStream(),
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        dispatches::incrementAndGet));
+
+        assertEquals(1, http.sendCalls.get());
+        assertEquals(1, dispatches.get());
+    }
+
+    @Test
+    void terminalAbandonmentAtHandoffPreventsPhysicalSend() throws Exception {
+        ThrowingSendHttpClient http = new ThrowingSendHttpClient();
+        CompatChatClient client = new CompatChatClient(
+                "http://127.0.0.1:18115",
+                "agent.gguf",
+                http,
+                MAPPER);
+        ProviderResponseCapture.Scope scope = ProviderResponseCapture.begin(
+                new ProviderResponseCapture.Listener() {}, "dispatch-race");
+        ProviderResponseCapture.Generation generation = scope.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        CountDownLatch atHandoff = new CountDownLatch(1);
+        CountDownLatch releaseHandoff = new CountDownLatch(1);
+        AtomicReference<Throwable> workerFailure = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                client.chatStream(
+                        requestForStream(),
+                        RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                        () -> {
+                            atHandoff.countDown();
+                            try {
+                                if (!releaseHandoff.await(5, TimeUnit.SECONDS)) {
+                                    throw new IllegalStateException("handoff test latch timed out");
+                                }
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException(interrupted);
+                            }
+                            attempt.requestDispatched();
+                        });
+            } catch (Throwable failure) {
+                workerFailure.set(failure);
+            }
+        }, "compat-dispatch-race-test");
+        worker.start();
+
+        assertTrue(atHandoff.await(5, TimeUnit.SECONDS));
+        assertTrue(generation.tryAbandon(
+                ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT));
+        releaseHandoff.countDown();
+        worker.join(5_000L);
+
+        assertFalse(worker.isAlive());
+        assertInstanceOf(ProviderTransportHandoff.DispatchRejected.class,
+                workerFailure.get());
+        assertEquals(0, http.sendCalls.get());
     }
 
     /**
@@ -321,7 +453,8 @@ class CompatChatClientTest {
 
     @Test
     void chatStreamParsesTextChunks() throws Exception {
-        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
                 data: {"choices":[{"delta":{"content":"Hel"}}]}
 
                 data: {"choices":[{"delta":{"content":"lo"}}]}
@@ -332,12 +465,19 @@ class CompatChatClientTest {
         try {
             CompatChatClient client = client(server);
             ChatRequest request = requestForStream();
+            DispatchCapture handoff = new DispatchCapture();
 
-            List<TokenChunk> chunks = client.chatStream(request).toList();
+            List<TokenChunk> chunks = client.chatStream(
+                    request, RequestMessageLayout.PRESERVE_AS_WRITTEN, handoff).toList();
 
             assertEquals("Hel", chunks.get(0).text());
             assertEquals("lo", chunks.get(1).text());
             assertTrue(chunks.get(2).done());
+            assertEquals(0, handoff.unboundDispatches);
+            assertEquals(1, handoff.evidence.size());
+            assertEquals(sha256Utf8(bodyRef.get()),
+                    handoff.evidence.getFirst().providerBodyHash());
+            assertEquals(List.of(), handoff.evidence.getFirst().nativeTools());
         } finally {
             server.stop(0);
         }
@@ -361,6 +501,29 @@ class CompatChatClientTest {
             assertEquals("partial", chunks.get(0).text());
             assertTrue(chunks.get(1).done());
             assertEquals("length", chunks.get(1).finishReason());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void rawSocketEofIsNotAnExplicitProviderSentinelEvenAfterStopReason() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                data: {"choices":[{"delta":{"content":"partial"}}]}
+
+                data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+                """, "text/event-stream");
+        try {
+            CompatChatClient client = client(server);
+
+            List<TokenChunk> chunks = client.chatStream(requestForStream()).toList();
+
+            assertEquals("partial", chunks.getFirst().text());
+            TokenChunk terminal = chunks.getLast();
+            assertTrue(terminal.done());
+            assertEquals("stop", terminal.finishReason());
+            assertEquals(TokenChunk.TerminalSignal.TRANSPORT_EOF, terminal.terminalSignal());
         } finally {
             server.stop(0);
         }
@@ -492,8 +655,12 @@ class CompatChatClientTest {
                 """, "application/json");
         try {
             CompatChatClient client = client(server);
+            DispatchCapture handoff = new DispatchCapture();
 
-            List<TokenChunk> chunks = client.chatStreamNonStreaming(requestForStream()).toList();
+            List<TokenChunk> chunks = client.chatStreamNonStreaming(
+                    requestForStream(),
+                    RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                    handoff).toList();
 
             JsonNode body = MAPPER.readTree(bodyRef.get());
             assertEquals(false, body.path("stream").asBoolean());
@@ -504,6 +671,11 @@ class CompatChatClientTest {
             assertEquals("scripts.js", call.arguments().get("path"));
             assertEquals("ok", call.arguments().get("content"));
             assertTrue(chunks.get(1).done());
+            assertEquals(0, handoff.unboundDispatches);
+            assertEquals(1, handoff.evidence.size());
+            assertEquals(sha256Utf8(bodyRef.get()),
+                    handoff.evidence.getFirst().providerBodyHash());
+            assertEquals(List.of(), handoff.evidence.getFirst().nativeTools());
         } finally {
             server.stop(0);
         }
@@ -536,16 +708,21 @@ class CompatChatClientTest {
                 """, "application/json", 400);
         try {
             CompatChatClient client = client(server);
+            AtomicInteger dispatches = new AtomicInteger();
 
             EngineException.ContextBudgetExceeded error =
                     assertThrows(EngineException.ContextBudgetExceeded.class,
-                            () -> client.chatStream(requestForStream()).toList());
+                            () -> client.chatStream(
+                                    requestForStream(),
+                                    RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                                    dispatches::incrementAndGet).toList());
 
             assertEquals(3390, error.estimatedTokens());
             assertEquals(3072, error.inputBudgetTokens());
             assertEquals(3072, error.contextWindowTokens());
             assertEquals(400, error.httpStatus());
             assertFalse(error.getMessage().contains("complete"));
+            assertEquals(1, dispatches.get());
         } finally {
             server.stop(0);
         }
@@ -585,6 +762,110 @@ class CompatChatClientTest {
     private static CompatChatClient client(HttpServer server) {
         String host = "http://127.0.0.1:" + server.getAddress().getPort();
         return new CompatChatClient(host, "agent.gguf", HttpClient.newHttpClient(), MAPPER);
+    }
+
+    private static String sha256Utf8(String value) {
+        try {
+            return "sha256:" + HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256")
+                            .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static final class DispatchCapture implements ProviderTransportHandoff {
+        private int unboundDispatches;
+        private final List<DispatchEvidence> evidence = new ArrayList<>();
+
+        @Override
+        public void requestDispatched() {
+            unboundDispatches++;
+        }
+
+        @Override
+        public void requestDispatched(DispatchEvidence dispatchEvidence) {
+            evidence.add(dispatchEvidence);
+        }
+    }
+
+    private static final class FailingSerializationMapper extends ObjectMapper {
+        @Override
+        public String writeValueAsString(Object value) throws JsonProcessingException {
+            throw new JsonProcessingException("injected local serialization failure") { };
+        }
+    }
+
+    private static final class ThrowingSendHttpClient extends HttpClient {
+        private final AtomicInteger sendCalls = new AtomicInteger();
+
+        @Override
+        public Optional<CookieHandler> cookieHandler() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<Duration> connectTimeout() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Redirect followRedirects() {
+            return Redirect.NEVER;
+        }
+
+        @Override
+        public Optional<ProxySelector> proxy() {
+            return Optional.empty();
+        }
+
+        @Override
+        public SSLContext sslContext() {
+            return null;
+        }
+
+        @Override
+        public SSLParameters sslParameters() {
+            return new SSLParameters();
+        }
+
+        @Override
+        public Optional<Authenticator> authenticator() {
+            return Optional.empty();
+        }
+
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
+        }
+
+        @Override
+        public Optional<Executor> executor() {
+            return Optional.empty();
+        }
+
+        @Override
+        public <T> HttpResponse<T> send(
+                HttpRequest request,
+                HttpResponse.BodyHandler<T> responseBodyHandler) throws IOException {
+            sendCalls.incrementAndGet();
+            throw new IOException("injected transport failure");
+        }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+                HttpRequest request,
+                HttpResponse.BodyHandler<T> responseBodyHandler) {
+            throw new UnsupportedOperationException("not used");
+        }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+                HttpRequest request,
+                HttpResponse.BodyHandler<T> responseBodyHandler,
+                HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+            throw new UnsupportedOperationException("not used");
+        }
     }
 
     private static final class ReadAbortHttpClient extends HttpClient {

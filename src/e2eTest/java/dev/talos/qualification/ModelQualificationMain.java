@@ -26,16 +26,18 @@ public final class ModelQualificationMain {
                 }
                 case "preflight" -> preflight(parsed.root(), catalogForPacket(parsed.root()), out, err);
                 case "validate" -> validate(parsed.root(), catalogForPacket(parsed.root()), out, err);
-                case "score" -> score(parsed.root(), parsed.bank(), catalogForPacket(parsed.root()), out, err);
+                case "assert-writable-campaign" -> assertWritableCampaign(
+                        parsed.root(), catalogForMutation(parsed.root()), out);
+                case "score" -> score(parsed.root(), parsed.bank(), catalogForMutation(parsed.root()), out, err);
                 case "requirements" -> requirements(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
-                        catalogForPacket(parsed.root()), out);
+                        catalogForMutation(parsed.root()), out);
                 case "approvals" -> approvals(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
-                        catalogForPacket(parsed.root()), out);
+                        catalogForMutation(parsed.root()), out);
                 case "provider-evidence" -> providerEvidence(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
-                        parsed.serverPort(), catalogForPacket(parsed.root()), out);
+                        parsed.serverPort(), catalogForMutation(parsed.root()), out);
                 default -> throw new IllegalArgumentException("Unknown command: " + parsed.command());
             };
         } catch (IllegalArgumentException e) {
@@ -58,6 +60,21 @@ public final class ModelQualificationMain {
         return QualificationScenarioBank.load(protocolVersion);
     }
 
+    private static QualificationScenarioBank.Catalog catalogForMutation(Path root) throws Exception {
+        Path campaignPath = root.toAbsolutePath().normalize().resolve("campaign.json");
+        if (Files.isSymbolicLink(campaignPath)
+                || !Files.isRegularFile(campaignPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalArgumentException(
+                    "qualification artifact publication requires campaign.json");
+        }
+        int protocolVersion = QualificationJson.requiredInt(
+                QualificationJson.readTree(campaignPath).get("protocolVersion"),
+                "campaign protocolVersion");
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocolVersion);
+        QualificationArtifactPublication.requireWritableCampaign(root, catalog);
+        return catalog;
+    }
+
     private static int preflight(
             Path root,
             QualificationScenarioBank.Catalog catalog,
@@ -71,6 +88,15 @@ public final class ModelQualificationMain {
         }
         out.println("Qualification calibration frozen and valid: " + root.toAbsolutePath().normalize());
         out.println("Scenario bank SHA-256: " + catalog.sha256());
+        return 0;
+    }
+
+    private static int assertWritableCampaign(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out) {
+        out.println("Qualification campaign is writable under protocol v"
+                + catalog.protocolVersion() + ": " + root.toAbsolutePath().normalize());
         return 0;
     }
 
@@ -117,7 +143,8 @@ public final class ModelQualificationMain {
         String name = campaign.candidateAlias() + "-" + campaign.configId() + "-"
                 + bank.name().toLowerCase(Locale.ROOT) + ".json";
         Path target = root.resolve("scorecards").resolve(name);
-        QualificationJson.write(target, scorecard);
+        QualificationArtifactPublication.publishNewOrVerifyExact(
+                target, QualificationJson.bytes(scorecard), "qualification scorecard");
         out.println("Qualification scorecard: " + target.toAbsolutePath().normalize());
         out.println("Disposition: " + scorecard.disposition());
         return switch (scorecard.disposition()) {
@@ -162,7 +189,7 @@ public final class ModelQualificationMain {
         catalog.scenario(scenarioId);
         QualificationProviderEvidenceFinalizer.Result result =
                 QualificationProviderEvidenceFinalizer.finalizeEvidence(
-                        root, runRoot, scenarioId, serverPort);
+                        root, runRoot, scenarioId, serverPort, catalog);
         out.println("Qualification provider evidence: prompt="
                 + result.promptDebug().toAbsolutePath().normalize()
                 + " model=" + result.modelLog().toAbsolutePath().normalize()
@@ -228,6 +255,7 @@ public final class ModelQualificationMain {
             }
             if (!command.equals("preflight")
                     && !command.equals("validate")
+                    && !command.equals("assert-writable-campaign")
                     && !command.equals("score")
                     && !command.equals("requirements")
                     && !command.equals("approvals")
@@ -239,6 +267,7 @@ public final class ModelQualificationMain {
 
         static String usage() {
             return "Usage: bank-hash | preflight --root <packet> | validate --root <packet> | "
+                    + "assert-writable-campaign --root <packet> | "
                     + "score --root <packet> --bank admission|full | requirements --root <packet> "
                     + "--scenario <id> --run <run-root> | approvals --root <packet> "
                     + "--scenario <id> --run <run-root> | provider-evidence --root <packet> "

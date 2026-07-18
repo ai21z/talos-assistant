@@ -40,6 +40,29 @@ final class ToolCallPreExecutionGuardChain {
             Set<String> staleRereadRequiredAtStart,
             Set<String> fullRewriteRepairTargets
     ) {
+        return evaluate(
+                state,
+                effective,
+                pathContext,
+                currentTaskContract,
+                nativePath,
+                callIndex,
+                staleRereadRequiredAtStart,
+                fullRewriteRepairTargets,
+                null);
+    }
+
+    Result evaluate(
+            LoopState state,
+            ToolCall effective,
+            ToolExecutionPathContext pathContext,
+            TaskContract currentTaskContract,
+            boolean nativePath,
+            int callIndex,
+            Set<String> staleRereadRequiredAtStart,
+            Set<String> fullRewriteRepairTargets,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit
+    ) {
         WorkspaceOperationPlan workspaceOperationPlan = pathContext.workspaceOperationPlan();
         String pathHint = pathContext.pathHint();
 
@@ -173,6 +196,12 @@ final class ToolCallPreExecutionGuardChain {
                             effective,
                             pathHint);
             if (repairedSourceEvidenceWrite != null) {
+                recordTransformation(
+                        parsedPermit,
+                        effective,
+                        repairedSourceEvidenceWrite,
+                        LocalTurnTraceCapture.ToolCallTransformationReason
+                                .SOURCE_EVIDENCE_EXACT_REPAIR);
                 effective = repairedSourceEvidenceWrite;
                 pathContext = ToolExecutionPathContext.from(effective);
                 workspaceOperationPlan = pathContext.workspaceOperationPlan();
@@ -287,6 +316,11 @@ final class ToolCallPreExecutionGuardChain {
                     "REPAIRED",
                     "append-shaped write_file steered to talos.edit_file before approval",
                     "APPEND_LINE_WRITE_STEERED_TO_EDIT_FILE");
+            recordTransformation(
+                    parsedPermit,
+                    effective,
+                    appendLineSteeredEdit,
+                    LocalTurnTraceCapture.ToolCallTransformationReason.APPEND_WRITE_TO_EDIT);
             effective = appendLineSteeredEdit;
             pathContext = ToolExecutionPathContext.from(effective);
             workspaceOperationPlan = pathContext.workspaceOperationPlan();
@@ -491,8 +525,20 @@ final class ToolCallPreExecutionGuardChain {
     }
 
     private static void recordBlockedCall(ToolCall call, String reason) {
-        LocalTurnTraceCapture.recordToolCallParsed("tool_loop", call);
         LocalTurnTraceCapture.recordToolCallBlocked("tool_loop", call, reason);
+    }
+
+    private static void recordTransformation(
+            LocalTurnTraceCapture.ParsedToolCallPermit permit,
+            ToolCall from,
+            ToolCall to,
+            LocalTurnTraceCapture.ToolCallTransformationReason reason) {
+        if (permit == null || from.equals(to)) return;
+        if (!LocalTurnTraceCapture.recordToolCallTransformedForExecution(
+                permit, "tool_loop", to, reason)) {
+            throw new IllegalStateException(
+                    "Could not advance the exact parsed-call evidence lineage for " + reason);
+        }
     }
 
     record Result(

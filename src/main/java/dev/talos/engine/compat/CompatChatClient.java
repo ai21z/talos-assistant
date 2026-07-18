@@ -10,6 +10,7 @@ import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.SamplingControls;
@@ -67,10 +68,20 @@ public final class CompatChatClient {
     }
 
     public String chat(ChatRequest request) throws Exception {
-        return chat(request, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+        return chat(
+                request,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                ProviderTransportHandoff.none());
     }
 
     public String chat(ChatRequest request, RequestMessageLayout layout) throws Exception {
+        return chat(request, layout, ProviderTransportHandoff.none());
+    }
+
+    public String chat(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
         RequestMessageLayout selected = safeLayout(layout);
         String json = mapper.writeValueAsString(buildBody(req, false, selected));
@@ -82,6 +93,7 @@ public final class CompatChatClient {
 
         HttpResponse<String> resp;
         try {
+            ProviderTransportHandoff.mark(handoff, json, req.tools);
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -94,12 +106,22 @@ public final class CompatChatClient {
     }
 
     public Stream<TokenChunk> chatStream(ChatRequest request) throws Exception {
-        return chatStream(request, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+        return chatStream(
+                request,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                ProviderTransportHandoff.none());
     }
 
     public Stream<TokenChunk> chatStream(
             ChatRequest request,
             RequestMessageLayout layout) throws Exception {
+        return chatStream(request, layout, ProviderTransportHandoff.none());
+    }
+
+    public Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
         RequestMessageLayout selected = safeLayout(layout);
         String json = mapper.writeValueAsString(buildBody(req, true, selected));
@@ -111,6 +133,7 @@ public final class CompatChatClient {
 
         HttpResponse<java.io.InputStream> resp;
         try {
+            ProviderTransportHandoff.mark(handoff, json, req.tools);
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -132,12 +155,22 @@ public final class CompatChatClient {
     }
 
     public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
-        return chatStreamNonStreaming(request, RequestMessageLayout.PRESERVE_AS_WRITTEN);
+        return chatStreamNonStreaming(
+                request,
+                RequestMessageLayout.PRESERVE_AS_WRITTEN,
+                ProviderTransportHandoff.none());
     }
 
     public Stream<TokenChunk> chatStreamNonStreaming(
             ChatRequest request,
             RequestMessageLayout layout) throws Exception {
+        return chatStreamNonStreaming(request, layout, ProviderTransportHandoff.none());
+    }
+
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            RequestMessageLayout layout,
+            ProviderTransportHandoff handoff) throws Exception {
         ChatRequest req = safeRequest(request);
         RequestMessageLayout selected = safeLayout(layout);
         String json = mapper.writeValueAsString(buildBody(req, false, selected));
@@ -149,6 +182,7 @@ public final class CompatChatClient {
 
         HttpResponse<String> resp;
         try {
+            ProviderTransportHandoff.mark(handoff, json, req.tools);
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -549,7 +583,7 @@ public final class CompatChatClient {
 
                 if (line == null) {
                     flushToolCallsIfAny();
-                    pending.add(TokenChunk.eos(finishReason));
+                    pending.add(TokenChunk.transportEof(finishReason));
                     finished = true;
                     return;
                 }

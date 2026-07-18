@@ -10,7 +10,6 @@ import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 
 final class ToolRepromptChatExecutor {
@@ -130,17 +129,14 @@ final class ToolRepromptChatExecutor {
             String noAnswerFallback,
             boolean failPendingObligationOnEmptyResult
     ) {
-        state.currentText = repromptResult.text();
-        state.currentNativeCalls = repromptResult.hasToolCalls()
-                ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
-        if (state.currentText == null) state.currentText = "";
+        state.applyProviderResult(repromptResult);
         if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
             if (failPendingObligationOnEmptyResult
                     && state.failPendingActionObligationAfterNoExecutableToolCalls()) {
                 return false;
             }
             if (!state.pendingMutationSummaries.isEmpty()) {
-                state.finishWithAnswer(String.join("\n", state.pendingMutationSummaries));
+                state.finishWithToolAnswer(String.join("\n", state.pendingMutationSummaries));
             } else {
                 state.finishWithAnswer(noAnswerFallback == null || noAnswerFallback.isBlank()
                         ? NO_ANSWER_AFTER_TOOL_EXECUTION

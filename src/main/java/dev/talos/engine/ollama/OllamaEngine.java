@@ -62,6 +62,11 @@ final class OllamaEngine implements ModelEngine {
         return chatClient.chat(req);
     }
 
+    @Override
+    public String chat(ChatRequest req, ProviderTransportHandoff handoff) throws Exception {
+        return chatClient.chat(req, handoff);
+    }
+
     /**
      * Extracts the assistant text content from an /api/chat JSON response.
      *
@@ -83,6 +88,20 @@ final class OllamaEngine implements ModelEngine {
     @Override
     public Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
         return chatClient.chatStream(req);
+    }
+
+    @Override
+    public Stream<TokenChunk> chatStream(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
+        return chatClient.chatStream(req, handoff);
+    }
+
+    @Override
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
+        return Stream.of(TokenChunk.of(chat(req, handoff)), TokenChunk.eos());
     }
 
     // ── Tool spec conversion ─────────────────────────────────────────────

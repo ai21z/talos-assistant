@@ -11,6 +11,7 @@ import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderResponseCapture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -91,6 +92,188 @@ class AssistantTurnExecutorAbortTruthTest {
                 "UNKNOWN", false);
         assertAbortEvent("", "[turn aborted: repetition loop]",
                 "UNKNOWN", false);
+    }
+
+    @Test
+    void typedExternalOperatorAbortRoutesWithOperatorOrigin() {
+        String answer = "[turn aborted: interrupted]";
+        LocalTurnTraceCapture.begin(
+                "trc-abort-operator-origin",
+                "sid",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Interrupt this turn.");
+        try {
+            AssistantTurnExecutor.recordLlmAbortOutcome(
+                    new LlmClient.StreamResult(
+                            answer,
+                            List.of(),
+                            "",
+                            "interrupted",
+                            ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL),
+                    answer);
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(answer);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            var selection = trace.events().stream()
+                    .filter(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("OPERATOR", selection.data().get("origin"));
+            assertEquals("OPERATOR", terminal.data().get("origin"));
+            assertFalse(terminal.data().containsKey("sourceGenerationId"));
+            assertEquals(List.of(
+                            "TERMINAL_ANSWER_SELECTED",
+                            "ROUTED_ANSWER_CAPTURED",
+                            "OUTCOME_RENDERED",
+                            "TRACE_COMPLETED"),
+                    trace.events().stream()
+                            .map(event -> event.type())
+                            .filter(type -> type.equals("TERMINAL_ANSWER_SELECTED")
+                                    || type.equals("ROUTED_ANSWER_CAPTURED")
+                                    || type.equals("OUTCOME_RENDERED")
+                                    || type.equals("TRACE_COMPLETED"))
+                            .toList());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void operatorAbortWithPartialProviderOutputDoesNotClaimOperatorAuthorship() {
+        String answer = "partial provider text\n[turn aborted: interrupted]";
+        LocalTurnTraceCapture.begin(
+                "trc-abort-operator-partial",
+                "sid",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Interrupt this turn after output begins.");
+        try {
+            AssistantTurnExecutor.recordLlmAbortOutcome(
+                    new LlmClient.StreamResult(
+                            answer,
+                            List.of(),
+                            "",
+                            "interrupted",
+                            ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL),
+                    answer);
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(answer);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("NONE", terminal.data().get("origin"));
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type())),
+                    "operator control of cancellation does not prove authorship of partial bytes");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void nonOperatorAbortOriginsNeverInferOperatorFromInterruptedProse() {
+        for (ProviderResponseCapture.AbortOrigin origin : List.of(
+                ProviderResponseCapture.AbortOrigin.RUNTIME_WATCHDOG,
+                ProviderResponseCapture.AbortOrigin.RUNTIME_THREAD_INTERRUPT,
+                ProviderResponseCapture.AbortOrigin.RUNTIME_STREAM_CLOSE,
+                ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT)) {
+            String answer = "[turn aborted: interrupted]";
+            LocalTurnTraceCapture.begin(
+                    "trc-abort-non-operator-" + origin.name().toLowerCase(),
+                    "sid",
+                    1,
+                    "2026-07-16T00:00:00Z",
+                    "workspace-hash",
+                    "agent",
+                    "llama_cpp",
+                    "test-model",
+                    "Exercise a non-operator abort.");
+            try {
+                AssistantTurnExecutor.recordLlmAbortOutcome(
+                        new LlmClient.StreamResult(answer, List.of(), "", "interrupted", origin),
+                        answer);
+                LocalTurnTraceCapture.recordRoutedAnswerCaptured(answer);
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+                var terminal = trace.events().stream()
+                        .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                        .findFirst()
+                        .orElseThrow();
+                assertEquals("NONE", terminal.data().get("origin"), origin.name());
+                assertTrue(trace.events().stream()
+                                .noneMatch(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type())),
+                        origin.name());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+    }
+
+    @Test
+    void abortMarkerFallbackInvalidatesPriorProviderCandidate() {
+        String answer = "partial provider text\n[turn aborted: interrupted]";
+        LocalTurnTraceCapture.begin(
+                "trc-abort-marker-provider-candidate",
+                "sid",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Exercise marker-only abort recovery.");
+        try {
+            LocalTurnTraceCapture.recordProviderAnswerSelected(
+                    answer,
+                    authenticProviderReceipt(answer));
+
+            AssistantTurnExecutor.recordLlmAbortOutcome(
+                    new LlmClient.StreamResult(answer, List.of()),
+                    answer);
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(answer);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("NONE", terminal.data().get("origin"));
+            assertFalse(terminal.data().containsKey("sourceGenerationId"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    private static ProviderResponseCapture.Receipt authenticProviderReceipt(String answer) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(
+                new ProviderResponseCapture.Response(
+                        answer,
+                        0,
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Completion.PROVIDER_EOS,
+                        false,
+                        false));
+        generation.complete(receipt);
+        return receipt;
     }
 
     private static void assertAbortEvent(

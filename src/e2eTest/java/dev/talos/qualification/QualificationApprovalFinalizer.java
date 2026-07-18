@@ -3,11 +3,7 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,30 +31,30 @@ final class QualificationApprovalFinalizer {
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
         Path runRoot = QualificationRequirementFinalizer.containedRunRoot(
-                packetRoot, requestedRunRoot, scenarioId);
+                packetRoot, requestedRunRoot, scenarioId, catalog);
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         Document document = derive(
                 runRoot.resolve("transcript.raw.json"), scenario.approvalBehavior());
         Path output = runRoot.resolve(OUTPUT_FILE);
-        if (Files.exists(output)) {
-            throw new IllegalStateException("refusing to overwrite approval evidence: " + output);
-        }
-        try {
-            Files.writeString(output, QualificationJson.write(document), StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        } catch (FileAlreadyExistsException race) {
-            throw new IllegalStateException("refusing to overwrite approval evidence: " + output, race);
-        }
+        QualificationArtifactPublication.publishNewOrVerifyExact(
+                output,
+                QualificationJson.bytes(document),
+                "approval evidence");
         return output;
     }
 
     static Document derive(
             Path capturePath,
             QualificationProtocol.ApprovalBehavior approvalBehavior) throws IOException {
+        return derive(QualificationJson.readTree(capturePath), approvalBehavior);
+    }
+
+    static Document derive(
+            JsonNode capture,
+            QualificationProtocol.ApprovalBehavior approvalBehavior) {
         if (approvalBehavior == null) {
             throw new IllegalArgumentException("approval behavior is required");
         }
-        JsonNode capture = QualificationJson.readTree(capturePath);
         JsonNode events = capture.path("events");
         if (!events.isArray()) {
             throw new IllegalArgumentException("PTY capture must contain an events array");

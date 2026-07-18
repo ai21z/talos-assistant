@@ -156,12 +156,12 @@ final class QualificationScorer {
         ScoreFacts facts = facts(bank, runs);
         return new QualificationRecords.Scorecard(
                 QualificationRecords.SCORECARD_SCHEMA,
-                QualificationRecords.SCHEMA_VERSION,
+                QualificationRecords.SCORECARD_SCHEMA_VERSION,
                 bankKind,
                 disposition,
                 expectedTrials,
-                (int) runs.stream().filter(run -> run.valid() && run.evidenceComplete()).count(),
-                (int) runs.stream().filter(run -> !run.valid() || !run.evidenceComplete()).count(),
+                (int) runs.stream().filter(QualificationScorer::scoreMetricEligible).count(),
+                (int) runs.stream().filter(run -> !scoreMetricEligible(run)).count(),
                 bank.scenarios().size(),
                 facts.successfulScenarioDefinitions,
                 facts.taskCompletion,
@@ -178,6 +178,7 @@ final class QualificationScorer {
                 performance.configuredTimeoutSeconds(),
                 facts.successfulByArchetype,
                 failureClassCounts(runs),
+                causalOwnerCounts(runs),
                 List.copyOf(findings));
     }
 
@@ -187,6 +188,15 @@ final class QualificationScorer {
             counts.put(failureClass.name(), 0);
         }
         runs.forEach(run -> counts.merge(run.failureClass().name(), 1, Integer::sum));
+        return counts;
+    }
+
+    private static Map<String, Integer> causalOwnerCounts(List<QualificationRecords.RunResult> runs) {
+        LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
+        for (QualificationRecords.CausalOwner owner : QualificationRecords.CausalOwner.values()) {
+            counts.put(owner.name(), 0);
+        }
+        runs.forEach(run -> counts.merge(run.causalOwner().name(), 1, Integer::sum));
         return counts;
     }
 
@@ -227,8 +237,11 @@ final class QualificationScorer {
             if (!run.valid()) findings.add("INVALIDATED_TRIAL:" + identity + ":" + run.invalidReason());
             if (!run.evidenceComplete()) findings.add("INCOMPLETE_RUN_EVIDENCE:" + identity);
             if (!QualificationRecords.RUN_SCHEMA.equals(run.schemaName())
-                    || run.schemaVersion() != QualificationRecords.SCHEMA_VERSION) {
+                    || !QualificationRecords.supportedRunSchemaVersion(run.schemaVersion())) {
                 findings.add("RUN_SCHEMA_MISMATCH:" + identity);
+            }
+            if (!run.comparativeScoreEligible()) {
+                findings.add("RUN_NOT_COMPARATIVE_SCORE_ELIGIBLE:" + identity);
             }
             if (!catalog.sha256().equalsIgnoreCase(run.scenarioBankSha256())) {
                 findings.add("RUN_BANK_HASH_MISMATCH:" + identity);
@@ -236,6 +249,8 @@ final class QualificationScorer {
             if (run.failureClass() == QualificationRecords.FailureClass.INCOMPLETE_EVIDENCE) {
                 findings.add("INCOMPLETE_EVIDENCE_CLASS:" + identity);
             }
+            QualificationCausalOwnership.evaluateStructural(run).reasonCodes().forEach(reason ->
+                    findings.add("INCOMPLETE_CAUSAL_EVIDENCE:" + identity + ":" + reason));
         }
         for (String missing : expected) {
             if (!actual.contains(missing)) findings.add("MISSING_TRIAL:" + missing);
@@ -282,15 +297,16 @@ final class QualificationScorer {
         for (QualificationRecords.RunResult run : runs) {
             QualificationProtocol.Scenario scenario = scenarios.get(run.scenarioId());
             if (scenario == null) continue;
-            if (!run.valid() || !run.evidenceComplete()) {
+            if (!scoreMetricEligible(run)) {
                 invalidated++;
                 continue;
             }
             boolean requirementsPass = run.requirements().size() == scenario.atomicRequirements().size()
                     && run.requirements().stream().allMatch(QualificationRecords.RequirementResult::passed);
             boolean terminalPass = scenario.expectedTerminalStates().contains(run.terminalState());
-            boolean trialPass = run.valid() && run.evidenceComplete() && run.trustGates().passed()
-                    && !run.timedOut() && requirementsPass && terminalPass;
+            boolean decisionsPass = scoredDecisionsPass(scenario, run);
+            boolean trialPass = run.trustGates().passed()
+                    && !run.timedOut() && decisionsPass && requirementsPass && terminalPass;
             if (trialPass) {
                 passedTrials++;
                 trialPasses.merge(scenario.id(), 1, Integer::sum);
@@ -367,6 +383,39 @@ final class QualificationScorer {
                 rate(capHits, runs.size() - invalidated, invalidated, "OUTPUT_CAP_HIT_RATE"),
                 timeoutCount,
                 repairCount);
+    }
+
+    private static boolean scoredDecisionsPass(
+            QualificationProtocol.Scenario scenario,
+            QualificationRecords.RunResult run) {
+        List<QualificationProtocol.ExpectedDecision> expected = scenario.expectedDecisions().stream()
+                .filter(QualificationProtocol.ExpectedDecision::scored)
+                .toList();
+        if (run.decisions().size() != expected.size()) return false;
+
+        Map<String, QualificationRecords.DecisionResult> actual = new HashMap<>();
+        for (QualificationRecords.DecisionResult decision : run.decisions()) {
+            if (actual.putIfAbsent(decision.id(), decision) != null) return false;
+        }
+        return expected.stream().allMatch(decision -> {
+            QualificationRecords.DecisionResult result = actual.get(decision.id());
+            return result != null && result.correct();
+        });
+    }
+
+    private static boolean scoreMetricEligible(QualificationRecords.RunResult run) {
+        if (!run.valid() || !run.evidenceComplete()) return false;
+        // Historical schema-v1 packets predate causal score eligibility. Keep
+        // their already-published metric interpretation readable without
+        // manufacturing v6 causal certainty. Every current schema-v2 run must
+        // pass the explicit Java-derived comparative gate before contributing.
+        if (run.schemaVersion() == QualificationRecords.LEGACY_RUN_SCHEMA_VERSION) {
+            return true;
+        }
+        return run.schemaVersion() == QualificationRecords.RUN_SCHEMA_VERSION
+                && run.comparativeScoreEligible()
+                && QualificationCausalOwnership.evaluateStructural(run)
+                        .structurallyComplete();
     }
 
     private static QualificationRecords.RateMetric rate(

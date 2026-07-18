@@ -10,7 +10,6 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ToolSpec;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,10 +41,7 @@ final class CompactMutationContinuationExecutor {
                     compact.messages(),
                     compact.tools(),
                     compact.controls());
-            state.currentText = result.text() == null ? "" : result.text();
-            state.currentNativeCalls = result.hasToolCalls()
-                    ? new ArrayList<>(result.toolCalls())
-                    : List.of();
+            state.applyProviderResult(result);
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION",
                     "used compact mutation continuation after " + retryName

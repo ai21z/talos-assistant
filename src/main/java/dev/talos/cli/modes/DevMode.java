@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Limits;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,16 +48,18 @@ public final class DevMode implements Mode {
         if (isList) {
             Path dir = (target == null ? ws : target);
             if (!ctx.sandbox().allowedPath(dir)) {
-                return Optional.of(new Result.Info("Refusing to list outside workspace.\n"));
+                return runtime(new Result.Info("Refusing to list outside workspace.\n"));
             }
-            if (!Files.exists(dir)) return Optional.of(new Result.Info("Not found: " + rel(ws, dir) + "\n"));
-            if (!Files.isDirectory(dir)) return Optional.of(new Result.Info("Not a directory: " + rel(ws, dir) + "\n"));
+            if (!Files.exists(dir)) return runtime(
+                    new Result.Info("Not found: " + rel(ws, dir) + "\n"));
+            if (!Files.isDirectory(dir)) return runtime(
+                    new Result.Info("Not a directory: " + rel(ws, dir) + "\n"));
 
             List<Path> entries = new ArrayList<>();
             try (var stream = Files.list(dir)) {
                 stream.limit(lim.dirEntriesMax() + 1L).forEach(entries::add);
             } catch (Exception e) {
-                return Optional.of(new Result.Error("List error: " + safe(e.getMessage()), 500));
+                return runtime(new Result.Error("List error: " + safe(e.getMessage()), 500));
             }
             boolean clipped = entries.size() > lim.dirEntriesMax();
             if (clipped) entries = entries.subList(0, lim.dirEntriesMax());
@@ -74,17 +77,20 @@ public final class DevMode implements Mode {
             for (Path f : files) out.append("  [FILE] ").append(f.getFileName()).append("\n");
             if (clipped) out.append("\n(showing first ").append(lim.dirEntriesMax()).append(" entries)\n\n");
             else out.append("\n");
-            return Optional.of(new Result.Ok(out.toString()));
+            return tool(new Result.Ok(out.toString()));
         }
 
         // open/show/view -> file read
-        if (target == null) return Optional.of(new Result.Info("File not found or invalid path.\n"));
+        if (target == null) return runtime(
+                new Result.Info("File not found or invalid path.\n"));
         if (!ctx.sandbox().allowedPath(target)) {
-            return Optional.of(new Result.Info("Refusing to read outside workspace.\n"));
+            return runtime(new Result.Info("Refusing to read outside workspace.\n"));
         }
-        if (!Files.exists(target)) return Optional.of(new Result.Info("Not found: " + rel(ws, target) + "\n"));
+        if (!Files.exists(target)) return runtime(
+                new Result.Info("Not found: " + rel(ws, target) + "\n"));
         if (Files.isDirectory(target)) {
-            return Optional.of(new Result.Info("Path is a directory. Try 'ls " + rel(ws, target) + "'.\n"));
+            return runtime(new Result.Info(
+                    "Path is a directory. Try 'ls " + rel(ws, target) + "'.\n"));
         }
 
         StringBuilder out = new StringBuilder();
@@ -107,9 +113,23 @@ public final class DevMode implements Mode {
                 out.append("\n");
             }
         } catch (Exception e) {
-            return Optional.of(new Result.Error("Read error: " + safe(e.getMessage()), 500));
+            return runtime(new Result.Error("Read error: " + safe(e.getMessage()), 500));
         }
-        return Optional.of(new Result.Ok(out.toString()));
+        return tool(new Result.Ok(out.toString()));
+    }
+
+    private static Optional<Result> runtime(Result result) {
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected(persistedText(result));
+        return Optional.of(result);
+    }
+
+    private static Optional<Result> tool(Result.Ok result) {
+        LocalTurnTraceCapture.recordToolAnswerSelected(result.text);
+        return Optional.of(result);
+    }
+
+    private static String persistedText(Result result) {
+        return result instanceof Result.Ok ok ? ok.text : "";
     }
 
     private static String rel(Path base, Path p) {

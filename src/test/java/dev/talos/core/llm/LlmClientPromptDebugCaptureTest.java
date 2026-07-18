@@ -156,12 +156,12 @@ class LlmClientPromptDebugCaptureTest {
     }
 
     @Test
-    void chatPlainSummarizerDoesNotOverwriteLatestUserFacingPromptDebugCapture() {
+    void explicitBackgroundMaintenanceDoesNotOverwriteLatestUserFacingPromptDebugCapture() {
         RecordingResolver resolver = new RecordingResolver();
         LlmClient client = new LlmClient(engineConfig(), resolver);
 
         client.chatFull(List.of(ChatMessage.user("List current files.")), 5_000L);
-        client.chatPlain(
+        client.chatPlainBackgroundMaintenance(
                 "You are a conversation summarizer for a developer CLI tool.",
                 "Recent conversation turns to incorporate:");
 

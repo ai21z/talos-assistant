@@ -61,6 +61,58 @@ class AssistantTurnExecutorTest {
                 .build();
     }
 
+    private record BlockedSmallTalkCapture(
+            AssistantTurnExecutor.TurnOutput output,
+            LocalTurnTrace trace) {}
+
+    private static BlockedSmallTalkCapture blockedSmallTalkCapture(
+            Path workspace,
+            String traceSuffix,
+            LlmClient.StreamResult response,
+            long responseMaxChars) {
+        var registry = new ToolRegistry();
+        var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor, 3);
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(response), 4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Without inspecting this workspace, explain approval in one sentence."));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-small-talk-" + traceSuffix,
+                "sid",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                messages.getLast().content());
+        try {
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages,
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options()
+                            .responseMaxChars(responseMaxChars));
+            TurnAuditCapture.end();
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(output.text());
+            return new BlockedSmallTalkCapture(
+                    output, LocalTurnTraceCapture.complete());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     @Test
     void ambiguousMutationRequestClarifiesWithoutModelToolsOrRawTraceEvidence(@TempDir Path workspace) {
         String request = "Rename reset to resetAll in app.js, but do not change any files yet.";
@@ -87,6 +139,7 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
             var audit = TurnAuditCapture.end();
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(out.text());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
             assertEquals(
@@ -114,6 +167,14 @@ class AssistantTurnExecutorTest {
             assertTrue(decision.data().containsKey("evidenceHash"), decision.data().toString());
             assertFalse(decision.data().toString().contains("resetAll"), decision.data().toString());
             assertFalse(decision.data().toString().contains("do not change"), decision.data().toString());
+            var answerSelection = trace.events().stream()
+                    .filter(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("RUNTIME_DETERMINISTIC", answerSelection.data().get("origin"));
+            assertEquals(trace.redaction().assistantHash(), answerSelection.data().get("answerHash"));
+            assertTrue(trace.events().stream()
+                    .noneMatch(event -> "GENERATION_STARTED".equals(event.type())));
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();
@@ -654,6 +715,191 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
+    void blockedSmallTalkToolCallPreservesProviderProseLineageThroughNamedTransformation(
+            @TempDir Path workspace) {
+        var registry = new ToolRegistry();
+        var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor, 3);
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult(
+                        "  Approval means explicit consent before a mutation.  ",
+                        List.of(new ChatMessage.NativeToolCall(
+                                "call_read", "talos.read_file", java.util.Map.of("path", "README.md"))))),
+                4096);
+        var ctx = Context.builder(new Config())
+                .llm(recorded.client())
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Without inspecting this workspace, explain approval in one sentence."));
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-small-talk-provider-prose",
+                "sid",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                messages.getLast().content());
+        try {
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            TurnAuditCapture.end();
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(output.text());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals("Approval means explicit consent before a mutation.", output.text());
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+            assertTrue(terminal.data().containsKey("sourceGenerationId"));
+            assertTrue(terminal.data().containsKey("sourceAttemptId"));
+            assertTrue(trace.events().stream().anyMatch(event ->
+                    "ANSWER_TRANSFORMED".equals(event.type())
+                            && "TASK_CONTRACT_TOOL_CALL_SUPPRESSION".equals(
+                                    event.data().get("reasonCode"))));
+            var suppression = trace.events().stream()
+                    .filter(event -> "PROVIDER_TOOL_CALLS_SUPPRESSED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(terminal.data().get("sourceGenerationId"),
+                    suppression.data().get("sourceGenerationId"));
+            assertEquals(terminal.data().get("sourceAttemptId"),
+                    suppression.data().get("sourceAttemptId"));
+            assertEquals("TASK_CONTRACT_BLOCKED_TOOL_CALLS",
+                    suppression.data().get("reasonCode"));
+            assertEquals(1, suppression.data().get("nativeToolCallCount"));
+            assertEquals(false, suppression.data().get("textualToolCallPresent"));
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void blockedNativeToolWithExactProviderProseUsesSuppressionWithoutInventingByteRewrite(
+            @TempDir Path workspace) {
+        BlockedSmallTalkCapture captured = blockedSmallTalkCapture(
+                workspace,
+                "native-exact-prose",
+                new LlmClient.StreamResult(
+                        "Approval means explicit consent before a mutation.",
+                        List.of(new ChatMessage.NativeToolCall(
+                                "call_read", "talos.read_file",
+                                java.util.Map.of("path", "README.md")))),
+                1024);
+
+        assertEquals("Approval means explicit consent before a mutation.",
+                captured.output().text());
+        var terminal = captured.trace().events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"),
+                captured.trace().events().toString());
+        assertTrue(captured.trace().events().stream().anyMatch(event ->
+                "PROVIDER_TOOL_CALLS_SUPPRESSED".equals(event.type())));
+        assertTrue(captured.trace().events().stream().noneMatch(event ->
+                "ANSWER_TRANSFORMED".equals(event.type())));
+        assertTrue(captured.trace().events().stream().noneMatch(event ->
+                "TOOL_CALL_PARSED".equals(event.type())
+                        || "TOOL_EXECUTED".equals(event.type())));
+    }
+
+    @Test
+    void blockedTextualToolWithProviderProseDoesNotClaimIneligibleProviderLineage(
+            @TempDir Path workspace) {
+        BlockedSmallTalkCapture captured = blockedSmallTalkCapture(
+                workspace,
+                "textual-prose",
+                new LlmClient.StreamResult(
+                        "Approval means explicit consent before a mutation.\n"
+                                + "```json\n"
+                                + "{\"name\":\"talos.read_file\","
+                                + "\"arguments\":{\"path\":\"README.md\"}}\n"
+                                + "```",
+                        List.of()),
+                1024);
+
+        assertEquals("Approval means explicit consent before a mutation.",
+                captured.output().text());
+        var terminal = captured.trace().events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("NONE", terminal.data().get("origin"),
+                captured.trace().events().toString());
+        assertFalse(terminal.data().containsKey("sourceGenerationId"));
+        assertFalse(terminal.data().containsKey("sourceAttemptId"));
+        assertTrue(captured.trace().events().stream().noneMatch(event ->
+                "PROVIDER_TOOL_CALLS_SUPPRESSED".equals(event.type())));
+        assertTrue(captured.trace().events().stream().noneMatch(event ->
+                "TOOL_CALL_PARSED".equals(event.type())
+                        || "TOOL_EXECUTED".equals(event.type())));
+    }
+
+    @Test
+    void blockedTextualToolOnlyUsesRuntimeFallbackWithoutProviderSuppressionClaim(
+            @TempDir Path workspace) {
+        BlockedSmallTalkCapture captured = blockedSmallTalkCapture(
+                workspace,
+                "textual-only",
+                new LlmClient.StreamResult("""
+                        ```json
+                        {"name":"talos.read_file","arguments":{"path":"README.md"}}
+                        ```
+                        """, List.of()),
+                1024);
+
+        assertEquals("Hi, I am Talos.", captured.output().text());
+        var terminal = captured.trace().events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("RUNTIME_DETERMINISTIC", terminal.data().get("origin"));
+        assertTrue(captured.trace().events().stream().noneMatch(event ->
+                "PROVIDER_TOOL_CALLS_SUPPRESSED".equals(event.type())));
+        assertTrue(captured.trace().events().stream().noneMatch(event ->
+                "TOOL_CALL_PARSED".equals(event.type())
+                        || "TOOL_EXECUTED".equals(event.type())));
+    }
+
+    @Test
+    void blockedProviderProseTruncationRemainsAnExplicitProviderTransformation(
+            @TempDir Path workspace) {
+        BlockedSmallTalkCapture captured = blockedSmallTalkCapture(
+                workspace,
+                "truncated-prose",
+                new LlmClient.StreamResult(
+                        "Approval means explicit consent before a mutation.",
+                        List.of(new ChatMessage.NativeToolCall(
+                                "call_read", "talos.read_file",
+                                java.util.Map.of("path", "README.md")))),
+                12);
+
+        assertTrue(captured.output().text().endsWith("[output truncated]"),
+                captured.output().text());
+        var terminal = captured.trace().events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+        assertTrue(captured.trace().events().stream().anyMatch(event ->
+                "ANSWER_TRANSFORMED".equals(event.type())
+                        && "TASK_CONTRACT_TOOL_CALL_SUPPRESSION".equals(
+                                event.data().get("reasonCode"))));
+    }
+
+    @Test
     void blanketNoWorkspaceTurnRejectsBackendSuppliedReadBeforeExecution(@TempDir Path workspace) {
         AtomicInteger executions = new AtomicInteger();
         var registry = new ToolRegistry();
@@ -713,6 +959,7 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
             var audit = TurnAuditCapture.end();
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(output.text());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
             assertEquals(0, executions.get(), "out-of-surface read must fail before tool execution");
@@ -734,6 +981,12 @@ class AssistantTurnExecutorTest {
             assertTrue(trace.events().stream().noneMatch(event ->
                             "TOOL_CALL_PARSED".equals(event.type()) || "TOOL_EXECUTED".equals(event.type())),
                     trace.events().toString());
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("RUNTIME_DETERMINISTIC", terminal.data().get("origin"));
+            assertFalse(terminal.data().containsKey("sourceGenerationId"));
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();

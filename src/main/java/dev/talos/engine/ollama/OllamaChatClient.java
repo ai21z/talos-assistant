@@ -9,6 +9,7 @@ import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
@@ -16,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -24,13 +26,17 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 final class OllamaChatClient {
     private static final Logger LOG = LoggerFactory.getLogger(OllamaChatClient.class);
@@ -53,8 +59,12 @@ final class OllamaChatClient {
     }
 
     String chat(ChatRequest req) throws Exception {
+        return chat(req, ProviderTransportHandoff.none());
+    }
+
+    String chat(ChatRequest req, ProviderTransportHandoff handoff) throws Exception {
         if (req.messages != null && !req.messages.isEmpty()) {
-            return chatViaMessages(req);
+            return chatViaMessages(req, handoff);
         }
 
         String model = Objects.toString(req.model, defaultModel);
@@ -78,6 +88,7 @@ final class OllamaChatClient {
 
         HttpResponse<String> resp;
         try {
+            ProviderTransportHandoff.mark(handoff, json, List.of());
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -99,8 +110,14 @@ final class OllamaChatClient {
     }
 
     Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
+        return chatStream(req, ProviderTransportHandoff.none());
+    }
+
+    Stream<TokenChunk> chatStream(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
         if (req.messages != null && !req.messages.isEmpty()) {
-            return chatStreamViaMessages(req);
+            return chatStreamViaMessages(req, handoff);
         }
 
         String model = Objects.toString(req.model, defaultModel);
@@ -124,6 +141,7 @@ final class OllamaChatClient {
 
         HttpResponse<java.io.InputStream> resp;
         try {
+            ProviderTransportHandoff.mark(handoff, json, List.of());
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -134,13 +152,14 @@ final class OllamaChatClient {
         checkStatus(resp.statusCode(), model, null);
 
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
-        return br.lines().map(line -> {
+        Stream<TokenChunk> chunks = br.lines().map(line -> {
             Matcher m = RESPONSE.matcher(line);
             if (line.contains("\"done\":true")) return TokenChunk.eos();
             return m.find() ? TokenChunk.of(unesc(m.group(1))) : TokenChunk.of("");
         }).onClose(() -> {
             try { br.close(); } catch (Exception ignored) {}
         });
+        return normalizeStreamingBodyIo(chunks);
     }
 
     String extractChatContentOrToolCalls(String json) {
@@ -262,7 +281,9 @@ final class OllamaChatClient {
         return b.isEmpty() ? null : b.toString();
     }
 
-    private String chatViaMessages(ChatRequest req) throws Exception {
+    private String chatViaMessages(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
         StringBuilder systemBuf = new StringBuilder();
@@ -305,6 +326,8 @@ final class OllamaChatClient {
                 .build();
         HttpResponse<String> resp;
         try {
+            ProviderTransportHandoff.mark(
+                    handoff, json, nativeToolCalling ? req.tools : List.of());
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -316,7 +339,9 @@ final class OllamaChatClient {
         return extractChatContentOrToolCalls(resp.body());
     }
 
-    private Stream<TokenChunk> chatStreamViaMessages(ChatRequest req) throws Exception {
+    private Stream<TokenChunk> chatStreamViaMessages(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
         StringBuilder systemBuf = new StringBuilder();
@@ -360,6 +385,8 @@ final class OllamaChatClient {
 
         HttpResponse<java.io.InputStream> resp;
         try {
+            ProviderTransportHandoff.mark(
+                    handoff, json, nativeToolCalling ? req.tools : List.of());
             resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
         } catch (ConnectException ce) {
             throw new EngineException.ConnectionFailed(host, ce);
@@ -370,7 +397,7 @@ final class OllamaChatClient {
         checkStatus(resp.statusCode(), model, null);
 
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
-        return br.lines().map(line -> {
+        Stream<TokenChunk> chunks = br.lines().map(line -> {
             if (line.contains("\"tool_calls\"")) {
                 try {
                     JsonNode root = mapper.readTree(line);
@@ -401,6 +428,41 @@ final class OllamaChatClient {
         }).onClose(() -> {
             try { br.close(); } catch (Exception ignored) {}
         });
+        return normalizeStreamingBodyIo(chunks);
+    }
+
+    private static <T> Stream<T> normalizeStreamingBodyIo(Stream<T> source) {
+        Iterator<T> delegate = source.iterator();
+        Iterator<T> normalized = new Iterator<>() {
+            @Override
+            public boolean hasNext() {
+                try {
+                    return delegate.hasNext();
+                } catch (UncheckedIOException bodyFailure) {
+                    throw providerStreamFailure(bodyFailure);
+                }
+            }
+
+            @Override
+            public T next() {
+                try {
+                    return delegate.next();
+                } catch (UncheckedIOException bodyFailure) {
+                    throw providerStreamFailure(bodyFailure);
+                }
+            }
+        };
+        return StreamSupport.stream(
+                Spliterators.spliteratorUnknownSize(normalized, Spliterator.ORDERED),
+                false).onClose(source::close);
+    }
+
+    private static EngineException.ResponseError providerStreamFailure(
+            UncheckedIOException failure) {
+        return new EngineException.ResponseError(
+                0,
+                "Ollama response stream ended with an I/O failure",
+                failure.getCause());
     }
 
     private static String unesc(String s) {

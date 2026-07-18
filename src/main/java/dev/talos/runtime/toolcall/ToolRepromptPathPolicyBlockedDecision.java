@@ -35,8 +35,7 @@ final class ToolRepromptPathPolicyBlockedDecision {
             state.expectedTargetScopeRepairPromptedKeys.add(repair.key());
             if (repair.exactReplacementRepair() != null) {
                 LocalTurnTraceCapture.recordRepair("PLANNED", repair.traceDetail());
-                state.currentText = "";
-                state.currentNativeCalls = List.of(repair.exactReplacementRepair());
+                state.setRuntimeNativeCalls("", List.of(repair.exactReplacementRepair()));
                 return Optional.of(true);
             }
             return Optional.of(ToolRepromptChatExecutor.execute(

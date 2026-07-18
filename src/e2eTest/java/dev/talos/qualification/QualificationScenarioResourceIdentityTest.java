@@ -22,7 +22,8 @@ class QualificationScenarioResourceIdentityTest {
             2, "2b903f0219734edd74a0c2eb00c020a98a394fc5be07f4f2aa42f639c65a4614",
             3, "da2c4558e43c1359025a408b4e12b30f4e1b08b9236ad1bee1940c86b3d40fa3",
             4, "d3df5675d1b764d846202012acc250caeb0324fe5ce81ec176928cc986a067ad",
-            5, "28e3df731502dcbf3dbcdd4bd69131f93a71766aa6c42ebcebd5825619de7d6b");
+            5, "28e3df731502dcbf3dbcdd4bd69131f93a71766aa6c42ebcebd5825619de7d6b",
+            6, "b3e1b52ad5904bc110bfee42ef7fe7e0b2ee874b9011b1f0a4091194c27f1927");
 
     private static final Map<String, String> EXPECTED_RESOURCE_SHA256 = Map.ofEntries(
             Map.entry("model-qualification/banks/admission-v1.json", "54cd902f28399c09d9d52560db82d7dab7f5c6db7f3ebb30c43244ef99923a76"),
@@ -54,7 +55,13 @@ class QualificationScenarioResourceIdentityTest {
             Map.entry("model-qualification/fixtures/basic-workspace-v5.json", "da1a0dcb09af384c40e44dabc5bb357f5ec47c2d56e0328ea7c17b736aea5e37"),
             Map.entry("model-qualification/fixtures/context-workspace-v5.json", "2c27b3584fd4275517415fbc33074bd5bb93d81d0e7821a03fc98cc6eefe5e1e"),
             Map.entry("model-qualification/fixtures/privacy-workspace-v5.json", "3b885ceb6197b80442bb3b7b6bacb19a1dcfd7dac32fe37ad5e9e8673f4e0672"),
-            Map.entry("model-qualification/fixtures/web-workspace-v5.json", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10"));
+            Map.entry("model-qualification/fixtures/web-workspace-v5.json", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10"),
+            Map.entry("model-qualification/banks/admission-v6.json", "64fb693757fc3d427f4aa9609ff0673eef4118d2c7645b01b8cefb37980de37c"),
+            Map.entry("model-qualification/banks/full-v6.json", "ad94fd242fbe38c9809a267c112964ae0c8cdd816dd225260aaf2faeae814c7a"),
+            Map.entry("model-qualification/fixtures/basic-workspace-v6.json", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473"),
+            Map.entry("model-qualification/fixtures/context-workspace-v6.json", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da"),
+            Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5"),
+            Map.entry("model-qualification/fixtures/web-workspace-v6.json", "0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337"));
 
     @Test
     void lfCrlfAndPublishedRepresentationsResolveToExactPinnedIdentities() throws Exception {
@@ -114,6 +121,19 @@ class QualificationScenarioResourceIdentityTest {
     }
 
     @Test
+    void v6CanonicalizesOnlyPhysicalLineEndingsToLfAndPreservesEscapedContent() throws Exception {
+        String path = "model-qualification/fixtures/web-workspace-v6.json";
+        byte[] expected = normalizeLf(resource(path));
+        byte[] crlf = withCrlf(expected);
+
+        byte[] canonical = QualificationScenarioBank.canonicalResourceBytes(path, crlf, 6);
+
+        assertArrayEquals(expected, canonical);
+        assertTrue(new String(canonical, StandardCharsets.UTF_8).contains("<!doctype html>\\n<html"));
+        assertEquals(Set.of(), crlfSeparatorOrdinals(canonical));
+    }
+
+    @Test
     void physicalLineEndingNormalizationPreservesEscapesAndUtf8Bytes() {
         String text = "{\r\n  \"escaped\": \"first\\r\\nsecond\",\r\n"
                 + "  \"unicode\": \"Mérida Ω\"\r\n}\r\n";
@@ -130,22 +150,23 @@ class QualificationScenarioResourceIdentityTest {
 
     @Test
     void malformedOrHistoricallyUnrecognizedBytesFailClosed() throws Exception {
-        String historical = "model-qualification/banks/admission-v5.json";
+        String v6 = "model-qualification/banks/admission-v6.json";
         assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.canonicalResourceBytes(
-                historical, new byte[]{(byte) 0xef, (byte) 0xbb, (byte) 0xbf, '{', '}'}, 5));
+                v6, new byte[]{(byte) 0xef, (byte) 0xbb, (byte) 0xbf, '{', '}'}, 6));
         assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.canonicalResourceBytes(
-                historical, new byte[]{'{', '\n', (byte) 0xc3, 0x28, '\n', '}'}, 5));
+                v6, new byte[]{'{', '\n', (byte) 0xc3, 0x28, '\n', '}'}, 6));
         assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.canonicalResourceBytes(
-                historical, "{\r  \"value\": 1\n}\n".getBytes(StandardCharsets.UTF_8), 5));
-        byte[] admission = normalizeLf(resource(historical));
-        byte[] contentMutation = new String(admission, StandardCharsets.UTF_8)
+                v6, "{\r  \"value\": 1\n}\n".getBytes(StandardCharsets.UTF_8), 6));
+        byte[] admissionV6 = normalizeLf(resource(v6));
+        byte[] contentMutation = new String(admissionV6, StandardCharsets.UTF_8)
                 .replaceFirst("What is 2 \\+ 2\\?", "What is 2 + 3?")
                 .getBytes(StandardCharsets.UTF_8);
         assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.canonicalResourceBytes(
-                historical, contentMutation, 5));
+                v6, contentMutation, 6));
         assertThrows(IllegalArgumentException.class, () -> QualificationScenarioBank.canonicalResourceBytes(
-                "model-qualification/banks/full-v5.json", admission, 5));
+                "model-qualification/banks/full-v6.json", admissionV6, 6));
 
+        String historical = "model-qualification/banks/admission-v5.json";
         String original = new String(normalizeLf(resource(historical)), StandardCharsets.UTF_8);
         byte[] semanticallyEquivalent = original.replaceFirst("\\\"schemaName\\\":", "\\\"schemaName\\\" :")
                 .getBytes(StandardCharsets.UTF_8);

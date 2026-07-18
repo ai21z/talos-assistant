@@ -20,7 +20,8 @@ class QualificationProviderEvidenceTest {
         Files.writeString(temp.resolve("prompt-debug-20260711.md"), "provider request\n",
                 StandardCharsets.UTF_8);
 
-        QualificationProviderEvidence.capture(temp, "ordinary command output");
+        QualificationProviderEvidence.capture(
+                temp, "ordinary command output", QualificationProtocol.VERSION);
 
         assertFalse(Files.exists(temp.resolve("prompt-debug.txt")));
         assertFalse(Files.exists(temp.resolve("llama.log")));
@@ -28,8 +29,10 @@ class QualificationProviderEvidenceTest {
 
     @Test
     void exactNoProviderOutputCreatesPairedBoundedNotApplicableEvidence() throws Exception {
-        QualificationProviderEvidence.capture(temp,
-                "i " + QualificationProviderEvidence.NO_PROVIDER_PROMPT + " More detail.");
+        QualificationProviderEvidence.capture(
+                temp,
+                "i " + QualificationProviderEvidence.NO_PROVIDER_PROMPT + " More detail.",
+                QualificationProtocol.VERSION);
 
         String prompt = Files.readString(temp.resolve("prompt-debug.txt"), StandardCharsets.UTF_8);
         String runtime = Files.readString(temp.resolve("llama.log"), StandardCharsets.UTF_8);
@@ -42,9 +45,27 @@ class QualificationProviderEvidenceTest {
     @Test
     void missingOrPartialNoProviderOutputFailsClosedWithoutFallbacks() {
         assertThrows(IllegalStateException.class,
-                () -> QualificationProviderEvidence.capture(temp,
-                        "No provider prompt may have been sent."));
+                () -> QualificationProviderEvidence.capture(
+                        temp,
+                        "No provider prompt may have been sent.",
+                        QualificationProtocol.VERSION));
         assertFalse(Files.exists(temp.resolve("prompt-debug.txt")));
         assertFalse(Files.exists(temp.resolve("llama.log")));
+    }
+
+    @Test
+    void secondMemberConflictNeverRollsBackThePublishedFirstMember() throws Exception {
+        Files.writeString(temp.resolve("llama.log"), "frozen conflict\n", StandardCharsets.UTF_8);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationProviderEvidence.capture(
+                        temp,
+                        QualificationProviderEvidence.NO_PROVIDER_PROMPT,
+                        QualificationProtocol.VERSION));
+
+        assertTrue(Files.readString(temp.resolve("prompt-debug.txt"), StandardCharsets.UTF_8)
+                .equals(QualificationProviderEvidence.promptNotApplicableText()));
+        assertTrue(Files.readString(temp.resolve("llama.log"), StandardCharsets.UTF_8)
+                .equals("frozen conflict\n"));
     }
 }

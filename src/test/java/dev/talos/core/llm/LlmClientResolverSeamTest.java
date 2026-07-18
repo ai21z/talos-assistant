@@ -7,6 +7,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
@@ -378,6 +379,25 @@ final class LlmClientResolverSeamTest {
         resolver.release();
     }
 
+    @Test
+    void nativeToolChunksCountAsGenerationProgressForTheWallClockBudget() {
+        NativeToolProgressResolver resolver = new NativeToolProgressResolver();
+        Config config = engineConfig();
+        LinkedHashMap<String, Object> limits = new LinkedHashMap<>();
+        limits.put("llm_idle_ms", 4_000L);
+        config.data.put("limits", limits);
+        LlmClient client = new LlmClient(config, resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("inspect with a native tool")),
+                1_000L,
+                List.of());
+
+        assertFalse(result.aborted(), result.text());
+        assertTrue(result.hasToolCalls(), "native proposal must survive beyond the initial wall-clock deadline");
+        assertEquals("talos.read_file", result.toolCalls().getFirst().name());
+    }
+
     private static final class BlockingNoChunkResolver implements LlmEngineResolver {
         private final CountDownLatch release = new CountDownLatch(1);
 
@@ -474,6 +494,51 @@ final class LlmClientResolverSeamTest {
             this.requests.add(request);
             chatCalls.incrementAndGet();
             return Stream.of(TokenChunk.of("reply"), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class NativeToolProgressResolver implements LlmEngineResolver {
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private int index;
+
+                @Override
+                public boolean hasNext() {
+                    return index < 2;
+                }
+
+                @Override
+                public TokenChunk next() {
+                    if (!hasNext()) throw new NoSuchElementException();
+                    try {
+                        Thread.sleep(index == 0 ? 250L : 1_200L);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new NoSuchElementException("interrupted");
+                    }
+                    if (index++ == 0) {
+                        return TokenChunk.ofToolCalls(List.of(new ChatMessage.NativeToolCall(
+                                "call-read",
+                                "talos.read_file",
+                                Map.of("path", "README.md"))));
+                    }
+                    return TokenChunk.eos("tool_calls");
+                }
+            };
+            return StreamSupport.stream(
+                    Spliterators.spliteratorUnknownSize(iterator, 0),
+                    false);
         }
 
         @Override
@@ -637,6 +702,14 @@ final class LlmClientResolverSeamTest {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public void close() {
             // no-op
         }
@@ -675,6 +748,14 @@ final class LlmClientResolverSeamTest {
                 }
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override
@@ -833,6 +914,14 @@ final class LlmClientResolverSeamTest {
                             "talos.write_file",
                             java.util.Map.of("path", "index.html", "content", "<h1>done</h1>")))),
                     TokenChunk.eos("stop"));
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override

@@ -115,7 +115,7 @@ final class MissingMutationRetry {
         Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
                 .noChangeAnswerIfCurrentWorkspacePasses(retryContract, loopResult, workspace, answer);
         if (conditionalNoChange.isPresent()) {
-            return new Result(conditionalNoChange.get(), 0, null);
+            return new Result(selectDeterministicAnswer(conditionalNoChange.get()), 0, null);
         }
         ActionObligation obligation = safePlan.actionObligation();
         if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {
@@ -154,6 +154,8 @@ final class MissingMutationRetry {
         messages.add(ChatMessage.user(retryInstruction));
         List<ChatMessage> retryMessages = compactMutationRetryMessages(
                 messages, safePlan, retryInstruction, retryToolSpecs, retryToolNames);
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint fallbackCheckpoint =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
 
         try {
             LlmClient.StreamResult retry = chat.chat(retryMessages, safePlan, retryToolSpecs);
@@ -161,14 +163,20 @@ final class MissingMutationRetry {
 
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
+                        retryText, retry.toolCalls(), retry.provenance(),
+                        retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
                 String summary = retryLoop.summary();
                 boolean retryIssuedMutatingTool = retryLoop.toolOutcomes().stream()
                         .anyMatch(ToolCallLoop.ToolOutcome::mutating);
                 if (hasDeniedMutation(retryLoop)) {
-                    mergedAnswer = MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
+                    String deniedAnswer = MutationFailureAnswerRenderer
+                            .summarizeDeniedMutationOutcomesIfNeeded(
                             mergedAnswer, safePlan, messages, retryLoop, 0);
+                    if (!Objects.equals(mergedAnswer, deniedAnswer)) {
+                        selectDeterministicAnswer(deniedAnswer);
+                    }
+                    mergedAnswer = deniedAnswer;
                 }
                 if (isStaticRepairWrongToolRetry(retryLoop)) {
                     List<String> targets = staticRepairWrongToolTargets(retryLoop);
@@ -181,8 +189,10 @@ final class MissingMutationRetry {
                                     + targetReason,
                             "STATIC_REPAIR_WRONG_TOOL");
                     return new Result(
-                            ResponseObligationVerifier.deterministicStaticRepairWrongToolAnswer(
-                                    targets, partialMutation),
+                            selectDeterministicAnswer(
+                                    ResponseObligationVerifier
+                                            .deterministicStaticRepairWrongToolAnswer(
+                                                    targets, partialMutation)),
                             0,
                             summary,
                             retryLoop,
@@ -220,7 +230,8 @@ final class MissingMutationRetry {
                                 "retry response issued invalid mutating tool arguments",
                                 "INVALID_MUTATION_AFTER_RETRY");
                         return new Result(
-                                mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                                fallbackAnswerIfBlank(
+                                        mergedAnswer, answer, fallbackCheckpoint),
                                 0,
                                 summary,
                                 retryLoop,
@@ -236,7 +247,9 @@ final class MissingMutationRetry {
                                     : " for " + String.join(", ", failedTargets)),
                             "CONDITIONAL_REVIEW_FAILED_MUTATION");
                     return new Result(
-                            ResponseObligationVerifier.deterministicFailedMutationAttemptAnswer(failedTargets),
+                            selectDeterministicAnswer(
+                                    ResponseObligationVerifier
+                                            .deterministicFailedMutationAttemptAnswer(failedTargets)),
                             0,
                             summary,
                             retryLoop,
@@ -261,16 +274,19 @@ final class MissingMutationRetry {
                                 failureReason);
                     }
                     return new Result(
-                            repairInspectionOnly
-                                    ? ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer()
-                                    : ResponseObligationVerifier.deterministicNoActionAnswer(obligation),
+                            selectDeterministicAnswer(
+                                    repairInspectionOnly
+                                            ? ResponseObligationVerifier
+                                                    .deterministicRepairInspectionOnlyAnswer()
+                                            : ResponseObligationVerifier
+                                                    .deterministicNoActionAnswer(obligation)),
                             0,
                             summary,
                             retryLoop,
                             true);
                 }
                 return new Result(
-                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        fallbackAnswerIfBlank(mergedAnswer, answer, fallbackCheckpoint),
                         retryLoop.mutatingToolSuccesses(),
                         summary,
                         retryLoop);
@@ -282,7 +298,9 @@ final class MissingMutationRetry {
                         obligation.name(),
                         "FAILED",
                         "retry response still had no " + requiredToolCallLabel(obligation, retryToolNames));
-                return new Result(deterministic, 0, null, null, true);
+                return new Result(
+                        selectDeterministicAnswer(deterministic),
+                        0, null, null, true);
             }
         } catch (EngineException.ContextBudgetExceeded budget) {
             String detail = ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget);
@@ -294,8 +312,10 @@ final class MissingMutationRetry {
                     detail,
                     "CONTEXT_BUDGET_RETRY_SKIPPED");
             return new Result(
-                    ResponseObligationVerifier.deterministicContextBudgetRetrySkippedAnswer(
-                            "missing-mutation retry", budget),
+                    selectDeterministicAnswer(
+                            ResponseObligationVerifier
+                                    .deterministicContextBudgetRetrySkippedAnswer(
+                                            "missing-mutation retry", budget)),
                     0,
                     null,
                     null,
@@ -308,11 +328,31 @@ final class MissingMutationRetry {
                 "FAILED",
                 "retry failed before " + requiredToolCallLabel(obligation, retryToolNames) + " executed");
         return new Result(
-                ResponseObligationVerifier.deterministicNoActionAnswer(obligation),
+                selectDeterministicAnswer(
+                        ResponseObligationVerifier.deterministicNoActionAnswer(obligation)),
                 0,
                 null,
                 null,
                 true);
+    }
+
+    private static String fallbackAnswerIfBlank(
+            String selected,
+            String fallback,
+            LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint) {
+        if (selected != null && !selected.isBlank()) return selected;
+        LocalTurnTraceCapture.restoreExactAnswerCandidate(
+                checkpoint,
+                fallback,
+                LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                        .SPECULATIVE_RETRY_EMPTY);
+        return fallback;
+    }
+
+    private static String selectDeterministicAnswer(String answer) {
+        String selected = Objects.toString(answer, "");
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected(selected);
+        return selected;
     }
 
     static List<ToolSpec> toolSpecs(Context ctx, List<String> allowed) {
@@ -488,6 +528,7 @@ final class MissingMutationRetry {
             ToolCallLoop.LoopResult continuationLoop = ctx.toolCallLoop().run(
                     continuationText,
                     continuation.toolCalls(),
+                    continuation.provenance(),
                     new ArrayList<>(continuationMessages),
                     workspace,
                     ctx);

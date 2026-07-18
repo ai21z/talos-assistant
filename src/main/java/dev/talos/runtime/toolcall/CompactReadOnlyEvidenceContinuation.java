@@ -47,8 +47,7 @@ final class CompactReadOnlyEvidenceContinuation {
                         "compact read-only evidence continuation returned empty text after " + retryName);
                 return false;
             }
-            state.currentText = stripped;
-            state.currentNativeCalls = List.of();
+            state.finishWithProviderAnswer(stripped, result.provenance());
             state.failureDecision = FailureDecision.continueLoop();
             state.clearPendingActionObligation();
             LocalTurnTraceCapture.warning(

@@ -70,6 +70,58 @@ public final class TurnAuditCapture {
         recordToolCall(name, primary, pathHints, success, reason);
     }
 
+    /** Append a tool-call summary while preserving the exact executed call in trace evidence. */
+    public static void recordToolCall(
+            ToolCall call,
+            String pathHint,
+            boolean success,
+            String reason) {
+        recordToolCall(call, pathHint, List.of(), success, reason);
+    }
+
+    /** Append a multi-path summary while preserving the exact executed call in trace evidence. */
+    public static void recordToolCall(
+            ToolCall call,
+            List<String> pathHints,
+            boolean success,
+            String reason) {
+        String primary = pathHints == null || pathHints.isEmpty() ? "" : pathHints.getFirst();
+        recordToolCall(call, primary, pathHints, success, reason);
+    }
+
+    private static void recordToolCall(
+            ToolCall call,
+            String pathHint,
+            List<String> pathHints,
+            boolean success,
+            String reason) {
+        String name = call == null ? "" : call.toolName();
+        recordToolCallSummary(name, pathHint, pathHints, success, reason);
+        String normalizedReason = reason == null ? "" : reason.strip();
+        if (success) {
+            LocalTurnTraceCapture.recordToolExecuted("", call, true, "", pathHints);
+        } else {
+            LocalTurnTraceCapture.recordToolCallBlocked("", call, normalizedReason);
+        }
+    }
+
+    /** Records a call that reached the tool registry, including executed failures. */
+    public static void recordExecutedToolCall(
+            ToolCall call,
+            List<String> pathHints,
+            boolean success,
+            String reason) {
+        String primary = pathHints == null || pathHints.isEmpty() ? "" : pathHints.getFirst();
+        recordToolCallSummary(
+                call == null ? "" : call.toolName(),
+                primary,
+                pathHints,
+                success,
+                reason);
+        LocalTurnTraceCapture.recordToolExecuted(
+                "", call, success, reason == null ? "" : reason.strip(), pathHints);
+    }
+
     private static void recordToolCall(
             String name,
             String pathHint,

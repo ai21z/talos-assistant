@@ -7,6 +7,7 @@ import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.policy.ProjectSummaryEvidencePolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.ToolCallParser;
@@ -62,25 +63,66 @@ final class ReadOnlyInspectionRetry {
         retryMessages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
         retryMessages.add(ChatMessage.user(retryPrompt(contract, userRequest, workspace)));
 
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
         try {
             LlmClient.StreamResult retry = chat.chat(retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
+                        retryText, retry.toolCalls(), retry.provenance(),
+                        retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
+                boolean emptyFallback = mergedAnswer == null || mergedAnswer.isBlank();
+                boolean equalFallback = !emptyFallback && mergedAnswer.equals(answer);
+                if (emptyFallback || equalFallback) {
+                    restoreOriginalCandidate(
+                            originalCandidate,
+                            answer,
+                            emptyFallback
+                                    ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
+                                    : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
+                }
                 return new Result(
-                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        emptyFallback ? answer : mergedAnswer,
                         retryLoop,
                         retryLoop.summary());
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new Result(ToolCallParser.stripToolCalls(retryText), null, null);
+                String stripped = ToolCallParser.stripToolCalls(retryText);
+                if (stripped.equals(answer)) {
+                    restoreOriginalCandidate(
+                            originalCandidate,
+                            answer,
+                            LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
+                } else {
+                    LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                            stripped,
+                            LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+                }
+                return new Result(stripped, null, null);
             }
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    retryText.isBlank()
+                            ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
+                            : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
         } catch (Exception e) {
+            restoreOriginalCandidate(
+                    originalCandidate,
+                    answer,
+                    LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_FAILED);
             LOG.warn("Read-only inspection retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return new Result(answer, null, null);
+    }
+
+    private static void restoreOriginalCandidate(
+            LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint,
+            String answer,
+            LocalTurnTraceCapture.AnswerCandidateRestorationReason reason) {
+        LocalTurnTraceCapture.restoreExactAnswerCandidate(checkpoint, answer, reason);
     }
 
     static String retryPrompt(

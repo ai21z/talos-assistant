@@ -1,9 +1,12 @@
 package dev.talos.runtime;
 
+import dev.talos.cli.modes.AskMode;
+import dev.talos.cli.modes.DevMode;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.retrieval.RetrievalTrace;
@@ -15,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -310,7 +314,9 @@ class TurnProcessorTest {
                     .findFirst()
                     .orElseThrow();
             assertEquals("REJECTED_UNKNOWN_NAMESPACE", aliasEvent.data().get("status"));
-            assertEquals("unknown_provider.write_file", aliasEvent.data().get("rawName"));
+            assertFalse(aliasEvent.data().containsKey("rawName"));
+            assertEquals("unknown_provider.write_file".length(),
+                    aliasEvent.data().get("rawNameChars"));
             assertEquals("talos.write_file", aliasEvent.data().get("canonicalTool"));
         } finally {
             LocalTurnTraceCapture.clear();
@@ -1422,11 +1428,29 @@ class TurnProcessorTest {
 
         assertNotNull(result.audit().localTrace());
         LocalTurnTrace trace = result.audit().localTrace();
-        assertEquals(2, trace.schemaVersion());
+        assertEquals(3, trace.schemaVersion());
         assertFalse(trace.traceId().isBlank());
         assertTrue(trace.events().stream().anyMatch(event -> "TRACE_STARTED".equals(event.type())));
-        assertTrue(trace.events().stream().anyMatch(event -> "MODEL_RESPONSE_RECEIVED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "ROUTED_ANSWER_CAPTURED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "OUTCOME_RENDERED".equals(event.type())));
+        assertEquals(List.of(
+                        "TERMINAL_ANSWER_SELECTED",
+                        "ROUTED_ANSWER_CAPTURED",
+                        "OUTCOME_RENDERED",
+                        "TRACE_COMPLETED"),
+                trace.events().stream()
+                        .map(TurnTraceEvent::type)
+                        .filter(type -> type.equals("TERMINAL_ANSWER_SELECTED")
+                                || type.equals("ROUTED_ANSWER_CAPTURED")
+                                || type.equals("OUTCOME_RENDERED")
+                                || type.equals("TRACE_COMPLETED"))
+                        .toList());
+        assertEquals("NONE", trace.events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow()
+                .data()
+                .get("origin"));
         assertFalse(trace.redaction().promptHash().isBlank());
         assertFalse(trace.redaction().assistantHash().isBlank());
 
@@ -1494,6 +1518,207 @@ class TurnProcessorTest {
         assertTrue(json.contains("\"contentHash\""), json);
         assertFalse(json.contains("SECRET=abc"), "write payload must be hashed, not stored raw");
         assertFalse(json.contains("<h1>ok</h1>"), "write payload must be hashed, not stored raw");
+    }
+
+    @Test
+    void runtimeContentRewriteKeepsOneExactToolCallLineage(@TempDir Path workspace)
+            throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        var processor = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "write styles.css";
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "styles.css",
+                "content", "body { color: red; }\n```\n## Summary\n- changed color\n"));
+
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-tool-transform",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-07-16T12:00:00Z",
+                "workspace-hash",
+                "agent",
+                "ollama",
+                "test-model",
+                request);
+
+        ToolResult result = processor.executeTool(session, call, ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        TurnAuditCapture.end();
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("body { color: red; }\n", Files.readString(workspace.resolve("styles.css")));
+        TurnTraceEvent parsed = trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .findFirst().orElseThrow();
+        List<TurnTraceEvent> transformations = trace.events().stream()
+                .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
+                .toList();
+        TurnTraceEvent sanitized = transformations.stream()
+                .filter(event -> "MARKDOWN_COMMENTARY_SANITIZATION".equals(
+                        event.data().get("reasonCode")))
+                .findFirst().orElseThrow();
+        TurnTraceEvent executed = trace.events().stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                .findFirst().orElseThrow();
+        String callId = (String) parsed.data().get("toolCallId");
+
+        assertEquals(callId, sanitized.data().get("toolCallId"));
+        assertEquals(callId, executed.data().get("toolCallId"));
+        assertNotEquals(parsed.data().get("argumentsHash"), sanitized.data().get("argumentsHash"));
+        TurnTraceEvent terminalIdentity = transformations.getLast();
+        assertEquals(terminalIdentity.data().get("toolNameHash"),
+                executed.data().get("toolNameHash"));
+        assertEquals(terminalIdentity.data().get("argumentsHash"),
+                executed.data().get("argumentsHash"));
+        assertEquals(1, approvals.get());
+    }
+
+    @Test
+    void publicAlreadyParsedEntryCannotExecuteWithoutParseEvidence(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var processor = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "bypass.txt",
+                "content", "must not be written"));
+
+        TurnUserRequestCapture.set("write bypass.txt");
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest("write bypass.txt"));
+        ToolResult result = processor.executeToolAfterParsed(session, call, ctx, null);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertFalse(Files.exists(workspace.resolve("bypass.txt")));
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void parsedExecutionPermitCannotAuthorizeADifferentToolCall(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var processor = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        ToolCall recorded = new ToolCall("talos.read_file", Map.of("path", "source.txt"));
+        ToolCall substituted = new ToolCall("talos.write_file", Map.of(
+                "path", "substituted.txt",
+                "content", "must not be written"));
+
+        TurnUserRequestCapture.set("write substituted.txt");
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest("write substituted.txt"));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-permit-substitution",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-07-16T12:00:00Z",
+                "workspace-hash",
+                "agent",
+                "ollama",
+                "test-model",
+                "write substituted.txt");
+        LocalTurnTraceCapture.ParsedToolCallPermit permit =
+                LocalTurnTraceCapture.beginParsedToolCallForExecution(
+                        "tool_loop", recorded, null, 0);
+
+        ToolResult result = processor.executeToolAfterParsed(session, substituted, ctx, permit);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertFalse(Files.exists(workspace.resolve("substituted.txt")));
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void outerTurnCaptureDoesNotRelabelDeterministicAnswerAsModelAuthored() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override public Optional<Result> handle(String raw, Path ws, Context ctx) {
+                ctx.llm().chatFull(List.of(ChatMessage.user(raw)));
+                LocalTurnTraceCapture.recordDeterministicAnswerSelected("Ready");
+                return Optional.of(new Result.Ok("Ready"));
+            }
+        });
+        try (LlmClient llm = LlmClient.scripted("provider intermediate")) {
+            Context context = Context.builder(new Config()).llm(llm).build();
+            TurnResult result = new TurnProcessor(modes).process(
+                    new Session(WS, new Config()), "review page", context);
+
+            List<String> origins = result.audit().localTrace().events().stream()
+                    .map(TurnTraceEvent::type)
+                    .filter(type -> type.equals("GENERATION_RESPONSE_CAPTURED")
+                            || type.equals("DETERMINISTIC_ANSWER_SELECTED")
+                            || type.equals("ROUTED_ANSWER_CAPTURED"))
+                    .toList();
+            assertEquals(List.of(
+                    "GENERATION_RESPONSE_CAPTURED",
+                    "DETERMINISTIC_ANSWER_SELECTED",
+                    "ROUTED_ANSWER_CAPTURED"), origins);
+            assertTrue(result.audit().localTrace().events().stream()
+                    .noneMatch(event -> "MODEL_RESPONSE_RECEIVED".equals(event.type())));
+        }
+    }
+
+    @Test
+    void askFastPathsSelectExactRuntimeAnswerBeforeOuterRouting() throws Exception {
+        try (LlmClient llm = LlmClient.scripted("must not be called")) {
+            ModeController modes = new ModeController().add(new AskMode());
+            assertTrue(modes.setActive("ask"));
+            TurnProcessor processor = new TurnProcessor(modes);
+            Session session = new Session(WS, new Config());
+            Context context = Context.builder(new Config()).llm(llm).build();
+
+            for (String request : List.of(
+                    "Respond with exactly: test output",
+                    "Print this without the think tags: <think>reasoning</think> output",
+                    "Run the command Get-ChildItem -Name to list workspace files. "
+                            + "Do not use slash commands.")) {
+                TurnResult result = processor.process(session, request, context);
+                LocalTurnTrace trace = result.audit().localTrace();
+                List<TurnTraceEvent> terminal = trace.events().stream()
+                        .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                        .toList();
+
+                assertEquals(1, terminal.size(), request);
+                assertEquals("RUNTIME_DETERMINISTIC",
+                        terminal.getFirst().data().get("origin"), request);
+                assertTrue(trace.events().stream().noneMatch(event ->
+                        "GENERATION_STARTED".equals(event.type())
+                                || "GENERATION_RESPONSE_CAPTURED".equals(event.type())), request);
+            }
+        }
+    }
+
+    @Test
+    void structuralModeSelectsToolOriginForReadsAndRuntimeOriginForRefusals(
+            @TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "release notes\n");
+        ModeController modes = new ModeController().add(new DevMode());
+        assertTrue(modes.setActive("dev"));
+        TurnProcessor processor = new TurnProcessor(modes);
+        Session session = new Session(workspace, new Config());
+        Context context = contextForWorkspace(workspace);
+
+        for (String request : List.of("ls", "show notes.md")) {
+            TurnResult result = processor.process(session, request, context);
+            TurnTraceEvent terminal = result.audit().localTrace().events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("TOOL_DETERMINISTIC", terminal.data().get("origin"), request);
+        }
+
+        TurnResult refusal = processor.process(session, "show missing.md", context);
+        TurnTraceEvent refusalTerminal = refusal.audit().localTrace().events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("RUNTIME_DETERMINISTIC", refusalTerminal.data().get("origin"));
     }
 
     @Test

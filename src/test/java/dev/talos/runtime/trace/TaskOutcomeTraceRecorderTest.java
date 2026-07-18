@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,7 +69,7 @@ class TaskOutcomeTraceRecorderTest {
                         && "Command failed.".equals(warning.message())));
         assertTrue(trace.events().stream().anyMatch(event ->
                 "VERIFICATION_COMPLETED".equals(event.type())));
-        assertTrue(trace.events().stream().anyMatch(event ->
+        assertFalse(trace.events().stream().anyMatch(event ->
                 "OUTCOME_RENDERED".equals(event.type())));
     }
 

@@ -9,6 +9,7 @@ import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.Test;
@@ -409,6 +410,14 @@ class ToolCallRepromptStageToolSurfaceTest {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public void close() {
             // no-op
         }
@@ -434,6 +443,14 @@ class ToolCallRepromptStageToolSurfaceTest {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public void close() {
             // no-op
         }
@@ -454,6 +471,14 @@ class ToolCallRepromptStageToolSurfaceTest {
                 throw new EngineException.Transient("temporary backend failure", 503);
             }
             return Stream.of(TokenChunk.eos());
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override

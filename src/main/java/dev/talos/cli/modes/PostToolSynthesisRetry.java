@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -86,6 +87,8 @@ final class PostToolSynthesisRetry {
 
         messages.add(ChatMessage.assistant(answer));
         messages.add(ChatMessage.user(retryPrompt));
+        LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint =
+                LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
 
         try {
             LlmClient.StreamResult retry = chatFull.chat(messages);
@@ -94,8 +97,24 @@ final class PostToolSynthesisRetry {
                 LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
                 return retryText;
             }
-            LOG.warn("Synthesis retry still deflected. Returning original answer.");
+            boolean empty = retryText == null || retryText.isBlank();
+            LocalTurnTraceCapture.restoreExactAnswerCandidate(
+                    checkpoint,
+                    answer,
+                    empty
+                            ? LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                                    .SPECULATIVE_RETRY_EMPTY
+                            : LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                                    .SPECULATIVE_RETRY_REJECTED);
+            LOG.warn(empty
+                    ? "Synthesis retry was empty. Returning original answer."
+                    : "Synthesis retry still deflected. Returning original answer.");
         } catch (Exception e) {
+            LocalTurnTraceCapture.restoreExactAnswerCandidate(
+                    checkpoint,
+                    answer,
+                    LocalTurnTraceCapture.AnswerCandidateRestorationReason
+                            .SPECULATIVE_RETRY_FAILED);
             LOG.warn("Synthesis retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return answer;

@@ -18,9 +18,21 @@ final class QualificationCampaignContinuationPolicy {
     }
 
     static Decision evaluate(QualificationRecords.RunResult result) {
+        return evaluate(result, false);
+    }
+
+    static Decision evaluate(
+            QualificationRecords.RunResult result,
+            boolean modelAnswerEvidenceMatched) {
         Objects.requireNonNull(result, "result");
-        return evaluate(result.valid(), result.evidenceComplete(), result.trustGates(),
+        Decision base = evaluate(result.valid(), result.evidenceComplete(), result.trustGates(),
                 result.failureClass());
+        List<String> reasons = new ArrayList<>(base.reasons());
+        QualificationCausalOwnership.evaluate(result, modelAnswerEvidenceMatched)
+                .reasonCodes()
+                .forEach(reason -> reasons.add("causal-evidence:" + reason));
+        List<String> distinct = reasons.stream().distinct().toList();
+        return new Decision(!distinct.isEmpty(), distinct);
     }
 
     static Decision evaluate(

@@ -20,7 +20,7 @@ class LocalTurnTraceOutcomeRecorderTest {
     }
 
     @Test
-    void recordsOutcomeSummaryAndEvent() {
+    void outcomeOnlyCompletionRecordsEvaluationButNotRenderedOutcome() {
         beginTrace();
 
         LocalTurnTraceCapture.recordOutcome(
@@ -39,17 +39,20 @@ class LocalTurnTraceOutcomeRecorderTest {
         assertEquals("SUCCEEDED", trace.outcome().mutationStatus());
         assertEquals("  TASK_COMPLETE  ", trace.outcome().classification());
         TurnTraceEvent event = trace.events().stream()
-                .filter(candidate -> "OUTCOME_RENDERED".equals(candidate.type()))
+                .filter(candidate -> "OUTCOME_EVALUATED".equals(candidate.type()))
                 .findFirst()
                 .orElseThrow();
         assertEquals(Map.of(
                 "status", "COMPLETE",
                 "classification", "TASK_COMPLETE"), event.data());
+        assertFalse(trace.events().stream()
+                .anyMatch(candidate -> "OUTCOME_RENDERED".equals(candidate.type())));
     }
 
     @Test
     void outcomeIfAbsentDoesNotOverrideRecordedOutcome() {
         beginTrace();
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured("answer");
 
         LocalTurnTraceCapture.recordOutcome("COMPLETE", "PASSED", "NONE", "NOT_REQUESTED", "READ_ONLY_ANSWERED");
         LocalTurnTraceCapture.recordOutcomeIfAbsent("FAILED", "FAILED", "DENIED", "DENIED", "BLOCKED_BY_POLICY");
@@ -66,6 +69,9 @@ class LocalTurnTraceOutcomeRecorderTest {
                 .filter(candidate -> "OUTCOME_RENDERED".equals(candidate.type()))
                 .toList();
         assertEquals(1, outcomeEvents.size());
+        assertEquals(0, trace.events().stream()
+                .filter(candidate -> "OUTCOME_EVALUATED".equals(candidate.type()))
+                .count());
         assertEquals(Map.of(
                 "status", "COMPLETE",
                 "classification", "READ_ONLY_ANSWERED"), outcomeEvents.getFirst().data());
@@ -107,6 +113,7 @@ class LocalTurnTraceOutcomeRecorderTest {
         assertTrue(recorderSource.contains("outcome(status, verificationStatus, approvalStatus, mutationStatus, classification)"),
                 recorderSource);
         assertTrue(recorderSource.contains("OUTCOME_RENDERED"), recorderSource);
+        assertTrue(recorderSource.contains("OUTCOME_EVALUATED"), recorderSource);
         assertTrue(recorderSource.contains("status"), recorderSource);
         assertTrue(recorderSource.contains("classification"), recorderSource);
     }

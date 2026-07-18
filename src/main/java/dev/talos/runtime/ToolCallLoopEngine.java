@@ -4,8 +4,10 @@ import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolProgressSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +41,7 @@ final class ToolCallLoopEngine {
     ToolCallLoop.LoopResult run(
             String initialAnswer,
             List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt,
             List<ChatMessage> messages,
             Path workspace,
             RuntimeTurnContext ctx
@@ -60,6 +63,7 @@ final class ToolCallLoopEngine {
         LoopState state = new LoopState(
                 initialAnswer,
                 hasNative ? new ArrayList<>(nativeToolCalls) : List.of(),
+                responseReceipt,
                 messages,
                 workspace,
                 ctx,
@@ -90,7 +94,8 @@ final class ToolCallLoopEngine {
                         state.totalToolsInvoked)) {
                     LOG.warn("Suppressing unfinished tool-call continuation after {} executed tool(s)",
                             state.totalToolsInvoked);
-                    state.currentText = ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback();
+                    state.finishWithAnswer(
+                            ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback());
                 }
                 break;
             }
@@ -113,7 +118,9 @@ final class ToolCallLoopEngine {
         boolean hitIterLimit = repromptStage.hitIterationLimit(state);
         if (hitIterLimit) {
             LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
-            state.currentText = ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText);
+            state.transformAnswer(
+                    ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText),
+                    LocalTurnTraceCapture.AnswerTransformationReason.TOOL_LOOP_ITERATION_LIMIT);
         }
 
         String finalAnswer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
@@ -121,6 +128,17 @@ final class ToolCallLoopEngine {
                 state.totalToolsInvoked,
                 state.contentWithheldFromModelContext,
                 state.userVisiblePrivacyNotices);
+        if (ToolLoopFinalAnswerFinalizer.shouldSuppressUnfinishedToolContinuation(
+                state.currentText,
+                state.totalToolsInvoked)
+                && ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback()
+                        .equals(finalAnswer)) {
+            state.finishWithAnswer(finalAnswer);
+        } else {
+            state.transformAnswer(
+                    finalAnswer,
+                    LocalTurnTraceCapture.AnswerTransformationReason.TOOL_LOOP_FINALIZATION);
+        }
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
                 state.iterations, state.totalToolsInvoked, state.failedCalls);

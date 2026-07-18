@@ -7,16 +7,23 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,6 +35,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InspectCompletenessRetryTest {
+
+    @TempDir
+    Path lineageWorkspace;
+
+    @AfterEach
+    void clearTrace() {
+        LocalTurnTraceCapture.clear();
+    }
 
     @Test
     void missingReadsIncludesLinkedScriptButSkipsProtectedAndExternalScripts(@TempDir Path workspace)
@@ -61,6 +76,7 @@ class InspectCompletenessRetryTest {
     @Test
     void retryMergesOriginalAndRetryReadEvidenceWithoutDuplicatingOriginalSummary(@TempDir Path workspace)
             throws Exception {
+        beginTrace("inspect-retry-receipt");
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
                 <html><body><script src="script.js"></script></body></html>
@@ -86,10 +102,8 @@ class InspectCompletenessRetryTest {
                 ctx,
                 sentMessages -> {
                     retryMessages.set(List.copyOf(sentMessages));
-                    return new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
-                            "call_1",
-                            "talos.read_file",
-                            Map.of("path", "script.js"))));
+                    return providerResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_1", "talos.read_file", Map.of("path", "script.js"))));
                 });
 
         assertEquals("Script evidence answer.", result.answer());
@@ -105,6 +119,75 @@ class InspectCompletenessRetryTest {
         String prompt = retryMessages.get().get(3).content();
         assertTrue(prompt.contains("You started diagnosing the workspace"), prompt);
         assertTrue(prompt.contains("Read these files now before answering: script.js"), prompt);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        var parsed = trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .filter(event -> "talos.read_file".equals(event.toolName()))
+                .filter(event -> event.data().containsKey("providerGenerationId"))
+                .findFirst().orElseThrow();
+        var completed = trace.events().stream()
+                .filter(event -> "GENERATION_COMPLETED".equals(event.type()))
+                .filter(event -> event.data().get("generationId").equals(
+                        parsed.data().get("providerGenerationId")))
+                .findFirst().orElseThrow();
+        assertEquals(completed.data().get("selectedAttemptId"),
+                parsed.data().get("providerAttemptId"));
+        assertEquals(1, parsed.data().get("providerProposalOrdinal"));
+    }
+
+    @ParameterizedTest(name = "{0} retry restores original inspect answer owner")
+    @EnumSource(FallbackKind.class)
+    void fallbackRetryRestoresOriginalInspectAnswerOwner(FallbackKind fallbackKind) throws Exception {
+        beginTrace("inspect-completeness-" + fallbackKind.name().toLowerCase());
+        InspectLineageFixture fixture = inspectLineageFixture(lineageWorkspace);
+        LlmClient.StreamResult originalProviderResult = providerResult(fixture.answer(), List.of());
+
+        InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
+                fixture.answer(),
+                messages(fixture.request()),
+                plan(fixture.request()),
+                fixture.originalLoop(),
+                lineageWorkspace,
+                context(lineageWorkspace, "unused scripted answer"),
+                ignored -> fallbackProviderResult(fallbackKind, fixture.answer()));
+
+        assertEquals(fixture.answer(), result.answer(),
+                "inspect fallback must preserve the original answer bytes");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertRestoredProviderOwner(
+                trace,
+                originalProviderResult.provenance(),
+                fallbackKind.restorationReason());
+    }
+
+    @Test
+    void acceptedDifferentInspectProviderRetryRetainsRetryOwnerWithoutRestoration() throws Exception {
+        beginTrace("inspect-completeness-accepted");
+        InspectLineageFixture fixture = inspectLineageFixture(lineageWorkspace);
+        providerResult(fixture.answer(), List.of());
+        AtomicReference<ProviderResponseCapture.Receipt> retryReceipt = new AtomicReference<>();
+        String accepted = "Grounded answer from the additional file evidence.";
+
+        InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
+                fixture.answer(),
+                messages(fixture.request()),
+                plan(fixture.request()),
+                fixture.originalLoop(),
+                lineageWorkspace,
+                context(lineageWorkspace, "unused scripted answer"),
+                ignored -> {
+                    LlmClient.StreamResult retry = providerResult(accepted, List.of());
+                    retryReceipt.set(retry.provenance());
+                    return retry;
+                });
+
+        assertEquals(accepted, result.answer(), "accepted retry bytes must remain unchanged");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertTrue(events(trace, "ANSWER_CANDIDATE_RESTORED").isEmpty(),
+                "accepted retry must not restore the original candidate");
+        assertTerminalProviderOwner(trace, retryReceipt.get());
     }
 
     @Test
@@ -285,5 +368,130 @@ class InspectCompletenessRetryTest {
             index += needle.length();
         }
         return count;
+    }
+
+    private static LlmClient.StreamResult providerResult(
+            String text,
+            List<ChatMessage.NativeToolCall> calls) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
+                text,
+                calls,
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false,
+                false,
+                false));
+        generation.complete(receipt);
+        return new LlmClient.StreamResult(
+                text, calls, "", "", ProviderResponseCapture.AbortOrigin.NONE,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false, false, receipt);
+    }
+
+    private static void beginTrace(String id) {
+        LocalTurnTraceCapture.begin(
+                id, "session", 1, "2026-07-16T00:00:00Z", "workspace",
+                "auto", "test", "model", "retry receipt");
+    }
+
+    private enum FallbackKind {
+        BLANK("SPECULATIVE_RETRY_EMPTY"),
+        EQUAL("SPECULATIVE_RETRY_REJECTED"),
+        EXCEPTION("SPECULATIVE_RETRY_FAILED");
+
+        private final String restorationReason;
+
+        FallbackKind(String restorationReason) {
+            this.restorationReason = restorationReason;
+        }
+
+        String restorationReason() {
+            return restorationReason;
+        }
+    }
+
+    private record InspectLineageFixture(
+            String request,
+            String answer,
+            ToolCallLoop.LoopResult originalLoop) {}
+
+    private static InspectLineageFixture inspectLineageFixture(Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"),
+                "<!DOCTYPE html><html><body><script src=\"script.js\"></script></body></html>");
+        Files.writeString(workspace.resolve("script.js"), "console.log('evidence');\n");
+        String request = "Read the main files and verify the web page.";
+        String answer = "HTML-only answer.";
+        return new InspectLineageFixture(
+                request,
+                answer,
+                loopResult(
+                        answer,
+                        1,
+                        1,
+                        List.of("talos.read_file"),
+                        List.of("index.html"),
+                        List.of(outcome("talos.read_file", "index.html"))));
+    }
+
+    private static LlmClient.StreamResult fallbackProviderResult(
+            FallbackKind fallbackKind,
+            String original) {
+        return switch (fallbackKind) {
+            case BLANK -> providerResult("", List.of());
+            case EQUAL -> providerResult(original, List.of());
+            case EXCEPTION -> {
+                failProviderGeneration();
+                throw new IllegalStateException("injected inspect-completeness retry failure");
+            }
+        };
+    }
+
+    private static void failProviderGeneration() {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        generation.fail(ProviderResponseCapture.Failure.PROVIDER_EXCEPTION);
+    }
+
+    private static void assertRestoredProviderOwner(
+            LocalTurnTrace trace,
+            ProviderResponseCapture.Receipt originalReceipt,
+            String expectedReason) {
+        List<TurnTraceEvent> restorations = events(trace, "ANSWER_CANDIDATE_RESTORED");
+        assertEquals(1, restorations.size(), "fallback must emit exactly one closed restoration");
+        TurnTraceEvent restoration = restorations.getFirst();
+        assertEquals("MODEL_PROVIDER", restoration.data().get("origin"));
+        assertEquals(originalReceipt.generationId(), restoration.data().get("sourceGenerationId"));
+        assertEquals(originalReceipt.attemptId(), restoration.data().get("sourceAttemptId"));
+        assertEquals(expectedReason, restoration.data().get("reasonCode"));
+        assertTrue(events(trace, "ANSWER_TRANSFORMED").isEmpty(),
+                "exact original fallback bytes require no transform");
+        assertTerminalProviderOwner(trace, originalReceipt);
+    }
+
+    private static void assertTerminalProviderOwner(
+            LocalTurnTrace trace,
+            ProviderResponseCapture.Receipt receipt) {
+        TurnTraceEvent terminal = events(trace, "TERMINAL_ANSWER_SELECTED").getFirst();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+        assertEquals(receipt.generationId(), terminal.data().get("sourceGenerationId"));
+        assertEquals(receipt.attemptId(), terminal.data().get("sourceAttemptId"));
+    }
+
+    private static List<TurnTraceEvent> events(LocalTurnTrace trace, String type) {
+        return trace.events().stream()
+                .filter(event -> type.equals(event.type()))
+                .toList();
     }
 }

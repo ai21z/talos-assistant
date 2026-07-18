@@ -9,6 +9,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.EmbeddingResult;
 import dev.talos.spi.types.Health;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.TokenChunk;
 
@@ -85,15 +86,37 @@ final class LlamaCppEngine implements ModelEngine {
     }
 
     @Override
+    public String chat(ChatRequest req, ProviderTransportHandoff handoff) throws Exception {
+        prepareCapabilities();
+        return chatClient.chat(req, requestLayout(), handoff);
+    }
+
+    @Override
     public Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
         prepareCapabilities();
         return chatClient.chatStream(req, requestLayout());
     }
 
     @Override
+    public Stream<TokenChunk> chatStream(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
+        prepareCapabilities();
+        return chatClient.chatStream(req, requestLayout(), handoff);
+    }
+
+    @Override
     public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest req) throws Exception {
         prepareCapabilities();
         return chatClient.chatStreamNonStreaming(req, requestLayout());
+    }
+
+    @Override
+    public Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest req,
+            ProviderTransportHandoff handoff) throws Exception {
+        prepareCapabilities();
+        return chatClient.chatStreamNonStreaming(req, requestLayout(), handoff);
     }
 
     @Override

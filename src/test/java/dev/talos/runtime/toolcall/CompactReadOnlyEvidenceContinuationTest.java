@@ -5,9 +5,13 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -19,11 +23,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CompactReadOnlyEvidenceContinuationTest {
 
+    @AfterEach
+    void clearTrace() {
+        LocalTurnTraceCapture.clear();
+    }
+
     @Test
     void ownerBuildsCompactReadOnlyEvidenceAnswerWithoutConversationHistory() {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 List.of(new LlmClient.StreamResult(
-                        "Suggestion: say the README validates the workflow.",
+                        "  Suggestion: say the README validates the workflow.  ",
                         List.of())),
                 2048);
         var ctx = Context.builder(new Config())
@@ -58,10 +67,13 @@ class CompactReadOnlyEvidenceContinuationTest {
                 new ToolCall("talos.read_file", java.util.Map.of("path", "README.md")),
                 "README.md",
                 ToolResult.ok("1 | # Fixture\n2 | README evidence belongs in the compact answer."));
+        beginTrace();
 
         boolean answered = CompactReadOnlyEvidenceContinuation.tryAnswer(
                 state,
                 "tool-call loop continuation");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(state.currentText);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
         assertTrue(answered);
         assertEquals("Suggestion: say the README validates the workflow.", state.currentText);
@@ -78,6 +90,17 @@ class CompactReadOnlyEvidenceContinuationTest {
         assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
         assertFalse(compactPrompt.contains("Earlier README conversation"), compactPrompt);
         assertFalse(compactPrompt.contains("Historical proposal"), compactPrompt);
+        TurnTraceEvent terminal = trace.events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+        assertTrue(terminal.data().containsKey("sourceGenerationId"));
+        assertTrue(terminal.data().containsKey("sourceAttemptId"));
+        assertTrue(trace.events().stream().anyMatch(event ->
+                "ANSWER_TRANSFORMED".equals(event.type())
+                        && "PROVIDER_RESPONSE_NORMALIZATION".equals(
+                                event.data().get("reasonCode"))));
     }
 
     @Test
@@ -91,5 +114,18 @@ class CompactReadOnlyEvidenceContinuationTest {
         assertTrue(handler.contains("CompactReadOnlyEvidenceContinuation.tryAnswer"), handler);
         assertFalse(source.contains("private static boolean tryCompactReadOnlyEvidenceContinuation"), source);
         assertFalse(source.contains("private static List<ChatMessage> readOnlyEvidenceAnswerMessages"), source);
+    }
+
+    private static void beginTrace() {
+        LocalTurnTraceCapture.begin(
+                "trace-compact-read-only",
+                "session-compact-read-only",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "review README.md");
     }
 }

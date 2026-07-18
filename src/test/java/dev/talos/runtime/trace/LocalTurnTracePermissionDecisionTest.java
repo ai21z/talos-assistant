@@ -65,14 +65,15 @@ class LocalTurnTracePermissionDecisionTest {
 
         String capture = Files.readString(capturePath);
         String factory = Files.readString(factoryPath);
-        assertTrue(capture.contains("PermissionTraceEventFactory."), capture);
-        assertFalse(capture.contains("\"PERMISSION_DECISION\""), capture);
-        assertFalse(capture.contains("data.put(\"action\""), capture);
-        assertFalse(capture.contains("data.put(\"reasonCode\""), capture);
-        assertFalse(capture.contains("data.put(\"rememberEligible\""), capture);
-        assertFalse(capture.contains("data.put(\"protectedPath\""), capture);
-        assertFalse(capture.contains("data.put(\"protectedKind\""), capture);
-        assertFalse(capture.contains("TraceRedactor.pathHint(relativePath)"), capture);
+        String permissionMethod = methodBody(capture, "recordPermissionDecision");
+        assertTrue(permissionMethod.contains("PermissionTraceEventFactory."), permissionMethod);
+        assertFalse(permissionMethod.contains("\"PERMISSION_DECISION\""), permissionMethod);
+        assertFalse(permissionMethod.contains("data.put(\"action\""), permissionMethod);
+        assertFalse(permissionMethod.contains("data.put(\"reasonCode\""), permissionMethod);
+        assertFalse(permissionMethod.contains("data.put(\"rememberEligible\""), permissionMethod);
+        assertFalse(permissionMethod.contains("data.put(\"protectedPath\""), permissionMethod);
+        assertFalse(permissionMethod.contains("data.put(\"protectedKind\""), permissionMethod);
+        assertFalse(permissionMethod.contains("TraceRedactor.pathHint(relativePath)"), permissionMethod);
         assertTrue(factory.contains("PERMISSION_DECISION"), factory);
         assertTrue(factory.contains("data.put(\"action\""), factory);
         assertTrue(factory.contains("data.put(\"reasonCode\""), factory);
@@ -80,6 +81,14 @@ class LocalTurnTracePermissionDecisionTest {
         assertTrue(factory.contains("data.put(\"protectedPath\""), factory);
         assertTrue(factory.contains("data.put(\"protectedKind\""), factory);
         assertTrue(factory.contains("TraceRedactor.pathHint(relativePath)"), factory);
+    }
+
+    private static String methodBody(String source, String methodName) {
+        String marker = "public static void " + methodName + "(";
+        int start = source.indexOf(marker);
+        assertTrue(start >= 0, "missing source method " + methodName);
+        int end = source.indexOf("\n    public static void ", start + marker.length());
+        return end < 0 ? source.substring(start) : source.substring(start, end);
     }
 
     private static void beginTrace() {

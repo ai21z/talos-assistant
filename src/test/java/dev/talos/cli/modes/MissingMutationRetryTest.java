@@ -7,16 +7,28 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolError;
+import dev.talos.tools.TalosTool;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolContext;
+import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.ToolResult;
 import dev.talos.tools.impl.FileWriteTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +42,56 @@ class MissingMutationRetryTest {
 
     @TempDir
     Path workspace;
+
+    @AfterEach
+    void clearTrace() {
+        LocalTurnTraceCapture.clear();
+    }
+
+    @Test
+    void missingMutationRetryPreservesProviderReceiptIntoToolParsing() {
+        LocalTurnTraceCapture.begin(
+                "missing-mutation-retry-receipt", "session", 1,
+                "2026-07-16T00:00:00Z", "workspace", "auto", "test", "model",
+                "retry receipt");
+        String request = "Create notes.md with a single line of text.";
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+        CurrentTurnPlan safePlan = CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+        var invalid = new ToolCallLoop.ToolOutcome(
+                "talos.write_file", "notes.md", false, true, false, "",
+                "Invalid parameters.", null, ToolError.INVALID_PARAMS);
+        var loopResult = new ToolCallLoop.LoopResult(
+                "", 1, 1, List.of("talos.write_file"), messages, 1, 0, false, 0,
+                List.of(), 0, 0, 0, 0, List.of(invalid));
+
+        MissingMutationRetry.retryIfNeeded(
+                "I tried to create the file.", messages, safePlan, loopResult, workspace,
+                testContext(),
+                (retryMessages, plan, specs) -> providerNativeToolResult(
+                        new ChatMessage.NativeToolCall(
+                                "call_write_notes",
+                                "talos.write_file",
+                                Map.of("path", "notes.md", "content", "hello\n"))));
+
+        var trace = LocalTurnTraceCapture.complete();
+        var parsed = trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .filter(event -> event.data().containsKey("providerGenerationId"))
+                .findFirst().orElseThrow();
+        var completed = trace.events().stream()
+                .filter(event -> "GENERATION_COMPLETED".equals(event.type()))
+                .filter(event -> event.data().get("generationId").equals(
+                        parsed.data().get("providerGenerationId")))
+                .findFirst().orElseThrow();
+        assertEquals(completed.data().get("selectedAttemptId"),
+                parsed.data().get("providerAttemptId"));
+        assertEquals(1, parsed.data().get("providerProposalOrdinal"));
+    }
 
     @Test
     void invalidParamsMutatingFailureGetsOneCorrectedRetryWithErrorEchoed() {
@@ -98,9 +160,218 @@ class MissingMutationRetryTest {
         assertEquals("Approval was denied.", result.answer());
     }
 
+    @Test
+    void runtimeReplacementCannotInheritRetryProviderOwnerFromIdenticalBytes() {
+        beginTrace("missing-mutation-provider-collision");
+        String request = "Create notes.md with a single line of text.";
+        String original = "I will create notes.md.";
+        String deterministic = ResponseObligationVerifier.deterministicNoActionAnswer();
+        providerTextResult(original);
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+        CurrentTurnPlan safePlan = mutationPlan(request);
+
+        MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
+                original,
+                messages,
+                safePlan,
+                retryableMutationLoop(messages),
+                workspace,
+                testContext(),
+                (retryMessages, plan, specs) -> providerTextResult(deterministic));
+
+        assertEquals(deterministic, result.answer(),
+                "runtime replacement must preserve its existing user-visible bytes");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertRuntimeTerminalOwner(trace);
+    }
+
+    @Test
+    void runtimeReplacementCannotInheritPriorToolOwnerFromIdenticalBytes() {
+        beginTrace("missing-mutation-tool-collision");
+        String request = "Create notes.md with a single line of text.";
+        String deterministic = ResponseObligationVerifier.deterministicNoActionAnswer();
+        LocalTurnTraceCapture.recordToolAnswerSelected(deterministic);
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(request)));
+        CurrentTurnPlan safePlan = mutationPlan(request);
+
+        MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
+                deterministic,
+                messages,
+                safePlan,
+                retryableMutationLoop(messages),
+                workspace,
+                testContext(),
+                (retryMessages, plan, specs) -> {
+                    throw new IllegalStateException("injected missing-mutation retry failure");
+                });
+
+        assertEquals(deterministic, result.answer(),
+                "runtime replacement must preserve its existing user-visible bytes");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertRuntimeTerminalOwner(trace);
+    }
+
+    @Test
+    void blankSuccessfulMutationSummaryRestoresExactOriginalProviderCandidate()
+            throws Exception {
+        beginTrace("missing-mutation-blank-success-restoration");
+        String request = "Create notes.md with a single line of text.";
+        String original = "I will create notes.md.";
+        LlmClient.StreamResult originalResult = providerTextResult(original);
+        ProviderResponseCapture.Receipt originalReceipt = originalResult.provenance();
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"), ChatMessage.user(request)));
+        CurrentTurnPlan safePlan = mutationPlan(request);
+
+        FileWriteTool delegate = new FileWriteTool();
+        TalosTool blankOutputWrite = new TalosTool() {
+            @Override
+            public String name() {
+                return delegate.name();
+            }
+
+            @Override
+            public String description() {
+                return delegate.description();
+            }
+
+            @Override
+            public ToolDescriptor descriptor() {
+                return delegate.descriptor();
+            }
+
+            @Override
+            public ToolResult execute(ToolCall call, ToolContext context) {
+                ToolResult result = delegate.execute(call, context);
+                return result.success()
+                        ? new ToolResult(
+                                true, "", null, result.verification(),
+                                result.contentMetadata())
+                        : result;
+            }
+        };
+
+        MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
+                original,
+                messages,
+                safePlan,
+                retryableMutationLoop(messages),
+                workspace,
+                testContext(blankOutputWrite),
+                (retryMessages, plan, specs) -> providerNativeToolResult(
+                        new ChatMessage.NativeToolCall(
+                                "call_write_notes",
+                                "talos.write_file",
+                                Map.of("path", "notes.md", "content", "hello\n"))));
+
+        assertEquals(original, result.answer());
+        assertEquals(1, result.mutationsInRetry());
+        assertEquals("hello\n", Files.readString(workspace.resolve("notes.md")));
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        List<TurnTraceEvent> events = trace.events();
+        List<TurnTraceEvent> blankToolCandidates = events.stream()
+                .filter(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type()))
+                .filter(event -> "TOOL_DETERMINISTIC".equals(event.data().get("origin")))
+                .filter(event -> Integer.valueOf(0).equals(event.data().get("answerChars")))
+                .toList();
+        assertEquals(1, blankToolCandidates.size());
+        TurnTraceEvent restoration = events.stream()
+                .filter(event -> "ANSWER_CANDIDATE_RESTORED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("MODEL_PROVIDER", restoration.data().get("origin"));
+        assertEquals(originalReceipt.generationId(),
+                restoration.data().get("sourceGenerationId"));
+        assertEquals(originalReceipt.attemptId(),
+                restoration.data().get("sourceAttemptId"));
+        assertEquals("SPECULATIVE_RETRY_EMPTY", restoration.data().get("reasonCode"));
+        assertTrue(events.stream().noneMatch(event ->
+                "ANSWER_TRANSFORMED".equals(event.type())));
+        TurnTraceEvent terminal = events.stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+        assertEquals(originalReceipt.generationId(),
+                terminal.data().get("sourceGenerationId"));
+        assertEquals(originalReceipt.attemptId(),
+                terminal.data().get("sourceAttemptId"));
+        assertTrue(events.indexOf(blankToolCandidates.getFirst())
+                < events.indexOf(restoration));
+        assertTrue(events.indexOf(restoration) < events.indexOf(terminal));
+    }
+
+    private static CurrentTurnPlan mutationPlan(String request) {
+        return CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+    }
+
+    private static ToolCallLoop.LoopResult retryableMutationLoop(List<ChatMessage> messages) {
+        return new ToolCallLoop.LoopResult(
+                "", 0, 0, List.of(), messages, 0, 0, false, 0,
+                List.of(), 0, 0, 0, 0);
+    }
+
+    private static LlmClient.StreamResult providerTextResult(String text) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
+                text,
+                List.of(),
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false,
+                false,
+                false));
+        generation.complete(receipt);
+        return new LlmClient.StreamResult(
+                text, List.of(), "", "", ProviderResponseCapture.AbortOrigin.NONE,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false, false, receipt);
+    }
+
+    private static void assertRuntimeTerminalOwner(LocalTurnTrace trace) {
+        TurnTraceEvent terminal = trace.events().stream()
+                .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("RUNTIME_DETERMINISTIC", terminal.data().get("origin"));
+        assertFalse(terminal.data().containsKey("sourceGenerationId"));
+        assertFalse(terminal.data().containsKey("sourceAttemptId"));
+    }
+
+    private static void beginTrace(String traceId) {
+        LocalTurnTraceCapture.begin(
+                traceId,
+                "session-missing-mutation-retry",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "verify missing-mutation retry answer lineage");
+    }
+
     private Context testContext() {
+        return testContext(new FileWriteTool());
+    }
+
+    private Context testContext(TalosTool writeTool) {
         var registry = new ToolRegistry();
-        registry.register(new FileWriteTool());
+        registry.register(writeTool);
         var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         var loop = new ToolCallLoop(processor, 3);
         return Context.builder(new Config())
@@ -216,5 +487,29 @@ class MissingMutationRetryTest {
         var writeProps = mapper.readTree(writeSpec.parametersSchemaJson()).get("properties");
         assertEquals(1, writeProps.get("path").path("minLength").asInt(-1),
                 "compact write spec must keep minLength 1 on path");
+    }
+
+    private static LlmClient.StreamResult providerNativeToolResult(
+            ChatMessage.NativeToolCall call) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
+                "",
+                List.of(call),
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false,
+                false,
+                false));
+        generation.complete(receipt);
+        return new LlmClient.StreamResult(
+                "", List.of(call), "", "", ProviderResponseCapture.AbortOrigin.NONE,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false, false, receipt);
     }
 }

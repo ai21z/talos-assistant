@@ -2446,12 +2446,25 @@ class ToolCallLoopTest {
 
             TurnUserRequestCapture.set(request);
             TurnTaskContractCapture.set(contract);
+            LocalTurnTraceCapture.begin(
+                    "trc-source-evidence-repair",
+                    "sid-source-evidence-repair",
+                    1,
+                    "2026-07-16T00:00:00Z",
+                    "workspace-hash",
+                    "agent",
+                    "scripted",
+                    "repair-fixture",
+                    request);
             ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
             try {
                 result = loop.run("", initialCalls, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
             } finally {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
             }
 
             assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
@@ -2464,6 +2477,33 @@ class ToolCallLoopTest {
             assertFalse(written.contains("Southeast Asia"));
             assertEquals(1, recorded.requests().size(),
                     "runtime repair should avoid a second model retry for exact source evidence coverage");
+            var transformed = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
+                    .filter(event -> "SOURCE_EVIDENCE_EXACT_REPAIR".equals(
+                            event.data().get("reasonCode")))
+                    .findFirst()
+                    .orElseThrow();
+            String toolCallId = String.valueOf(transformed.data().get("toolCallId"));
+            var parsed = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                    .filter(event -> toolCallId.equals(String.valueOf(
+                            event.data().get("toolCallId"))))
+                    .findFirst()
+                    .orElseThrow();
+            var executed = trace.events().stream()
+                    .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                    .filter(event -> toolCallId.equals(String.valueOf(
+                            event.data().get("toolCallId"))))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(parsed.data().get("toolNameHash"),
+                    transformed.data().get("fromToolNameHash"));
+            assertEquals(parsed.data().get("argumentsHash"),
+                    transformed.data().get("fromArgumentsHash"));
+            assertEquals(transformed.data().get("toolNameHash"),
+                    executed.data().get("toolNameHash"));
+            assertEquals(transformed.data().get("argumentsHash"),
+                    executed.data().get("argumentsHash"));
         } finally {
             deleteRecursive(ws);
         }

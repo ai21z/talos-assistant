@@ -30,7 +30,8 @@ final class LlamaCppQualificationCandidateLoader {
 
     private static final String CALIBRATION_SCHEMA = "talos.modelQualification.calibrationRules";
     private static final int CALIBRATION_SCHEMA_VERSION = 1;
-    private static final int QUALIFICATION_PROTOCOL_VERSION = 5;
+    private static final int LEGACY_QUALIFICATION_PROTOCOL_VERSION = 5;
+    private static final int CURRENT_QUALIFICATION_PROTOCOL_VERSION = 6;
     private static final int MAX_CALIBRATION_BYTES = 1024 * 1024;
     private static final Pattern ALIAS = Pattern.compile("[a-z0-9][a-z0-9._-]*");
     private static final Pattern REVISION = Pattern.compile("[0-9a-f]{40}");
@@ -144,8 +145,11 @@ final class LlamaCppQualificationCandidateLoader {
                     || !talosCommit.startsWith(runningCommit)) {
                 throw invalid("Talos build does not match the frozen commit");
             }
-            requireEquals(QUALIFICATION_PROTOCOL_VERSION, integer(rules, "protocolVersion"),
-                    "qualification protocol");
+            int protocolVersion = integer(rules, "protocolVersion");
+            if (protocolVersion != LEGACY_QUALIFICATION_PROTOCOL_VERSION
+                    && protocolVersion != CURRENT_QUALIFICATION_PROTOCOL_VERSION) {
+                throw invalid("qualification protocol is unsupported: " + protocolVersion);
+            }
             requireEquals("native", text(rules, "toolMode").toLowerCase(Locale.ROOT), "tool mode");
             if (!config.managed() || !config.nativeCallingRequested() || config.hasHfSource()) {
                 throw invalid("qualification candidate requires managed native local-file mode");
@@ -213,7 +217,7 @@ final class LlamaCppQualificationCandidateLoader {
                             LlamaCppModelCatalog.Disposition.LAB_ONLY,
                             false,
                             false,
-                            QUALIFICATION_PROTOCOL_VERSION,
+                            protocolVersion,
                             "qualification-candidate:" + root.getFileName(),
                             talosCommit,
                             "not-scored",

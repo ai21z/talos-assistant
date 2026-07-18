@@ -34,7 +34,7 @@ final class ToolRepairInspectionBudgetGate {
                         state.mutatingToolSuccesses,
                         state.workspace);
         if (conditionalNoChange.isPresent()) {
-            state.finishWithAnswer(conditionalNoChange.get());
+            state.finishWithToolAnswer(conditionalNoChange.get());
             state.clearPendingActionObligation();
             LOG.debug("Stopping conditional review/fix loop after inspection found no current static blocker.");
             return Optional.of(false);

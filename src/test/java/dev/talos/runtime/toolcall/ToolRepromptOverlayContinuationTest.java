@@ -8,6 +8,8 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import org.junit.jupiter.api.Test;
 
 import java.net.ConnectException;
@@ -94,6 +96,54 @@ class ToolRepromptOverlayContinuationTest {
         assertEquals("[Model engine not reachable - tool loop aborted. "
                 + failure.guidance() + "]", state.currentText);
         assertFalse(state.currentText.contains("Ollama"), state.currentText);
+    }
+
+    @Test
+    void runtimeThreadInterruptionDoesNotInventOperatorAuthorship() {
+        EngineException.Transient failure = new EngineException.Transient(
+                "transient test failure",
+                new RuntimeException("fixture"),
+                503);
+        LoopState state = state(LlmClient.scriptedFailure(failure));
+        LocalTurnTraceCapture.begin(
+                "trace-runtime-thread-interrupt",
+                "sid",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "exercise retry interruption");
+
+        try {
+            Thread.currentThread().interrupt();
+            boolean continueLoop = ToolRepromptOverlayContinuation.execute(
+                    state,
+                    List.of(),
+                    List.of("scripts.js"),
+                    "Create scripts.js.",
+                    false,
+                    tools());
+
+            assertFalse(continueLoop);
+            assertEquals("[Interrupted during tool-call loop]", state.currentText);
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(state.currentText);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            var terminal = trace.events().stream()
+                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            var selection = trace.events().stream()
+                    .filter(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("RUNTIME_DETERMINISTIC", selection.data().get("origin"));
+            assertEquals("RUNTIME_DETERMINISTIC", terminal.data().get("origin"));
+        } finally {
+            Thread.interrupted();
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     private static LoopState state(LlmClient llm) {

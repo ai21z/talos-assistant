@@ -19,6 +19,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
@@ -231,11 +232,12 @@ class ToolCallExecutionStageCharacterizationTest {
         ToolCallExecutionStage.IterationOutcome outcome = execute(harness);
         var ledger = ContextLedgerCapture.snapshot();
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        List<String> toolEvents = trace.events().stream()
-                .filter(event -> "talos.echo".equals(event.toolName()))
-                .map(event -> event.type())
-                .filter("TOOL_CALL_PARSED"::equals)
+        var parsedEvents = trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
                 .toList();
+        assertEquals(1, parsedEvents.size(),
+                "the loop and processor must not duplicate parsed-call evidence");
+        var parsedEvent = parsedEvents.getFirst();
 
         ToolCallLoop.ToolOutcome toolOutcome = harness.state().toolOutcomes.get(0);
         ChatMessage result = harness.state().messages.get(harness.state().messages.size() - 1);
@@ -247,8 +249,11 @@ class ToolCallExecutionStageCharacterizationTest {
                         .get(ContextDecision.Action.INCLUDED_IN_MODEL_PROMPT.name())),
                 () -> assertEquals("talos.echo", toolOutcome.toolName()),
                 () -> assertTrue(toolOutcome.success()),
-                () -> assertEquals(List.of("TOOL_CALL_PARSED"), toolEvents,
-                        "the loop and processor must not duplicate parsed-call evidence"),
+                () -> assertEquals("<unrecognized-tool>", parsedEvent.toolName()),
+                () -> assertEquals("UNKNOWN",
+                        parsedEvent.data().get("toolNameClassification")),
+                () -> assertEquals(ProviderResponseCapture.toolNameHash("talos.echo"),
+                        parsedEvent.data().get("toolNameHash")),
                 () -> assertTrue(toolOutcome.summary().contains("ledger: included"), toolOutcome.summary()),
                 () -> assertTrue(result.content().contains("ledger: included"), result.content()));
     }

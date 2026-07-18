@@ -1,0 +1,14 @@
+{
+  "schemaName": "talos.modelQualification.fixture",
+  "schemaVersion": 6,
+  "id": "basic-workspace-v6",
+  "files": {
+    "README.md": "# Atlas Notes\n\nA small local project for qualification tests.\n\n## Setup\n\nRun the local checks before committing.\n",
+    "notes.md": "Release owner: Aris\nStatus: draft\nKeep this final line unchanged.\n",
+    "config.json": "{\n  \"service\" : \"atlas\",\n  \"port\" : 8080,\n  \"debug\" : false\n}\n",
+    "src/App.java": "package sample;\n\nfinal class App {\n    static String greeting() {\n        return \"hello\";\n    }\n}\n",
+    "script.js": "export function reset() {\n  return 'ready';\n}\n",
+    "scripts.js": "export const helpers = ['format', 'validate'];\n",
+    "docs/product-plan.md": "# Product Plan\n\nThe first milestone is local setup.\nThe second milestone is verified editing.\n"
+  }
+}

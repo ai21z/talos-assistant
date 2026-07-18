@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.Set;
 
 final class QualificationScenarioBank {
-    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4, 5);
+    private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4, 5, 6);
     private static final List<String> FIXTURE_NAMES = List.of(
             "basic-workspace", "context-workspace", "privacy-workspace", "web-workspace");
     private static final String FULL_V5_PATH = "model-qualification/banks/full-v5.json";
@@ -65,7 +65,13 @@ final class QualificationScenarioBank {
             Map.entry("model-qualification/fixtures/basic-workspace-v5.json", new ResourceIdentity("1f0f8c4bd3af28731dcf2ec6813fe495b8396ebace8357f47065fa193b141c37", "da1a0dcb09af384c40e44dabc5bb357f5ec47c2d56e0328ea7c17b736aea5e37")),
             Map.entry("model-qualification/fixtures/context-workspace-v5.json", new ResourceIdentity("5ea35fd54391f7f07ff5bd7c398320b14fb078d1ae6f0c9d695fd3f34afd480c", "2c27b3584fd4275517415fbc33074bd5bb93d81d0e7821a03fc98cc6eefe5e1e")),
             Map.entry("model-qualification/fixtures/privacy-workspace-v5.json", new ResourceIdentity("73440a10a20519b56c58440cdfb78ab7e1fb73c4d81d260230719db472e9b2ef", "3b885ceb6197b80442bb3b7b6bacb19a1dcfd7dac32fe37ad5e9e8673f4e0672")),
-            Map.entry("model-qualification/fixtures/web-workspace-v5.json", new ResourceIdentity("e73f177ca821dc8aeb15a818f5549b90a34461b6193bb5fddc10778aa1cd901c", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10")));
+            Map.entry("model-qualification/fixtures/web-workspace-v5.json", new ResourceIdentity("e73f177ca821dc8aeb15a818f5549b90a34461b6193bb5fddc10778aa1cd901c", "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10")),
+            Map.entry("model-qualification/banks/admission-v6.json", new ResourceIdentity("64fb693757fc3d427f4aa9609ff0673eef4118d2c7645b01b8cefb37980de37c", "64fb693757fc3d427f4aa9609ff0673eef4118d2c7645b01b8cefb37980de37c")),
+            Map.entry("model-qualification/banks/full-v6.json", new ResourceIdentity("ad94fd242fbe38c9809a267c112964ae0c8cdd816dd225260aaf2faeae814c7a", "ad94fd242fbe38c9809a267c112964ae0c8cdd816dd225260aaf2faeae814c7a")),
+            Map.entry("model-qualification/fixtures/basic-workspace-v6.json", new ResourceIdentity("6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473", "6daaed724577acd6eee2c2e234252293ca48267ddc3d57a44e1e791b1db1d473")),
+            Map.entry("model-qualification/fixtures/context-workspace-v6.json", new ResourceIdentity("565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da", "565d33c5451fde19803a69ffe15b880d314be5885eabe44c463fcb0736e2c6da")),
+            Map.entry("model-qualification/fixtures/privacy-workspace-v6.json", new ResourceIdentity("6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5", "6b8c8157f131d61d31baecd356467d43cb02337eb7b7bc2de4fc6788e3a358f5")),
+            Map.entry("model-qualification/fixtures/web-workspace-v6.json", new ResourceIdentity("0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337", "0c9a3090cb306277e8f057934e56c23651936bf488c42d90ac8c688171e75337")));
 
     private QualificationScenarioBank() {}
 
@@ -185,10 +191,17 @@ final class QualificationScenarioBank {
         validateTargetList(scenario.allowedTargets(), "allowed target", scenario.id());
         validateTargetList(scenario.forbiddenTargets(), "forbidden target", scenario.id());
         Set<String> decisionIds = new HashSet<>();
+        int scoredDecisionCount = 0;
         for (QualificationProtocol.ExpectedDecision decision : scenario.expectedDecisions()) {
             if (!decisionIds.add(decision.id())) {
                 throw new IllegalArgumentException("Duplicate decision id in " + scenario.id() + ": " + decision.id());
             }
+            if (decision.scored()) scoredDecisionCount++;
+        }
+        if (scoredDecisionCount > 1) {
+            throw new IllegalArgumentException(
+                    "Scenario has multiple score-bearing decisions but protocol-v6 causal evidence "
+                            + "binds one decision per trial: " + scenario.id());
         }
         Set<String> requirementIds = new HashSet<>();
         for (QualificationProtocol.AtomicRequirement requirement : scenario.atomicRequirements()) {
@@ -214,6 +227,15 @@ final class QualificationScenarioBank {
         if (scenario.category() == QualificationProtocol.ScenarioCategory.MUTATION
                 && scenario.approvalBehavior() == QualificationProtocol.ApprovalBehavior.NONE) {
             throw new IllegalArgumentException("Mutation scenario lacks declared approval behavior: " + scenario.id());
+        }
+        boolean interruptionCategory = scenario.category() == QualificationProtocol.ScenarioCategory.INTERRUPTION;
+        boolean interruptionApproval = scenario.approvalBehavior()
+                == QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL;
+        boolean operatorOwned = scenario.responseOwnerContract()
+                == QualificationRecords.ResponseOwnerContract.OPERATOR_OWNED;
+        if (interruptionCategory != interruptionApproval || interruptionCategory != operatorOwned) {
+            throw new IllegalArgumentException(
+                    "Interruption category, approval, and response owner disagree: " + scenario.id());
         }
     }
 
@@ -272,6 +294,10 @@ final class QualificationScenarioBank {
             throw new IllegalArgumentException(
                     "Qualification resource normalized content differs from its pinned identity: " + name);
         }
+
+        // Protocol v6 establishes authenticated LF as its canonical representation; it has no
+        // historical mixed-line-ending identity to reconstruct.
+        if (protocolVersion == 6) return normalizedLf;
 
         byte[] canonical = protocolVersion <= 3
                 ? normalizedLf

@@ -449,7 +449,7 @@ class ExplainLastTurnCommandTest {
         assertInstanceOf(Result.TrustedInfo.class, result);
         String text = ((Result.TrustedInfo) result).text;
         assertTrue(text.contains("Local trace: trc-local"), text);
-        assertTrue(text.contains("Schema: 2"), text);
+        assertTrue(text.contains("Schema: 3"), text);
         assertTrue(text.contains("Mode: auto"), text);
         assertTrue(text.contains("Redaction: DEFAULT"), text);
         assertTrue(text.contains("Prompt Audit"), text);

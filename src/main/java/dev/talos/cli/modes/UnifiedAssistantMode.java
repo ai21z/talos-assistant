@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.AtFilePins;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
@@ -149,6 +150,9 @@ public final class UnifiedAssistantMode implements Mode {
                 AssistantTurnExecutor.execute(messages, workspace, turnCtx, opts);
 
         String body = "\n" + turnOut.text() + "\n\n";
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                body,
+                LocalTurnTraceCapture.AnswerTransformationReason.MODE_PRESENTATION_LAYOUT);
 
         if (turnOut.streamed()) {
             return Optional.of(new Result.Streamed(body, ""));

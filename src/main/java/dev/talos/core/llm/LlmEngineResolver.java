@@ -3,6 +3,7 @@ package dev.talos.core.llm;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 
 import java.util.stream.Stream;
@@ -31,8 +32,28 @@ interface LlmEngineResolver extends AutoCloseable {
 
     Stream<TokenChunk> chatStream(ChatRequest request) throws Exception;
 
+    /**
+     * Dispatch-aware seam used by production. The legacy default deliberately
+     * emits no handoff fact; {@link RegistryLlmEngineResolver} overrides it and
+     * delegates to the engine's physical transport boundary.
+     */
+    default Stream<TokenChunk> chatStream(
+            ChatRequest request,
+            ProviderTransportHandoff handoff) throws Exception {
+        ProviderTransportHandoff.markUnobserved(handoff);
+        return chatStream(request);
+    }
+
     default Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
         return chatStream(request);
+    }
+
+    /** See {@link #chatStream(ChatRequest, ProviderTransportHandoff)}. */
+    default Stream<TokenChunk> chatStreamNonStreaming(
+            ChatRequest request,
+            ProviderTransportHandoff handoff) throws Exception {
+        ProviderTransportHandoff.markUnobserved(handoff);
+        return chatStreamNonStreaming(request);
     }
 
     @Override

@@ -499,7 +499,7 @@ public final class ScenarioRunner {
         beginExecutorHarnessTrace(scenario, workspace, userPrompt);
         try {
             turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
-            LocalTurnTraceCapture.recordModelResponseReceived(turnOut.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(turnOut.text());
             LocalTurnTraceCapture.recordOutcomeIfAbsent("OK", "NOT_RUN", "UNKNOWN", "UNKNOWN", "EXECUTOR_SCENARIO");
             localTrace = LocalTurnTraceCapture.complete();
             TurnAuditCapture.end();
@@ -567,7 +567,7 @@ public final class ScenarioRunner {
         beginExecutorHarnessTrace(scenario, workspace, userPrompt);
         try {
             turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
-            LocalTurnTraceCapture.recordModelResponseReceived(turnOut.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(turnOut.text());
             LocalTurnTraceCapture.recordOutcomeIfAbsent("OK", "NOT_RUN", "UNKNOWN", "UNKNOWN", "EXECUTOR_SCENARIO");
             localTrace = LocalTurnTraceCapture.complete();
             TurnAuditCapture.end();

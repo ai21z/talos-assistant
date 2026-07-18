@@ -50,6 +50,32 @@ class LlamaCppQualificationCandidateLoaderTest {
     }
 
     @Test
+    void protocolV6DeclarationCreatesAV6ProcessScopedCapabilityCeiling() throws Exception {
+        Fixture fixture = fixture(Map.of("protocolVersion", 6));
+
+        var loaded = loader().load(
+                fixture.settings(), fixture.config(), fixture.talosHome()).orElseThrow();
+
+        assertEquals(6, loaded.profile().qualification().protocolRevision());
+        assertEquals(LlamaCppModelCatalog.Disposition.LAB_ONLY,
+                loaded.profile().disposition());
+        assertFalse(loaded.profile().selectable());
+        assertFalse(loaded.profile().wizardDownload());
+    }
+
+    @Test
+    void protocolsOutsideTheV5HistoricalAndV6CurrentContractAreRefused() throws Exception {
+        for (int protocolVersion : List.of(4, 7)) {
+            Fixture fixture = fixture(Map.of("protocolVersion", protocolVersion));
+
+            assertThrows(IllegalStateException.class,
+                    () -> loader().load(
+                            fixture.settings(), fixture.config(), fixture.talosHome()),
+                    "protocol " + protocolVersion);
+        }
+    }
+
+    @Test
     void frozenCalibrationCanExplicitlySelectSingleLeadingSystemLayout() throws Exception {
         Fixture fixture = fixture(Map.of("requestLayout", "SINGLE_LEADING_SYSTEM"));
 

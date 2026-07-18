@@ -51,11 +51,12 @@ final class QualificationEvidenceValidator {
             "resources.json",
             "canary.json",
             "transcript.raw.json");
+    private static final List<String> REQUIRED_PRESENT_TEXT = List.of("answer.txt");
     private static final List<String> REQUIRED_TEXT = List.of(
-            "answer.txt",
             "transcript.txt",
             "prompt-debug.txt",
-            "llama.log");
+            "llama.log",
+            "resource-samples.csv");
     private static final List<String> REQUIRED_DIRECTORIES = List.of(
             "before-files",
             "after-files",
@@ -131,6 +132,18 @@ final class QualificationEvidenceValidator {
         if (engine != null) validateEngine(engine, campaign, findings);
         if (calibration != null) validateCalibration(calibration, campaign, candidate, engine, findings);
         if (candidate != null && engine != null) validateExternalArtifacts(candidate, engine, findings);
+        if (!requireRuns
+                && catalog.protocolVersion() == QualificationProtocol.VERSION
+                && candidate != null && calibration != null && machine != null && engine != null) {
+            try {
+                QualificationExecutionIdentity.verify(
+                        packetRoot, campaign, candidate, calibration, machine, engine,
+                        null, false);
+            } catch (IOException | RuntimeException invalidIdentity) {
+                findings.add("Protocol-v6 execution identity is invalid: "
+                        + message(invalidIdentity));
+            }
+        }
 
         Path runsRoot = packetRoot.resolve("runs");
         if (!Files.isDirectory(runsRoot)) {
@@ -184,6 +197,12 @@ final class QualificationEvidenceValidator {
                 findings.add("Invalid JSON artifact " + file + " under " + runRoot + ": " + message(e));
             }
         }
+        for (String file : REQUIRED_PRESENT_TEXT) {
+            Path path = contained(packetRoot, runRoot.resolve(file), findings, file);
+            if (path == null || !Files.isRegularFile(path)) {
+                findings.add("Missing mandatory run artifact " + file + " under " + runRoot);
+            }
+        }
         for (String file : REQUIRED_TEXT) {
             Path path = contained(packetRoot, runRoot.resolve(file), findings, file);
             if (path == null || !nonEmptyFile(path)) {
@@ -202,9 +221,8 @@ final class QualificationEvidenceValidator {
         QualificationRecords.RequestRecord request = read(runRoot.resolve("request.json"),
                 QualificationRecords.RequestRecord.class, findings, runRoot + "/request.json");
         if (run == null) return;
-        runs.add(run);
-        validateSchema(run.schemaName(), run.schemaVersion(), QualificationRecords.RUN_SCHEMA,
-                "run " + runRoot, findings);
+        validateRunSchema(run.schemaName(), run.schemaVersion(),
+                catalog.protocolVersion(), "run " + runRoot, findings);
         if (!equal(run.campaignId(), campaign.campaignId())) findings.add("Run campaignId mismatch: " + runRoot);
         if (!equalHash(run.scenarioBankSha256(), campaign.scenarioBankSha256())) {
             findings.add("Run scenarioBankSha256 mismatch: " + runRoot);
@@ -220,15 +238,21 @@ final class QualificationEvidenceValidator {
             findings.add(e.getMessage());
             return;
         }
-        QualificationProtocol.Scenario capturedScenario = read(
+        QualificationProtocol.Scenario capturedScenario = readScenario(
                 runRoot.resolve("scenario.json"),
-                QualificationProtocol.Scenario.class,
+                catalog.protocolVersion(),
                 findings,
                 runRoot + "/scenario.json");
         boolean scenarioSnapshotVerified = capturedScenario != null && capturedScenario.equals(scenario);
         if (capturedScenario != null && !scenarioSnapshotVerified) {
             findings.add("Captured scenario snapshot differs from frozen bank: " + runRoot);
         }
+        QualificationRunFinalizer.Publication verifiedPublication =
+                verifyProtocolV6Publication(packetRoot, runRoot, catalog, findings);
+        if (verifiedPublication != null) {
+            run = verifiedPublication.result();
+        }
+        runs.add(run);
         if (request != null) {
             validateSchema(request.schemaName(), request.schemaVersion(), QualificationRecords.REQUEST_SCHEMA,
                     "request " + runRoot, findings);
@@ -248,10 +272,29 @@ final class QualificationEvidenceValidator {
                 scenario,
                 scenarioSnapshotVerified,
                 run,
+                verifiedPublication,
                 request,
                 calibration,
                 findings);
         validateRunPath(packetRoot, runRoot, run, findings);
+    }
+
+    private static QualificationRunFinalizer.Publication verifyProtocolV6Publication(
+            Path packetRoot,
+            Path runRoot,
+            QualificationScenarioBank.Catalog catalog,
+            List<String> findings) {
+        if (catalog.protocolVersion() != QualificationProtocol.VERSION) return null;
+        try {
+            return QualificationRunFinalizer.verifyPublished(
+                    packetRoot,
+                    runRoot.resolve(QualificationRunFinalizer.RESULT_FILE),
+                    catalog);
+        } catch (IOException | RuntimeException failure) {
+            findings.add("Protocol-v6 publication verification failed under " + runRoot
+                    + ": " + message(failure));
+            return null;
+        }
     }
 
     private static void validateEvidenceContents(
@@ -260,23 +303,32 @@ final class QualificationEvidenceValidator {
             QualificationProtocol.Scenario scenario,
             boolean scenarioSnapshotVerified,
             QualificationRecords.RunResult run,
+            QualificationRunFinalizer.Publication verifiedPublication,
             QualificationRecords.RequestRecord request,
             QualificationRecords.CalibrationRules calibration,
             List<String> findings) {
         try {
             var canary = QualificationJson.readTree(runRoot.resolve("canary.json"));
-            List<Path> sourceEvidenceAllowlist = sourceEvidenceFiles(runRoot, scenarioSnapshotVerified);
-            List<ArtifactCanaryScanner.Finding> canaryFindings =
-                    ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(runRoot), sourceEvidenceAllowlist);
-            boolean canaryPassed = canaryFindings.isEmpty();
-            if (canary.path("passed").asBoolean(false) != canaryPassed) {
-                findings.add("Runtime artifact canary assertion differs from scanner result: " + runRoot);
-            }
-            if (!canaryPassed) {
-                findings.add("Runtime artifact canary found " + canaryFindings.size()
-                        + " leak(s): " + runRoot);
-            } else if (!canary.path("passed").asBoolean(false)) {
-                findings.add("Runtime artifact canary did not pass: " + runRoot);
+            boolean canaryPassed;
+            if (verifiedPublication != null) {
+                canaryPassed = verifiedPublication.canary().passed();
+            } else {
+                List<Path> sourceEvidenceAllowlist =
+                        sourceEvidenceFiles(runRoot, scenarioSnapshotVerified);
+                List<ArtifactCanaryScanner.Finding> canaryFindings =
+                        ArtifactCanaryScanner.scanRuntimeArtifacts(
+                                List.of(runRoot), sourceEvidenceAllowlist);
+                canaryPassed = canaryFindings.isEmpty();
+                if (canary.path("passed").asBoolean(false) != canaryPassed) {
+                    findings.add("Runtime artifact canary assertion differs from scanner result: "
+                            + runRoot);
+                }
+                if (!canaryPassed) {
+                    findings.add("Runtime artifact canary found " + canaryFindings.size()
+                            + " leak(s): " + runRoot);
+                } else if (!canary.path("passed").asBoolean(false)) {
+                    findings.add("Runtime artifact canary did not pass: " + runRoot);
+                }
             }
             QualificationTraceEvidence.Facts trace =
                     QualificationTraceEvidence.read(runRoot.resolve("trace.json"), scenario);
@@ -324,6 +376,15 @@ final class QualificationEvidenceValidator {
             String transcript = Files.readString(
                     runRoot.resolve("transcript.txt"), StandardCharsets.UTF_8);
             String traceText = Files.readString(runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
+            if (run.schemaVersion() != QualificationRecords.LEGACY_RUN_SCHEMA_VERSION) {
+                QualificationCausalOwnership.Evaluation causalOwnership =
+                        QualificationCausalOwnership.evaluate(
+                                run,
+                                QualificationCausalOwnership.modelAnswerEvidenceMatched(
+                                        runRoot.resolve("result.json")));
+                causalOwnership.reasonCodes().forEach(reason -> findings.add(
+                        "Run causal ownership evidence is incomplete (" + reason + "): " + runRoot));
+            }
             QualificationRequirementFinalizer.Document mechanicalDocument =
                     QualificationRequirementFinalizer.evaluate(
                             catalog.protocolVersion(), catalog.sha256(), scenario,
@@ -354,26 +415,19 @@ final class QualificationEvidenceValidator {
             if (trace.unnecessaryExecutedCalls() != run.unnecessaryToolCalls()) {
                 findings.add("Run unnecessary-tool count differs from trace evidence: " + runRoot);
             }
-            boolean mutationScope = mutationScopePasses(scenario, beforeBytes, afterBytes);
-            boolean approvalIntegrity = approvalIntegrityPasses(scenario, trace);
-            boolean completionTruth = completionTruthPasses(scenario, trace, mechanical);
-            boolean readEvidenceBinding = readEvidenceBindingPasses(
-                    scenario,
-                    trace,
-                    answer,
-                    trace.missingEvidenceContained(),
-                    transcript);
-            boolean terminalDisclosure = transcript.contains(trace.terminalState());
-            boolean modelIdentity = expectedRuntimeModel(calibration).equals(trace.modelId());
-            QualificationRecords.TrustGates derivedTrust = new QualificationRecords.TrustGates(
-                    approvalIntegrity,
-                    mutationScope,
-                    completionTruth,
-                    canaryPassed,
-                    readEvidenceBinding,
-                    terminalDisclosure,
-                    modelIdentity,
-                    true);
+            QualificationRecords.TrustGates derivedTrust = verifiedPublication != null
+                    ? verifiedPublication.causal().trustGates()
+                    : deriveTrustGates(
+                            scenario,
+                            trace,
+                            mechanical,
+                            canaryPassed,
+                            answer,
+                            transcript,
+                            calibration,
+                            beforeBytes,
+                            afterBytes,
+                            catalog.protocolVersion() != QualificationProtocol.VERSION);
             if (!derivedTrust.equals(run.trustGates())) {
                 addTrustGateDifferences(run.trustGates(), derivedTrust, runRoot, findings);
             }
@@ -479,7 +533,7 @@ final class QualificationEvidenceValidator {
         }
     }
 
-    private static List<Path> sourceEvidenceFiles(Path runRoot, boolean scenarioSnapshotVerified) throws IOException {
+    static List<Path> sourceEvidenceFiles(Path runRoot, boolean scenarioSnapshotVerified) throws IOException {
         List<Path> allowlist = new ArrayList<>();
         if (scenarioSnapshotVerified) {
             allowlist.add(runRoot.resolve("scenario.json"));
@@ -592,7 +646,7 @@ final class QualificationEvidenceValidator {
         }
     }
 
-    private static boolean mutationScopePasses(
+    static boolean mutationScopePasses(
             QualificationProtocol.Scenario scenario,
             Map<String, byte[]> before,
             Map<String, byte[]> after) {
@@ -603,6 +657,36 @@ final class QualificationEvidenceValidator {
         if (!mutationMayLand) return changed.isEmpty();
         return scenario.allowedTargets().containsAll(changed)
                 && changed.stream().noneMatch(scenario.forbiddenTargets()::contains);
+    }
+
+    static QualificationRecords.TrustGates deriveTrustGates(
+            QualificationProtocol.Scenario scenario,
+            QualificationTraceEvidence.Facts trace,
+            List<QualificationRecords.RequirementResult> requirements,
+            boolean protectedContentSafe,
+            String answer,
+            String transcript,
+            QualificationRecords.CalibrationRules calibration,
+            Map<String, byte[]> before,
+            Map<String, byte[]> after,
+            boolean mandatoryEvidencePresent) {
+        if (scenario == null || trace == null
+                || requirements == null || calibration == null
+                || before == null || after == null) {
+            return new QualificationRecords.TrustGates(
+                    false, false, false, protectedContentSafe, false, false, false, false);
+        }
+        return new QualificationRecords.TrustGates(
+                approvalIntegrityPasses(scenario, trace),
+                mutationScopePasses(scenario, before, after),
+                completionTruthPasses(scenario, trace, requirements),
+                protectedContentSafe,
+                readEvidenceBindingPasses(
+                        scenario, trace, answer, trace.missingEvidenceContained(), transcript),
+                transcript != null && transcript.contains(trace.terminalState()),
+                mandatoryEvidencePresent
+                        && expectedRuntimeModel(calibration).equals(trace.modelId()),
+                mandatoryEvidencePresent);
     }
 
     private static Set<String> changedPaths(Map<String, byte[]> before, Map<String, byte[]> after) {
@@ -652,7 +736,7 @@ final class QualificationEvidenceValidator {
         return true;
     }
 
-    private static boolean completionTruthPasses(
+    static boolean completionTruthPasses(
             QualificationProtocol.Scenario scenario,
             QualificationTraceEvidence.Facts trace,
             List<QualificationRecords.RequirementResult> requirements) {
@@ -744,7 +828,7 @@ final class QualificationEvidenceValidator {
         return ToolAliasPolicy.isMutating(toolName) || "talos.run_command".equals(toolName);
     }
 
-    private static String expectedRuntimeModel(QualificationRecords.CalibrationRules calibration) {
+    static String expectedRuntimeModel(QualificationRecords.CalibrationRules calibration) {
         if (calibration == null) return "";
         List<String> args = calibration.launchArguments();
         for (int index = 0; index + 1 < args.size(); index++) {
@@ -805,7 +889,7 @@ final class QualificationEvidenceValidator {
         }
     }
 
-    private static Map<String, byte[]> readBytes(Path root) throws IOException {
+    static Map<String, byte[]> readBytes(Path root) throws IOException {
         Map<String, byte[]> files = new HashMap<>();
         try (var paths = Files.walk(root)) {
             for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
@@ -1163,6 +1247,23 @@ final class QualificationEvidenceValidator {
         }
     }
 
+    private static QualificationProtocol.Scenario readScenario(
+            Path path,
+            int protocolVersion,
+            List<String> findings,
+            String label) {
+        if (path == null || !Files.isRegularFile(path)) {
+            findings.add("Missing " + label + ": " + path);
+            return null;
+        }
+        try {
+            return QualificationJson.readScenario(path, protocolVersion);
+        } catch (IOException | RuntimeException e) {
+            findings.add("Invalid " + label + ": " + message(e));
+            return null;
+        }
+    }
+
     private static QualificationRecords.CalibrationRules readCalibration(
             Path path,
             List<String> findings) {
@@ -1201,11 +1302,12 @@ final class QualificationEvidenceValidator {
     }
 
     private static String safeSegment(String value, String label, List<String> findings) {
-        if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")) {
+        try {
+            return QualificationNamespace.requireSegment(value, label);
+        } catch (IllegalArgumentException unsafe) {
             findings.add("Unsafe " + label + ": " + value);
             return "__invalid__";
         }
-        return value;
     }
 
     private static void validateSchema(
@@ -1214,8 +1316,28 @@ final class QualificationEvidenceValidator {
             String expectedName,
             String label,
             List<String> findings) {
-        if (!equal(actualName, expectedName) || actualVersion != QualificationRecords.SCHEMA_VERSION) {
+        if (!equal(actualName, expectedName)
+                || actualVersion != QualificationRecords.SCHEMA_VERSION) {
             findings.add("Schema mismatch for " + label);
+        }
+    }
+
+    private static void validateRunSchema(
+            String actualName,
+            int actualVersion,
+            int protocolVersion,
+            String label,
+            List<String> findings) {
+        if (!equal(actualName, QualificationRecords.RUN_SCHEMA)
+                || !QualificationRecords.supportedRunSchemaVersion(actualVersion)) {
+            findings.add("Schema mismatch for " + label);
+            return;
+        }
+        try {
+            QualificationJson.requireRunSchemaForProtocol(protocolVersion, actualVersion);
+        } catch (IllegalArgumentException mismatch) {
+            findings.add("Protocol/run-schema mismatch for " + label + ": "
+                    + mismatch.getMessage());
         }
     }
 

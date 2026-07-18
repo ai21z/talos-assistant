@@ -8,6 +8,7 @@ import dev.talos.runtime.toolcall.ToolOutcomeFailureShape;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
@@ -357,7 +358,19 @@ public final class ToolCallLoop {
 
     public LoopResult run(String initialAnswer, List<NativeToolCall> nativeToolCalls,
                           List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx) {
-        return engine.run(initialAnswer, nativeToolCalls, messages, workspace, ctx);
+        return run(initialAnswer, nativeToolCalls, ProviderResponseCapture.Receipt.none(),
+                messages, workspace, ctx);
+    }
+
+    public LoopResult run(
+            String initialAnswer,
+            List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx) {
+        return engine.run(
+                initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx);
     }
 
     static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {

@@ -746,6 +746,21 @@ tasks.register<JavaExec>("validateModelQualificationCalibration") {
     })
 }
 
+tasks.register<JavaExec>("assertWritableModelQualificationCampaign") {
+    description = "Rejects any noncanonical or non-v6 qualification campaign before packet mutation."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        listOf("assert-writable-campaign", "--root", root)
+    })
+}
+
 tasks.register<JavaExec>("finalizeModelQualificationRequirements") {
     description = "Writes immutable mechanical requirement results using the canonical qualification evaluator."
     group = "verification"
@@ -884,12 +899,138 @@ tasks.register<JavaExec>("checkModelQualificationCampaignContinuation") {
     mainClass.set("dev.talos.qualification.QualificationCampaignContinuationMain")
     classpath = e2eTestSourceSet.runtimeClasspath
     argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
-        val result = providers.gradleProperty("qualificationResult").orElse("").get()
-        if (result.isBlank()) {
-            throw GradleException("-PqualificationResult=<finalized result.json> is required")
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val repetition = providers.gradleProperty("qualificationRepetition").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
         }
-        listOf(result)
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (repetition.toIntOrNull() == null || repetition.toInt() < 1) {
+            throw GradleException("-PqualificationRepetition=<positive integer> is required")
+        }
+        listOf(root, scenario, repetition)
     })
+}
+
+val finalizeModelQualificationResult by tasks.registering(JavaExec::class) {
+    description = "Publishes Java-derived protocol-v6 causal, canary, and result artifacts."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationCausalFinalizerMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val run = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (run.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        listOf(root, run, scenario)
+    })
+}
+
+tasks.register<JavaExec>("printModelQualificationFinalizerIdentity") {
+    description = "Prints the exact compiled protocol-v6 Java finalizer SHA-256."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionIdentityMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+}
+
+tasks.register<JavaExec>("printModelQualificationExecutionInputIdentity") {
+    description = "Prints path-free finalizer and classpath values for the frozen protocol-v6 harness input specification."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionInputIdentityMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+}
+
+tasks.register<JavaExec>("writeModelQualificationExecutionIdentity") {
+    description = "Creates exact protocol-v6 harness and runtime identity manifests for a pre-trial packet."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionIdentityWriterMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        fun requiredProperty(name: String): String {
+            val value = providers.gradleProperty(name).orElse("").get()
+            if (value.isBlank()) throw GradleException("-P$name=<absolute path> is required")
+            val requested = File(value)
+            if (!requested.isAbsolute) {
+                throw GradleException("-P$name must be an explicit absolute path")
+            }
+            return requested.absolutePath
+        }
+        val currentCommit = packagedGitHead.get()
+        if (!currentCommit.matches(Regex("[0-9a-f]{40}"))) {
+            throw GradleException("current Git commit is unavailable; execution identity was not written")
+        }
+        if (packagedGitDirty.get()) {
+            throw GradleException("tracked worktree is dirty; execution identity was not written")
+        }
+        listOf(
+            "--root", requiredProperty("qualificationRoot"),
+            "--repository-root", rootProject.projectDir.absolutePath,
+            "--built-talos", requiredProperty("qualificationBuiltTalosArtifact"),
+            "--installed-talos", requiredProperty("qualificationInstalledTalosArtifact"),
+            "--model-artifact", requiredProperty("qualificationModelArtifact"),
+            "--engine-executable", requiredProperty("qualificationEngineExecutable"),
+            "--harness-inputs", requiredProperty("qualificationHarnessInputSpecification"),
+            "--current-commit", currentCommit,
+            "--current-version", project.version.toString(),
+        )
+    })
+}
+
+tasks.register<JavaExec>("verifyModelQualificationExecutionIdentity") {
+    description = "Read-only verification of an existing protocol-v6 execution identity chain and its live frozen inputs."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.QualificationExecutionIdentityVerifierMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        fun requiredProperty(name: String): String {
+            val value = providers.gradleProperty(name).orElse("").get()
+            if (value.isBlank()) throw GradleException("-P$name=<absolute path> is required")
+            val requested = File(value)
+            if (!requested.isAbsolute) {
+                throw GradleException("-P$name must be an explicit absolute path")
+            }
+            return requested.absolutePath
+        }
+        val currentCommit = packagedGitHead.get()
+        if (!currentCommit.matches(Regex("[0-9a-f]{40}"))) {
+            throw GradleException("current Git commit is unavailable; execution identity was not verified")
+        }
+        if (packagedGitDirty.get()) {
+            throw GradleException("tracked worktree is dirty; execution identity was not verified")
+        }
+        listOf(
+            "--root", requiredProperty("qualificationRoot"),
+            "--repository-root", rootProject.projectDir.absolutePath,
+            "--built-talos", requiredProperty("qualificationBuiltTalosArtifact"),
+            "--installed-talos", requiredProperty("qualificationInstalledTalosArtifact"),
+            "--model-artifact", requiredProperty("qualificationModelArtifact"),
+            "--engine-executable", requiredProperty("qualificationEngineExecutable"),
+            "--current-commit", currentCommit,
+            "--current-version", project.version.toString(),
+        )
+    })
+}
+
+tasks.register("finalizeModelQualificationCausality") {
+    description = "Deprecated safe alias for finalizeModelQualificationResult."
+    group = "verification"
+    dependsOn(finalizeModelQualificationResult)
 }
 
 val candidateTest by tasks.registering(Test::class) {

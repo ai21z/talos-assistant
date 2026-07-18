@@ -2,10 +2,8 @@ package dev.talos.qualification;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,21 +41,15 @@ final class QualificationRequirementFinalizer {
             Path requestedRunRoot,
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
-        Path runRoot = containedRunRoot(packetRoot, requestedRunRoot, scenarioId);
+        Path runRoot = containedRunRoot(packetRoot, requestedRunRoot, scenarioId, catalog);
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         Document document = evaluate(
                 catalog.protocolVersion(), catalog.sha256(), scenario, runRoot);
         Path output = runRoot.resolve(OUTPUT_FILE);
-        if (Files.exists(output)) {
-            throw new IllegalStateException("refusing to overwrite mechanical requirements: " + output);
-        }
-        try {
-            Files.writeString(output, QualificationJson.write(document), StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        } catch (FileAlreadyExistsException race) {
-            throw new IllegalStateException(
-                    "refusing to overwrite mechanical requirements: " + output, race);
-        }
+        QualificationArtifactPublication.publishNewOrVerifyExact(
+                output,
+                QualificationJson.bytes(document),
+                "mechanical requirements");
         return output;
     }
 
@@ -103,28 +95,10 @@ final class QualificationRequirementFinalizer {
     static Path containedRunRoot(
             Path packetRoot,
             Path requestedRunRoot,
-            String scenarioId) throws IOException {
-        if (packetRoot == null || requestedRunRoot == null) {
-            throw new IllegalArgumentException("packet root and run root are required");
-        }
-        String expectedScenario = scenarioId == null ? "" : scenarioId.strip();
-        if (expectedScenario.isEmpty()) {
-            throw new IllegalArgumentException("scenario id is required");
-        }
-
-        Path root = packetRoot.toAbsolutePath().normalize().toRealPath();
-        Path runs = root.resolve("runs").toRealPath();
-        Path run = requestedRunRoot.toAbsolutePath().normalize().toRealPath();
-        if (!run.startsWith(runs)) {
-            throw new IllegalArgumentException("run root must be inside packet runs: " + run);
-        }
-        Path relative = runs.relativize(run);
-        if (relative.getNameCount() < 2
-                || !relative.getName(relative.getNameCount() - 2).toString().equals(expectedScenario)) {
-            throw new IllegalArgumentException(
-                    "run root scenario does not match requested scenario: " + run);
-        }
-        return run;
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog) throws IOException {
+        return QualificationArtifactPublication.requireWritableDeclaredRun(
+                packetRoot, requestedRunRoot, scenarioId, catalog).runRoot();
     }
 
     private static Map<String, byte[]> readBytes(Path root) throws IOException {

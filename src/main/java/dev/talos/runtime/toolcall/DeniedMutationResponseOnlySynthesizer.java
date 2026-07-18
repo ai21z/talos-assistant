@@ -4,6 +4,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderResponseCapture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,9 +14,23 @@ final class DeniedMutationResponseOnlySynthesizer {
 
     private DeniedMutationResponseOnlySynthesizer() {}
 
-    static String synthesize(LoopState state) {
+    record Result(
+            String text,
+            ProviderResponseCapture.Receipt receipt,
+            boolean capturedGeneration) {
+        Result {
+            text = text == null ? "" : text;
+            receipt = receipt == null ? ProviderResponseCapture.Receipt.none() : receipt;
+        }
+
+        static Result deterministicStop() {
+            return new Result(stopMessage(), ProviderResponseCapture.Receipt.none(), false);
+        }
+    }
+
+    static Result synthesize(LoopState state) {
         if (state == null || state.ctx == null || state.ctx.llm() == null) {
-            return stopMessage();
+            return Result.deterministicStop();
         }
 
         state.messages.add(ChatMessage.system(
@@ -30,16 +45,16 @@ final class DeniedMutationResponseOnlySynthesizer {
                     state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
             String text = terminal.text() == null ? "" : terminal.text();
             if (terminal.hasToolCalls()) {
-                return stopMessage();
+                return Result.deterministicStop();
             }
             String stripped = ToolCallParser.stripToolCalls(text).strip();
             if (stripped.isBlank() || ToolCallParser.containsToolCalls(text)) {
-                return stopMessage();
+                return Result.deterministicStop();
             }
-            return stripped;
+            return new Result(stripped, terminal.provenance(), true);
         } catch (Exception e) {
             LOG.warn("Response-only synthesis after denied mutation failed: {}", SafeLogFormatter.throwableMessage(e));
-            return stopMessage();
+            return Result.deterministicStop();
         } finally {
             if (anchorIndex < state.messages.size()) {
                 ChatMessage m = state.messages.get(anchorIndex);

@@ -5,12 +5,19 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderResponseCapture;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +27,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NoToolGroundingRetryTest {
+
+    @AfterEach
+    void clearTrace() {
+        LocalTurnTraceCapture.clear();
+    }
 
     @Test
     void retriesLongEvidenceLookingAnswerAndReturnsDifferentRetryText() throws Exception {
@@ -111,6 +123,68 @@ class NoToolGroundingRetryTest {
         assertEquals(2, messages.size(), "short answers must not append retry messages");
     }
 
+    @ParameterizedTest(name = "{0} retry restores original provider before annotation")
+    @EnumSource(FallbackKind.class)
+    void fallbackRetryRestoresOriginalProviderBeforeAnnotation(FallbackKind fallbackKind) {
+        beginTrace("no-tool-grounding-" + fallbackKind.name().toLowerCase());
+        Context ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted("unused"))
+                .build();
+        String request = "Use evidence from the actual files.";
+        String answer = longAnswer();
+        LlmClient.StreamResult originalProviderResult = providerTextResult(answer);
+
+        String result = NoToolGroundingRetry.retryIfNeeded(
+                answer,
+                plan(TaskContractResolver.fromUserRequest(request)),
+                messages(request),
+                ctx,
+                ignored -> fallbackProviderResult(fallbackKind, answer));
+
+        assertEquals(AssistantTurnExecutor.UNGROUNDED_ANNOTATION + answer, result,
+                "fallback annotation bytes must remain unchanged");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertRestoredProviderOwner(
+                trace,
+                originalProviderResult.provenance(),
+                fallbackKind.restorationReason(),
+                true);
+    }
+
+    @Test
+    void acceptedDifferentProviderRetryRetainsRetryOwnerWithoutRestoration() {
+        beginTrace("no-tool-grounding-accepted");
+        Context ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted("unused"))
+                .build();
+        String request = "Use evidence from the actual files.";
+        String answer = longAnswer();
+        providerTextResult(answer);
+        String accepted = "Grounded retry answer.";
+        AtomicReference<ProviderResponseCapture.Receipt> retryReceipt = new AtomicReference<>();
+
+        String result = NoToolGroundingRetry.retryIfNeeded(
+                answer,
+                plan(TaskContractResolver.fromUserRequest(request)),
+                messages(request),
+                ctx,
+                ignored -> {
+                    LlmClient.StreamResult retry = providerTextResult(accepted);
+                    retryReceipt.set(retry.provenance());
+                    return retry;
+                });
+
+        assertEquals(accepted, result, "accepted retry bytes must remain unchanged");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertTrue(events(trace, "ANSWER_CANDIDATE_RESTORED").isEmpty(),
+                "accepted retry must not restore the original candidate");
+        assertTrue(events(trace, "ANSWER_TRANSFORMED").isEmpty(),
+                "exact accepted retry bytes need no runtime transform");
+        assertTerminalProviderOwner(trace, retryReceipt.get());
+    }
+
     private static CurrentTurnPlan plan(TaskContract contract) {
         return CurrentTurnPlan.compatibility(
                 contract,
@@ -164,5 +238,124 @@ class NoToolGroundingRetryTest {
                 + "Use the available file tools to read the relevant files, then "
                 + "answer concretely from what you read. Do not guess about file "
                 + "contents. Do not describe files you have not read.";
+    }
+
+    private enum FallbackKind {
+        BLANK("SPECULATIVE_RETRY_EMPTY"),
+        EQUAL("SPECULATIVE_RETRY_REJECTED"),
+        EXCEPTION("SPECULATIVE_RETRY_FAILED");
+
+        private final String restorationReason;
+
+        FallbackKind(String restorationReason) {
+            this.restorationReason = restorationReason;
+        }
+
+        String restorationReason() {
+            return restorationReason;
+        }
+    }
+
+    private static LlmClient.StreamResult fallbackProviderResult(
+            FallbackKind fallbackKind,
+            String original) {
+        return switch (fallbackKind) {
+            case BLANK -> providerTextResult("");
+            case EQUAL -> providerTextResult(original);
+            case EXCEPTION -> {
+                failProviderGeneration();
+                throw new IllegalStateException("injected grounding retry failure");
+            }
+        };
+    }
+
+    private static LlmClient.StreamResult providerTextResult(String text) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
+                text,
+                List.of(),
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false,
+                false,
+                false));
+        generation.complete(receipt);
+        return streamResult(text, receipt);
+    }
+
+    private static LlmClient.StreamResult streamResult(
+            String text,
+            ProviderResponseCapture.Receipt receipt) {
+        return new LlmClient.StreamResult(
+                text, List.of(), "", "", ProviderResponseCapture.AbortOrigin.NONE,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false, false, receipt);
+    }
+
+    private static void failProviderGeneration() {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        generation.fail(ProviderResponseCapture.Failure.PROVIDER_EXCEPTION);
+    }
+
+    private static void assertRestoredProviderOwner(
+            LocalTurnTrace trace,
+            ProviderResponseCapture.Receipt originalReceipt,
+            String expectedReason,
+            boolean expectTransform) {
+        List<TurnTraceEvent> restorations = events(trace, "ANSWER_CANDIDATE_RESTORED");
+        assertEquals(1, restorations.size(), "fallback must emit exactly one closed restoration");
+        TurnTraceEvent restoration = restorations.getFirst();
+        assertEquals("MODEL_PROVIDER", restoration.data().get("origin"));
+        assertEquals(originalReceipt.generationId(), restoration.data().get("sourceGenerationId"));
+        assertEquals(originalReceipt.attemptId(), restoration.data().get("sourceAttemptId"));
+        assertEquals(expectedReason, restoration.data().get("reasonCode"));
+
+        List<TurnTraceEvent> transformations = events(trace, "ANSWER_TRANSFORMED");
+        assertEquals(expectTransform ? 1 : 0, transformations.size());
+        if (expectTransform) {
+            assertTrue(trace.events().indexOf(restoration) < trace.events().indexOf(transformations.getFirst()),
+                    "the original source must be restored before the annotation transform");
+        }
+        assertTerminalProviderOwner(trace, originalReceipt);
+    }
+
+    private static void assertTerminalProviderOwner(
+            LocalTurnTrace trace,
+            ProviderResponseCapture.Receipt receipt) {
+        TurnTraceEvent terminal = events(trace, "TERMINAL_ANSWER_SELECTED").getFirst();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+        assertEquals(receipt.generationId(), terminal.data().get("sourceGenerationId"));
+        assertEquals(receipt.attemptId(), terminal.data().get("sourceAttemptId"));
+    }
+
+    private static List<TurnTraceEvent> events(LocalTurnTrace trace, String type) {
+        return trace.events().stream()
+                .filter(event -> type.equals(event.type()))
+                .toList();
+    }
+
+    private static void beginTrace(String traceId) {
+        LocalTurnTraceCapture.begin(
+                traceId,
+                "session-no-tool-grounding",
+                1,
+                "2026-07-16T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "verify no-tool grounding retry lineage");
     }
 }

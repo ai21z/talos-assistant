@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Limits;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
@@ -176,6 +177,9 @@ public final class RagMode implements Mode {
         // Memory update is now centralized in TurnProcessor via SessionListener
 
         String fullText = turnOut.text() + citationsSuffix;
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                fullText,
+                LocalTurnTraceCapture.AnswerTransformationReason.RETRIEVAL_CITATION_SUFFIX);
         if (turnOut.streamed()) {
             return Optional.of(new Result.Streamed(fullText, citationsSuffix));
         }

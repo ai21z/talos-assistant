@@ -6,6 +6,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.CapabilityPosturePolicy;
@@ -66,7 +67,9 @@ public final class PlanMode implements Mode {
                 TaskContractResolver.fromMessages(contractMessages),
                 workspace);
         if (ReadOnlyCommandRefusal.matches(rawContract)) {
-            return Optional.of(ReadOnlyCommandRefusal.resultFor(name()));
+            Result.Ok refusal = ReadOnlyCommandRefusal.resultFor(name());
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(refusal.text);
+            return Optional.of(refusal);
         }
         CapabilityPosturePolicy.EffectiveTurn effectiveTurn =
                 CapabilityPosturePolicy.apply(CapabilityPosture.PLAN_READ_ONLY, rawContract);
@@ -110,6 +113,9 @@ public final class PlanMode implements Mode {
                 AssistantTurnExecutor.execute(messages, workspace, turnCtx, opts);
 
         String body = "\n" + turnOut.text() + "\n\n";
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                body,
+                LocalTurnTraceCapture.AnswerTransformationReason.MODE_PRESENTATION_LAYOUT);
 
         if (turnOut.streamed()) {
             return Optional.of(new Result.Streamed(body, ""));

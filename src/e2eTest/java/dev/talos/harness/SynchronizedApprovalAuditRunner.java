@@ -207,7 +207,7 @@ public final class SynchronizedApprovalAuditRunner {
                     request.workspace(),
                     ctx,
                     new AssistantTurnExecutor.Options());
-            LocalTurnTraceCapture.recordModelResponseReceived(turnOutput.text());
+            LocalTurnTraceCapture.recordRoutedAnswerCaptured(turnOutput.text());
             LocalTurnTraceCapture.recordOutcomeIfAbsent(
                     "OK",
                     "NOT_RUN",

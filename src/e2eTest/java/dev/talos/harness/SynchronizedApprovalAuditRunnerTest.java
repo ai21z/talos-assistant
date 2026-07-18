@@ -1265,6 +1265,43 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(result.traceText().contains("TOOL_EXECUTED talos.edit_file"), result.traceText());
         assertTrue(result.trace().verification().summary().contains("Append line verification passed"),
                 result.trace().verification().summary());
+        var transformed = result.trace().events().stream()
+                .filter(event -> "TOOL_CALL_TRANSFORMED".equals(event.type()))
+                .filter(event -> "APPEND_WRITE_TO_EDIT".equals(
+                        event.data().get("reasonCode")))
+                .findFirst()
+                .orElseThrow();
+        String toolCallId = String.valueOf(transformed.data().get("toolCallId"));
+        var parsed = result.trace().events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .filter(event -> toolCallId.equals(String.valueOf(
+                        event.data().get("toolCallId"))))
+                .findFirst()
+                .orElseThrow();
+        var approval = result.trace().events().stream()
+                .filter(event -> "APPROVAL_GRANTED".equals(event.type()))
+                .filter(event -> toolCallId.equals(String.valueOf(
+                        event.data().get("toolCallId"))))
+                .findFirst()
+                .orElseThrow();
+        var executed = result.trace().events().stream()
+                .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                .filter(event -> toolCallId.equals(String.valueOf(
+                        event.data().get("toolCallId"))))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(parsed.data().get("toolNameHash"),
+                transformed.data().get("fromToolNameHash"));
+        assertEquals(parsed.data().get("argumentsHash"),
+                transformed.data().get("fromArgumentsHash"));
+        assertEquals(transformed.data().get("toolNameHash"),
+                approval.data().get("toolNameHash"));
+        assertEquals(transformed.data().get("argumentsHash"),
+                approval.data().get("argumentsHash"));
+        assertEquals(transformed.data().get("toolNameHash"),
+                executed.data().get("toolNameHash"));
+        assertEquals(transformed.data().get("argumentsHash"),
+                executed.data().get("argumentsHash"));
     }
 
     @Test

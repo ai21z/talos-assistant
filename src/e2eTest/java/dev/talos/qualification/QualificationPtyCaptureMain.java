@@ -68,8 +68,13 @@ public final class QualificationPtyCaptureMain {
         String machineId = required(campaign.machineId(), "machineId");
         String configId = required(campaign.configId(), "configId");
         this.protocolVersion = campaign.protocolVersion();
-        if (protocolVersion <= 0) {
-            throw new IllegalStateException("campaign protocolVersion is missing or invalid");
+        QualificationArtifactPublication.requireWritableProtocol(protocolVersion);
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocolVersion);
+        QualificationArtifactPublication.requireWritableCampaign(this.campaignRoot, catalog);
+        catalog.scenario(scenarioId);
+        if (repetition < 1 || repetition > campaign.repetitions().size()) {
+            throw new IllegalArgumentException(
+                    "repetition must identify one trial declared by the campaign");
         }
         JsonNode calibration = JSON.readTree(this.campaignRoot.resolve(Path.of(
                 "candidates", candidateAlias, "calibration-rules.json")).toFile());
@@ -95,6 +100,8 @@ public final class QualificationPtyCaptureMain {
         String trial = "trial-%02d".formatted(repetition);
         this.runRoot = this.campaignRoot.resolve(Path.of(
                 "runs", candidateAlias, machineId, configId, scenarioId, trial));
+        QualificationArtifactPublication.requireWritableDeclaredRun(
+                this.campaignRoot, this.runRoot, scenarioId, catalog);
         this.workspace = this.campaignRoot.resolve(Path.of("workspaces", scenarioId, trial));
         this.monitorScript = this.campaignRoot.resolve(Path.of("tools", "monitor-resources.ps1"));
         this.stopFile = runRoot.resolve("resource-monitor.stop");
@@ -171,9 +178,11 @@ public final class QualificationPtyCaptureMain {
             drainOutput();
             writePacket(started, captureFailure);
             if (captureFailure != null) {
-                Files.writeString(runRoot.resolve("transcript.failed.txt"),
-                        capture.text() + System.lineSeparator() + captureFailure,
-                        StandardCharsets.UTF_8);
+                QualificationArtifactPublication.publishNewOrVerifyExact(
+                        runRoot.resolve("transcript.failed.txt"),
+                        (capture.text() + System.lineSeparator() + captureFailure)
+                                .getBytes(StandardCharsets.UTF_8),
+                        "PTY capture failure transcript");
             }
         }
         if (captureFailure != null) throw captureFailure;
@@ -250,7 +259,7 @@ public final class QualificationPtyCaptureMain {
         waitForSettledIdlePrompt(cursor, SLASH_WAIT);
         drainOutput();
         QualificationProviderEvidence.capture(
-                runRoot, capture.slice(promptDebugAnchor, cursor));
+                runRoot, capture.slice(promptDebugAnchor, cursor), protocolVersion);
 
         addInput("last-trace");
         writeLine("/last trace");
@@ -432,7 +441,10 @@ public final class QualificationPtyCaptureMain {
             packet.put("processCleanup", cleanupResult == null ? Map.of() : cleanupResult.evidence());
             packet.put("events", events);
             packet.put("rawOutput", capture.text());
-            JSON.writeValue(transcriptPath.toFile(), packet);
+            QualificationArtifactPublication.publishNewOrVerifyExact(
+                    transcriptPath,
+                    JSON.writeValueAsBytes(packet),
+                    "PTY capture packet");
         } catch (Exception writeFailure) {
             if (failure != null) failure.addSuppressed(writeFailure);
             else throw new IllegalStateException("failed to write PTY capture packet", writeFailure);

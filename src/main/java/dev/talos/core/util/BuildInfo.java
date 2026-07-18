@@ -59,9 +59,17 @@ public final class BuildInfo {
      *         or {@value #UNKNOWN} if the resource is absent or the key is missing.
      */
     public static String commitSha() {
-        String full = buildProp("git.commit");
+        String full = fullCommitSha();
         if (UNKNOWN.equals(full)) return UNKNOWN;
         return full.length() > 7 ? full.substring(0, 7) : full;
+    }
+
+    /**
+     * @return the complete git commit SHA recorded in the packaged build metadata,
+     *         or {@value #UNKNOWN} when the build is not identity-bearing.
+     */
+    public static String fullCommitSha() {
+        return buildProp("git.commit");
     }
 
     /** @return git branch from {@code META-INF/talos-build.properties}, or {@value #UNKNOWN}. */

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 
 final class QualificationProtocol {
-    static final int VERSION = 5;
+    static final int VERSION = 6;
     static final String BANK_SCHEMA = "talos.modelQualification.scenarioBank";
     static final String FIXTURE_SCHEMA = "talos.modelQualification.fixture";
 
@@ -77,6 +77,7 @@ final class QualificationProtocol {
             String fixtureSha256,
             String prompt,
             ApprovalBehavior approvalBehavior,
+            QualificationRecords.ResponseOwnerContract responseOwnerContract,
             List<String> expectedTerminalStates,
             List<String> allowedTargets,
             List<String> forbiddenTargets,
@@ -91,6 +92,7 @@ final class QualificationProtocol {
             fixtureSha256 = required(fixtureSha256, "fixture SHA-256");
             prompt = required(prompt, "scenario prompt");
             approvalBehavior = Objects.requireNonNull(approvalBehavior, "approval behavior");
+            responseOwnerContract = Objects.requireNonNull(responseOwnerContract, "response owner contract");
             expectedTerminalStates = immutableRequired(expectedTerminalStates, "expected terminal states");
             allowedTargets = immutable(allowedTargets);
             forbiddenTargets = immutable(forbiddenTargets);
@@ -100,8 +102,8 @@ final class QualificationProtocol {
 
         Scenario withFixtureSha256(String replacement) {
             return new Scenario(id, bank, archetype, category, fixture, replacement, prompt,
-                    approvalBehavior, expectedTerminalStates, allowedTargets, forbiddenTargets,
-                    expectedDecisions, atomicRequirements);
+                    approvalBehavior, responseOwnerContract, expectedTerminalStates, allowedTargets,
+                    forbiddenTargets, expectedDecisions, atomicRequirements);
         }
     }
 

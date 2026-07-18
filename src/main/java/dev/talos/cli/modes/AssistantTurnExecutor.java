@@ -43,6 +43,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.ModelIdentitySnapshot;
+import dev.talos.spi.types.ProviderResponseCapture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -214,7 +215,7 @@ public final class AssistantTurnExecutor {
                     workspace,
                     0,
                     opts));
-            return new TurnOutput(out.toString(), false);
+            return completeTurnOutput(out.toString(), false);
         }
         boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan, workspace);
 
@@ -257,14 +258,19 @@ public final class AssistantTurnExecutor {
                         out.append(answer);
                     } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
-                            answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                            BlockedSmallTalkAnswer blocked =
+                                    answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                            answer = blocked.text();
+                            recordBlockedSmallTalkAnswerOrigin(
+                                    blocked, streamResult.provenance());
                             emitBlockedSmallTalkToolCallAnswer(answer, ctx);
                             out.append(answer);
                         } else {
                             LOG.debug("Tool calls detected in streamed response (native: {}), entering tool-call loop",
                                     streamResult.hasToolCalls());
                             ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                    answer, streamResult.toolCalls(), messages, workspace, ctx);
+                                    answer, streamResult.toolCalls(), streamResult.provenance(),
+                                    messages, workspace, ctx);
                             answer = loopResult.finalAnswer();
                             LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
                                     loopResult.iterations(), loopResult.toolsInvoked());
@@ -313,12 +319,17 @@ public final class AssistantTurnExecutor {
                         answer = withOutputLimitNotice(answer, streamResult, ctx, false);
                     } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
-                            answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                            BlockedSmallTalkAnswer blocked =
+                                    answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                            answer = blocked.text();
+                            recordBlockedSmallTalkAnswerOrigin(
+                                    blocked, streamResult.provenance());
                         } else {
                             LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
                                     streamResult.hasToolCalls());
                             ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                    answer, streamResult.toolCalls(), messages, workspace, ctx);
+                                    answer, streamResult.toolCalls(), streamResult.provenance(),
+                                    messages, workspace, ctx);
                             answer = loopResult.finalAnswer();
                             LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
                                     loopResult.iterations(), loopResult.toolsInvoked());
@@ -370,7 +381,7 @@ public final class AssistantTurnExecutor {
             TurnSourceEvidenceCapture.clear();
         }
 
-        return new TurnOutput(out.toString(), streamed);
+        return completeTurnOutput(out.toString(), streamed);
     }
 
     static void recordModelIdentityDiagnostics(ModelIdentitySnapshot identity) {
@@ -481,9 +492,15 @@ public final class AssistantTurnExecutor {
     }
 
     static void recordLlmAbortOutcome(LlmClient.StreamResult result, String answer) {
+        String abortReason = result == null ? "" : result.abortReason();
         LocalTurnTraceCapture.recordModelGenerationAborted(
-                result == null ? "" : result.abortReason(),
+                abortReason,
                 hasAbortPartialOutput(answer));
+        if (result != null
+                && result.abortOrigin() == ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL
+                && !hasAbortPartialOutput(answer)) {
+            LocalTurnTraceCapture.recordOperatorAnswerSelected(answer);
+        }
         recordBackendFailureOutcome("LLM_ABORTED");
     }
 
@@ -579,6 +596,7 @@ public final class AssistantTurnExecutor {
 
     private static TurnOutput directTurnOutput(String answer, Context ctx, Options opts) {
         String shaped = sanitizeAndTruncate(answer == null ? "" : answer, opts);
+        LocalTurnTraceCapture.recordDeterministicAnswerSelected(shaped);
         boolean streamed = ctx != null && ctx.streamSink() != null;
         if (streamed) {
             ctx.streamSink().accept(shaped);
@@ -586,7 +604,15 @@ public final class AssistantTurnExecutor {
                 try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
             }
         }
-        return new TurnOutput(shaped, streamed);
+        return completeTurnOutput(shaped, streamed);
+    }
+
+    private static TurnOutput completeTurnOutput(String answer, boolean streamed) {
+        String safe = Objects.toString(answer, "");
+        LocalTurnTraceCapture.recordAnswerTransformedForRouting(
+                safe,
+                LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
+        return new TurnOutput(safe, streamed);
     }
 
     record ToolLoopAnswerResolution(String answer, String extraSummary) {}
@@ -783,26 +809,51 @@ public final class AssistantTurnExecutor {
         return taskContract != null && taskContract.type() == TaskType.SMALL_TALK;
     }
 
-    private static String answerForBlockedSmallTalkToolCalls(
+    private record BlockedSmallTalkAnswer(String text, boolean providerDerived) {
+        private BlockedSmallTalkAnswer {
+            text = Objects.toString(text, "");
+        }
+    }
+
+    private static BlockedSmallTalkAnswer answerForBlockedSmallTalkToolCalls(
             String answer,
             List<ChatMessage> messages,
             Options opts
     ) {
         String stripped = ToolCallParser.stripToolCalls(answer == null ? "" : answer).strip();
         if (!stripped.isBlank()) {
-            return sanitizeAndTruncate(stripped, opts);
+            return new BlockedSmallTalkAnswer(sanitizeAndTruncate(stripped, opts), true);
         }
         String userRequest = latestUserRequest(messages);
         if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(userRequest)) {
-            return sanitizeAndTruncate(CapabilityAnswerPolicy.workspaceSwitchUnsupportedAnswer(), opts);
+            return new BlockedSmallTalkAnswer(
+                    sanitizeAndTruncate(CapabilityAnswerPolicy.workspaceSwitchUnsupportedAnswer(), opts),
+                    false);
         }
         if (looksLikeAssistantIdentityTurn(userRequest)) {
-            return sanitizeAndTruncate(CapabilityAnswerPolicy.identityAnswer(), opts);
+            return new BlockedSmallTalkAnswer(
+                    sanitizeAndTruncate(CapabilityAnswerPolicy.identityAnswer(), opts), false);
         }
         if (looksLikeAssistantCapabilityTurn(userRequest)) {
-            return sanitizeAndTruncate(CapabilityAnswerPolicy.capabilityAnswer(), opts);
+            return new BlockedSmallTalkAnswer(
+                    sanitizeAndTruncate(CapabilityAnswerPolicy.capabilityAnswer(), opts), false);
         }
-        return sanitizeAndTruncate("Hi, I am Talos.", opts);
+        return new BlockedSmallTalkAnswer(
+                sanitizeAndTruncate("Hi, I am Talos.", opts), false);
+    }
+
+    private static void recordBlockedSmallTalkAnswerOrigin(
+            BlockedSmallTalkAnswer answer,
+            ProviderResponseCapture.Receipt receipt) {
+        if (answer.providerDerived()) {
+            LocalTurnTraceCapture.recordProviderAnswerSelectedAfterToolCallSuppression(
+                    answer.text(),
+                    receipt,
+                    LocalTurnTraceCapture.ProviderToolSuppressionReason
+                            .TASK_CONTRACT_BLOCKED_TOOL_CALLS);
+        } else {
+            LocalTurnTraceCapture.recordDeterministicAnswerSelected(answer.text());
+        }
     }
 
     private static void emitBlockedSmallTalkToolCallAnswer(String answer, Context ctx) {

@@ -4,6 +4,7 @@ import dev.talos.core.Config;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.TokenChunk;
 
 import java.util.ArrayList;
@@ -194,6 +195,14 @@ public final class ScriptedNativeLlmClient {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public void close() {
         }
     }
@@ -232,6 +241,14 @@ public final class ScriptedNativeLlmClient {
             requests.add(request);
             int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
             return chunks(responses.get(index));
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override
@@ -299,6 +316,14 @@ public final class ScriptedNativeLlmClient {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public void close() {
         }
     }
@@ -340,8 +365,24 @@ public final class ScriptedNativeLlmClient {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) {
             return chunks(recovery);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStreamNonStreaming(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStreamNonStreaming(request);
         }
 
         @Override
@@ -419,6 +460,14 @@ public final class ScriptedNativeLlmClient {
         }
 
         @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
         public void close() {
         }
     }
@@ -464,6 +513,14 @@ public final class ScriptedNativeLlmClient {
                 }
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override

@@ -7,17 +7,24 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,8 +37,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ReadOnlyInspectionRetryTest {
 
+    @TempDir
+    Path lineageWorkspace;
+
+    @AfterEach
+    void clearTrace() {
+        LocalTurnTraceCapture.clear();
+    }
+
     @Test
     void retriesReadOnlyEvidenceRequestAndRunsToolLoop(@TempDir Path workspace) throws Exception {
+        beginTrace("read-only-retry-receipt");
         Files.writeString(workspace.resolve("README.md"), "Workspace facts from README.\n");
         Context ctx = context(workspace, "Answer from retry evidence.");
         List<ChatMessage> messages = messages("Explain this workspace.");
@@ -45,9 +61,8 @@ class ReadOnlyInspectionRetryTest {
                 ctx,
                 sentMessages -> {
                     retryMessages.set(List.copyOf(sentMessages));
-                    return new LlmClient.StreamResult(
-                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
-                            List.of());
+                    return providerTextToolResult(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}");
                 });
 
         assertNotNull(result.loopResult(), "retry tool calls should re-enter the tool loop");
@@ -59,6 +74,18 @@ class ReadOnlyInspectionRetryTest {
         assertTrue(prompt.contains("Use read-only tools now."), prompt);
         assertTrue(prompt.contains("README.md"), prompt);
         assertTrue(prompt.contains("Do not call write_file or edit_file."), prompt);
+        var trace = LocalTurnTraceCapture.complete();
+        var parsed = trace.events().stream()
+                .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                .filter(event -> event.data().containsKey("providerGenerationId"))
+                .findFirst().orElseThrow();
+        var completed = trace.events().stream()
+                .filter(event -> "GENERATION_COMPLETED".equals(event.type()))
+                .filter(event -> event.data().get("generationId").equals(
+                        parsed.data().get("providerGenerationId")))
+                .findFirst().orElseThrow();
+        assertEquals(completed.data().get("selectedAttemptId"),
+                parsed.data().get("providerAttemptId"));
     }
 
     @Test
@@ -142,6 +169,61 @@ class ReadOnlyInspectionRetryTest {
         assertEquals(2, messages.size(), "non-retry path must not append messages");
     }
 
+    @ParameterizedTest(name = "{0} retry restores original read-only answer owner")
+    @EnumSource(FallbackKind.class)
+    void fallbackRetryRestoresOriginalReadOnlyAnswerOwner(FallbackKind fallbackKind) {
+        beginTrace("read-only-inspection-" + fallbackKind.name().toLowerCase());
+        String request = "Explain this workspace.";
+        String answer = "I cannot inspect from here.";
+        LlmClient.StreamResult originalProviderResult = providerTextResult(answer);
+
+        ReadOnlyInspectionRetry.Result result = ReadOnlyInspectionRetry.retryIfNeeded(
+                answer,
+                messages(request),
+                plan(TaskContractResolver.fromUserRequest(request), ExecutionPhase.INSPECT),
+                lineageWorkspace,
+                context(lineageWorkspace, "unused scripted answer"),
+                ignored -> fallbackProviderResult(fallbackKind, answer));
+
+        assertEquals(answer, result.answer(),
+                "read-only fallback must preserve the original answer bytes");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertRestoredProviderOwner(
+                trace,
+                originalProviderResult.provenance(),
+                fallbackKind.restorationReason());
+    }
+
+    @Test
+    void acceptedDifferentReadOnlyProviderRetryRetainsRetryOwnerWithoutRestoration() {
+        beginTrace("read-only-inspection-accepted");
+        String request = "Explain this workspace.";
+        String answer = "I cannot inspect from here.";
+        String accepted = "Grounded answer from the workspace evidence.";
+        providerTextResult(answer);
+        AtomicReference<ProviderResponseCapture.Receipt> retryReceipt = new AtomicReference<>();
+
+        ReadOnlyInspectionRetry.Result result = ReadOnlyInspectionRetry.retryIfNeeded(
+                answer,
+                messages(request),
+                plan(TaskContractResolver.fromUserRequest(request), ExecutionPhase.INSPECT),
+                lineageWorkspace,
+                context(lineageWorkspace, "unused scripted answer"),
+                ignored -> {
+                    LlmClient.StreamResult retry = providerTextResult(accepted);
+                    retryReceipt.set(retry.provenance());
+                    return retry;
+                });
+
+        assertEquals(accepted, result.answer(), "accepted retry bytes must remain unchanged");
+        LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertTrue(events(trace, "ANSWER_CANDIDATE_RESTORED").isEmpty(),
+                "accepted retry must not restore the original candidate");
+        assertTerminalProviderOwner(trace, retryReceipt.get());
+    }
+
     private static CurrentTurnPlan plan(TaskContract contract, ExecutionPhase phase) {
         return CurrentTurnPlan.compatibility(
                 contract,
@@ -168,5 +250,128 @@ class ReadOnlyInspectionRetryTest {
         messages.add(ChatMessage.system("You are Talos."));
         messages.add(ChatMessage.user(request));
         return messages;
+    }
+
+    private static LlmClient.StreamResult providerTextToolResult(String text) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
+                text,
+                0,
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP,
+                false,
+                false,
+                true));
+        generation.complete(receipt);
+        return new LlmClient.StreamResult(
+                text, List.of(), "", "", ProviderResponseCapture.AbortOrigin.NONE,
+                ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP,
+                false, false, receipt);
+    }
+
+    private static LlmClient.StreamResult providerTextResult(String text) {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
+                text,
+                List.of(),
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false,
+                false,
+                false));
+        generation.complete(receipt);
+        return new LlmClient.StreamResult(
+                text, List.of(), "", "", ProviderResponseCapture.AbortOrigin.NONE,
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                false, false, receipt);
+    }
+
+    private static void beginTrace(String id) {
+        LocalTurnTraceCapture.begin(
+                id, "session", 1, "2026-07-16T00:00:00Z", "workspace",
+                "auto", "test", "model", "retry receipt");
+    }
+
+    private enum FallbackKind {
+        BLANK("SPECULATIVE_RETRY_EMPTY"),
+        EQUAL("SPECULATIVE_RETRY_REJECTED"),
+        EXCEPTION("SPECULATIVE_RETRY_FAILED");
+
+        private final String restorationReason;
+
+        FallbackKind(String restorationReason) {
+            this.restorationReason = restorationReason;
+        }
+
+        String restorationReason() {
+            return restorationReason;
+        }
+    }
+
+    private static LlmClient.StreamResult fallbackProviderResult(
+            FallbackKind fallbackKind,
+            String original) {
+        return switch (fallbackKind) {
+            case BLANK -> providerTextResult("");
+            case EQUAL -> providerTextResult(original);
+            case EXCEPTION -> {
+                failProviderGeneration();
+                throw new IllegalStateException("injected read-only retry failure");
+            }
+        };
+    }
+
+    private static void failProviderGeneration() {
+        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        generation.fail(ProviderResponseCapture.Failure.PROVIDER_EXCEPTION);
+    }
+
+    private static void assertRestoredProviderOwner(
+            LocalTurnTrace trace,
+            ProviderResponseCapture.Receipt originalReceipt,
+            String expectedReason) {
+        List<TurnTraceEvent> restorations = events(trace, "ANSWER_CANDIDATE_RESTORED");
+        assertEquals(1, restorations.size(), "fallback must emit exactly one closed restoration");
+        TurnTraceEvent restoration = restorations.getFirst();
+        assertEquals("MODEL_PROVIDER", restoration.data().get("origin"));
+        assertEquals(originalReceipt.generationId(), restoration.data().get("sourceGenerationId"));
+        assertEquals(originalReceipt.attemptId(), restoration.data().get("sourceAttemptId"));
+        assertEquals(expectedReason, restoration.data().get("reasonCode"));
+        assertTrue(events(trace, "ANSWER_TRANSFORMED").isEmpty(),
+                "exact original fallback bytes require no transform");
+        assertTerminalProviderOwner(trace, originalReceipt);
+    }
+
+    private static void assertTerminalProviderOwner(
+            LocalTurnTrace trace,
+            ProviderResponseCapture.Receipt receipt) {
+        TurnTraceEvent terminal = events(trace, "TERMINAL_ANSWER_SELECTED").getFirst();
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"));
+        assertEquals(receipt.generationId(), terminal.data().get("sourceGenerationId"));
+        assertEquals(receipt.attemptId(), terminal.data().get("sourceAttemptId"));
+    }
+
+    private static List<TurnTraceEvent> events(LocalTurnTrace trace, String type) {
+        return trace.events().stream()
+                .filter(event -> type.equals(event.type()))
+                .toList();
     }
 }

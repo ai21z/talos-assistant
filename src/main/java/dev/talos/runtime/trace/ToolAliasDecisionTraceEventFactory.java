@@ -1,5 +1,6 @@
 package dev.talos.runtime.trace;
 
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.time.Instant;
@@ -12,7 +13,9 @@ final class ToolAliasDecisionTraceEventFactory {
     static TurnTraceEvent decision(ToolAliasPolicy.Decision decision) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("status", decision.status().name());
-        data.put("rawName", safe(decision.rawName()));
+        String rawName = safe(decision.rawName());
+        data.put("rawNameHash", ProviderResponseCapture.toolNameHash(rawName));
+        data.put("rawNameChars", rawName.length());
         data.put("canonicalTool", safe(decision.canonicalToolName()));
         data.put("profile", decision.profile().id());
         data.put("mutating", decision.mutating());
