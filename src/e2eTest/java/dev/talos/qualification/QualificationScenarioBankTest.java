@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QualificationScenarioBankTest {
 
     @Test
-    void historicalV1ThroughV4ResourceBytesRemainPinned() throws Exception {
+    void historicalV1ThroughV5CanonicalPublishedBytesRemainPinned() throws Exception {
         Map<String, String> expected = Map.ofEntries(
                 Map.entry("model-qualification/banks/admission-v1.json",
                         "54cd902f28399c09d9d52560db82d7dab7f5c6db7f3ebb30c43244ef99923a76"),
@@ -34,6 +34,10 @@ class QualificationScenarioBankTest {
                         "606726bf72f6e2a3f31d20cc46c8b41654d70aa42c06151c81f4a3be76909a6f"),
                 Map.entry("model-qualification/banks/full-v4.json",
                         "ccdba9307ea8d07c5b4e54ece9a295da0963363222bd664e8f50e6173ea76020"),
+                Map.entry("model-qualification/banks/admission-v5.json",
+                        "9990a74ac870690e2c7ea97b6bfc60ce3e04f35d6d49bad41e3caf6975f0f741"),
+                Map.entry("model-qualification/banks/full-v5.json",
+                        "e7136109e7066b64ff514f6a713c86d56ca3861b767720f90779c2b9047c9133"),
                 Map.entry("model-qualification/fixtures/basic-workspace-v1.json",
                         "2f5d6a59bdcfd3021ea977908ba1b70b2ce1fc55e90e9c73b4dcae84dfbea689"),
                 Map.entry("model-qualification/fixtures/basic-workspace-v2.json",
@@ -42,6 +46,8 @@ class QualificationScenarioBankTest {
                         "8a425ad1de1cdcd641407e6e00862744bcc7f11f819fab6f4af938a76ae2aaa7"),
                 Map.entry("model-qualification/fixtures/basic-workspace-v4.json",
                         "31bc4929dfd5865b801ba73f46c74fee198102aec4ce47e14c77f4c68fc6cdae"),
+                Map.entry("model-qualification/fixtures/basic-workspace-v5.json",
+                        "da1a0dcb09af384c40e44dabc5bb357f5ec47c2d56e0328ea7c17b736aea5e37"),
                 Map.entry("model-qualification/fixtures/context-workspace-v1.json",
                         "49424edf18c5d9944a7286ee445f48e54485cb605322e69aeba6551b0f18b7b4"),
                 Map.entry("model-qualification/fixtures/context-workspace-v2.json",
@@ -50,6 +56,8 @@ class QualificationScenarioBankTest {
                         "19852c9e8895827b5d9aead01df3367900ff41787d34f060ec47eeba6c86f39d"),
                 Map.entry("model-qualification/fixtures/context-workspace-v4.json",
                         "e4708699fb0aca99518a811503ee235a021f76c2d6a18fba00bb004f21ce2530"),
+                Map.entry("model-qualification/fixtures/context-workspace-v5.json",
+                        "2c27b3584fd4275517415fbc33074bd5bb93d81d0e7821a03fc98cc6eefe5e1e"),
                 Map.entry("model-qualification/fixtures/privacy-workspace-v1.json",
                         "cc24ef90dc8e1174934651e95e98e79a7403e10e5d284965ea47c36ac373d86f"),
                 Map.entry("model-qualification/fixtures/privacy-workspace-v2.json",
@@ -58,6 +66,8 @@ class QualificationScenarioBankTest {
                         "ccc9c8496c2278bcbf3c380df21a216b5765c702fa8c5dd5da1eea165b8dface"),
                 Map.entry("model-qualification/fixtures/privacy-workspace-v4.json",
                         "ff1895c039041bc4b7e874cea643645a08ebe3366c25eee216572c68564e4bbf"),
+                Map.entry("model-qualification/fixtures/privacy-workspace-v5.json",
+                        "3b885ceb6197b80442bb3b7b6bacb19a1dcfd7dac32fe37ad5e9e8673f4e0672"),
                 Map.entry("model-qualification/fixtures/web-workspace-v1.json",
                         "043a02de8972adb77e05bee448ffa80d3e0e868341b7b0cc1b3b8b4a64d7c666"),
                 Map.entry("model-qualification/fixtures/web-workspace-v2.json",
@@ -65,12 +75,17 @@ class QualificationScenarioBankTest {
                 Map.entry("model-qualification/fixtures/web-workspace-v3.json",
                         "fb63451517715763426d6dc779f9b6165eb258ce4793fd64f009ca42f7884b87"),
                 Map.entry("model-qualification/fixtures/web-workspace-v4.json",
-                        "536612d8d076f7f2654328cf5d3fe88de6ae0518ca5265b8537094ad41c79bf4"));
+                        "536612d8d076f7f2654328cf5d3fe88de6ae0518ca5265b8537094ad41c79bf4"),
+                Map.entry("model-qualification/fixtures/web-workspace-v5.json",
+                        "47c5f342965550a01c1d7764ae3059088e8eda8cdf037e54c84f4364afb7fd10"));
 
         for (Map.Entry<String, String> entry : expected.entrySet()) {
             try (var input = getClass().getClassLoader().getResourceAsStream(entry.getKey())) {
                 assertTrue(input != null, entry.getKey());
-                assertEquals(entry.getValue(), QualificationScenarioBank.sha256(input.readAllBytes()), entry.getKey());
+                int version = Integer.parseInt(entry.getKey().replaceFirst("^.*-v(\\d+)\\.json$", "$1"));
+                byte[] canonical = QualificationScenarioBank.canonicalResourceBytes(
+                        entry.getKey(), input.readAllBytes(), version);
+                assertEquals(entry.getValue(), QualificationScenarioBank.sha256(canonical), entry.getKey());
             }
         }
     }
