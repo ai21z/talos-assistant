@@ -1,6 +1,8 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.io.AtomicFileWriter;
+import dev.talos.core.io.StrictUtf8;
 import dev.talos.core.util.TextReplacement;
 import dev.talos.tools.*;
 
@@ -8,12 +10,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Tool that performs a targeted string replacement within a workspace file.
  *
- * <p>Modeled after local coding assistant's FileEditTool: the caller provides the exact
- * text to find ({@code old_string}) and the replacement ({@code new_string}).
+ * <p>The caller provides the exact text to find ({@code old_string}) and the
+ * replacement ({@code new_string}).
  * The match must be unique - if the old string appears zero or multiple times,
  * the edit is rejected to prevent ambiguous changes.
  *
@@ -33,8 +36,15 @@ public final class FileEditTool implements TalosTool {
 
     private static final String NAME = "talos.edit_file";
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB
+    private final AtomicFileWriter atomicFileWriter;
 
-    public FileEditTool() { }
+    public FileEditTool() {
+        this(new AtomicFileWriter());
+    }
+
+    FileEditTool(AtomicFileWriter atomicFileWriter) {
+        this.atomicFileWriter = Objects.requireNonNull(atomicFileWriter, "atomicFileWriter");
+    }
 
     @Override public String name() { return NAME; }
     @Override public String description() {
@@ -134,7 +144,14 @@ public final class FileEditTool implements TalosTool {
 
         // --- Read, validate uniqueness, replace ---
         try {
-            String content = Files.readString(resolved);
+            AtomicFileWriter.ReadSnapshot snapshot = atomicFileWriter.readSnapshot(resolved);
+            byte[] sourceBytes = snapshot.bytes();
+            if (sourceBytes.length > MAX_FILE_SIZE) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "File too large (" + (sourceBytes.length / 1024)
+                                + " KB). Max: " + (MAX_FILE_SIZE / 1024) + " KB"));
+            }
+            String content = StrictUtf8.decode(sourceBytes);
 
             TextReplacement.Match match = TextReplacement.findUniqueMatch(content, oldString, newString);
             if (match.count() == 0) {
@@ -165,7 +182,10 @@ public final class FileEditTool implements TalosTool {
 
             // Undo snapshots moved to the governed checkpoint machinery
             // (T795/T796) - captured pre-approval by the runtime, not here.
-            Files.writeString(resolved, updated);
+            atomicFileWriter.replace(
+                    resolved,
+                    StrictUtf8.encode(updated),
+                    snapshot.preimage());
 
             // Report what changed
             long oldLines = oldString.chars().filter(c -> c == '\n').count() + 1;

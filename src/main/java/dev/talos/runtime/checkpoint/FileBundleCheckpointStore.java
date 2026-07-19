@@ -3,16 +3,15 @@ package dev.talos.runtime.checkpoint;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
+import dev.talos.core.io.AtomicFileWriter;
 import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -38,16 +37,38 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
      */
     private static final java.util.concurrent.atomic.AtomicLong CAPTURE_SEQUENCE =
             new java.util.concurrent.atomic.AtomicLong();
+    private final AtomicFileWriter blobFileWriter;
     private final Path root;
     private final RestoreFileWriter restoreFileWriter;
 
     public FileBundleCheckpointStore(Path root) {
-        this(root, FileBundleCheckpointStore::replaceFileAtomically);
+        this(root, new AtomicFileWriter());
+    }
+
+    /** Package-private seam proving restore and blob writes share the governed owner. */
+    FileBundleCheckpointStore(Path root, AtomicFileWriter atomicFileWriter) {
+        this(
+                root,
+                atomicFileWriter,
+                atomicFileWriter == null
+                        ? FileBundleCheckpointStore::replaceFileAtomically
+                        : atomicFileWriter::replaceCurrent);
     }
 
     /** Package-private seam so tests can inject write faults mid-restore. */
     FileBundleCheckpointStore(Path root, RestoreFileWriter restoreFileWriter) {
+        this(root, new AtomicFileWriter(), restoreFileWriter);
+    }
+
+    private FileBundleCheckpointStore(
+            Path root,
+            AtomicFileWriter blobFileWriter,
+            RestoreFileWriter restoreFileWriter
+    ) {
         this.root = root == null ? CheckpointConfig.defaultRoot() : root;
+        this.blobFileWriter = blobFileWriter == null
+                ? new AtomicFileWriter()
+                : blobFileWriter;
         this.restoreFileWriter = restoreFileWriter == null
                 ? FileBundleCheckpointStore::replaceFileAtomically
                 : restoreFileWriter;
@@ -65,22 +86,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
      * previous content or the full replacement.
      */
     static void replaceFileAtomically(Path target, byte[] bytes) throws IOException {
-        Path parent = target.getParent();
-        if (parent == null) {
-            Files.write(target, bytes);
-            return;
-        }
-        Path tmp = Files.createTempFile(parent, ".talos-restore", ".tmp");
-        try {
-            Files.write(tmp, bytes);
-            try {
-                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
+        new AtomicFileWriter().replaceCurrent(target, bytes);
     }
 
     @Override
@@ -573,7 +579,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return root.resolve(workspaceId).resolve("checkpoints").resolve(checkpointId);
     }
 
-    private static CaptureStats capturePath(
+    private CaptureStats capturePath(
             Path workspace,
             Path target,
             Path blobs,
@@ -615,7 +621,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return captureExistingFile(workspace, target, blobs, cfg, files);
     }
 
-    private static CaptureStats captureExistingFile(
+    private CaptureStats captureExistingFile(
             Path workspace,
             Path target,
             Path blobs,
@@ -633,7 +639,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return new CaptureStats(bytes.length);
     }
 
-    private static void writeBlobAtomically(Path blob, byte[] bytes) throws Exception {
+    private void writeBlobAtomically(Path blob, byte[] bytes) throws Exception {
         Path parent = blob.getParent();
         if (parent != null) Files.createDirectories(parent);
         if (Files.isRegularFile(blob)) {
@@ -642,17 +648,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 return;
             }
         }
-        Path tmp = Files.createTempFile(parent, blob.getFileName().toString(), ".tmp");
-        try {
-            Files.write(tmp, bytes);
-            try {
-                Files.move(tmp, blob, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, blob, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
+        blobFileWriter.replaceCurrent(blob, bytes);
     }
 
     private static Map<String, Object> fileEntry(

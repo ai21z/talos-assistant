@@ -3,18 +3,23 @@ package dev.talos.runtime.checkpoint;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
+import dev.talos.core.io.AtomicFileWriter;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.UserDefinedFileAttributeView;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class FileBundleCheckpointStoreTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -44,6 +49,44 @@ class FileBundleCheckpointStoreTest {
 
         assertTrue(restore.success(), restore.message());
         assertEquals("original", Files.readString(workspace.resolve("index.html")));
+        assertEquals(1, restore.restoredFiles());
+    }
+
+    @Test
+    void capturesAndRestoresArbitraryBinaryBytesExactly(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Path target = workspace.resolve("payload.bin");
+        byte[] captured = {
+                0,
+                (byte) 0xff,
+                (byte) 0xc3,
+                0x28,
+                '\r',
+                '\n',
+                (byte) 0xed,
+                (byte) 0xa0,
+                (byte) 0x80
+        };
+        Files.write(target, captured);
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "payload.bin", "content", "changed")),
+                "trc-binary",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.write(target, new byte[] { 1, 2, 3, 4 });
+
+        CheckpointRestoreResult restore = service.restore(workspace, capture.checkpointId());
+
+        assertTrue(restore.success(), restore.message());
+        assertArrayEquals(captured, Files.readAllBytes(target));
         assertEquals(1, restore.restoredFiles());
     }
 
@@ -535,16 +578,186 @@ class FileBundleCheckpointStoreTest {
     }
 
     @Test
-    void checkpointBlobCaptureUsesTempFileAndAtomicPromotion() throws Exception {
+    void checkpointSingleFileWritesUseTheSharedFailClosedAtomicOwner() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/checkpoint/FileBundleCheckpointStore.java"));
 
-        assertTrue(source.contains("Files.createTempFile"),
-                "checkpoint blobs must be written to a temp path first");
-        assertTrue(source.contains("StandardCopyOption.ATOMIC_MOVE"),
-                "checkpoint blobs must request atomic promotion where supported");
-        assertTrue(source.contains("Files.move"),
-                "checkpoint blobs must be promoted with Files.move rather than plain final-path write");
+        assertTrue(source.contains("AtomicFileWriter"),
+                "checkpoint restore and blob publication must use the shared single-file owner");
+        assertFalse(source.contains("AtomicMoveNotSupportedException"),
+                "checkpoint code must not retain a plain-move fallback");
+        assertFalse(source.contains("StandardCopyOption.REPLACE_EXISTING"),
+                "checkpoint code must not own a private non-atomic replacement path");
+        assertFalse(source.contains("Files.write("),
+                "checkpoint primary bytes must not bypass the governed owner");
+        assertFalse(source.contains("Files.writeString("),
+                "checkpoint primary text must not bypass the governed owner");
+    }
+
+    @Test
+    void injectedSharedOwnerObservesBothBlobPublicationAndDefaultRestore(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Path target = workspace.resolve("safe.bin");
+        byte[] captured = { 0, (byte) 0xff, 1, 2 };
+        Files.write(target, captured);
+        List<Path> governedTargets = new java.util.ArrayList<>();
+        AtomicFileWriter observingWriter = new AtomicFileWriter(
+                (stage, observedTarget, ignoredTemp) -> {
+                    if (stage == AtomicFileWriter.FaultStage.AFTER_TEMP_CREATE) {
+                        governedTargets.add(observedTarget);
+                    }
+                });
+        Path checkpointRoot = temp.resolve("checkpoints");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(checkpointRoot, observingWriter));
+
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "safe.bin", "content", "changed")),
+                "trc-owner",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.write(target, new byte[] { 9, 8, 7, 6 });
+        CheckpointRestoreResult restore = service.restore(workspace, capture.checkpointId());
+
+        assertTrue(restore.success(), restore.message());
+        assertArrayEquals(captured, Files.readAllBytes(target));
+        assertTrue(governedTargets.stream().anyMatch(path ->
+                        path.startsWith(checkpointRoot) && path.getParent().endsWith("blobs")),
+                "checkpoint blob publication must traverse the injected atomic owner");
+        assertTrue(governedTargets.contains(target.toAbsolutePath().normalize()),
+                "default checkpoint restore must traverse the same injected atomic owner");
+    }
+
+    @Test
+    void checkpointRestorePreservesCurrentUserDefinedAttributeBytes(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Path target = workspace.resolve("safe.bin");
+        byte[] captured = { 0, (byte) 0xff, 1, 2 };
+        Files.write(target, captured);
+        UserDefinedFileAttributeView view = userDefinedView(target);
+        assumeTrue(view != null, "user-defined attributes are unsupported");
+        byte[] binary = { 5, 0, (byte) 0xff, 6 };
+        assertEquals(binary.length, view.write(
+                "talos_checkpoint_metadata_probe",
+                ByteBuffer.wrap(binary)));
+        assertEquals(0, view.write(
+                "talos_checkpoint_empty_probe",
+                ByteBuffer.allocate(0)));
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "safe.bin", "content", "changed")),
+                "trc-metadata",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.write(target, new byte[] { 9, 8, 7, 6 });
+
+        CheckpointRestoreResult restore = service.restore(
+                workspace,
+                capture.checkpointId());
+
+        assertTrue(restore.success(), restore.message());
+        assertArrayEquals(captured, Files.readAllBytes(target));
+        assertArrayEquals(
+                binary,
+                readUserDefinedAttribute(
+                        userDefinedView(target),
+                        "talos_checkpoint_metadata_probe"));
+        assertArrayEquals(
+                new byte[0],
+                readUserDefinedAttribute(
+                        userDefinedView(target),
+                        "talos_checkpoint_empty_probe"));
+        assertNoAtomicTemps(workspace);
+    }
+
+    @Test
+    void sharedAtomicWriterPrepromotionFaultKeepsRestoreTargetExact(@TempDir Path temp)
+            throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Path target = workspace.resolve("safe.bin");
+        byte[] captured = { 0, (byte) 0xff, 1, 2 };
+        byte[] current = { 9, 8, 7, 6 };
+        Files.write(target, captured);
+        AtomicFileWriter failingWriter = new AtomicFileWriter(
+                (stage, ignoredTarget, ignoredTemp) -> {
+                    if (stage == AtomicFileWriter.FaultStage.BEFORE_PROMOTION) {
+                        throw new java.io.IOException("PRIVATE_CHECKPOINT_CANARY");
+                    }
+                });
+        FileBundleCheckpointStore store = new FileBundleCheckpointStore(
+                temp.resolve("checkpoints"),
+                failingWriter::replaceCurrent);
+        CheckpointService service = new CheckpointService(store);
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "safe.bin", "content", "changed")),
+                "trc-fault",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.write(target, current);
+
+        CheckpointRestoreResult restore = service.restore(workspace, capture.checkpointId());
+
+        assertFalse(restore.success());
+        assertArrayEquals(current, Files.readAllBytes(target));
+        assertFalse(restore.message().contains("PRIVATE_CHECKPOINT_CANARY"), restore.message());
+        assertNoAtomicTemps(workspace);
+    }
+
+    @Test
+    void committedUnverifiedRestoreIsNotDescribedAsAnUnchangedTarget(@TempDir Path temp)
+            throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Path target = workspace.resolve("safe.txt");
+        Files.writeString(target, "captured-before");
+        AtomicFileWriter failingWriter = new AtomicFileWriter(
+                (stage, ignoredTarget, ignoredTemp) -> {
+                    if (stage == AtomicFileWriter.FaultStage.AFTER_PROMOTION) {
+                        throw new java.io.IOException("PRIVATE_POST_COMMIT_CANARY");
+                    }
+                });
+        FileBundleCheckpointStore store = new FileBundleCheckpointStore(
+                temp.resolve("checkpoints"),
+                failingWriter::replaceCurrent);
+        CheckpointService service = new CheckpointService(store);
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "safe.txt", "content", "changed")),
+                "trc-post-commit",
+                1);
+        assertTrue(capture.success(), capture.message());
+        Files.writeString(target, "current-before-restore");
+
+        CheckpointRestoreResult restore = service.restore(workspace, capture.checkpointId());
+
+        assertFalse(restore.success());
+        assertEquals("captured-before", Files.readString(target));
+        assertTrue(restore.message().contains("committed"), restore.message());
+        assertFalse(restore.message().contains("PRIVATE_POST_COMMIT_CANARY"), restore.message());
+        assertNoAtomicTemps(workspace);
     }
 
     private static Config config(boolean enabled) {
@@ -565,6 +778,29 @@ class FileBundleCheckpointStoreTest {
                 .resolve("manifest.json");
     }
 
+    private static UserDefinedFileAttributeView userDefinedView(Path target) {
+        return Files.getFileAttributeView(
+                target,
+                UserDefinedFileAttributeView.class,
+                LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static byte[] readUserDefinedAttribute(
+            UserDefinedFileAttributeView view,
+            String name
+    ) throws Exception {
+        if (view == null) {
+            throw new java.io.IOException("user-defined attribute view is unavailable");
+        }
+        int size = view.size(name);
+        ByteBuffer value = ByteBuffer.allocate(size);
+        int read = view.read(name, value);
+        if (read != size || value.position() != size) {
+            throw new java.io.IOException("user-defined attribute read was incomplete");
+        }
+        return value.array();
+    }
+
     private static String blobShaFor(Path manifestFile, String relativePath) throws Exception {
         Map<String, Object> manifest = MAPPER.readValue(
                 Files.readString(manifestFile),
@@ -578,6 +814,15 @@ class FileBundleCheckpointStoreTest {
                 .filter(sha -> !sha.isBlank())
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("missing blob entry for " + relativePath));
+    }
+
+    private static void assertNoAtomicTemps(Path directory) throws Exception {
+        try (var paths = Files.list(directory)) {
+            assertTrue(paths.noneMatch(path -> {
+                String name = path.getFileName().toString();
+                return name.startsWith(".talos-atomic-") && name.endsWith(".tmp");
+            }), "checkpoint consumer must not leave an atomic-write temp");
+        }
     }
 
     private static void withOsName(String value, ThrowingRunnable runnable) throws Exception {
