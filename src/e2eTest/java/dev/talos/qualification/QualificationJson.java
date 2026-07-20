@@ -3,12 +3,16 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import dev.talos.core.security.NoFollowPathPolicy;
 
 import java.io.IOException;
@@ -32,10 +36,21 @@ final class QualificationJson {
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
+            .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
             .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .withCoercionConfig(LogicalType.Textual, coercion -> {
+                coercion.setCoercion(CoercionInputShape.Array, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.Object, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.Binary, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.EmptyArray, CoercionAction.Fail);
+                coercion.setCoercion(CoercionInputShape.EmptyObject, CoercionAction.Fail);
+            })
             .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
             .build();
@@ -50,12 +65,12 @@ final class QualificationJson {
         if (type == QualificationProtocol.ScenarioBank.class) {
             JsonNode tree = MAPPER.readTree(bytes);
             adaptLegacyScenarioOwners(tree);
-            return MAPPER.treeToValue(tree, type);
+            return bindStrict(tree, type);
         }
         if (type == QualificationRecords.RunResult.class) {
             JsonNode tree = MAPPER.readTree(bytes);
             adaptLegacyRunResult(tree);
-            return MAPPER.treeToValue(tree, type);
+            return bindStrict(tree, type);
         }
         return MAPPER.readValue(bytes, type);
     }
@@ -85,7 +100,7 @@ final class QualificationJson {
             throw new IllegalArgumentException(
                     "unsupported qualification protocol version: " + protocolVersion);
         }
-        return MAPPER.treeToValue(tree, QualificationProtocol.Scenario.class);
+        return bindStrict(tree, QualificationProtocol.Scenario.class);
     }
 
     static JsonNode tree(Object value) {
@@ -111,6 +126,15 @@ final class QualificationJson {
         return value.intValue();
     }
 
+    static int requiredInt(JsonNode value, int minimum, int maximum, String label) {
+        int parsed = requiredInt(value, label);
+        if (parsed < minimum || parsed > maximum) {
+            throw new IllegalArgumentException(
+                    label + " must be between " + minimum + " and " + maximum);
+        }
+        return parsed;
+    }
+
     static long requiredLong(JsonNode value, String label) {
         if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
             throw new IllegalArgumentException(label + " must be an exact JSON integer");
@@ -118,11 +142,46 @@ final class QualificationJson {
         return value.longValue();
     }
 
+    static long requiredLong(JsonNode value, long minimum, long maximum, String label) {
+        long parsed = requiredLong(value, label);
+        if (parsed < minimum || parsed > maximum) {
+            throw new IllegalArgumentException(
+                    label + " must be between " + minimum + " and " + maximum);
+        }
+        return parsed;
+    }
+
     static boolean requiredBoolean(JsonNode value, String label) {
         if (value == null || !value.isBoolean()) {
             throw new IllegalArgumentException(label + " must be a JSON boolean");
         }
         return value.booleanValue();
+    }
+
+    static ObjectNode requiredObject(JsonNode value, String label) {
+        if (!(value instanceof ObjectNode object)) {
+            throw new IllegalArgumentException(label + " must be a JSON object");
+        }
+        return object;
+    }
+
+    static ArrayNode requiredArray(JsonNode value, String label) {
+        if (!(value instanceof ArrayNode array)) {
+            throw new IllegalArgumentException(label + " must be a JSON array");
+        }
+        return array;
+    }
+
+    static <E extends Enum<E>> E requiredEnum(
+            JsonNode value,
+            Class<E> enumType,
+            String label) {
+        String name = requiredText(value, label);
+        try {
+            return Enum.valueOf(enumType, name);
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalArgumentException(label + " has an unsupported value", invalid);
+        }
     }
 
     static String write(Object value) {
@@ -169,9 +228,10 @@ final class QualificationJson {
 
     private static void adaptLegacyRunResult(JsonNode tree) {
         if (!(tree instanceof ObjectNode object)
-                || object.path("schemaVersion").asInt(-1)
+                || exactIntOrSentinel(object.get("schemaVersion"))
                 != QualificationRecords.LEGACY_RUN_SCHEMA_VERSION
-                || !QualificationRecords.RUN_SCHEMA.equals(object.path("schemaName").asText(""))) {
+                || !QualificationRecords.RUN_SCHEMA.equals(
+                        exactTextOrEmpty(object.get("schemaName")))) {
             return;
         }
         if (CAUSAL_V2_FIELDS.stream().anyMatch(object::has)) {
@@ -203,7 +263,7 @@ final class QualificationJson {
         if (!(tree instanceof ObjectNode object)) {
             return;
         }
-        int version = object.path("schemaVersion").asInt(-1);
+        int version = exactIntOrSentinel(object.get("schemaVersion"));
         if (version < 1 || version > LAST_LEGACY_SCENARIO_SCHEMA_VERSION) {
             return;
         }
@@ -224,12 +284,28 @@ final class QualificationJson {
             throw new IllegalArgumentException(
                     "legacy scenario schema must not declare responseOwnerContract");
         }
-        String approval = scenarioObject.path("approvalBehavior").asText("");
+        String approval = exactTextOrEmpty(scenarioObject.get("approvalBehavior"));
         QualificationRecords.ResponseOwnerContract owner =
                 QualificationProtocol.ApprovalBehavior.INTERRUPT_BEFORE_APPROVAL.name().equals(approval)
                         ? QualificationRecords.ResponseOwnerContract.OPERATOR_OWNED
                         : QualificationRecords.ResponseOwnerContract.MODEL_SYNTHESIS_REQUIRED;
         scenarioObject.put("responseOwnerContract", owner.name());
+    }
+
+    private static int exactIntOrSentinel(JsonNode value) {
+        return value != null && value.isIntegralNumber() && value.canConvertToInt()
+                ? value.intValue()
+                : Integer.MIN_VALUE;
+    }
+
+    private static String exactTextOrEmpty(JsonNode value) {
+        return value != null && value.isTextual() ? value.textValue() : "";
+    }
+
+    private static <T> T bindStrict(JsonNode tree, Class<T> type) throws IOException {
+        // Legacy adaptation returns to the configured byte parser so every authority
+        // record is bound through one coercion policy.
+        return MAPPER.readValue(MAPPER.writeValueAsBytes(tree), type);
     }
 
 }

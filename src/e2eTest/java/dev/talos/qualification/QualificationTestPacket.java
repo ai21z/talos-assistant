@@ -293,37 +293,60 @@ final class QualificationTestPacket {
                         "verificationStatus", "NOT_RUN",
                         "approvalStatus", "NONE", "mutationStatus", "NOT_REQUESTED",
                         "classification", scenario.expectedTerminalStates().getFirst())));
-        QualificationJson.write(runDir.resolve("approvals.json"), java.util.Map.of("events", List.of()));
-        List<java.util.Map<String, String>> captureEvents = new java.util.ArrayList<>();
-        captureEvents.add(java.util.Map.of(
-                "timestamp", "2026-07-10T00:00:00Z",
-                "type", "input", "data", "scenario-prompt"));
+        QualificationJson.write(
+                runDir.resolve("approvals.json"),
+                new QualificationApprovalFinalizer.Document(List.of()));
+        List<QualificationPtyEvidence.Event> captureEvents = new java.util.ArrayList<>();
+        captureEvents.add(new QualificationPtyEvidence.Event(
+                "2026-07-10T00:00:00Z", "input", "scenario-prompt"));
         if (operatorInterruption) {
-            captureEvents.add(java.util.Map.of(
-                    "timestamp", "2026-07-10T00:00:01Z",
-                    "type", "input", "data", "user-interrupt"));
-            captureEvents.add(java.util.Map.of(
-                    "timestamp", "2026-07-10T00:00:01Z",
-                    "type", "terminal-outcome", "data", "turn-aborted-by-operator"));
+            captureEvents.add(new QualificationPtyEvidence.Event(
+                    "2026-07-10T00:00:01Z", "input", "user-interrupt"));
+            captureEvents.add(new QualificationPtyEvidence.Event(
+                    "2026-07-10T00:00:01Z",
+                    "terminal-outcome",
+                    "turn-aborted-by-operator"));
         }
-        captureEvents.add(java.util.Map.of(
-                "timestamp", "2026-07-10T00:00:01Z",
-                "type", "output",
-                "data", "Outcome: " + scenario.expectedTerminalStates().getFirst()));
-        captureEvents.add(java.util.Map.of(
-                "timestamp", "2026-07-10T00:00:02Z",
-                "type", "input", "data", "last-trace"));
-        QualificationJson.write(runDir.resolve("transcript.raw.json"), java.util.Map.of(
-                "schemaName", "talos.modelQualification.ptyCapture",
-                "schemaVersion", catalog.protocolVersion(),
-                "transport", "TEST_PTY",
-                "tty", true,
-                "captureStartedAt", "2026-07-10T00:00:00Z",
-                "captureEndedAt", "2026-07-10T00:00:02Z",
-                "command", "talos",
-                "workspace", root.resolve("workspace").toString(),
-                "events", captureEvents,
-                "rawOutput", "Outcome: " + scenario.expectedTerminalStates().getFirst()));
+        captureEvents.add(new QualificationPtyEvidence.Event(
+                "2026-07-10T00:00:01Z",
+                "output",
+                "Outcome: " + scenario.expectedTerminalStates().getFirst()));
+        captureEvents.add(new QualificationPtyEvidence.Event(
+                "2026-07-10T00:00:02Z", "input", "last-trace"));
+        int captureProtocol = catalog.protocolVersion();
+        boolean extendedCapture = captureProtocol >= 2;
+        boolean cleanupCapture = captureProtocol >= 3;
+        QualificationPtyEvidence.ProcessCleanup processCleanup = cleanupCapture
+                ? new QualificationPtyEvidence.ProcessCleanup(
+                        QualificationProcessCleanup.Outcome.ALREADY_EXITED,
+                        false,
+                        true,
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of())
+                : null;
+        QualificationPtyEvidence.Capture capture = new QualificationPtyEvidence.Capture(
+                QualificationPtyEvidence.SCHEMA_NAME,
+                catalog.protocolVersion(),
+                "TEST_PTY",
+                true,
+                "2026-07-10T00:00:00Z",
+                "2026-07-10T00:00:02Z",
+                "talos",
+                root.resolve("workspace").toString(),
+                extendedCapture ? scenario.approvalBehavior().name() : null,
+                extendedCapture
+                        ? operatorInterruption
+                                ? "turn-aborted-by-operator" : "fixture-complete"
+                        : null,
+                extendedCapture ? "" : null,
+                processCleanup,
+                captureEvents,
+                "Outcome: " + scenario.expectedTerminalStates().getFirst());
+        QualificationJson.write(runDir.resolve("transcript.raw.json"), capture);
         QualificationScenarioBank.FixtureResource fixture = catalog.fixtures().get(scenario.fixture());
         writeEvidenceFiles(runDir.resolve("before-files"), fixture.manifest().files());
         writeEvidenceFiles(runDir.resolve("after-files"), fixture.manifest().files());

@@ -1,10 +1,5 @@
 package dev.talos.qualification;
 
-import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.util.RuntimeArtifactIdentity;
 
@@ -64,15 +59,6 @@ final class QualificationExecutionIdentityWriter {
                     "tools/timestamp-policy.ps1"),
             Map.entry("TRIAL_STOP_ASSERTION",
                     "tools/assert-trial-stop-conditions.ps1"));
-
-    private static final ObjectMapper STRICT_MAPPER = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
-            .build();
 
     private QualificationExecutionIdentityWriter() {}
 
@@ -724,7 +710,7 @@ final class QualificationExecutionIdentityWriter {
 
     private static HarnessInputSpecification readInputSpecification(Path path) throws IOException {
         try {
-            return STRICT_MAPPER.readValue(
+            return QualificationJson.read(
                     NoFollowPathPolicy.readAllBytes(path),
                     HarnessInputSpecification.class);
         } catch (RuntimeException failure) {
@@ -836,7 +822,7 @@ final class QualificationExecutionIdentityWriter {
                 "execution input ledger hash mismatch");
         ExecutionInputLedger ledger;
         try {
-            ledger = STRICT_MAPPER.readValue(ledgerBytes, ExecutionInputLedger.class);
+            ledger = QualificationJson.read(ledgerBytes, ExecutionInputLedger.class);
         } catch (RuntimeException malformed) {
             throw invalid("execution input ledger is invalid", malformed);
         }

@@ -16,7 +16,9 @@ final class QualificationApprovalFinalizer {
 
     record ApprovalEvent(String response) {
         ApprovalEvent {
-            response = response == null ? "" : response;
+            if (!List.of("APPROVED", "APPROVED_REMEMBER", "DENIED").contains(response)) {
+                throw new IllegalArgumentException("approval response is invalid");
+            }
         }
     }
 
@@ -37,7 +39,9 @@ final class QualificationApprovalFinalizer {
         Path runRoot = declared.runRoot();
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         Document document = derive(
-                runRoot.resolve("transcript.raw.json"), scenario.approvalBehavior());
+                QualificationPtyEvidence.parse(
+                        runRoot.resolve("transcript.raw.json"), catalog.protocolVersion()),
+                scenario.approvalBehavior());
         Path output = runRoot.resolve(OUTPUT_FILE);
         QualificationArtifactPublication.publishNewOrVerifyExact(
                 declared.runFiles(),
@@ -58,19 +62,42 @@ final class QualificationApprovalFinalizer {
     static Document derive(
             JsonNode capture,
             QualificationProtocol.ApprovalBehavior approvalBehavior) {
+        JsonNode declaredVersion = capture == null ? null : capture.get("schemaVersion");
+        if (declaredVersion != null) {
+            if (!declaredVersion.isIntegralNumber() || !declaredVersion.canConvertToInt()) {
+                throw new IllegalArgumentException(
+                        "PTY capture schemaVersion must be an exact integer");
+            }
+            return derive(
+                    QualificationPtyEvidence.parse(capture, declaredVersion.intValue()),
+                    approvalBehavior);
+        }
+        return deriveEvents(
+                QualificationPtyEvidence.parseApprovalEvents(capture),
+                approvalBehavior);
+    }
+
+    static Document derive(
+            QualificationPtyEvidence.Capture capture,
+            QualificationProtocol.ApprovalBehavior approvalBehavior) {
+        if (capture == null) {
+            throw new IllegalArgumentException("PTY capture is required");
+        }
+        return deriveEvents(capture.events(), approvalBehavior);
+    }
+
+    private static Document deriveEvents(
+            List<QualificationPtyEvidence.Event> events,
+            QualificationProtocol.ApprovalBehavior approvalBehavior) {
         if (approvalBehavior == null) {
             throw new IllegalArgumentException("approval behavior is required");
-        }
-        JsonNode events = capture.path("events");
-        if (!events.isArray()) {
-            throw new IllegalArgumentException("PTY capture must contain an events array");
         }
 
         List<ApprovalEvent> approvals = new ArrayList<>();
         String pendingLabel = null;
-        for (JsonNode event : events) {
-            String type = event.path("type").asText("");
-            String label = event.path("data").asText("");
+        for (QualificationPtyEvidence.Event event : events) {
+            String type = event.type();
+            String label = event.data();
             boolean approvalLabel = isApprovalDecisionLabel(label);
 
             if (pendingLabel != null) {

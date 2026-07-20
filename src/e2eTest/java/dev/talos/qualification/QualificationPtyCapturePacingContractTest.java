@@ -34,6 +34,53 @@ class QualificationPtyCapturePacingContractTest {
     }
 
     @Test
+    void authorityConstructionCompletesBeforeMainCanEnterTheChildLaunchPath()
+            throws Exception {
+        String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
+        String constructor = between(
+                source,
+                "private QualificationPtyCaptureMain(",
+                "public static void main");
+        String main = between(
+                source,
+                "public static void main",
+                "private QualificationPtyFilesystemBoundary.Plan");
+
+        assertTrue(constructor.contains("QualificationRecords.CampaignManifest.class"),
+                constructor);
+        assertTrue(constructor.contains("QualificationRecords.CalibrationRules.class"),
+                constructor);
+        assertTrue(constructor.contains("QualificationJson.readScenario("), constructor);
+        assertFalse(constructor.contains("validateThenStartChildren();"), constructor);
+        assertFalse(constructor.contains("startMonitor();"), constructor);
+        assertFalse(constructor.contains("startTalos();"), constructor);
+        assertTrue(main.indexOf("new QualificationPtyCaptureMain(")
+                < main.indexOf("runner.run();"), main);
+    }
+
+    @Test
+    void ptyPublicationUsesTheCanonicalTypedCaptureAndValidatesItsBytes()
+            throws Exception {
+        String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
+        String writePacket = between(
+                source,
+                "private void writePacket(",
+                "private static QualificationPtyEvidence.Event event");
+
+        int typedCapture = writePacket.indexOf("new QualificationPtyEvidence.Capture(");
+        int canonicalBytes = writePacket.indexOf("QualificationJson.bytes(packet)");
+        int validateBytes = writePacket.indexOf(
+                "QualificationPtyEvidence.parse(canonicalBytes, protocolVersion)");
+        int publishBytes = writePacket.indexOf("publishNewOrVerifyExact(");
+        assertTrue(typedCapture >= 0, writePacket);
+        assertTrue(typedCapture < canonicalBytes, writePacket);
+        assertTrue(canonicalBytes < validateBytes, writePacket);
+        assertTrue(validateBytes < publishBytes, writePacket);
+        assertFalse(writePacket.contains("Map<String, Object>"), writePacket);
+        assertFalse(writePacket.contains("writeValueAsBytes"), writePacket);
+    }
+
+    @Test
     void startupIdleIsSettledBeforeScenarioInput() throws Exception {
         String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
         String runMethod = between(source, "private void run()", "private String awaitApprovalOrTerminal");

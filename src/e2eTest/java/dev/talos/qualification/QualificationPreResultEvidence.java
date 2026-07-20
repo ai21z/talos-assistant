@@ -279,8 +279,15 @@ final class QualificationPreResultEvidence {
         int traceSchemaVersion = -1;
         if (traceBytes != null) {
             try {
-                traceSchemaVersion = QualificationJson.readTree(traceBytes)
-                        .path("schemaVersion").asInt(-1);
+                JsonNode traceSchema = QualificationJson.readTree(traceBytes)
+                        .get("schemaVersion");
+                if (traceSchema == null
+                        || !traceSchema.isIntegralNumber()
+                        || !traceSchema.canConvertToInt()) {
+                    throw new IllegalArgumentException(
+                            "trace schemaVersion must be an exact integer");
+                }
+                traceSchemaVersion = traceSchema.intValue();
                 trace = QualificationTraceEvidence.read(traceBytes, scenario);
                 QualificationAuthorityPolicy.mismatch(
                                 scenario, trace.taskType(), trace.mutationAllowed(),
@@ -328,9 +335,16 @@ final class QualificationPreResultEvidence {
             findings.add("RESOURCE_SAMPLES_MACHINE_UNAVAILABLE");
         }
 
-        JsonNode capture = parseTree(
-                runArtifacts.get(runRoot.resolve("transcript.raw.json")),
-                "transcript.raw.json", findings);
+        QualificationPtyEvidence.Capture capture = null;
+        try {
+            byte[] captureBytes = runArtifacts.get(runRoot.resolve("transcript.raw.json"));
+            if (captureBytes != null) {
+                capture = QualificationPtyEvidence.parse(
+                        captureBytes, catalog.protocolVersion());
+            }
+        } catch (IOException | RuntimeException invalid) {
+            findings.add("PTY_CAPTURE_INVALID");
+        }
         validatePty(capture, request, catalog.protocolVersion(), findings);
         validateResourceSampleWindow(resourceSamples, capture, findings);
         validateApprovals(runArtifacts.get(runRoot.resolve("approvals.json")), capture,
@@ -425,7 +439,7 @@ final class QualificationPreResultEvidence {
     }
 
     private static boolean explicitPtyHarnessFailure(
-            JsonNode capture,
+            QualificationPtyEvidence.Capture capture,
             QualificationRecords.RequestRecord request,
             int protocolVersion) {
         if (protocolVersion != QualificationProtocol.VERSION) return false;
@@ -435,19 +449,14 @@ final class QualificationPreResultEvidence {
                 && !"TRUE_PTY".equals(request.transport())) {
             return true;
         }
-        if (capture == null || !capture.isObject()
-                || !"talos.modelQualification.ptyCapture".equals(
-                        capture.path("schemaName").asText(""))
-                || capture.path("schemaVersion").asInt(-1) != protocolVersion) {
+        if (capture == null
+                || !QualificationPtyEvidence.SCHEMA_NAME.equals(capture.schemaName())
+                || capture.schemaVersion() != protocolVersion) {
             return false;
         }
-        JsonNode tty = capture.path("tty");
-        if (tty.isBoolean() && !tty.booleanValue()) return true;
-        JsonNode transport = capture.path("transport");
-        return transport.isTextual()
-                && !transport.textValue().isBlank()
-                && !Set.of("WINDOWS_PTY", "UNIX_PTY", "TEST_PTY")
-                        .contains(transport.textValue());
+        if (!capture.tty()) return true;
+        return !capture.transport().isBlank()
+                && !QualificationPtyEvidence.TRANSPORTS.contains(capture.transport());
     }
 
     private static void validateIdentity(
@@ -596,73 +605,48 @@ final class QualificationPreResultEvidence {
             return;
         }
         Map<String, String> values = new TreeMap<>();
-        declared.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText("")));
-        if (!values.equals(hashes(actual))) findings.add(finding);
+        boolean exactTypes = true;
+        var fields = declared.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (!entry.getValue().isTextual()) {
+                exactTypes = false;
+            } else {
+                values.put(entry.getKey(), entry.getValue().textValue());
+            }
+        }
+        if ((!exactTypes || !values.equals(hashes(actual)))
+                && !findings.contains(finding)) {
+            findings.add(finding);
+        }
     }
 
     private static void validatePty(
-            JsonNode capture,
+            QualificationPtyEvidence.Capture capture,
             QualificationRecords.RequestRecord request,
             int protocolVersion,
             List<String> findings) {
         if (capture == null || request == null) {
-            findings.add("PTY_CAPTURE_INVALID");
+            if (!findings.contains("PTY_CAPTURE_INVALID")) {
+                findings.add("PTY_CAPTURE_INVALID");
+            }
             return;
         }
-        String captureCommand = capture.path("command").asText("").replace('\\', '/');
-        String requestCommand = nullToEmpty(request.command()).replace('\\', '/');
-        boolean valid = capture.isObject()
-                && "talos.modelQualification.ptyCapture".equals(capture.path("schemaName").asText(""))
-                && capture.path("schemaVersion").asInt(-1) == protocolVersion
-                && capture.path("tty").asBoolean(false)
-                && Set.of("WINDOWS_PTY", "UNIX_PTY", "TEST_PTY")
-                        .contains(capture.path("transport").asText(""))
-                && !capture.path("rawOutput").asText("").isBlank()
-                && !capture.path("workspace").asText("").isBlank()
-                && !captureCommand.isBlank()
-                && !requestCommand.isBlank()
-                && (captureCommand.equals(requestCommand)
-                        || captureCommand.endsWith("/" + requestCommand))
-                && capture.path("events").isArray()
-                && "TRUE_PTY".equals(request.transport());
-        if (valid) {
-            Instant previous = instant(capture.path("captureStartedAt").asText(""));
-            Instant ended = instant(capture.path("captureEndedAt").asText(""));
-            boolean scenarioInput = false;
-            boolean lastTrace = false;
-            boolean output = false;
-            StringBuilder capturedOutput = new StringBuilder();
-            if (previous == null || ended == null || ended.isBefore(previous)) valid = false;
-            for (JsonNode event : capture.path("events")) {
-                Instant timestamp = instant(event.path("timestamp").asText(""));
-                if (timestamp == null || previous == null || ended == null
-                        || timestamp.isBefore(previous) || timestamp.isAfter(ended)) {
-                    valid = false;
-                } else {
-                    previous = timestamp;
-                }
-                String type = event.path("type").asText("");
-                String data = event.path("data").asText("");
-                if ("input".equals(type) && "scenario-prompt".equals(data)) scenarioInput = true;
-                if ("input".equals(type) && "last-trace".equals(data)) lastTrace = true;
-                if ("output".equals(type) && !data.isBlank()) {
-                    output = true;
-                    capturedOutput.append(data);
-                }
-            }
-            valid = valid && scenarioInput && lastTrace && output
-                    && capturedOutput.toString().equals(capture.path("rawOutput").asText(""));
+        boolean valid = capture.schemaVersion() == protocolVersion
+                && QualificationPtyEvidence.validEvidence(
+                        capture, request.command(), request.transport());
+        if (!valid && !findings.contains("PTY_CAPTURE_INVALID")) {
+            findings.add("PTY_CAPTURE_INVALID");
         }
-        if (!valid) findings.add("PTY_CAPTURE_INVALID");
     }
 
     private static void validateResourceSampleWindow(
             QualificationResourceSamples.Summary samples,
-            JsonNode capture,
+            QualificationPtyEvidence.Capture capture,
             List<String> findings) {
         if (samples == null || capture == null) return;
-        Instant started = instant(capture.path("captureStartedAt").asText(""));
-        Instant ended = instant(capture.path("captureEndedAt").asText(""));
+        Instant started = capture.startedAt();
+        Instant ended = capture.endedAt();
         if (started == null || ended == null
                 || samples.firstSampleAt().isBefore(started)
                 || samples.lastSampleAt().isAfter(ended)) {
@@ -672,7 +656,7 @@ final class QualificationPreResultEvidence {
 
     private static void validateApprovals(
             byte[] approvalBytes,
-            JsonNode capture,
+            QualificationPtyEvidence.Capture capture,
             QualificationProtocol.Scenario scenario,
             QualificationTraceEvidence.Facts trace,
             List<String> findings) {
@@ -702,7 +686,7 @@ final class QualificationPreResultEvidence {
     private static void validateProviderEvidence(
             String prompt,
             String model,
-            JsonNode capture,
+            QualificationPtyEvidence.Capture capture,
             QualificationRecords.TimingEvidence timings,
             QualificationRecords.AnswerOrigin matchedOrigin,
             List<String> findings) {
@@ -724,7 +708,7 @@ final class QualificationPreResultEvidence {
                 && Double.compare(timings.generationTokensPerSecond(), 0.0) == 0
                 && timings.toolEligibleGenerations() == 0
                 && (timings.backendErrorCode() == null || timings.backendErrorCode().isBlank());
-        boolean captured = capture != null && capture.path("rawOutput").asText("")
+        boolean captured = capture != null && capture.rawOutput()
                 .contains(QualificationProviderEvidence.NO_PROVIDER_PROMPT);
         if (!exact || !noTiming || !captured
                 || matchedOrigin == QualificationRecords.AnswerOrigin.MODEL_PROVIDER) {
@@ -821,7 +805,7 @@ final class QualificationPreResultEvidence {
     }
 
     static boolean operatorInterruptionProven(
-            JsonNode capture,
+            QualificationPtyEvidence.Capture capture,
             QualificationProtocol.Scenario scenario,
             QualificationTraceEvidence.Facts trace,
             String answer,
@@ -837,20 +821,42 @@ final class QualificationPreResultEvidence {
                 || answer == null || !answer.isBlank()) return false;
         int interrupt = -1;
         int terminal = -1;
-        JsonNode events = capture.path("events");
-        if (!events.isArray()) return false;
+        List<QualificationPtyEvidence.Event> events = capture.events();
         for (int index = 0; index < events.size(); index++) {
-            JsonNode event = events.get(index);
-            if ("input".equals(event.path("type").asText(""))
-                    && "user-interrupt".equals(event.path("data").asText(""))) {
+            QualificationPtyEvidence.Event event = events.get(index);
+            if ("input".equals(event.type())
+                    && "user-interrupt".equals(event.data())) {
                 interrupt = index;
             }
-            if ("terminal-outcome".equals(event.path("type").asText(""))
-                    && "turn-aborted-by-operator".equals(event.path("data").asText(""))) {
+            if ("terminal-outcome".equals(event.type())
+                    && "turn-aborted-by-operator".equals(event.data())) {
                 terminal = index;
             }
         }
         return interrupt >= 0 && terminal > interrupt;
+    }
+
+    static boolean operatorInterruptionProven(
+            JsonNode capture,
+            QualificationProtocol.Scenario scenario,
+            QualificationTraceEvidence.Facts trace,
+            String answer,
+            QualificationRecords.AnswerOrigin matchedOrigin) {
+        if (capture == null) return false;
+        JsonNode version = capture.get("schemaVersion");
+        if (version == null || !version.isIntegralNumber() || !version.canConvertToInt()) {
+            return false;
+        }
+        try {
+            return operatorInterruptionProven(
+                    QualificationPtyEvidence.parse(capture, version.intValue()),
+                    scenario,
+                    trace,
+                    answer,
+                    matchedOrigin);
+        } catch (RuntimeException invalid) {
+            return false;
+        }
     }
 
     private static Map<Path, byte[]> sourceAllowlist(

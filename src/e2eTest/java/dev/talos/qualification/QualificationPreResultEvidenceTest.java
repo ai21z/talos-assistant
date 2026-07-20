@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,6 +24,66 @@ class QualificationPreResultEvidenceTest {
 
     @TempDir
     Path temp;
+
+    @Test
+    void protocolV6PtyScalarTypesAreNeverCoercedIntoEvidence() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        List<PtyScalarCase> cases = List.of(
+                new PtyScalarCase("textual-schema-version", json ->
+                        json.put("schemaVersion", Integer.toString(catalog.protocolVersion()))),
+                new PtyScalarCase("fractional-schema-version", json ->
+                        json.put("schemaVersion", catalog.protocolVersion() + 0.9)),
+                new PtyScalarCase("textual-tty", json -> json.put("tty", "true")),
+                new PtyScalarCase("numeric-tty", json -> json.put("tty", 1)),
+                new PtyScalarCase("numeric-workspace", json -> json.put("workspace", 17)),
+                new PtyScalarCase("numeric-raw-output", json -> {
+                    ArrayNode events = (ArrayNode) json.path("events");
+                    ((ObjectNode) events.get(1)).put("data", 17);
+                    json.put("rawOutput", 17);
+                }),
+                new PtyScalarCase("numeric-event-timestamp", json ->
+                        ((ObjectNode) json.path("events").get(0))
+                                .put("timestamp", 17)),
+                new PtyScalarCase("numeric-ignored-event-type", json ->
+                        ((ArrayNode) json.path("events")).addObject()
+                                .put("timestamp", "2026-07-10T00:00:02Z")
+                                .put("type", 17)
+                                .put("data", "ignored-diagnostic")),
+                new PtyScalarCase("numeric-ignored-event-data", json ->
+                        ((ArrayNode) json.path("events")).addObject()
+                                .put("timestamp", "2026-07-10T00:00:02Z")
+                                .put("type", "diagnostic")
+                                .put("data", 17)));
+        List<String> coercionsAccepted = new ArrayList<>();
+
+        for (PtyScalarCase testCase : cases) {
+            QualificationTestPacket packet = QualificationTestPacket.create(
+                    temp.resolve("pty-scalar-" + testCase.id()), catalog, scenario);
+            mutateJson(packet.runRoot().resolve("transcript.raw.json"),
+                    testCase.mutation());
+
+            QualificationPreResultEvidence.Snapshot snapshot =
+                    QualificationPreResultEvidence.capture(
+                            packet.root(), packet.runRoot(), scenario.id(), catalog);
+            QualificationCausalFinalizer.Document document =
+                    QualificationCausalFinalizer.deriveFromSnapshot(snapshot);
+
+            if (!snapshot.findings().contains("PTY_CAPTURE_INVALID")) {
+                coercionsAccepted.add(testCase.id());
+            }
+            assertFalse(snapshot.complete(), testCase.id());
+            assertFalse(snapshot.trustGates().mandatoryEvidencePresent(), testCase.id());
+            assertEquals(QualificationRecords.CausalOwner.UNKNOWN,
+                    document.causalOwner(), testCase.id());
+            assertEquals(QualificationRecords.FailureClass.INCOMPLETE_EVIDENCE,
+                    document.failureClass(), testCase.id());
+            assertFalse(document.comparativeScoreEligible(), testCase.id());
+        }
+
+        assertTrue(coercionsAccepted.isEmpty(),
+                () -> "PTY scalar coercions accepted as evidence: " + coercionsAccepted);
+    }
 
     @Test
     void protocolV6WithoutAnActiveProcessLaunchReceiptStopsAsUnknownIncompleteEvidence()
@@ -87,6 +148,9 @@ class QualificationPreResultEvidenceTest {
                 new Case("declared-before-hash", (packet) -> mutateJson(
                         packet.runRoot().resolve("before-hashes.json"), json ->
                                 json.put("README.md", "0".repeat(64)))),
+                new Case("declared-before-hash-scalar", (packet) -> mutateJson(
+                        packet.runRoot().resolve("before-hashes.json"), json ->
+                                json.put("README.md", 17))),
                 new Case("after-final-divergence", (packet) -> {
                     Files.writeString(packet.runRoot().resolve("after-files/README.md"),
                             "captured after drift\n", StandardCharsets.UTF_8);
@@ -445,6 +509,8 @@ class QualificationPreResultEvidenceTest {
     private record Case(String id, PacketMutation mutation) {}
 
     private record CanaryByteCase(String id, PacketMutation mutation) {}
+
+    private record PtyScalarCase(String id, JsonMutation mutation) {}
 
     private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
         try {

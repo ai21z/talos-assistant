@@ -1,8 +1,6 @@
 package dev.talos.qualification;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import dev.talos.core.security.NoFollowPathPolicy;
 
@@ -18,15 +16,13 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /** Windows true-PTY capture entrypoint for immutable local model-qualification campaigns. */
 public final class QualificationPtyCaptureMain {
-    private static final ObjectMapper JSON = new ObjectMapper()
-            .enable(SerializationFeature.INDENT_OUTPUT);
+    /** YAML is the explicitly separate, non-JSON engine-configuration format. */
     private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
     private static final Duration STARTUP_WAIT = Duration.ofSeconds(30);
     private static final Duration STARTUP_RECOVERY_WAIT = Duration.ofSeconds(10);
@@ -61,7 +57,7 @@ public final class QualificationPtyCaptureMain {
     private final String approvalBehavior;
     private final int protocolVersion;
     private final CaptureBuffer capture = new CaptureBuffer();
-    private final List<Map<String, Object>> events = new ArrayList<>();
+    private final List<QualificationPtyEvidence.Event> events = new ArrayList<>();
     private int cursor;
     private Process talos;
     private Process monitor;
@@ -77,10 +73,9 @@ public final class QualificationPtyCaptureMain {
             int repetition) throws Exception {
         this.packetFiles = NoFollowPathPolicy.bindExistingDirectory(campaignRoot);
         this.campaignRoot = packetFiles.path();
-        JsonNode campaignNode = JSON.readTree(
-                packetFiles.readAllBytes(this.campaignRoot.resolve("campaign.json")));
-        this.campaign = JSON.treeToValue(
-                campaignNode, QualificationRecords.CampaignManifest.class);
+        this.campaign = QualificationJson.read(
+                packetFiles.readAllBytes(this.campaignRoot.resolve("campaign.json")),
+                QualificationRecords.CampaignManifest.class);
         String candidateAlias = required(campaign.candidateAlias(), "candidateAlias");
         String machineId = required(campaign.machineId(), "machineId");
         String configId = required(campaign.configId(), "configId");
@@ -88,18 +83,43 @@ public final class QualificationPtyCaptureMain {
         QualificationArtifactPublication.requireWritableProtocol(protocolVersion);
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocolVersion);
         QualificationArtifactPublication.requireWritableCampaign(this.campaignRoot, catalog);
-        catalog.scenario(scenarioId);
+        QualificationProtocol.Scenario declaredScenario = catalog.scenario(scenarioId);
         if (repetition < 1 || repetition > campaign.repetitions().size()) {
             throw new IllegalArgumentException(
                     "repetition must identify one trial declared by the campaign");
         }
+
+        String trial = "trial-%02d".formatted(repetition);
+        Path requestedRunRoot = this.campaignRoot.resolve(Path.of(
+                "runs", candidateAlias, machineId, configId, scenarioId, trial));
+        QualificationArtifactPublication.DeclaredRun declaredRun =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        this.campaignRoot, requestedRunRoot, scenarioId, catalog);
+        this.runRoot = declaredRun.runRoot();
+        this.runFiles = declaredRun.runFiles();
+        this.transcriptPath = runRoot.resolve("transcript.raw.json");
+        if (runFiles.inspect(transcriptPath) != NoFollowPathPolicy.EntryType.MISSING) {
+            throw new IllegalStateException("refusing to overwrite the PTY capture packet");
+        }
+        this.scenarioPath = runFiles.requireRegularFile(runRoot.resolve("scenario.json"));
+        QualificationProtocol.Scenario capturedScenario = QualificationJson.readScenario(
+                runFiles.readAllBytes(scenarioPath), protocolVersion);
+        if (!declaredScenario.equals(capturedScenario)) {
+            throw new IllegalStateException(
+                    "captured scenario does not match the frozen qualification catalog");
+        }
+        this.prompt = capturedScenario.prompt();
+        this.approvalBehavior = capturedScenario.approvalBehavior().name();
+
         this.calibrationPath = packetFiles.requireRegularFile(this.campaignRoot.resolve(Path.of(
                 "candidates", candidateAlias, "calibration-rules.json")));
-        JsonNode calibration = JSON.readTree(packetFiles.readAllBytes(calibrationPath));
-        String serverPortText = argumentValue(calibration.path("launchArguments"), "--port");
+        QualificationRecords.CalibrationRules calibration = QualificationJson.read(
+                packetFiles.readAllBytes(calibrationPath),
+                QualificationRecords.CalibrationRules.class);
+        String serverPortText = argumentValue(calibration.launchArguments(), "--port");
         this.serverPort = Integer.parseInt(serverPortText);
         this.modelArtifact = NoFollowPathPolicy.requireUnlinkedRegularFile(Path.of(
-                argumentValue(calibration.path("launchArguments"), "-m"))
+                argumentValue(calibration.launchArguments(), "-m"))
                 .toAbsolutePath().normalize());
         @SuppressWarnings("unchecked")
         Map<String, Object> config = YAML.readValue(packetFiles.readAllBytes(
@@ -117,14 +137,6 @@ public final class QualificationPtyCaptureMain {
         }
         this.serverExecutable = NoFollowPathPolicy.requireUnlinkedRegularFile(
                 Path.of(configuredServerPath).toAbsolutePath().normalize());
-        String trial = "trial-%02d".formatted(repetition);
-        Path requestedRunRoot = this.campaignRoot.resolve(Path.of(
-                "runs", candidateAlias, machineId, configId, scenarioId, trial));
-        QualificationArtifactPublication.DeclaredRun declaredRun =
-                QualificationArtifactPublication.requireWritableDeclaredRun(
-                        this.campaignRoot, requestedRunRoot, scenarioId, catalog);
-        this.runRoot = declaredRun.runRoot();
-        this.runFiles = declaredRun.runFiles();
         this.workspace = packetFiles.requireDirectory(
                 this.campaignRoot.resolve(Path.of("workspaces", scenarioId, trial)));
         this.workspaceFiles = NoFollowPathPolicy.bindExistingDirectory(workspace);
@@ -133,7 +145,6 @@ public final class QualificationPtyCaptureMain {
                 this.campaignRoot.resolve(Path.of("tools", "monitor-resources.ps1")));
         this.stopFile = runRoot.resolve("resource-monitor.stop");
         this.resourceSamples = runRoot.resolve("resource-samples.csv");
-        this.transcriptPath = runRoot.resolve("transcript.raw.json");
         this.llamaLog = this.campaignRoot.resolve(Path.of(
                 "home", ".talos", "logs", "llama_cpp-" + serverPortText + ".log"));
         runFiles.requireRegularFileTarget(stopFile);
@@ -152,16 +163,6 @@ public final class QualificationPtyCaptureMain {
                 Path.of(localAppData, "Programs", "talos", "bin", "talos.bat")
                         .toAbsolutePath().normalize());
         this.installedRoot = installedTalos.getParent().getParent();
-        if (runFiles.inspect(transcriptPath) != NoFollowPathPolicy.EntryType.MISSING) {
-            throw new IllegalStateException("refusing to overwrite the PTY capture packet");
-        }
-        this.scenarioPath = runFiles.requireRegularFile(runRoot.resolve("scenario.json"));
-        JsonNode scenario = JSON.readTree(runFiles.readAllBytes(scenarioPath));
-        this.prompt = scenario.path("prompt").asText();
-        this.approvalBehavior = scenario.path("approvalBehavior").asText();
-        if (prompt.isBlank() || approvalBehavior.isBlank()) {
-            throw new IllegalStateException("scenario prompt or approval behavior is blank");
-        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -508,25 +509,27 @@ public final class QualificationPtyCaptureMain {
 
     private void writePacket(Instant started, Exception failure) {
         try {
-            Map<String, Object> packet = new LinkedHashMap<>();
-            packet.put("schemaName", "talos.modelQualification.ptyCapture");
-            packet.put("schemaVersion", protocolVersion);
-            packet.put("transport", "WINDOWS_PTY");
-            packet.put("tty", true);
-            packet.put("captureStartedAt", started.toString());
-            packet.put("captureEndedAt", Instant.now().toString());
-            packet.put("command", forwardSlashes(installedTalos));
-            packet.put("workspace", forwardSlashes(workspace));
-            packet.put("expectedApprovalBehavior", approvalBehavior);
-            packet.put("terminalOutcome", terminalOutcome);
-            packet.put("captureFailure", failure == null ? "" : failure.toString());
-            packet.put("processCleanup", cleanupResult == null ? Map.of() : cleanupResult.evidence());
-            packet.put("events", events);
-            packet.put("rawOutput", capture.text());
+            QualificationPtyEvidence.Capture packet = new QualificationPtyEvidence.Capture(
+                    QualificationPtyEvidence.SCHEMA_NAME,
+                    protocolVersion,
+                    "WINDOWS_PTY",
+                    true,
+                    started.toString(),
+                    Instant.now().toString(),
+                    forwardSlashes(installedTalos),
+                    forwardSlashes(workspace),
+                    approvalBehavior,
+                    terminalOutcome,
+                    failure == null ? "" : failure.toString(),
+                    QualificationPtyEvidence.ProcessCleanup.from(cleanupResult),
+                    events,
+                    capture.text());
+            byte[] canonicalBytes = QualificationJson.bytes(packet);
+            QualificationPtyEvidence.parse(canonicalBytes, protocolVersion);
             QualificationArtifactPublication.publishNewOrVerifyExact(
                     runFiles,
                     transcriptPath,
-                    JSON.writeValueAsBytes(packet),
+                    canonicalBytes,
                     "PTY capture packet");
         } catch (Exception writeFailure) {
             if (failure != null) failure.addSuppressed(writeFailure);
@@ -534,12 +537,8 @@ public final class QualificationPtyCaptureMain {
         }
     }
 
-    private static Map<String, Object> event(String type, String data) {
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("timestamp", Instant.now().toString());
-        event.put("type", type);
-        event.put("data", data);
-        return event;
+    private static QualificationPtyEvidence.Event event(String type, String data) {
+        return new QualificationPtyEvidence.Event(Instant.now().toString(), type, data);
     }
 
     private void writeLine(String value) throws Exception {
@@ -644,17 +643,10 @@ public final class QualificationPtyCaptureMain {
         return clean;
     }
 
-    private static String requiredText(JsonNode node, String field) {
-        String value = node.path(field).asText("").strip();
-        if (value.isEmpty()) throw new IllegalStateException("missing campaign field: " + field);
-        return value;
-    }
-
-    private static String argumentValue(JsonNode arguments, String name) {
-        if (!arguments.isArray()) throw new IllegalStateException("launchArguments must be an array");
+    private static String argumentValue(List<String> arguments, String name) {
         for (int index = 0; index + 1 < arguments.size(); index++) {
-            if (arguments.get(index).asText("").equals(name)) {
-                String value = arguments.get(index + 1).asText("").strip();
+            if (arguments.get(index).equals(name)) {
+                String value = arguments.get(index + 1).strip();
                 if (!value.isEmpty()) return value;
             }
         }

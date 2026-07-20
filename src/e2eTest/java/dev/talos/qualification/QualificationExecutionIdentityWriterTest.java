@@ -174,6 +174,120 @@ class QualificationExecutionIdentityWriterTest {
     }
 
     @Test
+    void harnessInputSpecificationRejectsScalarCoercionBeforeIdentityPublication()
+            throws Exception {
+        record ScalarCase(String id, String field, boolean textual) {}
+        List<ScalarCase> cases = List.of(
+                new ScalarCase("textual-schema-version", "schemaVersion", true),
+                new ScalarCase("fractional-schema-version", "schemaVersion", false),
+                new ScalarCase("textual-protocol-version", "protocolVersion", true),
+                new ScalarCase("fractional-protocol-version", "protocolVersion", false));
+        List<String> coercionsAccepted = new java.util.ArrayList<>();
+
+        for (ScalarCase testCase : cases) {
+            Seed seed = seed("input-scalar-" + testCase.id(), false);
+            ObjectNode specification = (ObjectNode) QualificationJson.readTree(seed.inputs());
+            replaceIntegralWithWrongScalarType(
+                    specification, testCase.field(), testCase.textual());
+            QualificationJson.write(seed.inputs(), specification);
+            byte[] malformedInput = Files.readAllBytes(seed.inputs());
+
+            try {
+                write(seed);
+                coercionsAccepted.add(testCase.id());
+            } catch (IOException rejected) {
+                assertOutputsAbsent(seed.packet().root());
+            }
+            assertArrayEquals(malformedInput, Files.readAllBytes(seed.inputs()),
+                    "identity generation must not rewrite its input specification");
+        }
+
+        assertTrue(coercionsAccepted.isEmpty(),
+                () -> "harness input scalar coercions reached identity publication: "
+                        + coercionsAccepted);
+    }
+
+    @Test
+    void malformedHarnessInputStructureIsRejectedBeforeIdentityPublication()
+            throws Exception {
+        record InvalidInput(
+                String id,
+                java.util.function.Consumer<ObjectNode> mutation,
+                boolean appendTrailingDocument) {}
+        List<InvalidInput> cases = List.of(
+                new InvalidInput("null-primitive",
+                        object -> object.putNull("schemaVersion"), false),
+                new InvalidInput("missing-creator",
+                        object -> object.remove("schemaName"), false),
+                new InvalidInput("unknown-property",
+                        object -> object.put("unowned", true), false),
+                new InvalidInput("trailing-document",
+                        object -> {}, true));
+
+        for (InvalidInput testCase : cases) {
+            Seed seed = seed("input-structure-" + testCase.id(), false);
+            ObjectNode specification = (ObjectNode) QualificationJson.readTree(seed.inputs());
+            testCase.mutation().accept(specification);
+            QualificationJson.write(seed.inputs(), specification);
+            if (testCase.appendTrailingDocument()) {
+                Files.writeString(
+                        seed.inputs(),
+                        Files.readString(seed.inputs(), StandardCharsets.UTF_8) + "{}\n",
+                        StandardCharsets.UTF_8);
+            }
+            byte[] malformedInput = Files.readAllBytes(seed.inputs());
+
+            assertThrows(IOException.class, () -> write(seed), testCase.id());
+
+            assertOutputsAbsent(seed.packet().root());
+            assertArrayEquals(malformedInput, Files.readAllBytes(seed.inputs()),
+                    "identity generation must not rewrite malformed input: " + testCase.id());
+        }
+    }
+
+    @Test
+    void executionInputLedgerRejectsScalarCoercionAfterIndependentHashRebinding()
+            throws Exception {
+        record ScalarCase(String id, String field, boolean artifactField, boolean textual) {}
+        List<ScalarCase> cases = List.of(
+                new ScalarCase("textual-schema-version", "schemaVersion", false, true),
+                new ScalarCase("fractional-schema-version", "schemaVersion", false, false),
+                new ScalarCase("textual-artifact-size", "sizeBytes", true, true),
+                new ScalarCase("fractional-artifact-size", "sizeBytes", true, false));
+        List<String> coercionsAccepted = new java.util.ArrayList<>();
+
+        for (ScalarCase testCase : cases) {
+            Seed seed = seed("ledger-scalar-" + testCase.id(), false);
+            QualificationExecutionIdentityWriter.Result written = write(seed);
+            ObjectNode ledger = (ObjectNode) QualificationJson.readTree(
+                    written.executionInputLedger());
+            ObjectNode scalarOwner = testCase.artifactField()
+                    ? (ObjectNode) ledger.path("artifacts").path(0)
+                    : ledger;
+            replaceIntegralWithWrongScalarType(
+                    scalarOwner, testCase.field(), testCase.textual());
+            rebindExecutionLedgerIdentity(written, ledger);
+
+            byte[] ledgerBefore = Files.readAllBytes(written.executionInputLedger());
+            byte[] harnessBefore = Files.readAllBytes(written.harnessManifest());
+            byte[] runtimeBefore = Files.readAllBytes(written.runtimeIdentity());
+            try {
+                verify(seed);
+                coercionsAccepted.add(testCase.id());
+            } catch (IOException rejected) {
+                // Exact JSON type rejection is the expected pre-authority outcome.
+            }
+            assertArrayEquals(ledgerBefore, Files.readAllBytes(written.executionInputLedger()));
+            assertArrayEquals(harnessBefore, Files.readAllBytes(written.harnessManifest()));
+            assertArrayEquals(runtimeBefore, Files.readAllBytes(written.runtimeIdentity()));
+        }
+
+        assertTrue(coercionsAccepted.isEmpty(),
+                () -> "rebound execution-ledger scalar coercions passed verification: "
+                        + coercionsAccepted);
+    }
+
+    @Test
     void refusesCampaignCoordinateRejectedByCanonicalPublicationNamespaceBeforeWriting()
             throws Exception {
         Seed seed = seed("campaign-namespace", false);
@@ -816,6 +930,32 @@ class QualificationExecutionIdentityWriterTest {
 
     private static String hash(Path path) throws IOException {
         return QualificationExecutionIdentityWriter.sha256File(path);
+    }
+
+    private static void replaceIntegralWithWrongScalarType(
+            ObjectNode owner, String field, boolean textual) {
+        long canonical = QualificationJson.requiredLong(owner.get(field), field);
+        if (textual) {
+            owner.put(field, Long.toString(canonical));
+        } else {
+            owner.put(field, canonical + 0.9d);
+        }
+    }
+
+    private static void rebindExecutionLedgerIdentity(
+            QualificationExecutionIdentityWriter.Result written,
+            ObjectNode ledger) throws IOException {
+        QualificationJson.write(written.executionInputLedger(), ledger);
+
+        ObjectNode harness = (ObjectNode) QualificationJson.readTree(written.harnessManifest());
+        ((ObjectNode) harness.path("files")).put(
+                QualificationExecutionIdentityWriter.LEDGER_FILE,
+                hash(written.executionInputLedger()));
+        QualificationJson.write(written.harnessManifest(), harness);
+
+        ObjectNode runtime = (ObjectNode) QualificationJson.readTree(written.runtimeIdentity());
+        runtime.put("harnessManifestSha256", hash(written.harnessManifest()));
+        QualificationJson.write(written.runtimeIdentity(), runtime);
     }
 
     private static void assertOutputsAbsent(Path root) {

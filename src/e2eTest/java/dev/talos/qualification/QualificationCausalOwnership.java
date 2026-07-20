@@ -511,7 +511,7 @@ final class QualificationCausalOwnership {
         String lastHash = "";
         int lastChars = -1;
         for (JsonNode event : events) {
-            String type = event.path("type").asText("");
+            String type = exactTextOrEmpty(event.path("type"));
             if ("OUTCOME_RENDERED".equals(type)) {
                 return matches(expected, lastHash, lastChars)
                         ? lastOrigin : QualificationRecords.AnswerOrigin.NONE;
@@ -519,14 +519,14 @@ final class QualificationCausalOwnership {
             JsonNode data = event.path("data");
             if ("MODEL_RESPONSE_RECEIVED".equals(type)) {
                 lastOrigin = QualificationRecords.AnswerOrigin.MODEL_PROVIDER;
-                lastHash = data.path("assistantHash").asText("");
+                lastHash = exactTextOrEmpty(data.path("assistantHash"));
                 lastChars = optionalExactInt(data.path("assistantChars"));
             } else if ("PROVIDER_GENERATION_RECEIVED".equals(type)) {
-                if (data.path("providerBacked").asBoolean(false)
-                        && data.path("foreground").asBoolean(false)
-                        && data.path("completedNormally").asBoolean(false)) {
+                if (isExactTrue(data.path("providerBacked"))
+                        && isExactTrue(data.path("foreground"))
+                        && isExactTrue(data.path("completedNormally"))) {
                     lastOrigin = QualificationRecords.AnswerOrigin.MODEL_PROVIDER;
-                    lastHash = data.path("assistantHash").asText("");
+                    lastHash = exactTextOrEmpty(data.path("assistantHash"));
                     lastChars = optionalExactInt(data.path("assistantChars"));
                 } else {
                     lastOrigin = QualificationRecords.AnswerOrigin.NONE;
@@ -534,14 +534,15 @@ final class QualificationCausalOwnership {
                     lastChars = -1;
                 }
             } else if ("DETERMINISTIC_ANSWER_SELECTED".equals(type)) {
-                String origin = data.path("origin").asText(
+                String origin = exactTextOrDefault(
+                        data.path("origin"),
                         QualificationRecords.AnswerOrigin.RUNTIME_DETERMINISTIC.name());
                 try {
                     lastOrigin = QualificationRecords.AnswerOrigin.valueOf(origin);
                 } catch (IllegalArgumentException invalid) {
                     lastOrigin = QualificationRecords.AnswerOrigin.NONE;
                 }
-                lastHash = data.path("answerHash").asText("");
+                lastHash = exactTextOrEmpty(data.path("answerHash"));
                 lastChars = optionalExactInt(data.path("answerChars"));
             }
         }
@@ -559,7 +560,7 @@ final class QualificationCausalOwnership {
         JsonNode routedData = null;
         for (int index = 0; index < events.size(); index++) {
             JsonNode event = events.get(index);
-            String type = event.path("type").asText("");
+            String type = exactTextOrEmpty(event.path("type"));
             JsonNode data = event.path("data");
             switch (type) {
                 case "DETERMINISTIC_ANSWER_SELECTED" -> {
@@ -646,7 +647,7 @@ final class QualificationCausalOwnership {
         Selection selected = null;
         for (int index = 0; index < terminalIndex; index++) {
             if ("DETERMINISTIC_ANSWER_SELECTED".equals(
-                    events.get(index).path("type").asText(""))) {
+                    exactTextOrEmpty(events.get(index).path("type")))) {
                 selected = deterministicSelection(events.get(index), index);
                 if (selected == null) return null;
             }
@@ -660,7 +661,7 @@ final class QualificationCausalOwnership {
         Selection matched = null;
         for (int index = 0; index < restoration.eventIndex(); index++) {
             if (!"DETERMINISTIC_ANSWER_SELECTED".equals(
-                    events.get(index).path("type").asText(""))) {
+                    exactTextOrEmpty(events.get(index).path("type")))) {
                 continue;
             }
             Selection candidate = deterministicSelection(events.get(index), index);
@@ -686,7 +687,7 @@ final class QualificationCausalOwnership {
         AnswerRestoration restored = null;
         for (int index = 0; index < exclusiveEnd; index++) {
             if (!"ANSWER_CANDIDATE_RESTORED".equals(
-                    events.get(index).path("type").asText(""))) {
+                    exactTextOrEmpty(events.get(index).path("type")))) {
                 continue;
             }
             restored = answerRestoration(events.get(index), index);
@@ -700,7 +701,7 @@ final class QualificationCausalOwnership {
             QualificationProviderAttemptLedger.Ledger ledger) {
         for (int index = 0; index < events.size(); index++) {
             if (!"ANSWER_CANDIDATE_RESTORED".equals(
-                    events.get(index).path("type").asText(""))) {
+                    exactTextOrEmpty(events.get(index).path("type")))) {
                 continue;
             }
             AnswerRestoration restoration = answerRestoration(events.get(index), index);
@@ -767,7 +768,7 @@ final class QualificationCausalOwnership {
 
     private static boolean hasInvalidatingEventAfter(JsonNode events, int terminalIndex) {
         for (int index = terminalIndex + 1; index < events.size(); index++) {
-            String type = events.get(index).path("type").asText("");
+            String type = exactTextOrEmpty(events.get(index).path("type"));
             if (type.startsWith("GENERATION_")
                     || type.startsWith("TOOL_")
                     || type.startsWith("APPROVAL_")
@@ -794,7 +795,7 @@ final class QualificationCausalOwnership {
         for (int index = 0; index < events.size(); index++) {
             JsonNode event = events.get(index);
             if (!"PROVIDER_TOOL_CALLS_SUPPRESSED".equals(
-                    event.path("type").asText(""))) {
+                    exactTextOrEmpty(event.path("type")))) {
                 continue;
             }
             if (index <= generationTerminalIndex || index >= terminalAnswerIndex) {
@@ -807,7 +808,7 @@ final class QualificationCausalOwnership {
                     || !generationId.equals(exactId(data.path("sourceGenerationId")))
                     || !attemptId.equals(exactId(data.path("sourceAttemptId")))
                     || !"TASK_CONTRACT_BLOCKED_TOOL_CALLS".equals(
-                            data.path("reasonCode").asText(""))
+                            exactTextOrEmpty(data.path("reasonCode")))
                     || exactNonNegativeInt(data.path("nativeToolCallCount"))
                             != response.nativeToolCallCount()
                     || !data.path("textualToolCallPresent").isBoolean()
@@ -830,7 +831,7 @@ final class QualificationCausalOwnership {
             int exclusiveStart,
             int exclusiveEnd) {
         for (int index = exclusiveStart + 1; index < exclusiveEnd; index++) {
-            String type = events.get(index).path("type").asText("");
+            String type = exactTextOrEmpty(events.get(index).path("type"));
             if (type.startsWith("TOOL_CALL_")
                     || "TOOL_EXECUTED".equals(type)
                     || type.startsWith("APPROVAL_")) {
@@ -846,7 +847,7 @@ final class QualificationCausalOwnership {
             int exclusiveStart,
             int exclusiveEnd) {
         for (int index = exclusiveStart + 1; index < exclusiveEnd; index++) {
-            if (type.equals(events.get(index).path("type").asText(""))) return true;
+            if (type.equals(exactTextOrEmpty(events.get(index).path("type")))) return true;
         }
         return false;
     }
@@ -857,7 +858,8 @@ final class QualificationCausalOwnership {
             int exclusiveEnd,
             Set<String> allowedTypes) {
         for (int index = exclusiveStart + 1; index < exclusiveEnd; index++) {
-            if (!allowedTypes.contains(events.get(index).path("type").asText(""))) {
+            if (!allowedTypes.contains(
+                    exactTextOrEmpty(events.get(index).path("type")))) {
                 return false;
             }
         }
@@ -876,7 +878,8 @@ final class QualificationCausalOwnership {
         int currentChars = sourceChars;
         for (int index = sourceIndex + 1; index < terminalIndex; index++) {
             JsonNode event = events.get(index);
-            if (!"ANSWER_TRANSFORMED".equals(event.path("type").asText(""))) continue;
+            if (!"ANSWER_TRANSFORMED".equals(
+                    exactTextOrEmpty(event.path("type")))) continue;
             AnswerTransformation transformation = answerTransformation(event, index);
             if (transformation == null
                     || !transformation.fromAnswerHash().equals(currentHash)
@@ -1001,6 +1004,19 @@ final class QualificationCausalOwnership {
         if (value == null || !value.isTextual()
                 || !value.textValue().matches("[A-Za-z0-9][A-Za-z0-9._-]{0,255}")) return null;
         return value.textValue();
+    }
+
+    private static String exactTextOrEmpty(JsonNode value) {
+        return value != null && value.isTextual() ? value.textValue() : "";
+    }
+
+    private static String exactTextOrDefault(JsonNode value, String defaultValue) {
+        if (value == null || value.isMissingNode()) return defaultValue;
+        return value.isTextual() ? value.textValue() : "";
+    }
+
+    private static boolean isExactTrue(JsonNode value) {
+        return value != null && value.isBoolean() && value.booleanValue();
     }
 
     private static int exactInt(JsonNode value) {

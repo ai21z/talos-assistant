@@ -1047,6 +1047,125 @@ class QualificationEvidenceValidatorTest {
     }
 
     @Test
+    void protocolV6PtyScalarTypesAreRejectedByTheFullValidator() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        List<PtyScalarCase> cases = List.of(
+                new PtyScalarCase("textual-schema-version", json ->
+                        json.put("schemaVersion", Integer.toString(catalog.protocolVersion()))),
+                new PtyScalarCase("fractional-schema-version", json ->
+                        json.put("schemaVersion", catalog.protocolVersion() + 0.9)),
+                new PtyScalarCase("textual-tty", json -> json.put("tty", "true")),
+                new PtyScalarCase("numeric-tty", json -> json.put("tty", 1)),
+                new PtyScalarCase("numeric-workspace", json -> json.put("workspace", 17)),
+                new PtyScalarCase("numeric-raw-output", json -> {
+                    ArrayNode events = (ArrayNode) json.path("events");
+                    ((ObjectNode) events.get(1)).put("data", 17);
+                    json.put("rawOutput", 17);
+                }),
+                new PtyScalarCase("numeric-event-timestamp", json ->
+                        ((ObjectNode) json.path("events").get(0))
+                                .put("timestamp", 17)),
+                new PtyScalarCase("numeric-ignored-event-type", json ->
+                        ((ArrayNode) json.path("events")).addObject()
+                                .put("timestamp", "2026-07-10T00:00:02Z")
+                                .put("type", 17)
+                                .put("data", "ignored-diagnostic")),
+                new PtyScalarCase("numeric-ignored-event-data", json ->
+                        ((ArrayNode) json.path("events")).addObject()
+                                .put("timestamp", "2026-07-10T00:00:02Z")
+                                .put("type", "diagnostic")
+                                .put("data", 17)));
+        List<String> missingTypeRejections = new ArrayList<>();
+
+        for (PtyScalarCase testCase : cases) {
+            QualificationTestPacket packet = QualificationTestPacket.create(
+                    temp.resolve("full-validator-pty-" + testCase.id()), catalog);
+            Path capturePath = packet.runRoot().resolve("transcript.raw.json");
+            ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
+            testCase.mutation().apply(capture);
+            QualificationJson.write(capturePath, capture);
+
+            QualificationEvidenceValidator.Validation validation =
+                    QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+            assertFalse(validation.valid(), testCase.id());
+            boolean rejectedByPtyAuthority = validation.findings().stream().anyMatch(finding ->
+                    finding.contains("Qualification PTY capture is missing or invalid"));
+            if (!rejectedByPtyAuthority) {
+                missingTypeRejections.add(testCase.id());
+            }
+        }
+
+        assertTrue(missingTypeRejections.isEmpty(),
+                () -> "full validator accepted PTY scalar coercions: "
+                        + missingTypeRejections);
+    }
+
+    @Test
+    void protocolV6PostIdentityScalarEvidenceCannotPassValidation() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        record ScalarEvidenceCase(
+                String id,
+                PacketMutation mutation,
+                String requiredFinding) {}
+        List<ScalarEvidenceCase> cases = List.of(
+                new ScalarEvidenceCase("textual-canary-verdict", packet -> mutateJson(
+                        packet.runRoot().resolve("canary.json"),
+                        json -> json.put("passed", "true")),
+                        "canary"),
+                new ScalarEvidenceCase("numeric-approval-response", packet ->
+                        QualificationJson.write(
+                                packet.runRoot().resolve("approvals.json"),
+                                java.util.Map.of(
+                                        "events",
+                                        List.of(java.util.Map.of("response", 1)))),
+                        "Approval evidence"),
+                new ScalarEvidenceCase("numeric-declared-hash", packet -> mutateJson(
+                        packet.runRoot().resolve("before-hashes.json"),
+                        json -> json.put("README.md", 17)),
+                        "exact string hashes"));
+
+        for (ScalarEvidenceCase testCase : cases) {
+            QualificationTestPacket packet = QualificationTestPacket.create(
+                    temp.resolve("post-identity-scalar-" + testCase.id()), catalog);
+            testCase.mutation().apply(packet);
+
+            QualificationEvidenceValidator.Validation validation =
+                    QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+            assertFalse(validation.valid(), testCase.id());
+            assertTrue(validation.findings().stream()
+                            .anyMatch(finding -> finding.contains(testCase.requiredFinding())),
+                    () -> testCase.id() + ":\n" + String.join("\n", validation.findings()));
+            assertTrue(validation.runs().stream()
+                            .noneMatch(QualificationRecords.RunResult::comparativeScoreEligible),
+                    testCase.id());
+        }
+    }
+
+    @Test
+    void legacyTextualCanaryVerdictIsRejectedWithoutV6PublicationEffects()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(5);
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("legacy-textual-canary"), catalog);
+        mutateJson(
+                packet.runRoot().resolve("canary.json"),
+                json -> json.put("passed", "true"));
+
+        QualificationEvidenceValidator.Validation validation =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(validation.valid());
+        assertTrue(validation.findings().stream()
+                        .anyMatch(finding -> finding.contains(
+                                "Runtime artifact canary evidence is invalid")),
+                () -> String.join("\n", validation.findings()));
+        assertTrue(validation.runs().stream()
+                        .noneMatch(QualificationRecords.RunResult::comparativeScoreEligible));
+    }
+
+    @Test
     void ptyCaptureSchemaMustMatchTheCampaignProtocolVersion() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(2);
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
@@ -1467,6 +1586,25 @@ class QualificationEvidenceValidatorTest {
 
     private static void assertEqualsOne(int actual) {
         assertTrue(actual == 1, "expected one run but was " + actual);
+    }
+
+    private record PtyScalarCase(String id, PtyJsonMutation mutation) {}
+
+    @FunctionalInterface
+    private interface PtyJsonMutation {
+        void apply(ObjectNode json) throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface PacketMutation {
+        void apply(QualificationTestPacket packet) throws Exception;
+    }
+
+    private static void mutateJson(Path path, PtyJsonMutation mutation)
+            throws Exception {
+        ObjectNode json = (ObjectNode) QualificationJson.readTree(path);
+        mutation.apply(json);
+        QualificationJson.write(path, json);
     }
 
     private static QualificationRecords.RunResult assertActiveProcessBindingBlocked(

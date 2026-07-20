@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -451,6 +452,46 @@ class QualificationCausalOwnershipTest {
     }
 
     @Test
+    void legacyProviderEvidenceRequiresExactBooleanScalarTypes() throws Exception {
+        byte[] answer = "4".getBytes(StandardCharsets.UTF_8);
+        List<LegacyBooleanCase> cases = List.of(
+                new LegacyBooleanCase("providerBacked-text", "providerBacked", true),
+                new LegacyBooleanCase("providerBacked-number", "providerBacked", false),
+                new LegacyBooleanCase("foreground-text", "foreground", true),
+                new LegacyBooleanCase("foreground-number", "foreground", false),
+                new LegacyBooleanCase("completedNormally-text", "completedNormally", true),
+                new LegacyBooleanCase("completedNormally-number", "completedNormally", false));
+        List<String> coercionsAccepted = new ArrayList<>();
+
+        for (LegacyBooleanCase testCase : cases) {
+            Map<String, Object> responseData = new java.util.LinkedHashMap<>(Map.of(
+                    "providerBacked", true,
+                    "foreground", true,
+                    "completedNormally", true,
+                    "assistantHash", answerHash("4"),
+                    "assistantChars", 1));
+            responseData.put(testCase.field(), testCase.textual() ? "true" : 1);
+            ObjectNode trace = (ObjectNode) QualificationJson.tree(Map.of(
+                    "schemaVersion", 2,
+                    "events", List.of(
+                            traceEvent("PROVIDER_GENERATION_RECEIVED",
+                                    responseData),
+                            traceEvent("OUTCOME_RENDERED", Map.of()))));
+
+            QualificationRecords.AnswerOrigin origin =
+                    QualificationCausalOwnership.matchedAnswerOrigin(
+                            answer, QualificationJson.bytes(trace), 5);
+            if (origin != QualificationRecords.AnswerOrigin.NONE) {
+                coercionsAccepted.add(testCase.id() + "=" + origin);
+            }
+        }
+
+        assertTrue(coercionsAccepted.isEmpty(),
+                () -> "legacy provider booleans were coerced into authority: "
+                        + coercionsAccepted);
+    }
+
+    @Test
     void preciseNonModelOwnersRemainDistinct() {
         assertOwnerAccepted(QualificationRecords.CausalOwner.RUNTIME_POLICY,
                 QualificationRecords.FailureClass.TALOS_RUNTIME_DEFECT);
@@ -602,6 +643,11 @@ class QualificationCausalOwnershipTest {
         assertTrue(evaluation.structurallyComplete(),
                 owner + ": " + evaluation.reasonCodes());
     }
+
+    private record LegacyBooleanCase(
+            String id,
+            String field,
+            boolean textual) {}
 
     private static QualificationRecords.RunResult failedResult(
             QualificationRecords.FailureClass failureClass,

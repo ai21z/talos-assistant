@@ -151,6 +151,33 @@ class ModelQualificationMainTest {
     }
 
     @Test
+    void validateRejectsNonIntegralCampaignProtocolBeforeCatalogSelection() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        for (boolean textual : List.of(true, false)) {
+            QualificationTestPacket packet = QualificationTestPacket.create(
+                    temp.resolve("validate-protocol-" + (textual ? "text" : "fraction")),
+                    catalog);
+            Path campaignPath = packet.root().resolve("campaign.json");
+            var campaign = (com.fasterxml.jackson.databind.node.ObjectNode)
+                    QualificationJson.readTree(campaignPath);
+            if (textual) {
+                campaign.put("protocolVersion", "6");
+            } else {
+                campaign.put("protocolVersion", 6.9d);
+            }
+            QualificationJson.write(campaignPath, campaign);
+            Map<String, FileState> before = treeState(packet.root());
+
+            Capture capture = run("validate", "--root", packet.root().toString());
+
+            assertEquals(2, capture.exit(), capture.err());
+            assertTrue(capture.err().contains(
+                    "campaign protocolVersion must be an exact JSON integer"), capture.err());
+            assertEquals(before, treeState(packet.root()));
+        }
+    }
+
+    @Test
     void protocolV4RequirementEvaluationRemainsReadableWithoutWritingPacketState() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(4);
         QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
@@ -422,12 +449,28 @@ class ModelQualificationMainTest {
         QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("approvals"), catalog);
         Path output = packet.runRoot().resolve("approvals.json");
         Files.delete(output);
-        QualificationJson.write(packet.runRoot().resolve("transcript.raw.json"), java.util.Map.of(
-                "events", List.of(
-                        java.util.Map.of("type", "terminal-outcome", "data", "approval-unexpected-deny-1"),
-                        java.util.Map.of("type", "input", "data", "approval-unexpected-deny-1"),
-                        java.util.Map.of("type", "terminal-outcome", "data", "approval-unexpected-deny-2"),
-                        java.util.Map.of("type", "input", "data", "approval-unexpected-deny-2"))));
+        Path capturePath = packet.runRoot().resolve("transcript.raw.json");
+        var capture = (com.fasterxml.jackson.databind.node.ObjectNode)
+                QualificationJson.readTree(capturePath);
+        var events = (com.fasterxml.jackson.databind.node.ArrayNode)
+                capture.path("events");
+        events.insertObject(1)
+                .put("timestamp", "2026-07-10T00:00:00Z")
+                .put("type", "terminal-outcome")
+                .put("data", "approval-unexpected-deny-1");
+        events.insertObject(2)
+                .put("timestamp", "2026-07-10T00:00:00Z")
+                .put("type", "input")
+                .put("data", "approval-unexpected-deny-1");
+        events.insertObject(3)
+                .put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "terminal-outcome")
+                .put("data", "approval-unexpected-deny-2");
+        events.insertObject(4)
+                .put("timestamp", "2026-07-10T00:00:01Z")
+                .put("type", "input")
+                .put("data", "approval-unexpected-deny-2");
+        QualificationJson.write(capturePath, capture);
         String[] args = {
                 "approvals",
                 "--root", packet.root().toString(),

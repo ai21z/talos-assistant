@@ -60,9 +60,10 @@ public final class ModelQualificationMain {
                 != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
             return QualificationScenarioBank.loadDefault();
         }
-        int protocolVersion = QualificationJson.readTree(
-                        packetFiles.readAllBytes(campaignPath))
-                .path("protocolVersion").asInt(-1);
+        int protocolVersion = QualificationJson.requiredInt(
+                QualificationJson.readTree(
+                        packetFiles.readAllBytes(campaignPath)).get("protocolVersion"),
+                "campaign protocolVersion");
         return QualificationScenarioBank.load(protocolVersion);
     }
 

@@ -66,6 +66,8 @@ final class QualificationEvidenceValidator {
 
     private QualificationEvidenceValidator() {}
 
+    private record LegacyCanary(boolean passed) {}
+
     record Validation(
             boolean valid,
             List<String> findings,
@@ -321,25 +323,41 @@ final class QualificationEvidenceValidator {
             QualificationRecords.CalibrationRules calibration,
             List<String> findings) {
         try {
-            var canary = QualificationJson.readTree(runRoot.resolve("canary.json"));
             boolean canaryPassed;
             if (verifiedPublication != null) {
                 canaryPassed = verifiedPublication.canary().passed();
             } else {
+                boolean declaredCanaryPassed;
+                try {
+                    if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+                        QualificationRunFinalizer.CanaryDocument canary =
+                                QualificationJson.read(
+                                        runRoot.resolve("canary.json"),
+                                        QualificationRunFinalizer.CanaryDocument.class);
+                        declaredCanaryPassed = canary.passed();
+                    } else {
+                        LegacyCanary canary = QualificationJson.read(
+                                runRoot.resolve("canary.json"), LegacyCanary.class);
+                        declaredCanaryPassed = canary.passed();
+                    }
+                } catch (IOException | RuntimeException invalidCanary) {
+                    findings.add("Runtime artifact canary evidence is invalid: " + runRoot);
+                    return;
+                }
                 List<Path> sourceEvidenceAllowlist =
                         sourceEvidenceFiles(runRoot, scenarioSnapshotVerified);
                 List<ArtifactCanaryScanner.Finding> canaryFindings =
                         ArtifactCanaryScanner.scanRuntimeArtifacts(
                                 List.of(runRoot), sourceEvidenceAllowlist);
                 canaryPassed = canaryFindings.isEmpty();
-                if (canary.path("passed").asBoolean(false) != canaryPassed) {
+                if (declaredCanaryPassed != canaryPassed) {
                     findings.add("Runtime artifact canary assertion differs from scanner result: "
                             + runRoot);
                 }
                 if (!canaryPassed) {
                     findings.add("Runtime artifact canary found " + canaryFindings.size()
                             + " leak(s): " + runRoot);
-                } else if (!canary.path("passed").asBoolean(false)) {
+                } else if (!declaredCanaryPassed) {
                     findings.add("Runtime artifact canary did not pass: " + runRoot);
                 }
             }
@@ -355,11 +373,19 @@ final class QualificationEvidenceValidator {
                     runRoot.resolve("timings.json"), QualificationRecords.TimingEvidence.class);
             QualificationRecords.ResourceEvidence resources = QualificationJson.read(
                     runRoot.resolve("resources.json"), QualificationRecords.ResourceEvidence.class);
+            QualificationPtyEvidence.Capture capture = null;
+            try {
+                capture = QualificationPtyEvidence.parse(
+                        runRoot.resolve("transcript.raw.json"),
+                        catalog.protocolVersion());
+            } catch (IOException | RuntimeException invalidCapture) {
+                findings.add("Qualification PTY capture is missing or invalid: " + runRoot);
+            }
             validateTimingEvidence(runRoot, run, timings, findings);
             validateResourceEvidence(runRoot, run, resources, findings);
-            validateApprovals(runRoot, scenario, trace, findings);
-            validatePtyCapture(runRoot, request, catalog.protocolVersion(), findings);
-            validateProviderEvidence(runRoot, timings, findings);
+            validateApprovals(runRoot, capture, scenario, trace, findings);
+            validatePtyCapture(runRoot, capture, request, catalog.protocolVersion(), findings);
+            validateProviderEvidence(runRoot, capture, timings, findings);
 
             QualificationFixtureMaterializer.Snapshot before =
                     QualificationFixtureMaterializer.snapshot(runRoot.resolve("before-files"));
@@ -569,60 +595,24 @@ final class QualificationEvidenceValidator {
 
     private static void validatePtyCapture(
             Path runRoot,
+            QualificationPtyEvidence.Capture capture,
             QualificationRecords.RequestRecord request,
             int protocolVersion,
-            List<String> findings) throws IOException {
-        var capture = QualificationJson.readTree(runRoot.resolve("transcript.raw.json"));
-        String transport = capture.path("transport").asText("");
-        String captureCommand = capture.path("command").asText("").replace('\\', '/');
-        String requestCommand = request == null || request.command() == null
-                ? "" : request.command().replace('\\', '/');
-        boolean valid = capture.isObject()
-                && "talos.modelQualification.ptyCapture".equals(capture.path("schemaName").asText(""))
-                && capture.path("schemaVersion").asInt(-1) == protocolVersion
-                && capture.path("tty").asBoolean(false)
-                && Set.of("WINDOWS_PTY", "UNIX_PTY", "TEST_PTY").contains(transport)
-                && !capture.path("rawOutput").asText("").isBlank()
-                && !capture.path("workspace").asText("").isBlank()
-                && !captureCommand.isBlank()
-                && !requestCommand.isBlank()
-                && (captureCommand.equals(requestCommand) || captureCommand.endsWith("/" + requestCommand))
-                && capture.path("events").isArray();
-        if (valid) {
-            Set<String> inputKinds = new HashSet<>();
-            boolean outputObserved = false;
-            StringBuilder capturedOutput = new StringBuilder();
-            java.time.Instant previous = parseInstant(capture.path("captureStartedAt").asText(""));
-            java.time.Instant ended = parseInstant(capture.path("captureEndedAt").asText(""));
-            if (previous == null || ended == null || ended.isBefore(previous)) valid = false;
-            for (var event : capture.path("events")) {
-                java.time.Instant timestamp = parseInstant(event.path("timestamp").asText(""));
-                if (timestamp == null || previous == null || ended == null
-                        || timestamp.isBefore(previous) || timestamp.isAfter(ended)) {
-                    valid = false;
-                } else {
-                    previous = timestamp;
-                }
-                if (event.path("type").asText("").equals("input")) {
-                    inputKinds.add(event.path("data").asText(""));
-                }
-                if (event.path("type").asText("").equals("output")
-                        && !event.path("data").asText("").isBlank()) {
-                    outputObserved = true;
-                    capturedOutput.append(event.path("data").asText(""));
-                }
-            }
-            valid = inputKinds.contains("scenario-prompt")
-                    && inputKinds.contains("last-trace")
-                    && outputObserved
-                    && capturedOutput.toString().equals(capture.path("rawOutput").asText(""));
+            List<String> findings) {
+        boolean valid = capture != null
+                && capture.schemaVersion() == protocolVersion
+                && request != null
+                && QualificationPtyEvidence.validEvidence(
+                        capture, request.command(), request.transport());
+        if (!valid) {
+            String finding = "Qualification PTY capture is missing or invalid: " + runRoot;
+            if (!findings.contains(finding)) findings.add(finding);
         }
-        if (request == null || !"TRUE_PTY".equals(request.transport())) valid = false;
-        if (!valid) findings.add("Qualification PTY capture is missing or invalid: " + runRoot);
     }
 
     private static void validateProviderEvidence(
             Path runRoot,
+            QualificationPtyEvidence.Capture capture,
             QualificationRecords.TimingEvidence timings,
             List<String> findings) throws IOException {
         Path promptDebug = runRoot.resolve("prompt-debug.txt");
@@ -650,8 +640,7 @@ final class QualificationEvidenceValidator {
             findings.add("MODEL_RUNTIME_NOT_APPLICABLE must not contain model timing: " + runRoot);
         }
 
-        String rawOutput = QualificationJson.readTree(runRoot.resolve("transcript.raw.json"))
-                .path("rawOutput").asText("");
+        String rawOutput = capture == null ? "" : capture.rawOutput();
         if (!promptEvidence.equals(QualificationProviderEvidence.promptNotApplicableText())
                 || !modelEvidence.equals(QualificationProviderEvidence.modelRuntimeNotApplicableText())
                 || !rawOutput.contains(QualificationProviderEvidence.NO_PROVIDER_PROMPT)) {
@@ -860,27 +849,32 @@ final class QualificationEvidenceValidator {
 
     private static void validateApprovals(
             Path runRoot,
+            QualificationPtyEvidence.Capture capture,
             QualificationProtocol.Scenario scenario,
             QualificationTraceEvidence.Facts trace,
             List<String> findings) throws IOException {
-        var approvals = QualificationJson.readTree(runRoot.resolve("approvals.json"));
-        var events = approvals.path("events");
-        if (!approvals.isObject() || !events.isArray()) {
-            findings.add("Approval evidence must contain an events array: " + runRoot);
+        QualificationApprovalFinalizer.Document approvals;
+        try {
+            approvals = QualificationJson.read(
+                    runRoot.resolve("approvals.json"),
+                    QualificationApprovalFinalizer.Document.class);
+        } catch (IOException | RuntimeException invalid) {
+            findings.add("Approval evidence must contain exact typed events: " + runRoot);
             return;
         }
-        List<String> responses = new ArrayList<>();
-        events.forEach(event -> responses.add(event.path("response").asText("")));
+        List<String> responses = approvals.events().stream()
+                .map(QualificationApprovalFinalizer.ApprovalEvent::response)
+                .toList();
         try {
             List<String> expected = QualificationApprovalFinalizer.derive(
-                            runRoot.resolve("transcript.raw.json"), scenario.approvalBehavior())
+                            capture, scenario.approvalBehavior())
                     .events().stream()
                     .map(QualificationApprovalFinalizer.ApprovalEvent::response)
                     .toList();
             if (!responses.equals(expected)) {
                 findings.add("Approval evidence differs from ordered PTY decisions: " + runRoot);
             }
-        } catch (IOException | RuntimeException invalidCapture) {
+        } catch (RuntimeException invalidCapture) {
             findings.add("Approval PTY event sequence is invalid: " + runRoot + ": "
                     + message(invalidCapture));
         }
@@ -904,7 +898,20 @@ final class QualificationEvidenceValidator {
             return;
         }
         Map<String, String> declared = new HashMap<>();
-        node.fields().forEachRemaining(entry -> declared.put(entry.getKey(), entry.getValue().asText("")));
+        boolean exactTypes = true;
+        var fields = node.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (!entry.getValue().isTextual()) {
+                exactTypes = false;
+            } else {
+                declared.put(entry.getKey(), entry.getValue().textValue());
+            }
+        }
+        if (!exactTypes) {
+            findings.add(label + " must contain exact string hashes: " + runRoot);
+            return;
+        }
         if (!declared.equals(actual)) {
             findings.add(label + " does not match captured bytes: " + runRoot);
         }
