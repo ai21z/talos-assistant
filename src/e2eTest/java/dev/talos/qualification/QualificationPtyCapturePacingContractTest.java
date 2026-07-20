@@ -14,6 +14,26 @@ class QualificationPtyCapturePacingContractTest {
             "src/e2eTest/java/dev/talos/qualification/QualificationPtyCaptureMain.java");
 
     @Test
+    void runRoutesBothChildStartsThroughTheCheckedLaunchGate() throws Exception {
+        String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
+
+        String runMethod = between(
+                source, "private void run()", "private String awaitApprovalOrTerminal");
+        String gateMethod = between(
+                source,
+                "private void validateThenStartChildren()",
+                "private void run()");
+
+        assertTrue(runMethod.contains("validateThenStartChildren();"), runMethod);
+        assertFalse(runMethod.contains("startMonitor();"), runMethod);
+        assertFalse(runMethod.contains("startTalos();"), runMethod);
+        assertTrue(gateMethod.contains(
+                "QualificationPtyFilesystemBoundary.validateThenStart("), gateMethod);
+        assertTrue(gateMethod.contains("this::startMonitor"), gateMethod);
+        assertTrue(gateMethod.contains("this::startTalos"), gateMethod);
+    }
+
+    @Test
     void startupIdleIsSettledBeforeScenarioInput() throws Exception {
         String source = Files.readString(SOURCE, StandardCharsets.UTF_8);
         String runMethod = between(source, "private void run()", "private String awaitApprovalOrTerminal");

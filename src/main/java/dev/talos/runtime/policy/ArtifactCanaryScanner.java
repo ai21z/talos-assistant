@@ -1,6 +1,9 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,7 +21,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /** Deterministic scanner for generated artifacts that must not contain raw privacy canaries. */
 public final class ArtifactCanaryScanner {
@@ -129,10 +131,7 @@ public final class ArtifactCanaryScanner {
             byte[] bytes) {}
 
     public static List<Finding> scanExisting(List<Path> roots, List<Path> allowlist) throws IOException {
-        List<Path> existing = roots == null
-                ? List.of()
-                : roots.stream().filter(Files::exists).toList();
-        return scan(existing, allowlist);
+        return scan(roots, allowlist);
     }
 
     public static List<Finding> scan(List<Path> roots, List<Path> allowlist) throws IOException {
@@ -197,26 +196,52 @@ public final class ArtifactCanaryScanner {
         Set<Path> allowed = normalizedAllowlist(allowlist);
         List<Finding> findings = new ArrayList<>();
         for (Path root : roots) {
-            if (root == null || !Files.exists(root)) continue;
-            try (Stream<Path> stream = Files.walk(root)) {
-                for (Path path : stream
-                        .filter(Files::isRegularFile)
-                        .filter(path -> !isUnderSkippedDirectory(path, broadScan))
-                        .filter(path -> !allowed.contains(normalize(path)))
-                        .filter(ArtifactCanaryScanner::looksTextLike)
-                        .toList()) {
-                    findings.addAll(scanFile(path));
+            if (root == null) continue;
+            Path normalizedRoot = normalize(root);
+            try {
+                NoFollowPathPolicy.GuardedRoot files =
+                        NoFollowPathPolicy.bindExistingDirectory(normalizedRoot);
+                for (NoFollowPathPolicy.TreeEntry entry : files.walk(normalizedRoot)) {
+                    Path path = entry.path();
+                    if (entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE
+                            && !isUnderSkippedDirectory(
+                                    normalizedRoot, path, broadScan)
+                            && !allowed.contains(path)
+                            && looksTextLike(path)) {
+                        findings.addAll(scanFile(files, path));
+                    }
+                }
+            } catch (NoFollowPathPolicy.Violation notDirectory) {
+                if (notDirectory.reason() == NoFollowPathPolicy.Reason.MISSING) continue;
+                if (notDirectory.reason() != NoFollowPathPolicy.Reason.NOT_DIRECTORY) {
+                    throw notDirectory;
+                }
+                NoFollowPathPolicy.requireUnlinkedRegularFile(normalizedRoot);
+                if (!isUnderSkippedDirectory(
+                            normalizedRoot, normalizedRoot, broadScan)
+                        && !allowed.contains(normalizedRoot)
+                        && looksTextLike(normalizedRoot)) {
+                    findings.addAll(scanFile(null, normalizedRoot));
                 }
             }
         }
         return List.copyOf(findings);
     }
 
-    private static List<Finding> scanFile(Path path) throws IOException {
+    private static List<Finding> scanFile(
+            NoFollowPathPolicy.GuardedRoot owner,
+            Path path
+    ) throws IOException {
+        if (owner == null) NoFollowPathPolicy.requireUnlinkedRegularFile(path);
+        else owner.requireRegularFile(path);
         if (Files.size(path) > MAX_TEXT_FILE_BYTES) return List.of();
         String text;
         try {
-            text = Files.readString(path, StandardCharsets.UTF_8);
+            byte[] bytes = owner == null
+                    ? NoFollowPathPolicy.readAllBytes(path)
+                    : owner.readAllBytes(path);
+            text = StandardCharsets.UTF_8.newDecoder()
+                    .decode(ByteBuffer.wrap(bytes)).toString();
         } catch (CharacterCodingException e) {
             return List.of();
         }
@@ -335,13 +360,30 @@ public final class ArtifactCanaryScanner {
         return value;
     }
 
-    private static boolean isUnderSkippedDirectory(Path path, boolean broadScan) {
-        for (Path part : path) {
+    private static boolean isUnderSkippedDirectory(
+            Path scanRoot,
+            Path path,
+            boolean broadScan) {
+        Path relative;
+        try {
+            relative = scanRoot.equals(path)
+                    ? Path.of(path.getFileName() == null
+                            ? ""
+                            : path.getFileName().toString())
+                    : scanRoot.relativize(path);
+        } catch (IllegalArgumentException unrelated) {
+            return true;
+        }
+        for (Path part : relative) {
             String name = part.toString().toLowerCase(Locale.ROOT);
             if (ALWAYS_SKIPPED_DIRECTORY_NAMES.contains(name)) return true;
             if (broadScan && BROAD_SCAN_SKIPPED_DIRECTORY_NAMES.contains(name)) return true;
         }
-        String normalized = path.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
+        String rootName = scanRoot.getFileName() == null
+                ? ""
+                : scanRoot.getFileName().toString();
+        String normalized = (rootName + "/" + relative)
+                .replace('\\', '/').toLowerCase(Locale.ROOT);
         if (normalized.startsWith("build/resources/") || normalized.contains("/build/resources/")) return true;
         if (broadScan && (normalized.startsWith("local/manual-testing/")
                 || normalized.contains("/local/manual-testing/"))) return true;

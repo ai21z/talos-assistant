@@ -1,7 +1,10 @@
 package dev.talos.runtime.policy;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -14,6 +17,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArtifactCanaryScanTest {
@@ -30,6 +34,22 @@ class ArtifactCanaryScanTest {
 
         assertFalse(findings.isEmpty());
         assertTrue(findings.get(0).path().endsWith("prompt-debug.md"));
+    }
+
+    @Test
+    void scannerDoesNotTreatAnAncestorAboveTheDeclaredRootAsSkipped()
+            throws Exception {
+        Path scanRoot = Files.createDirectories(
+                tempDir.resolve("tmp").resolve("declared-scan-root"));
+        Path artifact = Files.writeString(
+                scanRoot.resolve("prompt-debug.md"),
+                "FILE_DISCOVERED_CANARY_T275_ENV\n");
+
+        List<ArtifactCanaryScanner.Finding> findings =
+                ArtifactCanaryScanner.scan(List.of(scanRoot), List.of());
+
+        assertFalse(findings.isEmpty());
+        assertEquals(artifact, findings.getFirst().path());
     }
 
     @Test
@@ -121,6 +141,57 @@ class ArtifactCanaryScanTest {
         assertEquals(1, findings.size());
         assertEquals(2, findings.getFirst().line());
         assertTrue(findings.getFirst().snippet().contains("[redacted-canary]"));
+    }
+
+    @Test
+    void runtimeScanRejectsLinkedArtifactBeforeReadingExternalCanary()
+            throws Exception {
+        Path root = Files.createDirectory(tempDir.resolve("linked-scan"));
+        Path external = Files.writeString(
+                tempDir.resolve("external-trace.log"),
+                "FILE_DISCOVERED_CANARY_T1170_EXTERNAL");
+        Path linked = root.resolve("trace.log");
+        try {
+            Files.createSymbolicLink(linked, external);
+        } catch (Exception unavailable) {
+            Assumptions.abort("symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> ArtifactCanaryScanner.scanRuntimeArtifacts(
+                        List.of(root), List.of()));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void runtimeScanRejectsWindowsJunctionBeforeReadingExternalCanary()
+            throws Exception {
+        Path root = Files.createDirectory(tempDir.resolve("junction-scan"));
+        Path external = Files.createDirectory(tempDir.resolve("external-junction-scan"));
+        Files.writeString(
+                external.resolve("trace.log"),
+                "FILE_DISCOVERED_CANARY_T1170_WINDOWS_EXTERNAL");
+        Path junction = root.resolve("junction");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> ArtifactCanaryScanner.scanRuntimeArtifacts(
+                        List.of(root), List.of()));
     }
 
     @Test

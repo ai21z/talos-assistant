@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -8,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -109,6 +111,52 @@ class QualificationProviderEvidenceFinalizerTest {
     }
 
     @Test
+    void linkedProviderRenderFailsBeforeEvidencePairPublication() throws Exception {
+        Fixture fixture = fixture("linked-provider-render");
+        Path external = Files.writeString(
+                temp.resolve("T1170_EXTERNAL_PROVIDER_RENDER_CANARY.md"),
+                "# External provider request\n",
+                StandardCharsets.UTF_8);
+        Path render = fixture.runRoot().resolve("prompt-debug-linked.md");
+        createSymbolicLinkOrAbort(render, external);
+        Files.writeString(
+                fixture.sourceLog(), "prompt eval time\n", StandardCharsets.UTF_8);
+
+        NoFollowPathPolicy.Violation failure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> finalizeEvidence(fixture));
+
+        assertEquals(NoFollowPathPolicy.Reason.LINKED_COMPONENT, failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertFalse(Files.exists(fixture.runRoot().resolve("prompt-debug.txt")));
+        assertFalse(Files.exists(fixture.runRoot().resolve("llama.log")));
+    }
+
+    @Test
+    void linkedProviderSourceLogFailsBeforeEvidencePairPublication()
+            throws Exception {
+        Fixture fixture = fixture("linked-provider-source-log");
+        Files.writeString(
+                fixture.runRoot().resolve("prompt-debug-linked.md"),
+                "# Provider request\n",
+                StandardCharsets.UTF_8);
+        Path external = Files.writeString(
+                temp.resolve("T1170_EXTERNAL_PROVIDER_LOG_CANARY.log"),
+                "prompt eval time\n",
+                StandardCharsets.UTF_8);
+        createSymbolicLinkOrAbort(fixture.sourceLog(), external);
+
+        NoFollowPathPolicy.Violation failure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> finalizeEvidence(fixture));
+
+        assertEquals(NoFollowPathPolicy.Reason.LINKED_COMPONENT, failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertFalse(Files.exists(fixture.runRoot().resolve("prompt-debug.txt")));
+        assertFalse(Files.exists(fixture.runRoot().resolve("llama.log")));
+    }
+
+    @Test
     void secondMemberConflictNeverDeletesThePublishedProviderPrompt() throws Exception {
         Path prompt = temp.resolve("prompt-debug.txt");
         Path model = temp.resolve("llama.log");
@@ -118,6 +166,7 @@ class QualificationProviderEvidenceFinalizerTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationProviderEvidenceFinalizer.writePair(
+                        dev.talos.core.security.NoFollowPathPolicy.bindExistingDirectory(temp),
                         prompt, promptBytes, model, modelBytes));
 
         assertArrayEquals(promptBytes, Files.readAllBytes(prompt));
@@ -175,6 +224,17 @@ class QualificationProviderEvidenceFinalizerTest {
             throws Exception {
         return QualificationProviderEvidenceFinalizer.finalizeEvidence(
                 fixture.packetRoot(), fixture.runRoot(), SCENARIO, PORT, fixture.catalog());
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (java.io.IOException | UnsupportedOperationException unavailable) {
+            org.junit.jupiter.api.Assumptions.abort(
+                    "symbolic-link fixture unavailable: "
+                            + unavailable.getClass().getSimpleName());
+        }
     }
 
     private record Fixture(

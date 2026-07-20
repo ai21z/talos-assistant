@@ -1,6 +1,5 @@
 package dev.talos.runtime.verification;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 
@@ -23,11 +22,14 @@ final class TaskExpectationTargetReader {
         } catch (InvalidPathException e) {
             return Result.problem(pathHint, pathHint + ": " + safe(resolveFailure));
         }
-        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
+        if (!target.startsWith(root)
+                || !StaticWebFileAccess.isRegularFile(root, target)) {
             return Result.problem(pathHint, pathHint + ": " + safe(unreadableFailure));
         }
         try {
-            return Result.content(pathHint, Files.readString(target));
+            return Result.content(
+                    pathHint,
+                    StaticWebFileAccess.readString(root, target));
         } catch (Exception e) {
             return Result.problem(pathHint, pathHint + ": " + safe(readFailurePrefix)
                     + " (" + e.getMessage() + ")");

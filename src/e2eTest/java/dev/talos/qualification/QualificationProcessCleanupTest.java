@@ -1,17 +1,23 @@
 package dev.talos.qualification;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,14 +37,84 @@ class QualificationProcessCleanupTest {
                 : "java";
         Path existingExecutable = Path.of(
                 System.getProperty("java.home"), "bin", executableName);
+        Path discoveryExecutable = isWindows()
+                ? findOnPath("pwsh.exe")
+                : existingExecutable;
 
         QualificationProcessCleanup.Result result = QualificationProcessCleanup.stop(
-                null, existingExecutable, unusedPort, Instant.now());
+                null,
+                discoveryExecutable,
+                existingExecutable,
+                unusedPort,
+                Instant.now());
 
         assertEquals(QualificationProcessCleanup.Outcome.ALREADY_EXITED, result.outcome());
         assertTrue(result.campaignServerDiscoveryVerified());
         assertTrue(result.campaignServerPids().isEmpty());
         assertTrue(result.errors().isEmpty());
+    }
+
+    @Test
+    void linkedDiscoveryExecutableFailsBeforeQueryProcessStart(@TempDir Path temp)
+            throws Exception {
+        Path external = Files.writeString(
+                temp.resolve("external-discovery.exe"),
+                "T1170_EXTERNAL_CLEANUP_DISCOVERY_CANARY",
+                StandardCharsets.UTF_8);
+        Path link = temp.resolve("linked-discovery.exe");
+        createSymbolicLinkOrAbort(link, external);
+        AtomicInteger starts = new AtomicInteger();
+
+        QualificationProcessCleanup.FinderResult result =
+                QualificationProcessCleanup.findWindowsCampaignServers(
+                        link,
+                        external,
+                        31000,
+                        Instant.now(),
+                        builder -> {
+                            starts.incrementAndGet();
+                            throw new IOException("query start must not be reached");
+                        });
+
+        assertFalse(result.verified());
+        assertEquals(0, starts.get());
+        String errors = String.join("\n", result.errors());
+        assertTrue(errors.contains("LINKED_COMPONENT"), errors);
+        assertFalse(errors.contains(external.toString()), errors);
+        assertFalse(errors.contains("T1170_EXTERNAL_CLEANUP_DISCOVERY_CANARY"), errors);
+    }
+
+    @Test
+    void ordinaryDiscoveryUsesTheExactValidatedAbsoluteExecutable(@TempDir Path temp)
+            throws Exception {
+        Path discovery = Files.writeString(
+                temp.resolve("exact-discovery.exe"),
+                "ordinary discovery executable",
+                StandardCharsets.UTF_8);
+        Path expectedServer = Files.writeString(
+                temp.resolve("server.exe"),
+                "ordinary server executable",
+                StandardCharsets.UTF_8);
+        AtomicInteger starts = new AtomicInteger();
+        AtomicReference<List<String>> command = new AtomicReference<>();
+
+        QualificationProcessCleanup.FinderResult result =
+                QualificationProcessCleanup.findWindowsCampaignServers(
+                        discovery,
+                        expectedServer,
+                        31001,
+                        Instant.now(),
+                        builder -> {
+                            starts.incrementAndGet();
+                            command.set(List.copyOf(builder.command()));
+                            throw new IOException("intentional test stop");
+                        });
+
+        assertFalse(result.verified());
+        assertEquals(1, starts.get());
+        assertEquals(
+                discovery.toAbsolutePath().normalize().toString(),
+                command.get().getFirst());
     }
 
     @Test
@@ -176,6 +252,36 @@ class QualificationProcessCleanupTest {
 
     private static QualificationProcessCleanup.Result cleanup(FakeTarget root) {
         return QualificationProcessCleanup.stop(root, List.of(), NO_WAIT, NO_WAIT, NO_WAIT);
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .contains("win");
+    }
+
+    private static Path findOnPath(String executable) {
+        String path = System.getenv("PATH");
+        if (path != null) {
+            for (String token : path.split(java.util.regex.Pattern.quote(
+                    java.io.File.pathSeparator))) {
+                if (token == null || token.isBlank()) continue;
+                Path candidate = Path.of(token.strip()).resolve(executable)
+                        .toAbsolutePath().normalize();
+                if (Files.isRegularFile(candidate)) return candidate;
+            }
+        }
+        throw new IllegalStateException("required test executable is unavailable");
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException | SecurityException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 
     private static final class FakeTarget implements QualificationProcessCleanup.Target {

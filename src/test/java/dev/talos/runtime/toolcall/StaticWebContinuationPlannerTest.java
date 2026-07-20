@@ -18,7 +18,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.*;
 
 class StaticWebContinuationPlannerTest {
@@ -123,6 +125,51 @@ class StaticWebContinuationPlannerTest {
         assertTrue(prompt.contains("[StaticWebVerificationContinuation]"), prompt);
         assertTrue(prompt.contains("Missing or unmutated target files: script.js, styles.css"), prompt);
         assertTrue(prompt.contains("Call talos.write_file or talos.edit_file now"), prompt);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void linkedExternalMutatedHtmlCannotAddProviderContinuationTargets()
+            throws Exception {
+        Path external = Files.createTempFile(
+                "talos-t1170-continuation-external-",
+                ".html");
+        try {
+            Files.writeString(
+                    external,
+                    "<script src=\"T1170_EXTERNAL_CONTINUATION_CANARY.js\"></script>");
+            createSymbolicLinkOrAbort(
+                    workspace.resolve("linked-fragment.html"),
+                    external);
+            LoopState state = state(
+                    "Create a modern static website and complete every missing asset.");
+            state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                    "talos.write_file",
+                    "linked-fragment.html",
+                    true,
+                    true,
+                    false,
+                    "Wrote linked-fragment.html",
+                    ""));
+            state.mutatingToolSuccesses = 1;
+            java.util.LinkedHashSet<String> targets =
+                    new java.util.LinkedHashSet<>();
+            var reader = StaticWebContinuationPlanner.class.getDeclaredMethod(
+                    "addLinkedMissingStaticWebAssetsFromMutatedHtml",
+                    LoopState.class,
+                    Set.class);
+            reader.setAccessible(true);
+
+            Set<String> added =
+                    (Set<String>) reader.invoke(null, state, targets);
+
+            assertFalse(added.contains(
+                    "T1170_EXTERNAL_CONTINUATION_CANARY.js"));
+            assertFalse(targets.contains(
+                    "T1170_EXTERNAL_CONTINUATION_CANARY.js"));
+        } finally {
+            Files.deleteIfExists(external);
+        }
     }
 
     @Test
@@ -454,5 +501,15 @@ class StaticWebContinuationPlannerTest {
                 .map(ChatMessage::content)
                 .filter(content -> content != null)
                 .reduce("", (left, right) -> left + "\n" + right);
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

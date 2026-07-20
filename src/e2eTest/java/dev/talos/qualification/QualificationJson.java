@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.core.security.NoFollowPathPolicy;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -42,7 +43,7 @@ final class QualificationJson {
     private QualificationJson() {}
 
     static <T> T read(Path path, Class<T> type) throws IOException {
-        return read(Files.readAllBytes(path), type);
+        return read(NoFollowPathPolicy.readAllBytes(path), type);
     }
 
     static <T> T read(byte[] bytes, Class<T> type) throws IOException {
@@ -60,7 +61,7 @@ final class QualificationJson {
     }
 
     static JsonNode readTree(Path path) throws IOException {
-        return MAPPER.readTree(path.toFile());
+        return readTree(NoFollowPathPolicy.readAllBytes(path));
     }
 
     static JsonNode readTree(byte[] bytes) throws IOException {
@@ -69,7 +70,12 @@ final class QualificationJson {
 
     static QualificationProtocol.Scenario readScenario(Path path, int protocolVersion)
             throws IOException {
-        JsonNode tree = MAPPER.readTree(Files.readAllBytes(path));
+        return readScenario(NoFollowPathPolicy.readAllBytes(path), protocolVersion);
+    }
+
+    static QualificationProtocol.Scenario readScenario(byte[] bytes, int protocolVersion)
+            throws IOException {
+        JsonNode tree = MAPPER.readTree(bytes);
         if (protocolVersion >= FIRST_LEGACY_PROTOCOL_VERSION
                 && protocolVersion <= LAST_LEGACY_SCENARIO_SCHEMA_VERSION) {
             if (tree instanceof ObjectNode scenario) {

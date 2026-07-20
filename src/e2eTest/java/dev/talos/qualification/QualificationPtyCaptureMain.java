@@ -4,13 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import dev.talos.core.security.NoFollowPathPolicy;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -31,17 +35,28 @@ public final class QualificationPtyCaptureMain {
     private static final String PROMPT = QualificationPtyOutcomeRace.PROMPT_MARKER;
 
     private final Path campaignRoot;
+    private final NoFollowPathPolicy.GuardedRoot packetFiles;
     private final QualificationRecords.CampaignManifest campaign;
     private final Path runRoot;
+    private final NoFollowPathPolicy.GuardedRoot runFiles;
     private final Path workspace;
+    private final NoFollowPathPolicy.GuardedRoot workspaceFiles;
+    private final Path home;
+    private final Path calibrationPath;
+    private final Path configPath;
+    private final Path scenarioPath;
     private final Path monitorScript;
     private final Path stopFile;
     private final Path resourceSamples;
     private final Path transcriptPath;
     private final Path llamaLog;
+    private final Path modelArtifact;
     private final Path serverExecutable;
     private final int serverPort;
+    private final Path powershellExecutable;
+    private final Path winpty;
     private final Path installedTalos;
+    private final Path installedRoot;
     private final String prompt;
     private final String approvalBehavior;
     private final int protocolVersion;
@@ -60,8 +75,10 @@ public final class QualificationPtyCaptureMain {
             Path campaignRoot,
             String scenarioId,
             int repetition) throws Exception {
-        this.campaignRoot = campaignRoot.toAbsolutePath().normalize();
-        JsonNode campaignNode = JSON.readTree(this.campaignRoot.resolve("campaign.json").toFile());
+        this.packetFiles = NoFollowPathPolicy.bindExistingDirectory(campaignRoot);
+        this.campaignRoot = packetFiles.path();
+        JsonNode campaignNode = JSON.readTree(
+                packetFiles.readAllBytes(this.campaignRoot.resolve("campaign.json")));
         this.campaign = JSON.treeToValue(
                 campaignNode, QualificationRecords.CampaignManifest.class);
         String candidateAlias = required(campaign.candidateAlias(), "candidateAlias");
@@ -76,14 +93,20 @@ public final class QualificationPtyCaptureMain {
             throw new IllegalArgumentException(
                     "repetition must identify one trial declared by the campaign");
         }
-        JsonNode calibration = JSON.readTree(this.campaignRoot.resolve(Path.of(
-                "candidates", candidateAlias, "calibration-rules.json")).toFile());
+        this.calibrationPath = packetFiles.requireRegularFile(this.campaignRoot.resolve(Path.of(
+                "candidates", candidateAlias, "calibration-rules.json")));
+        JsonNode calibration = JSON.readTree(packetFiles.readAllBytes(calibrationPath));
         String serverPortText = argumentValue(calibration.path("launchArguments"), "--port");
         this.serverPort = Integer.parseInt(serverPortText);
+        this.modelArtifact = NoFollowPathPolicy.requireUnlinkedRegularFile(Path.of(
+                argumentValue(calibration.path("launchArguments"), "-m"))
+                .toAbsolutePath().normalize());
         @SuppressWarnings("unchecked")
-        Map<String, Object> config = YAML.readValue(
-                this.campaignRoot.resolve(Path.of("home", ".talos", "config.yaml")).toFile(),
+        Map<String, Object> config = YAML.readValue(packetFiles.readAllBytes(
+                this.campaignRoot.resolve(Path.of("home", ".talos", "config.yaml"))),
                 Map.class);
+        this.configPath = packetFiles.requireRegularFile(
+                this.campaignRoot.resolve(Path.of("home", ".talos", "config.yaml")));
         Map<String, Object> engines = map(config.get("engines"));
         Map<String, Object> llamaCpp = map(engines.get("llama_cpp"));
         String configuredServerPath = String.valueOf(llamaCpp.getOrDefault("server_path", "")).strip();
@@ -92,36 +115,48 @@ public final class QualificationPtyCaptureMain {
             throw new IllegalStateException(
                     "campaign config server path/port does not match frozen calibration");
         }
-        this.serverExecutable = Path.of(configuredServerPath).toAbsolutePath().normalize();
-        if (!Files.isRegularFile(this.serverExecutable)) {
-            throw new IllegalStateException("configured llama.cpp server is missing: "
-                    + this.serverExecutable);
-        }
+        this.serverExecutable = NoFollowPathPolicy.requireUnlinkedRegularFile(
+                Path.of(configuredServerPath).toAbsolutePath().normalize());
         String trial = "trial-%02d".formatted(repetition);
-        this.runRoot = this.campaignRoot.resolve(Path.of(
+        Path requestedRunRoot = this.campaignRoot.resolve(Path.of(
                 "runs", candidateAlias, machineId, configId, scenarioId, trial));
-        QualificationArtifactPublication.requireWritableDeclaredRun(
-                this.campaignRoot, this.runRoot, scenarioId, catalog);
-        this.workspace = this.campaignRoot.resolve(Path.of("workspaces", scenarioId, trial));
-        this.monitorScript = this.campaignRoot.resolve(Path.of("tools", "monitor-resources.ps1"));
+        QualificationArtifactPublication.DeclaredRun declaredRun =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        this.campaignRoot, requestedRunRoot, scenarioId, catalog);
+        this.runRoot = declaredRun.runRoot();
+        this.runFiles = declaredRun.runFiles();
+        this.workspace = packetFiles.requireDirectory(
+                this.campaignRoot.resolve(Path.of("workspaces", scenarioId, trial)));
+        this.workspaceFiles = NoFollowPathPolicy.bindExistingDirectory(workspace);
+        this.home = packetFiles.requireDirectory(this.campaignRoot.resolve("home"));
+        this.monitorScript = packetFiles.requireRegularFile(
+                this.campaignRoot.resolve(Path.of("tools", "monitor-resources.ps1")));
         this.stopFile = runRoot.resolve("resource-monitor.stop");
         this.resourceSamples = runRoot.resolve("resource-samples.csv");
         this.transcriptPath = runRoot.resolve("transcript.raw.json");
         this.llamaLog = this.campaignRoot.resolve(Path.of(
                 "home", ".talos", "logs", "llama_cpp-" + serverPortText + ".log"));
+        runFiles.requireRegularFileTarget(stopFile);
+        runFiles.requireRegularFileTarget(resourceSamples);
+        runFiles.requireRegularFileTarget(transcriptPath);
+        runFiles.requireRegularFileTarget(runRoot.resolve("transcript.failed.txt"));
+        packetFiles.requireRegularFileTarget(llamaLog);
+        this.powershellExecutable = resolveExecutableOnPath("pwsh.exe");
+        this.winpty = NoFollowPathPolicy.requireUnlinkedRegularFile(
+                Path.of("C:/Program Files/Git/usr/bin/winpty.exe"));
         String localAppData = System.getenv("LOCALAPPDATA");
         if (localAppData == null || localAppData.isBlank()) {
             throw new IllegalStateException("LOCALAPPDATA is unavailable");
         }
-        this.installedTalos = Path.of(localAppData, "Programs", "talos", "bin", "talos.bat")
-                .toAbsolutePath().normalize();
-        if (!Files.isDirectory(workspace) || !Files.isDirectory(runRoot)) {
-            throw new IllegalStateException("prepare-trial.ps1 must run first");
+        this.installedTalos = NoFollowPathPolicy.requireUnlinkedRegularFile(
+                Path.of(localAppData, "Programs", "talos", "bin", "talos.bat")
+                        .toAbsolutePath().normalize());
+        this.installedRoot = installedTalos.getParent().getParent();
+        if (runFiles.inspect(transcriptPath) != NoFollowPathPolicy.EntryType.MISSING) {
+            throw new IllegalStateException("refusing to overwrite the PTY capture packet");
         }
-        if (Files.exists(transcriptPath)) {
-            throw new IllegalStateException("refusing to overwrite " + transcriptPath);
-        }
-        JsonNode scenario = JSON.readTree(runRoot.resolve("scenario.json").toFile());
+        this.scenarioPath = runFiles.requireRegularFile(runRoot.resolve("scenario.json"));
+        JsonNode scenario = JSON.readTree(runFiles.readAllBytes(scenarioPath));
         this.prompt = scenario.path("prompt").asText();
         this.approvalBehavior = scenario.path("approvalBehavior").asText();
         if (prompt.isBlank() || approvalBehavior.isBlank()) {
@@ -139,12 +174,49 @@ public final class QualificationPtyCaptureMain {
         runner.run();
     }
 
+    private QualificationPtyFilesystemBoundary.Plan filesystemBoundaryPlan() {
+        return new QualificationPtyFilesystemBoundary.Plan(
+                        packetFiles,
+                        campaignRoot,
+                        List.of(
+                                campaignRoot.resolve("campaign.json"),
+                                calibrationPath,
+                                configPath,
+                                monitorScript),
+                        List.of(home),
+                        List.of(llamaLog),
+                        runFiles,
+                        runRoot,
+                        List.of(scenarioPath),
+                        List.of(
+                                stopFile,
+                                resourceSamples,
+                                transcriptPath,
+                                runRoot.resolve("transcript.failed.txt")),
+                        workspaceFiles,
+                        workspace,
+                        List.of(
+                                modelArtifact,
+                                serverExecutable,
+                                powershellExecutable,
+                                winpty,
+                                installedTalos),
+                        installedRoot,
+                        installedTalos);
+    }
+
+    private void validateThenStartChildren() throws Exception {
+        QualificationPtyFilesystemBoundary.validateThenStart(
+                filesystemBoundaryPlan(),
+                this::startMonitor,
+                this::startTalos);
+    }
+
     private void run() throws Exception {
         Instant started = Instant.now();
         Exception captureFailure = null;
         try {
-            startMonitor();
-            startTalos();
+            validateThenStartChildren();
             waitForStartupIdlePrompt();
             drainOutput();
 
@@ -179,6 +251,7 @@ public final class QualificationPtyCaptureMain {
             writePacket(started, captureFailure);
             if (captureFailure != null) {
                 QualificationArtifactPublication.publishNewOrVerifyExact(
+                        runFiles,
                         runRoot.resolve("transcript.failed.txt"),
                         (capture.text() + System.lineSeparator() + captureFailure)
                                 .getBytes(StandardCharsets.UTF_8),
@@ -276,9 +349,13 @@ public final class QualificationPtyCaptureMain {
     }
 
     private void startMonitor() throws Exception {
-        Files.deleteIfExists(stopFile);
+        NoFollowPathPolicy.requireUnlinkedRegularFile(powershellExecutable);
+        packetFiles.requireRegularFile(monitorScript);
+        deleteOrdinaryFileIfPresent(runFiles, stopFile);
+        runFiles.requireRegularFileTarget(resourceSamples);
         monitor = new ProcessBuilder(
-                "pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                powershellExecutable.toString(),
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 monitorScript.toString(), "-Output", resourceSamples.toString(),
                 "-StopFile", stopFile.toString())
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
@@ -287,22 +364,22 @@ public final class QualificationPtyCaptureMain {
     }
 
     private void startTalos() throws Exception {
-        Path winpty = Path.of("C:/Program Files/Git/usr/bin/winpty.exe");
-        if (!Files.isRegularFile(winpty) || !Files.isRegularFile(installedTalos)) {
-            throw new IllegalStateException("winpty or installed Talos launcher is missing");
-        }
-        Files.deleteIfExists(llamaLog);
+        NoFollowPathPolicy.requireUnlinkedRegularFile(winpty);
+        NoFollowPathPolicy.requireUnlinkedRegularFile(installedTalos);
+        NoFollowPathPolicy.requireUnlinkedRegularFile(modelArtifact);
+        NoFollowPathPolicy.requireUnlinkedRegularFile(serverExecutable);
+        workspaceFiles.requireDirectory(workspace);
+        packetFiles.requireRegularFile(calibrationPath);
+        packetFiles.requireDirectory(home);
+        deleteOrdinaryFileIfPresent(packetFiles, llamaLog);
         ProcessBuilder builder = new ProcessBuilder(
                 winpty.toString(), "-Xallow-non-tty", "--", installedTalos.toString())
                 .directory(workspace.toFile())
                 .redirectErrorStream(true);
-        Path canonicalRoot = campaignRoot.toRealPath();
-        Path calibration = canonicalRoot.resolve(Path.of(
-                "candidates", campaign.candidateAlias(), "calibration-rules.json")).toRealPath();
         String javaOptions = String.join(" ",
-                jvmProperty("user.home", canonicalRoot.resolve("home").toString()),
-                jvmProperty("talos.qualification.root", canonicalRoot.toString()),
-                jvmProperty("talos.qualification.calibration", calibration.toString()),
+                jvmProperty("user.home", home.toString()),
+                jvmProperty("talos.qualification.root", campaignRoot.toString()),
+                jvmProperty("talos.qualification.calibration", calibrationPath.toString()),
                 jvmProperty("talos.qualification.calibrationSha256",
                         campaign.calibrationRulesSha256()));
         builder.environment().put("JAVA_OPTS", javaOptions);
@@ -324,7 +401,7 @@ public final class QualificationPtyCaptureMain {
     }
 
     private void interruptDuringGeneration() throws Exception {
-        waitForFile(llamaLog, "processing task", Duration.ofSeconds(60));
+        waitForFile(packetFiles, llamaLog, "processing task", Duration.ofSeconds(60));
         Thread.sleep(100L);
         drainOutput();
         addInput("user-interrupt");
@@ -394,11 +471,16 @@ public final class QualificationPtyCaptureMain {
                 SystemWaiter::pauseThread);
     }
 
-    private static void waitForFile(Path path, String marker, Duration timeout) throws Exception {
+    private static void waitForFile(
+            NoFollowPathPolicy.GuardedRoot owner,
+            Path path,
+            String marker,
+            Duration timeout
+    ) throws Exception {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
-            if (Files.isRegularFile(path)
-                    && Files.readString(path, StandardCharsets.UTF_8).contains(marker)) {
+            if (owner.inspect(path) == NoFollowPathPolicy.EntryType.REGULAR_FILE
+                    && owner.readString(path, StandardCharsets.UTF_8).contains(marker)) {
                 return;
             }
             Thread.sleep(25L);
@@ -442,6 +524,7 @@ public final class QualificationPtyCaptureMain {
             packet.put("events", events);
             packet.put("rawOutput", capture.text());
             QualificationArtifactPublication.publishNewOrVerifyExact(
+                    runFiles,
                     transcriptPath,
                     JSON.writeValueAsBytes(packet),
                     "PTY capture packet");
@@ -472,11 +555,25 @@ public final class QualificationPtyCaptureMain {
 
     private QualificationProcessCleanup.Result stopProcesses() {
         try {
-            Files.writeString(stopFile, "stop\n", StandardCharsets.UTF_8);
+            runFiles.requireRegularFileTarget(stopFile);
+            try (OutputStream output = Files.newOutputStream(
+                    stopFile,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE,
+                    LinkOption.NOFOLLOW_LINKS)) {
+                output.write("stop\n".getBytes(StandardCharsets.UTF_8));
+            }
+            runFiles.requireRegularFile(stopFile);
         } catch (Exception ignored) {
         }
         QualificationProcessCleanup.Result result = QualificationProcessCleanup.stop(
-                talos, serverExecutable, serverPort, talosStartedNotBefore, allowGracefulCleanup);
+                talos,
+                powershellExecutable,
+                serverExecutable,
+                serverPort,
+                talosStartedNotBefore,
+                allowGracefulCleanup);
         stop(monitor, 5_000L);
         if (outputReader != null) {
             try {
@@ -502,6 +599,43 @@ public final class QualificationPtyCaptureMain {
 
     private static String forwardSlashes(Path path) {
         return path.toAbsolutePath().normalize().toString().replace('\\', '/');
+    }
+
+    private static void deleteOrdinaryFileIfPresent(
+            NoFollowPathPolicy.GuardedRoot owner,
+            Path path
+    ) throws Exception {
+        NoFollowPathPolicy.EntryType type = owner.inspect(path);
+        if (type == NoFollowPathPolicy.EntryType.MISSING) return;
+        owner.requireRegularFile(path);
+        Files.delete(path);
+    }
+
+    private static Path resolveExecutableOnPath(String executable) throws Exception {
+        String pathValue = System.getenv("PATH");
+        if (pathValue == null || pathValue.isBlank()) {
+            throw new IllegalStateException("PATH is unavailable");
+        }
+        for (String token : pathValue.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+            if (token == null || token.isBlank()) continue;
+            Path candidate;
+            try {
+                candidate = Path.of(token.strip()).resolve(executable)
+                        .toAbsolutePath().normalize();
+            } catch (RuntimeException invalid) {
+                continue;
+            }
+            try {
+                return NoFollowPathPolicy.requireUnlinkedRegularFile(candidate);
+            } catch (NoFollowPathPolicy.Violation rejected) {
+                if (rejected.reason() == NoFollowPathPolicy.Reason.MISSING
+                        || rejected.reason() == NoFollowPathPolicy.Reason.NOT_REGULAR_FILE) {
+                    continue;
+                }
+                throw rejected;
+            }
+        }
+        throw new IllegalStateException("required qualification executable is unavailable");
     }
 
     private static String required(String value, String field) {

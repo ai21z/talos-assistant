@@ -57,8 +57,10 @@ class TaskExpectationStaticVerifierTest {
         assertFalse(verifier.contains("Files.isRegularFile"));
         assertFalse(verifier.contains("Files.readString"));
         assertTrue(reader.contains("final class TaskExpectationTargetReader"));
-        assertTrue(reader.contains("Files.isRegularFile"));
-        assertTrue(reader.contains("Files.readString"));
+        assertFalse(reader.contains("Files.isRegularFile"));
+        assertFalse(reader.contains("Files.readString"));
+        assertTrue(reader.contains("StaticWebFileAccess.isRegularFile"));
+        assertTrue(reader.contains("StaticWebFileAccess.readString"));
     }
 
     @Test

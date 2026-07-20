@@ -1,5 +1,6 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolError;
@@ -8,6 +9,8 @@ import dev.talos.tools.ToolResult;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.Locale;
 
 final class WorkspaceOperationToolSupport {
@@ -76,22 +79,46 @@ final class WorkspaceOperationToolSupport {
         return newline < 0 ? value.strip() : value.substring(0, newline).strip();
     }
 
-    static void copyDirectory(Path source, Path destination, boolean overwrite) throws IOException {
-        try (var stream = Files.walk(source)) {
-            for (Path current : stream.sorted().toList()) {
-                Path relative = source.relativize(current);
-                Path target = destination.resolve(relative).normalize();
-                if (Files.isDirectory(current)) {
-                    Files.createDirectories(target);
-                } else {
-                    if (overwrite) {
-                        Files.copy(current, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    } else {
-                        Files.copy(current, target);
-                    }
-                }
+    static void copyDirectory(
+            NoFollowPathPolicy.GuardedRoot workspace,
+            Path source,
+            Path destination,
+            boolean overwrite,
+            List<NoFollowPathPolicy.TreeEntry> sourceTree
+    ) throws IOException {
+        for (NoFollowPathPolicy.TreeEntry entry : sourceTree) {
+            Path relative = source.relativize(entry.path());
+            Path target = destination.resolve(relative).normalize();
+            if (entry.type() == NoFollowPathPolicy.EntryType.DIRECTORY) {
+                workspace.createDirectories(target);
+            } else {
+                Path parent = target.getParent();
+                if (parent != null) workspace.createDirectories(parent);
+                copyRegularFile(workspace, entry.path(), target, overwrite);
             }
         }
+    }
+
+    static void copyRegularFile(
+            NoFollowPathPolicy.GuardedRoot workspace,
+            Path source,
+            Path destination,
+            boolean overwrite
+    ) throws IOException {
+        Path safeSource = workspace.requireRegularFile(source);
+        workspace.requireRegularFileTarget(destination);
+        if (workspace.inspect(destination) == NoFollowPathPolicy.EntryType.REGULAR_FILE
+                && Files.isSameFile(safeSource, destination)) {
+            return;
+        }
+        safeSource = workspace.requireRegularFile(safeSource);
+        workspace.requireRegularFileTarget(destination);
+        if (overwrite) {
+            Files.copy(safeSource, destination, StandardCopyOption.REPLACE_EXISTING);
+        } else {
+            Files.copy(safeSource, destination);
+        }
+        workspace.requireRegularFile(destination);
     }
 
     record ResolvedPath(String displayPath, Path path, String error) {

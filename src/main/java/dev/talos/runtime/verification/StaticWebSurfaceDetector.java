@@ -1,6 +1,5 @@
 package dev.talos.runtime.verification;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -20,7 +19,9 @@ final class StaticWebSurfaceDetector {
     private StaticWebSurfaceDetector() {}
 
     static List<String> obviousPrimaryFiles(Path workspace) {
-        if (workspace == null || !Files.isDirectory(workspace)) return List.of();
+        if (workspace == null || !StaticWebFileAccess.isDirectory(workspace, workspace)) {
+            return List.of();
+        }
         try {
             List<Path> visibleFiles = visibleRegularFiles(workspace);
             if (visibleFiles.isEmpty()
@@ -34,7 +35,10 @@ final class StaticWebSurfaceDetector {
     }
 
     static List<String> targetAwarePrimaryFiles(Path workspace, Collection<String> targetHints) {
-        if (workspace == null || !Files.isDirectory(workspace) || targetHints == null || targetHints.isEmpty()) {
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)
+                || targetHints == null
+                || targetHints.isEmpty()) {
             return List.of();
         }
         try {
@@ -58,16 +62,12 @@ final class StaticWebSurfaceDetector {
     }
 
     static List<Path> visibleRegularFiles(Path workspace) throws java.io.IOException {
-        List<Path> visibleFiles = new ArrayList<>();
-        try (var stream = Files.list(workspace)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(file -> {
-                        String name = visibleFileName(file);
-                        return !name.isBlank() && !name.startsWith(".");
-                    })
-                    .forEach(visibleFiles::add);
-        }
-        return visibleFiles;
+        return StaticWebFileAccess.immediateRegularFiles(workspace).stream()
+                .filter(file -> {
+                    String name = visibleFileName(file);
+                    return !name.isBlank() && !name.startsWith(".");
+                })
+                .toList();
     }
 
     static String visibleFileName(Path file) {

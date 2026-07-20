@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -8,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,5 +44,29 @@ class QualificationFixtureMaterializerTest {
                 () -> QualificationFixtureMaterializer.materialize(
                         catalog, "basic-workspace-v6.json", workspace));
         assertEquals("keep", Files.readString(workspace.resolve("keep.txt"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void snapshotRejectsLinkedWorkspaceContentBeforeHashing() throws Exception {
+        Path workspace = Files.createDirectory(temp.resolve("linked-workspace"));
+        Path external = Files.writeString(
+                temp.resolve("T1170_EXTERNAL_FIXTURE_CANARY.txt"),
+                "T1170_EXTERNAL_FIXTURE_CANARY",
+                StandardCharsets.UTF_8);
+        Path link = workspace.resolve("linked.txt");
+        try {
+            Files.createSymbolicLink(link, external);
+        } catch (java.io.IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+
+        NoFollowPathPolicy.Violation failure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> QualificationFixtureMaterializer.snapshot(workspace));
+
+        assertEquals(NoFollowPathPolicy.Reason.LINKED_COMPONENT, failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertFalse(failure.getMessage().contains("T1170_EXTERNAL_FIXTURE_CANARY"));
     }
 }

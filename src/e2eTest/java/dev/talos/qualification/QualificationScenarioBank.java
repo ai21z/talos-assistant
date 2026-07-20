@@ -1,9 +1,13 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.JarURLConnection;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -21,6 +25,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 final class QualificationScenarioBank {
     private static final Set<Integer> SUPPORTED_VERSIONS = Set.of(1, 2, 3, 4, 5, 6);
@@ -312,11 +318,40 @@ final class QualificationScenarioBank {
 
     private static NamedBytes resource(String name, int protocolVersion) throws IOException {
         ClassLoader loader = QualificationScenarioBank.class.getClassLoader();
-        try (InputStream input = loader.getResourceAsStream(name)) {
-            if (input == null) throw new IOException("Missing qualification resource: " + name);
-            return new NamedBytes(name,
-                    canonicalResourceBytes(name, input.readAllBytes(), protocolVersion));
+        URL resource = loader.getResource(name);
+        if (resource == null) throw new IOException("Missing qualification resource: " + name);
+        byte[] bytes;
+        try {
+            if ("file".equalsIgnoreCase(resource.getProtocol())) {
+                bytes = NoFollowPathPolicy.readAllBytes(Path.of(resource.toURI()));
+            } else if ("jar".equalsIgnoreCase(resource.getProtocol())) {
+                JarURLConnection connection = (JarURLConnection) resource.openConnection();
+                URL jarUrl = connection.getJarFileURL();
+                if (!"file".equalsIgnoreCase(jarUrl.getProtocol())) {
+                    throw new IOException(
+                            "Qualification resource archive is not a local file");
+                }
+                Path jarPath = NoFollowPathPolicy.requireUnlinkedRegularFile(
+                        Path.of(jarUrl.toURI()));
+                try (JarFile jar = new JarFile(jarPath.toFile(), false)) {
+                    JarEntry entry = jar.getJarEntry(name);
+                    if (entry == null || entry.isDirectory()) {
+                        throw new IOException("Missing qualification resource: " + name);
+                    }
+                    try (InputStream input = jar.getInputStream(entry)) {
+                        bytes = input.readAllBytes();
+                    }
+                }
+            } else {
+                throw new IOException(
+                        "Qualification resource protocol is unsupported: "
+                                + resource.getProtocol());
+            }
+        } catch (java.net.URISyntaxException invalid) {
+            throw new IOException("Qualification resource path is invalid", invalid);
         }
+        return new NamedBytes(
+                name, canonicalResourceBytes(name, bytes, protocolVersion));
     }
 
     private static Set<String> expectedResourceNames(int protocolVersion) {

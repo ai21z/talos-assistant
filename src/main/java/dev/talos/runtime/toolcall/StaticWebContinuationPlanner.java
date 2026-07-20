@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.intent.TargetRole;
@@ -20,7 +21,7 @@ import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolAliasPolicy;
 
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -481,23 +482,39 @@ final class StaticWebContinuationPlanner {
     private static Set<String> addLinkedMissingStaticWebAssetsFromMutatedHtml(LoopState state, Set<String> targets) {
         LinkedHashSet<String> added = new LinkedHashSet<>();
         if (state == null || state.workspace == null || targets == null) return added;
-        Path root = state.workspace.toAbsolutePath().normalize();
+        NoFollowPathPolicy.GuardedRoot workspaceFiles;
+        try {
+            workspaceFiles = NoFollowPathPolicy.bindExistingDirectory(state.workspace);
+        } catch (Exception rejected) {
+            return added;
+        }
+        Path root = workspaceFiles.path();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (!mutatedSmallWebFile(outcome)) continue;
             String htmlPath = ToolCallSupport.normalizePath(outcome.pathHint());
             if (!(htmlPath.endsWith(".html") || htmlPath.endsWith(".htm"))) continue;
             try {
                 Path resolved = root.resolve(htmlPath).toAbsolutePath().normalize();
-                if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) continue;
-                String html = Files.readString(resolved);
+                if (!resolved.startsWith(root)
+                        || workspaceFiles.inspect(resolved)
+                        != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                    continue;
+                }
+                String html = workspaceFiles.readString(resolved, StandardCharsets.UTF_8);
+                LinkedHashSet<String> pending = new LinkedHashSet<>();
                 for (String linked : linkedStaticWebAssets(html)) {
                     String target = resolveLinkedAssetAgainstHtmlPath(htmlPath, linked);
                     if (target.isBlank()) continue;
                     Path linkedPath = root.resolve(target).toAbsolutePath().normalize();
-                    if (!linkedPath.startsWith(root) || Files.isRegularFile(linkedPath)) continue;
-                    targets.add(target);
-                    added.add(target);
+                    if (!linkedPath.startsWith(root)
+                            || workspaceFiles.inspect(linkedPath)
+                            == NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                        continue;
+                    }
+                    pending.add(target);
                 }
+                targets.addAll(pending);
+                added.addAll(pending);
             } catch (Exception ignored) {
                 // Verification already reports the failure; missing target inference is best effort.
             }

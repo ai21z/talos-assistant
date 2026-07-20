@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class EvidenceObligationVerifierTest {
@@ -580,6 +581,39 @@ class EvidenceObligationVerifierTest {
         }
     }
 
+    @Test
+    void linkedExternalIndexCannotDefineEvidenceTargets(@TempDir Path workspace)
+            throws Exception {
+        Path external = Files.createTempFile(
+                "talos-t1170-obligation-external-",
+                ".html");
+        try {
+            Files.writeString(
+                    external,
+                    "<script src=\"T1170_EXTERNAL_OBLIGATION_CANARY.js\"></script>");
+            Files.writeString(
+                    workspace.resolve("T1170_EXTERNAL_OBLIGATION_CANARY.js"),
+                    "console.log('ordinary workspace control');\n");
+            createSymbolicLinkOrAbort(workspace.resolve("index.html"), external);
+
+            List<String> missing =
+                    EvidenceObligationVerifier.missingLinkedScriptReadTargets(
+                            workspace,
+                            List.of(new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file",
+                                    "index.html",
+                                    true,
+                                    false,
+                                    false,
+                                    "read index.html",
+                                    "")));
+
+            assertEquals(List.of(), missing);
+        } finally {
+            Files.deleteIfExists(external);
+        }
+    }
+
     private static ToolCallLoop.ToolOutcome sourceOutcome(String toolName, String sourcePath) {
         return new ToolCallLoop.ToolOutcome(
                 toolName,
@@ -595,5 +629,15 @@ class EvidenceObligationVerifierTest {
                 null,
                 null,
                 List.of(sourcePath));
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

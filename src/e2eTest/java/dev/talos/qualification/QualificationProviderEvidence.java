@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,7 +16,9 @@ final class QualificationProviderEvidence {
 
     static void capture(Path runRoot, String commandOutput, int protocolVersion) throws IOException {
         QualificationArtifactPublication.requireWritableProtocol(protocolVersion);
-        if (hasProviderRender(runRoot)) return;
+        NoFollowPathPolicy.GuardedRoot runFiles =
+                NoFollowPathPolicy.bindExistingDirectory(runRoot);
+        if (hasProviderRender(runFiles, runRoot)) return;
         if (commandOutput == null || !commandOutput.contains(NO_PROVIDER_PROMPT)) {
             throw new IllegalStateException(
                     "prompt-debug produced neither a provider render nor verified no-provider output");
@@ -26,8 +30,10 @@ final class QualificationProviderEvidence {
         // A published immutable member is never rolled back: another publisher may
         // already have observed it. T1192 owns atomic visibility of the complete pair.
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                runFiles,
                 promptDebug, promptBytes, "provider NOT_APPLICABLE prompt evidence");
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                runFiles,
                 modelLog, modelBytes, "provider NOT_APPLICABLE runtime evidence");
     }
 
@@ -52,14 +58,17 @@ final class QualificationProviderEvidence {
         return evidence != null && evidence.startsWith(MODEL_RUNTIME_HEADER + "\n");
     }
 
-    private static boolean hasProviderRender(Path runRoot) throws IOException {
-        try (var files = Files.list(runRoot)) {
-            return files.anyMatch(path -> {
-                String name = path.getFileName().toString();
-                return Files.isRegularFile(path)
-                        && name.startsWith("prompt-debug-")
-                        && name.endsWith(".md");
-            });
-        }
+    private static boolean hasProviderRender(
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path runRoot
+    ) throws IOException {
+        return runFiles.walk(runRoot).stream().anyMatch(entry -> {
+            Path path = entry.path();
+            String name = path.getFileName().toString();
+            return entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE
+                    && path.getParent().equals(runRoot)
+                    && name.startsWith("prompt-debug-")
+                    && name.endsWith(".md");
+        });
     }
 }

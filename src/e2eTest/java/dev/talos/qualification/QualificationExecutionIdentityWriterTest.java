@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -457,6 +458,199 @@ class QualificationExecutionIdentityWriterTest {
     }
 
     @Test
+    void linkedModelAncestorIsRejectedBeforeHasherOrIdentityPublication() throws Exception {
+        Seed seed = seed("linked-model-ancestor", false);
+        Path linkedParent = temp.resolve("linked-model-parent");
+        createSymbolicLinkOrAbort(linkedParent, seed.model().getParent());
+        Path linkedModel = linkedParent.resolve(seed.model().getFileName());
+        QualificationExecutionIdentityWriter.Request original = request(seed, COMMIT);
+        QualificationExecutionIdentityWriter.Request linkedRequest =
+                new QualificationExecutionIdentityWriter.Request(
+                        original.packetRoot(),
+                        original.repositoryRoot(),
+                        original.builtTalosArtifact(),
+                        original.installedTalosArtifact(),
+                        linkedModel.toAbsolutePath(),
+                        original.engineExecutable(),
+                        original.harnessInputSpecification(),
+                        original.currentCommit(),
+                        original.currentVersion());
+        java.util.concurrent.atomic.AtomicInteger observations =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> QualificationExecutionIdentityWriter.write(
+                        linkedRequest,
+                        path -> {
+                            observations.incrementAndGet();
+                            return QualificationExecutionIdentityWriter.sha256File(path);
+                        }));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(seed.model().getParent().toString()));
+        assertEquals(0, observations.get(),
+                "linked external artifacts must be rejected before their bytes are observed");
+        assertOutputsAbsent(seed.packet().root());
+    }
+
+    @Test
+    void linkedEngineAncestorIsRejectedBeforeHasherOrIdentityPublication()
+            throws Exception {
+        Seed seed = seed("linked-engine-ancestor", false);
+        Path linkedParent = temp.resolve("linked-engine-parent");
+        createSymbolicLinkOrAbort(linkedParent, seed.engine().getParent());
+        QualificationExecutionIdentityWriter.Request original = request(seed, COMMIT);
+        QualificationExecutionIdentityWriter.Request linkedRequest =
+                new QualificationExecutionIdentityWriter.Request(
+                        original.packetRoot(),
+                        original.repositoryRoot(),
+                        original.builtTalosArtifact(),
+                        original.installedTalosArtifact(),
+                        original.modelArtifact(),
+                        linkedParent.resolve(seed.engine().getFileName()).toAbsolutePath(),
+                        original.harnessInputSpecification(),
+                        original.currentCommit(),
+                        original.currentVersion());
+        java.util.concurrent.atomic.AtomicInteger observations =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> QualificationExecutionIdentityWriter.write(
+                        linkedRequest,
+                        path -> {
+                            observations.incrementAndGet();
+                            return QualificationExecutionIdentityWriter.sha256File(path);
+                        }));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertEquals(0, observations.get());
+        assertOutputsAbsent(seed.packet().root());
+    }
+
+    @Test
+    void linkedHarnessInputSpecificationIsRejectedBeforeIdentityPublication()
+            throws Exception {
+        Seed seed = seed("linked-harness-input", false);
+        Path external = Files.copy(
+                seed.inputs(),
+                temp.resolve("T1170_EXTERNAL_HARNESS_INPUT_CANARY.json"));
+        Files.delete(seed.inputs());
+        createSymbolicLinkOrAbort(seed.inputs(), external);
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> write(seed));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertOutputsAbsent(seed.packet().root());
+    }
+
+    @Test
+    void linkedDeclaredRepositoryInputIsRejectedBeforeIdentityPublication()
+            throws Exception {
+        Seed seed = seed("linked-repository-input", false);
+        Path repositoryInput = seed.repositoryRoot().resolve("src/input.txt");
+        Path external = Files.copy(
+                repositoryInput,
+                temp.resolve("T1170_EXTERNAL_REPOSITORY_INPUT_CANARY.txt"));
+        Files.delete(repositoryInput);
+        createSymbolicLinkOrAbort(repositoryInput, external);
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> write(seed));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertOutputsAbsent(seed.packet().root());
+    }
+
+    @Test
+    void linkedInstalledClasspathEntryIsRejectedBeforeIdentityPublication()
+            throws Exception {
+        Seed seed = seed("linked-installed-classpath", false);
+        Path dependency = seed.installedTalos().getParent().resolve("dependency.jar");
+        Path external = Files.copy(
+                dependency,
+                temp.resolve("T1170_EXTERNAL_INSTALLED_CLASSPATH_CANARY.jar"));
+        Files.delete(dependency);
+        createSymbolicLinkOrAbort(dependency, external);
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> write(seed));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertOutputsAbsent(seed.packet().root());
+    }
+
+    @Test
+    void linkedInstalledLauncherIsRejectedBeforeIdentityPublication()
+            throws Exception {
+        Seed seed = seed("linked-installed-launcher", false);
+        Path launcher = seed.installedTalos().getParent().getParent()
+                .resolve("bin/talos");
+        Path external = Files.copy(
+                launcher,
+                temp.resolve("T1170_EXTERNAL_INSTALLED_LAUNCHER_CANARY"));
+        Files.delete(launcher);
+        createSymbolicLinkOrAbort(launcher, external);
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> write(seed));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertOutputsAbsent(seed.packet().root());
+    }
+
+    @Test
+    void linkedGeneratedIdentityOutputCannotOverwriteExternalBytes()
+            throws Exception {
+        Seed seed = seed("linked-identity-output", false);
+        byte[] externalBytes =
+                "T1170_EXTERNAL_IDENTITY_OUTPUT_CANARY".getBytes(StandardCharsets.UTF_8);
+        Path external = Files.write(
+                temp.resolve("external-identity-output.json"),
+                externalBytes);
+        Path linkedOutput = seed.packet().root().resolve(
+                QualificationExecutionIdentityWriter.LEDGER_FILE);
+        createSymbolicLinkOrAbort(linkedOutput, external);
+
+        dev.talos.core.security.NoFollowPathPolicy.Violation failure = assertThrows(
+                dev.talos.core.security.NoFollowPathPolicy.Violation.class,
+                () -> write(seed));
+
+        assertEquals(
+                dev.talos.core.security.NoFollowPathPolicy.Reason.LINKED_COMPONENT,
+                failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertArrayEquals(externalBytes, Files.readAllBytes(external));
+        assertTrue(Files.isSymbolicLink(linkedOutput));
+        assertFalse(Files.exists(seed.packet().root().resolve(
+                QualificationExecutionIdentity.HARNESS_FILE)));
+        assertFalse(Files.exists(seed.packet().root().resolve(
+                QualificationExecutionIdentity.RUNTIME_FILE)));
+    }
+
+    @Test
     void metadataContinuityFallbackIsExplicitWhenThePlatformHasNoFileKey() throws Exception {
         Path artifact = temp.resolve("fallback.gguf");
         Files.writeString(artifact, "model bytes\n", StandardCharsets.UTF_8);
@@ -636,6 +830,15 @@ class QualificationExecutionIdentityWriterTest {
             for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
                 Files.delete(path);
             }
+        }
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
         }
     }
 

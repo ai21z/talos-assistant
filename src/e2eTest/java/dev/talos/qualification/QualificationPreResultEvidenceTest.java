@@ -2,9 +2,12 @@ package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.core.security.NoFollowPathPolicy;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QualificationPreResultEvidenceTest {
@@ -257,6 +261,60 @@ class QualificationPreResultEvidenceTest {
     }
 
     @Test
+    void linkedRunArtifactAbortsBeforeSnapshotOrAuthorityPublication() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("linked-run-artifact"), catalog, scenario);
+        List<String> authorities = List.of(
+                QualificationCausalFinalizer.OUTPUT_FILE,
+                QualificationRunFinalizer.CANARY_FILE,
+                QualificationRunFinalizer.RESULT_FILE);
+        java.util.Map<String, String> authorityHashesBefore = new java.util.LinkedHashMap<>();
+        for (String authority : authorities) {
+            Path authorityPath = packet.runRoot().resolve(authority);
+            assertTrue(Files.exists(authorityPath),
+                    "the protocol-v6 fixture must begin with " + authority);
+            authorityHashesBefore.put(
+                    authority,
+                    QualificationScenarioBank.sha256(Files.readAllBytes(authorityPath)));
+        }
+        Path external = Files.writeString(temp.resolve("external-pre-result.txt"),
+                "T1170_EXTERNAL_PRE_RESULT_CANARY", StandardCharsets.UTF_8);
+        createSymbolicLinkOrAbort(
+                packet.runRoot().resolve("final-files/linked.txt"), external);
+
+        NoFollowPathPolicy.Violation failure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> QualificationPreResultEvidence.capture(
+                        packet.root(), packet.runRoot(), scenario.id(), catalog),
+                "a linked run artifact must abort before a snapshot is constructed");
+        assertEquals(NoFollowPathPolicy.Reason.LINKED_COMPONENT, failure.reason());
+        assertFalse(failure.getMessage().contains(external.toString()));
+        assertFalse(failure.getMessage().contains(
+                "T1170_EXTERNAL_PRE_RESULT_CANARY"));
+        for (String authority : authorities) {
+            Path authorityPath = packet.runRoot().resolve(authority);
+            assertEquals(
+                    authorityHashesBefore.get(authority),
+                    QualificationScenarioBank.sha256(Files.readAllBytes(authorityPath)),
+                    "containment failure must not replace " + authority);
+        }
+        try (var paths = Files.walk(packet.runRoot())) {
+            for (Path path : paths
+                    .filter(candidate -> Files.isRegularFile(
+                            candidate,
+                            java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    .toList()) {
+                assertFalse(
+                        new String(Files.readAllBytes(path), StandardCharsets.UTF_8)
+                                .contains("T1170_EXTERNAL_PRE_RESULT_CANARY"),
+                        "external canary entered " + packet.runRoot().relativize(path));
+            }
+        }
+    }
+
+    @Test
     void unchangedFrozenPrivateSourceRemainsAnExplicitCanaryExemption() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
         QualificationProtocol.Scenario scenario = catalog.full().scenarios().stream()
@@ -387,6 +445,15 @@ class QualificationPreResultEvidenceTest {
     private record Case(String id, PacketMutation mutation) {}
 
     private record CanaryByteCase(String id, PacketMutation mutation) {}
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+    }
 
     @FunctionalInterface
     private interface PacketMutation {

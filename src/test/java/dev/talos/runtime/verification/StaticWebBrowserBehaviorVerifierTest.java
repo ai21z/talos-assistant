@@ -1,13 +1,19 @@
 package dev.talos.runtime.verification;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StaticWebBrowserBehaviorVerifierTest {
@@ -122,6 +128,87 @@ class StaticWebBrowserBehaviorVerifierTest {
     }
 
     @Test
+    void workspaceRelativeLinkedScriptIsBlockedWithoutReadingExternalBytes() throws Exception {
+        writeWebFixture("""
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'local fixture';
+                });
+                """);
+        StaticWebSelectorAnalyzer.Facts preLinkSelectors = selectors();
+        Path outsideScript = Files.writeString(outsideWorkspace.resolve("linked-external.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent =
+                      'T1170_EXTERNAL_BROWSER_CANARY';
+                });
+                """);
+        Files.delete(workspace.resolve("scripts.js"));
+        createSymbolicLinkOrAbort(workspace.resolve("scripts.js"), outsideScript);
+
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                preLinkSelectors);
+
+        assertFalse(report.requiredClaimsSatisfied(),
+                "workspace-relative linked JavaScript must not produce authoritative proof");
+        assertTrue(report.hasRequiredUnavailable() || report.hasRequiredFailure(), report.toString());
+        assertFalse(report.toString().contains("T1170_EXTERNAL_BROWSER_CANARY"), report.toString());
+        assertFalse(report.toString().contains(outsideScript.toString()), report.toString());
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void workspaceRelativeWindowsJunctionScriptIsBlockedWithoutExternalBytes()
+            throws Exception {
+        Path assets = Files.createDirectory(workspace.resolve("assets"));
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html><html><body>
+                <button id="teaser-button">Show teaser</button>
+                <p id="teaser-status">Waiting.</p>
+                <script src="assets/scripts.js"></script>
+                </body></html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(assets.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'ordinary';
+                });
+                """);
+        StaticWebSelectorAnalyzer.Facts ordinaryFacts =
+                StaticWebSelectorAnalyzer.analyze(
+                        workspace,
+                        List.of("index.html", "styles.css", "assets/scripts.js"),
+                        List.of("assets/scripts.js"));
+        assertNotNull(ordinaryFacts);
+
+        Files.delete(assets.resolve("scripts.js"));
+        Files.delete(assets);
+        Path externalAssets = Files.createDirectory(outsideWorkspace.resolve("external-assets"));
+        Files.writeString(externalAssets.resolve("scripts.js"), """
+                document.getElementById('teaser-status').textContent =
+                    'T1170_WINDOWS_BROWSER_CANARY';
+                """);
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                assets.toString(), externalAssets.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(
+                workspace,
+                "Update assets/scripts.js so #teaser-button updates #teaser-status when clicked.",
+                ordinaryFacts);
+
+        assertFalse(report.requiredClaimsSatisfied(), report.toString());
+        assertTrue(report.hasRequiredUnavailable() || report.hasRequiredFailure(), report.toString());
+        assertFalse(report.toString().contains("T1170_WINDOWS_BROWSER_CANARY"), report.toString());
+        assertFalse(report.toString().contains(externalAssets.toString()), report.toString());
+    }
+
+    @Test
     void fallbackVerifiesWhenInlineEvalMutatesAndClickChangesOutputFurther() throws Exception {
         writeWebFixture("""
                 window.teaserLoads = (window.teaserLoads || 0) + 1;
@@ -192,5 +279,14 @@ class StaticWebBrowserBehaviorVerifierTest {
         return StaticWebSelectorAnalyzer.analyze(
                 workspace,
                 StaticWebSurfaceDetector.obviousPrimaryFiles(workspace));
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

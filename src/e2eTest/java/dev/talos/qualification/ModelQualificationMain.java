@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,24 +53,31 @@ public final class ModelQualificationMain {
     }
 
     private static QualificationScenarioBank.Catalog catalogForPacket(Path root) throws Exception {
-        Path campaignPath = root.toAbsolutePath().normalize().resolve("campaign.json");
-        if (!Files.isRegularFile(campaignPath)) {
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(root);
+        Path campaignPath = packetFiles.path().resolve("campaign.json");
+        if (packetFiles.inspect(campaignPath)
+                != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
             return QualificationScenarioBank.loadDefault();
         }
-        int protocolVersion = QualificationJson.readTree(campaignPath)
+        int protocolVersion = QualificationJson.readTree(
+                        packetFiles.readAllBytes(campaignPath))
                 .path("protocolVersion").asInt(-1);
         return QualificationScenarioBank.load(protocolVersion);
     }
 
     private static QualificationScenarioBank.Catalog catalogForMutation(Path root) throws Exception {
-        Path campaignPath = root.toAbsolutePath().normalize().resolve("campaign.json");
-        if (Files.isSymbolicLink(campaignPath)
-                || !Files.isRegularFile(campaignPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(root);
+        Path campaignPath = packetFiles.path().resolve("campaign.json");
+        if (packetFiles.inspect(campaignPath)
+                != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
             throw new IllegalArgumentException(
                     "qualification artifact publication requires campaign.json");
         }
         int protocolVersion = QualificationJson.requiredInt(
-                QualificationJson.readTree(campaignPath).get("protocolVersion"),
+                QualificationJson.readTree(
+                        packetFiles.readAllBytes(campaignPath)).get("protocolVersion"),
                 "campaign protocolVersion");
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocolVersion);
         QualificationArtifactPublication.requireWritableCampaign(root, catalog);
@@ -144,6 +153,7 @@ public final class ModelQualificationMain {
                 + bank.name().toLowerCase(Locale.ROOT) + ".json";
         Path target = root.resolve("scorecards").resolve(name);
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                dev.talos.core.security.NoFollowPathPolicy.bindExistingDirectory(root),
                 target, QualificationJson.bytes(scorecard), "qualification scorecard");
         out.println("Qualification scorecard: " + target.toAbsolutePath().normalize());
         out.println("Disposition: " + scorecard.disposition());

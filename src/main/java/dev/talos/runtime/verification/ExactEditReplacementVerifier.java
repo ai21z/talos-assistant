@@ -4,7 +4,6 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.ToolAliasPolicy;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -31,14 +30,14 @@ final class ExactEditReplacementVerifier {
             verifiedAny = true;
             String pathHint = normalizePath(outcome.pathHint());
             Path target = resolveWorkspaceFile(root, pathHint);
-            if (target == null || !Files.isRegularFile(target)) {
+            if (target == null || !StaticWebFileAccess.isRegularFile(root, target)) {
                 problems.add(pathHint + ": exact edit replacement target is not readable after apply.");
                 hasProblem = true;
                 continue;
             }
             String content;
             try {
-                content = Files.readString(target);
+                content = StaticWebFileAccess.readString(root, target);
             } catch (Exception e) {
                 problems.add(pathHint + ": exact edit replacement target could not be read after apply ("
                         + e.getMessage() + ")");

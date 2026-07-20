@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.talos.core.security.NoFollowPathPolicy;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -30,13 +31,16 @@ final class QualificationApprovalFinalizer {
             Path requestedRunRoot,
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
-        Path runRoot = QualificationRequirementFinalizer.containedRunRoot(
-                packetRoot, requestedRunRoot, scenarioId, catalog);
+        QualificationArtifactPublication.DeclaredRun declared =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        packetRoot, requestedRunRoot, scenarioId, catalog);
+        Path runRoot = declared.runRoot();
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         Document document = derive(
                 runRoot.resolve("transcript.raw.json"), scenario.approvalBehavior());
         Path output = runRoot.resolve(OUTPUT_FILE);
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                declared.runFiles(),
                 output,
                 QualificationJson.bytes(document),
                 "approval evidence");
@@ -46,7 +50,9 @@ final class QualificationApprovalFinalizer {
     static Document derive(
             Path capturePath,
             QualificationProtocol.ApprovalBehavior approvalBehavior) throws IOException {
-        return derive(QualificationJson.readTree(capturePath), approvalBehavior);
+        return derive(
+                QualificationJson.readTree(NoFollowPathPolicy.readAllBytes(capturePath)),
+                approvalBehavior);
     }
 
     static Document derive(

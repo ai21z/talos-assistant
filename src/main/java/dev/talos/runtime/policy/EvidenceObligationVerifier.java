@@ -1,11 +1,12 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.ToolError;
 
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -458,10 +459,12 @@ public final class EvidenceObligationVerifier {
             List<ToolCallLoop.ToolOutcome> outcomes
     ) {
         if (workspace == null || outcomes == null || outcomes.isEmpty()) return Set.of();
+        NoFollowPathPolicy.GuardedRoot workspaceFiles;
         Path ws;
         try {
-            ws = workspace.toAbsolutePath().normalize();
-        } catch (RuntimeException e) {
+            workspaceFiles = NoFollowPathPolicy.bindExistingDirectory(workspace);
+            ws = workspaceFiles.path();
+        } catch (Exception e) {
             return Set.of();
         }
         Set<String> out = new LinkedHashSet<>();
@@ -470,10 +473,10 @@ public final class EvidenceObligationVerifier {
             if (!outcome.success() || outcome.denied()) continue;
             if (!isIndexHtmlTarget(outcome.pathHint())) continue;
             Path index = resolveWorkspacePath(ws, outcome.pathHint());
-            if (index == null || !Files.isRegularFile(index)) continue;
+            if (!isRegularWorkspaceFile(workspaceFiles, index)) continue;
             String html;
             try {
-                html = Files.readString(index);
+                html = workspaceFiles.readString(index, StandardCharsets.UTF_8);
             } catch (Exception ignored) {
                 continue;
             }
@@ -481,11 +484,23 @@ public final class EvidenceObligationVerifier {
             while (matcher.find()) {
                 String src = firstNonBlank(matcher.group(1), matcher.group(2), matcher.group(3));
                 Path linked = resolveLinkedSource(ws, index, src);
-                if (linked == null || !Files.isRegularFile(linked)) continue;
+                if (!isRegularWorkspaceFile(workspaceFiles, linked)) continue;
                 out.add(normalizePath(ws.relativize(linked).toString()).replace('\\', '/'));
             }
         }
         return out.isEmpty() ? Set.of() : java.util.Collections.unmodifiableSet(out);
+    }
+
+    private static boolean isRegularWorkspaceFile(
+            NoFollowPathPolicy.GuardedRoot workspaceFiles,
+            Path path) {
+        if (workspaceFiles == null || path == null) return false;
+        try {
+            return workspaceFiles.inspect(path)
+                    == NoFollowPathPolicy.EntryType.REGULAR_FILE;
+        } catch (Exception rejected) {
+            return false;
+        }
     }
 
     private static Path resolveWorkspacePath(Path workspace, String pathHint) {

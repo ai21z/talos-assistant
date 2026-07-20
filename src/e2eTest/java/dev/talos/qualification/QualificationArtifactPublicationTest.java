@@ -1,9 +1,14 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.core.security.NoFollowPathPolicy;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,6 +50,7 @@ class QualificationArtifactPublicationTest {
         Files.setLastModifiedTime(target, frozen);
 
         boolean created = QualificationArtifactPublication.publishNewOrVerifyExact(
+                NoFollowPathPolicy.bindExistingDirectory(target.getParent()),
                 target, expected, "scorecard");
 
         assertFalse(created);
@@ -62,6 +68,7 @@ class QualificationArtifactPublicationTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationArtifactPublication.publishNewOrVerifyExact(
+                        NoFollowPathPolicy.bindExistingDirectory(target.getParent()),
                         target,
                         "different\n".getBytes(StandardCharsets.UTF_8),
                         "scorecard"));
@@ -80,6 +87,7 @@ class QualificationArtifactPublicationTest {
                 futures.add(executor.submit(() -> {
                     start.await();
                     return QualificationArtifactPublication.publishNewOrVerifyExact(
+                            NoFollowPathPolicy.bindExistingDirectory(target.getParent()),
                             target, expected, "race artifact");
                 }));
             }
@@ -143,10 +151,48 @@ class QualificationArtifactPublicationTest {
     }
 
     @Test
+    void packetAndRunRootsBelowLinksAreRejectedBeforeAuthorityPublication() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("real-packet"), catalog);
+        String scenario = catalog.admission().scenarios().getFirst().id();
+        Path linkedPacket = temp.resolve("linked-packet");
+        Path linkedRun = temp.resolve("linked-run");
+        createSymbolicLinkOrAbort(linkedPacket, packet.root());
+        createSymbolicLinkOrAbort(linkedRun, packet.runRoot());
+
+        NoFollowPathPolicy.Violation packetFailure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> QualificationArtifactPublication.requireWritableCampaign(
+                        linkedPacket, catalog),
+                "a packet root reached through a link must not become trusted authority");
+        assertEquals(NoFollowPathPolicy.Reason.LINKED_COMPONENT, packetFailure.reason());
+        NoFollowPathPolicy.Violation runFailure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> QualificationArtifactPublication.requireWritableDeclaredRun(
+                        packet.root(), linkedRun, scenario, catalog),
+                "a run root reached through a link must not become trusted authority");
+        assertEquals(NoFollowPathPolicy.Reason.LINKED_COMPONENT, runFailure.reason());
+
+        Path linkedOutputParent = temp.resolve("linked-output-parent");
+        Path realOutputParent = Files.createDirectory(temp.resolve("real-output-parent"));
+        createSymbolicLinkOrAbort(linkedOutputParent, realOutputParent);
+        Path linkedOutput = linkedOutputParent.resolve("result.json");
+        assertThrows(IOException.class,
+                () -> QualificationArtifactPublication.publishNewOrVerifyExact(
+                        NoFollowPathPolicy.bindExistingDirectory(temp),
+                        linkedOutput,
+                        "T1170_PUBLICATION_CANARY".getBytes(StandardCharsets.UTF_8),
+                        "linked publication"));
+        assertFalse(Files.exists(realOutputParent.resolve("result.json")),
+                "publication must not traverse a linked output ancestor");
+    }
+
+    @Test
     void missingOrBankInconsistentCampaignCannotCreateAuthorityNamespace() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         Path missing = Files.createDirectories(temp.resolve("missing"));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(IOException.class,
                 () -> QualificationArtifactPublication.requireWritableCampaign(missing, catalog));
 
         QualificationTestPacket packet = QualificationTestPacket.create(
@@ -158,6 +204,33 @@ class QualificationArtifactPublicationTest {
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationArtifactPublication.requireWritableCampaign(
                         packet.root(), catalog));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void windowsJunctionPacketRootCannotBecomeQualificationAuthority()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        Path realParent = Files.createDirectory(temp.resolve("real-packet-parent"));
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                realParent.resolve("packet"), catalog);
+        Path junction = temp.resolve("packet-parent-junction");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), realParent.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        NoFollowPathPolicy.Violation failure = assertThrows(
+                NoFollowPathPolicy.Violation.class,
+                () -> QualificationArtifactPublication.requireWritableCampaign(
+                        junction.resolve(packet.root().getFileName()), catalog));
+
+        assertEquals(NoFollowPathPolicy.Reason.NON_ORDINARY_COMPONENT, failure.reason());
+        assertFalse(failure.getMessage().contains(realParent.toString()));
     }
 
     @Test
@@ -185,6 +258,16 @@ class QualificationArtifactPublicationTest {
             CountDownLatch start, Path target, byte[] bytes) throws Exception {
         start.await();
         return QualificationArtifactPublication.publishNewOrVerifyExact(
+                NoFollowPathPolicy.bindExistingDirectory(target.getParent()),
                 target, bytes, "racing artifact");
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

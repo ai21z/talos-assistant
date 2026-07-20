@@ -81,6 +81,63 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void linkedExternalMutationTargetCannotSatisfyVerification() throws Exception {
+        String canary = "T1170_EXTERNAL_VERIFICATION_CANARY";
+        Path external = Files.writeString(
+                Files.createTempFile(
+                        workspace.getParent(),
+                        "t1170-external-verification-",
+                        ".txt"),
+                canary);
+        createSymbolicLinkOrAbort(workspace.resolve("result.txt"), external);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Overwrite result.txt with exactly " + canary + ".",
+                loopResult(List.of(
+                        successfulWrite("result.txt", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertTrue(result.problems().stream().anyMatch(problem ->
+                        problem.contains("result.txt")
+                                && problem.contains("not a readable file")),
+                result.problems().toString());
+        assertFalse(result.facts().stream().anyMatch(fact -> fact.contains(canary)));
+    }
+
+    @Test
+    void windowsJunctionMutationTargetCannotSatisfyVerification() throws Exception {
+        assumeTrue(System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT).contains("win"));
+        String canary = "T1170_WINDOWS_VERIFICATION_JUNCTION_CANARY";
+        Path external = Files.createTempDirectory(
+                workspace.getParent(),
+                "t1170-external-verification-directory-");
+        Files.writeString(external.resolve("result.txt"), canary);
+        Path junction = workspace.resolve("linked");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Overwrite linked/result.txt with exactly " + canary + ".",
+                loopResult(List.of(successfulWrite(
+                        "linked/result.txt", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.toString());
+        assertFalse(result.facts().stream().anyMatch(fact -> fact.contains(canary)));
+    }
+
+    @Test
     void colonDelimitedExactCreatePassesTaskVerificationWithTerminalPunctuation() throws Exception {
         Files.writeString(workspace.resolve("todo.md"), "Review the local setup.");
 
@@ -4902,5 +4959,15 @@ class StaticTaskVerifierTest {
                 "Done.", 1, outcomes.size(), List.of("talos.edit_file"), List.of(),
                 0, 0, false, successes, List.of(),
                 0, 0, 0, 0, outcomes);
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (java.io.IOException | UnsupportedOperationException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

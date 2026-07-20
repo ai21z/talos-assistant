@@ -1,5 +1,7 @@
 package dev.talos.core.util;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.net.URI;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -11,7 +13,6 @@ import java.io.File;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -230,7 +231,8 @@ public final class RuntimeArtifactIdentity {
             URI location = RuntimeArtifactIdentity.class.getProtectionDomain()
                     .getCodeSource().getLocation().toURI();
             Path codeSource = Path.of(location).toAbsolutePath().normalize();
-            if (Files.isRegularFile(codeSource, LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                NoFollowPathPolicy.requireUnlinkedRegularFile(codeSource);
                 return new Snapshot(
                         "JAR",
                         sha256(codeSource),
@@ -238,25 +240,26 @@ public final class RuntimeArtifactIdentity {
                         BuildInfo.version(),
                         BuildInfo.fullCommitSha(),
                         classpath.sha256(), classpath.sizeBytes(), classpath.entryCount());
-            }
-            if (Files.isDirectory(codeSource, LinkOption.NOFOLLOW_LINKS)) {
-                Path packageRoot = codeSource.resolve("dev/talos");
-                List<Path> classes;
-                try (var paths = Files.walk(packageRoot)) {
-                    classes = paths
-                            .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                            .sorted(Comparator.comparing(path ->
-                                    packageRoot.relativize(path).toString().replace('\\', '/')))
-                            .toList();
+            } catch (NoFollowPathPolicy.Violation notARegularFile) {
+                if (notARegularFile.reason() != NoFollowPathPolicy.Reason.NOT_REGULAR_FILE) {
+                    throw notARegularFile;
                 }
+            }
+            try {
+                NoFollowPathPolicy.GuardedRoot codeRoot =
+                        NoFollowPathPolicy.bindExistingDirectory(codeSource);
+                Path packageRoot = codeSource.resolve("dev/talos");
+                List<NoFollowPathPolicy.TreeFile> classes =
+                        codeRoot.readRegularFiles(packageRoot);
                 MessageDigest digest = MessageDigest.getInstance("SHA-256");
                 long total = 0L;
-                for (Path path : classes) {
-                    byte[] relative = packageRoot.relativize(path).toString()
+                for (NoFollowPathPolicy.TreeFile file : classes) {
+                    byte[] bytes = file.bytes();
+                    byte[] relative = packageRoot.relativize(file.path()).toString()
                             .replace('\\', '/').getBytes(StandardCharsets.UTF_8);
                     updateLengthDelimited(digest, relative);
-                    updateLengthDelimited(digest, path);
-                    total = Math.addExact(total, Files.size(path));
+                    updateLengthDelimited(digest, bytes);
+                    total = Math.addExact(total, bytes.length);
                 }
                 if (!classes.isEmpty()) {
                     return new Snapshot(
@@ -266,6 +269,10 @@ public final class RuntimeArtifactIdentity {
                             BuildInfo.version(),
                             BuildInfo.fullCommitSha(),
                             classpath.sha256(), classpath.sizeBytes(), classpath.entryCount());
+                }
+            } catch (NoFollowPathPolicy.Violation notADirectory) {
+                if (notADirectory.reason() != NoFollowPathPolicy.Reason.NOT_DIRECTORY) {
+                    throw notADirectory;
                 }
             }
         } catch (Exception ignored) {
@@ -309,33 +316,26 @@ public final class RuntimeArtifactIdentity {
     private record EntryIdentity(String kind, String sha256, long sizeBytes, int fileCount) {}
 
     private static EntryIdentity identifyEntry(Path entry) throws Exception {
-        if (Files.isSymbolicLink(entry)) {
-            throw new IllegalStateException("linked classpath entry");
-        }
-        if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+        try {
+            NoFollowPathPolicy.requireUnlinkedRegularFile(entry);
             return new EntryIdentity("FILE", sha256(entry), Files.size(entry), 1);
-        }
-        if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalStateException("missing classpath entry");
-        }
-        List<Path> files;
-        try (var paths = Files.walk(entry)) {
-            List<Path> all = paths.sorted(Comparator.comparing(path ->
-                    entry.relativize(path).toString().replace('\\', '/'))).toList();
-            if (all.stream().anyMatch(Files::isSymbolicLink)) {
-                throw new IllegalStateException("linked classpath descendant");
+        } catch (NoFollowPathPolicy.Violation notARegularFile) {
+            if (notARegularFile.reason() != NoFollowPathPolicy.Reason.NOT_REGULAR_FILE) {
+                throw notARegularFile;
             }
-            files = all.stream()
-                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                    .toList();
         }
+        NoFollowPathPolicy.GuardedRoot entryRoot =
+                NoFollowPathPolicy.bindExistingDirectory(entry);
+        List<NoFollowPathPolicy.TreeFile> files =
+                entryRoot.readRegularFiles(entry);
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         long total = 0L;
-        for (Path file : files) {
-            updateLengthDelimited(digest, entry.relativize(file).toString()
+        for (NoFollowPathPolicy.TreeFile file : files) {
+            byte[] bytes = file.bytes();
+            updateLengthDelimited(digest, entry.relativize(file.path()).toString()
                     .replace('\\', '/').getBytes(StandardCharsets.UTF_8));
-            updateLengthDelimited(digest, file);
-            total = Math.addExact(total, Files.size(file));
+            updateLengthDelimited(digest, bytes);
+            total = Math.addExact(total, bytes.length);
         }
         if (files.isEmpty()) throw new IllegalStateException("empty classpath directory");
         return new EntryIdentity(
@@ -348,7 +348,7 @@ public final class RuntimeArtifactIdentity {
 
     private static String sha256(Path path) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (InputStream input = Files.newInputStream(path);
+        try (InputStream input = NoFollowPathPolicy.openUnlinkedRegularFile(path);
                 DigestInputStream hashing = new DigestInputStream(input, digest)) {
             byte[] buffer = new byte[1024 * 1024];
             while (hashing.read(buffer) >= 0) {
@@ -361,24 +361,6 @@ public final class RuntimeArtifactIdentity {
     private static void updateLengthDelimited(MessageDigest digest, byte[] bytes) {
         digest.update(ByteBuffer.allocate(Long.BYTES).putLong(bytes.length).array());
         digest.update(bytes);
-    }
-
-    private static void updateLengthDelimited(MessageDigest digest, Path path) throws Exception {
-        long expected = Files.size(path);
-        digest.update(ByteBuffer.allocate(Long.BYTES).putLong(expected).array());
-        long observed = 0L;
-        try (InputStream input = Files.newInputStream(path)) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) >= 0) {
-                if (read == 0) continue;
-                digest.update(buffer, 0, read);
-                observed = Math.addExact(observed, read);
-            }
-        }
-        if (observed != expected) {
-            throw new IllegalStateException("runtime identity input changed while hashing");
-        }
     }
 
     private static String safe(String value) {

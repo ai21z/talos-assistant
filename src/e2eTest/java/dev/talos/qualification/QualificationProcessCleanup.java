@@ -1,5 +1,8 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
+import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -44,18 +47,34 @@ final class QualificationProcessCleanup {
 
     private QualificationProcessCleanup() {}
 
-    static Result stop(Process root, Path serverExecutable, int serverPort, Instant notBefore) {
-        return stop(root, serverExecutable, serverPort, notBefore, true);
+    static Result stop(
+            Process root,
+            Path discoveryExecutable,
+            Path serverExecutable,
+            int serverPort,
+            Instant notBefore) {
+        return stop(
+                root,
+                discoveryExecutable,
+                serverExecutable,
+                serverPort,
+                notBefore,
+                true);
     }
 
     static Result stop(
             Process root,
+            Path discoveryExecutable,
             Path serverExecutable,
             int serverPort,
             Instant notBefore,
             boolean allowGracefulExit) {
         Target rootTarget = root == null ? null : new ProcessTarget(root);
-        FinderResult finder = findCampaignServers(serverExecutable, serverPort, notBefore);
+        FinderResult finder = findCampaignServers(
+                discoveryExecutable,
+                serverExecutable,
+                serverPort,
+                notBefore);
         return stop(rootTarget, finder.targets(), GRACEFUL_WAIT, NORMAL_WAIT, FORCED_WAIT,
                 allowGracefulExit, finder.verified(), finder.errors());
     }
@@ -225,6 +244,7 @@ final class QualificationProcessCleanup {
     }
 
     private static FinderResult findCampaignServers(
+            Path discoveryExecutable,
             Path expectedExecutable,
             int expectedPort,
             Instant notBefore) {
@@ -233,26 +253,52 @@ final class QualificationProcessCleanup {
             return FinderResult.failed("campaign server identity is incomplete");
         }
         if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
-            return findWindowsCampaignServers(expectedExecutable, expectedPort, notBefore);
+            return findWindowsCampaignServers(
+                    discoveryExecutable,
+                    expectedExecutable,
+                    expectedPort,
+                    notBefore);
         }
         return findPortableCampaignServers(expectedExecutable, expectedPort, notBefore);
     }
 
     private static FinderResult findWindowsCampaignServers(
+            Path discoveryExecutable,
             Path expectedExecutable,
             int expectedPort,
             Instant notBefore) {
+        return findWindowsCampaignServers(
+                discoveryExecutable,
+                expectedExecutable,
+                expectedPort,
+                notBefore,
+                ProcessBuilder::start);
+    }
+
+    static FinderResult findWindowsCampaignServers(
+            Path discoveryExecutable,
+            Path expectedExecutable,
+            int expectedPort,
+            Instant notBefore,
+            QueryProcessStarter starter) {
         Process query = null;
         try {
+            Path validatedDiscovery =
+                    NoFollowPathPolicy.requireUnlinkedRegularFile(discoveryExecutable);
             ProcessBuilder builder = new ProcessBuilder(
-                    "pwsh", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_SERVER_QUERY)
+                    validatedDiscovery.toString(),
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    WINDOWS_SERVER_QUERY)
                     .redirectErrorStream(true);
             builder.environment().put("TALOS_QUALIFICATION_SERVER_PORT", Integer.toString(expectedPort));
             builder.environment().put("TALOS_QUALIFICATION_SERVER_EXE",
                     expectedExecutable.toAbsolutePath().normalize().toString());
             builder.environment().put("TALOS_QUALIFICATION_NOT_BEFORE",
                     notBefore.minusSeconds(2L).toString());
-            query = builder.start();
+            NoFollowPathPolicy.requireUnlinkedRegularFile(discoveryExecutable);
+            query = starter.start(builder);
             if (!query.waitFor(SERVER_DISCOVERY_WAIT.toMillis(), TimeUnit.MILLISECONDS)) {
                 query.destroyForcibly();
                 return FinderResult.failed("campaign server discovery timed out");
@@ -384,8 +430,13 @@ final class QualificationProcessCleanup {
         }
     }
 
-    private record FinderResult(boolean verified, List<Target> targets, List<String> errors) {
-        private FinderResult {
+    @FunctionalInterface
+    interface QueryProcessStarter {
+        Process start(ProcessBuilder builder) throws IOException;
+    }
+
+    record FinderResult(boolean verified, List<Target> targets, List<String> errors) {
+        FinderResult {
             targets = List.copyOf(targets);
             errors = List.copyOf(errors);
         }

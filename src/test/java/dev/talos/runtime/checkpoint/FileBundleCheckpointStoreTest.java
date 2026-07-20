@@ -8,7 +8,10 @@ import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -134,6 +137,133 @@ class FileBundleCheckpointStoreTest {
 
         assertFalse(capture.success());
         assertTrue(capture.message().contains("workspace"), capture.message());
+    }
+
+    @Test
+    void linkedDescendantFailsBeforeCheckpointNamespaceOrBlobPublication(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = Files.createDirectories(temp.resolve("workspace/tree"));
+        Path external = Files.writeString(temp.resolve("external-canary.txt"),
+                "T1170_EXTERNAL_CHECKPOINT_CANARY");
+        createSymbolicLinkOrAbort(workspace.resolve("linked.txt"), external);
+        Path checkpointRoot = temp.resolve("checkpoints");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(checkpointRoot));
+
+        CheckpointCaptureResult capture = service.captureBeforeRestore(
+                temp.resolve("workspace"),
+                config(true),
+                List.of("tree"),
+                "linked descendant fixture",
+                "trace-linked",
+                1);
+
+        assertFalse(capture.success(), "linked checkpoint input must fail closed");
+        assertTrue(service.listIds(temp.resolve("workspace")).isEmpty(),
+                "failed containment must not publish a listable checkpoint");
+        assertFalse(Files.exists(checkpointRoot),
+                "the checkpoint namespace must not exist before all targets pass preflight");
+        assertFalse(capture.message().contains(external.toString()),
+                "containment failures must not disclose the external target");
+        assertFalse(capture.message().contains("T1170_EXTERNAL_CHECKPOINT_CANARY"));
+    }
+
+    @Test
+    void linkedMutationTargetFailsBeforeCheckpointNamespacePublication(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = Files.createDirectory(temp.resolve("workspace"));
+        Path external = Files.writeString(
+                temp.resolve("external-mutation-canary.txt"),
+                "T1170_EXTERNAL_MUTATION_CHECKPOINT_CANARY");
+        Path linkedTarget = workspace.resolve("linked.txt");
+        createSymbolicLinkOrAbort(linkedTarget, external);
+        Path checkpointRoot = temp.resolve("checkpoints");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(checkpointRoot));
+
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "linked.txt", "content", "replacement")),
+                "trace-linked-mutation",
+                1);
+
+        assertFalse(capture.success());
+        assertTrue(capture.message().contains("LINKED_COMPONENT"), capture.message());
+        assertFalse(capture.message().contains(external.toString()));
+        assertFalse(capture.message().contains(
+                "T1170_EXTERNAL_MUTATION_CHECKPOINT_CANARY"));
+        assertFalse(Files.exists(checkpointRoot));
+    }
+
+    @Test
+    void linkedDirectoryMutationTargetFailsThroughTheSamePolicy(
+            @TempDir Path temp
+    ) throws Exception {
+        Path workspace = Files.createDirectory(temp.resolve("workspace"));
+        Path external = Files.createDirectory(temp.resolve("external-directory"));
+        Files.writeString(
+                external.resolve("canary.txt"),
+                "T1170_EXTERNAL_DIRECTORY_CHECKPOINT_CANARY");
+        createSymbolicLinkOrAbort(workspace.resolve("linked-directory"), external);
+        Path checkpointRoot = temp.resolve("checkpoints");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(checkpointRoot));
+
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                workspace,
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "linked-directory", "content", "replacement")),
+                "trace-linked-directory",
+                1);
+
+        assertFalse(capture.success());
+        assertTrue(capture.message().contains("LINKED_COMPONENT"), capture.message());
+        assertFalse(capture.message().contains(external.toString()));
+        assertFalse(Files.exists(checkpointRoot));
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void windowsJunctionFailsBeforeCheckpointNamespacePublication(
+            @TempDir Path temp
+    ) throws Exception {
+        Path tree = Files.createDirectories(temp.resolve("workspace/tree"));
+        Path external = Files.createDirectory(temp.resolve("external-junction-target"));
+        Files.writeString(external.resolve("canary.txt"), "T1170_WINDOWS_CHECKPOINT_CANARY");
+        Path junction = tree.resolve("junction");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        Path checkpointRoot = temp.resolve("checkpoints");
+        CheckpointService service = new CheckpointService(
+                new FileBundleCheckpointStore(checkpointRoot));
+        CheckpointCaptureResult capture = service.captureBeforeMutation(
+                temp.resolve("workspace"),
+                config(true),
+                new ToolCall(
+                        "talos.write_file",
+                        Map.of("path", "tree/junction", "content", "replacement")),
+                "trace-junction",
+                1);
+
+        assertFalse(capture.success());
+        assertTrue(service.listIds(temp.resolve("workspace")).isEmpty());
+        assertFalse(Files.exists(checkpointRoot));
+        assertFalse(capture.message().contains("T1170_WINDOWS_CHECKPOINT_CANARY"));
+        assertFalse(capture.message().contains(external.toString()));
     }
 
     @Test
@@ -822,6 +952,15 @@ class FileBundleCheckpointStoreTest {
                 String name = path.getFileName().toString();
                 return name.startsWith(".talos-atomic-") && name.endsWith(".tmp");
             }), "checkpoint consumer must not leave an atomic-write temp");
+        }
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (java.io.IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
         }
     }
 

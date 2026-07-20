@@ -2,6 +2,7 @@ package dev.talos.runtime.verification;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.Assumptions;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,12 +11,38 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StaticWebSelectorAnalyzerTest {
 
     @TempDir
     Path workspace;
+
+    @Test
+    void linkedPrimaryScriptCannotEnterSelectorFactsEvenWhenHtmlDoesNotLoadIt()
+            throws Exception {
+        String externalCanary = "T1170_SELECTOR_EXTERNAL_CANARY";
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html><html><body><main id="app">ordinary</main></body></html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "#app { color: black; }\n");
+        Path outside = Files.writeString(
+                workspace.getParent().resolve("outside-selector.js"), externalCanary);
+        try {
+            Files.createSymbolicLink(workspace.resolve("scripts.js"), outside);
+        } catch (Exception unavailable) {
+            Assumptions.abort("symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+
+        StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyze(
+                workspace.toAbsolutePath().normalize(),
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of("scripts.js"));
+
+        assertNull(facts);
+    }
 
     @Test
     void analyzerOwnsSelectorLinkageAndButtonDiagnostics() throws Exception {

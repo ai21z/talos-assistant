@@ -2,6 +2,7 @@ package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
@@ -24,6 +25,7 @@ import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 final class QualificationEvidenceValidator {
@@ -94,8 +96,15 @@ final class QualificationEvidenceValidator {
         List<String> findings = new ArrayList<>();
         List<QualificationRecords.RunResult> runs = new ArrayList<>();
         Path packetRoot = root == null ? null : root.toAbsolutePath().normalize();
-        if (packetRoot == null || !Files.isDirectory(packetRoot)) {
+        if (packetRoot == null) {
             return empty("Qualification packet root is missing or not a directory");
+        }
+        NoFollowPathPolicy.GuardedRoot packetFiles;
+        try {
+            packetFiles = NoFollowPathPolicy.bindExistingDirectory(packetRoot);
+            packetFiles.walk(packetRoot);
+        } catch (IOException containment) {
+            return empty("Qualification packet containment failed: " + message(containment));
         }
 
         QualificationRecords.CampaignManifest campaign = read(
@@ -146,14 +155,18 @@ final class QualificationEvidenceValidator {
         }
 
         Path runsRoot = packetRoot.resolve("runs");
-        if (!Files.isDirectory(runsRoot)) {
+        try {
+            if (packetFiles.inspect(runsRoot) != NoFollowPathPolicy.EntryType.DIRECTORY) {
             if (requireRuns) findings.add("Missing runs directory: " + runsRoot);
-        } else if (!WorkspaceContainment.contains(packetRoot, runsRoot)) {
+            } else if (!WorkspaceContainment.contains(packetRoot, runsRoot)) {
             findings.add("Runs directory escapes packet root: " + runsRoot);
-        } else {
-            try (var paths = Files.walk(runsRoot)) {
-                List<Path> results = paths.filter(path -> path.getFileName() != null
-                                && path.getFileName().toString().equals("result.json"))
+            } else {
+                List<Path> results = packetFiles.walk(runsRoot).stream()
+                        .filter(entry ->
+                                entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE)
+                        .map(NoFollowPathPolicy.TreeEntry::path)
+                        .filter(path -> path.getFileName() != null
+                                 && path.getFileName().toString().equals("result.json"))
                         .sorted()
                         .toList();
                 if (requireRuns && results.isEmpty()) findings.add("No run result.json files found");
@@ -166,9 +179,9 @@ final class QualificationEvidenceValidator {
                                 findings, runs);
                     }
                 }
-            } catch (IOException e) {
-                findings.add("Unable to enumerate runs: " + message(e));
             }
+        } catch (IOException e) {
+            findings.add("Unable to enumerate runs: " + message(e));
         }
         return result(findings, runs, campaign, candidate, machine, engine, calibration);
     }
@@ -187,7 +200,7 @@ final class QualificationEvidenceValidator {
         }
         for (String file : REQUIRED_JSON) {
             Path path = contained(packetRoot, runRoot.resolve(file), findings, file);
-            if (path == null || !Files.isRegularFile(path)) {
+            if (path == null || !ordinaryFile(path)) {
                 findings.add("Missing mandatory run artifact " + file + " under " + runRoot);
                 continue;
             }
@@ -199,7 +212,7 @@ final class QualificationEvidenceValidator {
         }
         for (String file : REQUIRED_PRESENT_TEXT) {
             Path path = contained(packetRoot, runRoot.resolve(file), findings, file);
-            if (path == null || !Files.isRegularFile(path)) {
+            if (path == null || !ordinaryFile(path)) {
                 findings.add("Missing mandatory run artifact " + file + " under " + runRoot);
             }
         }
@@ -211,7 +224,7 @@ final class QualificationEvidenceValidator {
         }
         for (String directory : REQUIRED_DIRECTORIES) {
             Path path = contained(packetRoot, runRoot.resolve(directory), findings, directory);
-            if (path == null || !Files.isDirectory(path)) {
+            if (path == null || !ordinaryDirectory(path)) {
                 findings.add("Missing mandatory run directory " + directory + " under " + runRoot);
             }
         }
@@ -372,10 +385,12 @@ final class QualificationEvidenceValidator {
 
             Map<String, byte[]> beforeBytes = readBytes(runRoot.resolve("before-files"));
             Map<String, byte[]> afterBytes = readBytes(runRoot.resolve("final-files"));
-            String answer = Files.readString(runRoot.resolve("answer.txt"), StandardCharsets.UTF_8);
-            String transcript = Files.readString(
+            String answer = NoFollowPathPolicy.readString(
+                    runRoot.resolve("answer.txt"), StandardCharsets.UTF_8);
+            String transcript = NoFollowPathPolicy.readString(
                     runRoot.resolve("transcript.txt"), StandardCharsets.UTF_8);
-            String traceText = Files.readString(runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
+            String traceText = NoFollowPathPolicy.readString(
+                    runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
             if (run.schemaVersion() != QualificationRecords.LEGACY_RUN_SCHEMA_VERSION) {
                 QualificationCausalOwnership.Evaluation causalOwnership =
                         QualificationCausalOwnership.evaluate(
@@ -535,14 +550,18 @@ final class QualificationEvidenceValidator {
 
     static List<Path> sourceEvidenceFiles(Path runRoot, boolean scenarioSnapshotVerified) throws IOException {
         List<Path> allowlist = new ArrayList<>();
+        NoFollowPathPolicy.GuardedRoot runFiles =
+                NoFollowPathPolicy.bindExistingDirectory(runRoot);
         if (scenarioSnapshotVerified) {
-            allowlist.add(runRoot.resolve("scenario.json"));
+            allowlist.add(runFiles.requireRegularFile(runRoot.resolve("scenario.json")));
         }
         for (String directory : REQUIRED_DIRECTORIES) {
             Path root = runRoot.resolve(directory);
-            if (!Files.isDirectory(root)) continue;
-            try (var paths = Files.walk(root)) {
-                allowlist.addAll(paths.filter(Files::isRegularFile).toList());
+            if (runFiles.inspect(root) != NoFollowPathPolicy.EntryType.DIRECTORY) continue;
+            for (NoFollowPathPolicy.TreeEntry entry : runFiles.walk(root)) {
+                if (entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                    allowlist.add(entry.path());
+                }
             }
         }
         return List.copyOf(allowlist);
@@ -608,9 +627,11 @@ final class QualificationEvidenceValidator {
             List<String> findings) throws IOException {
         Path promptDebug = runRoot.resolve("prompt-debug.txt");
         Path modelLog = runRoot.resolve("llama.log");
-        if (!Files.isRegularFile(promptDebug) || !Files.isRegularFile(modelLog)) return;
-        String promptEvidence = Files.readString(promptDebug, StandardCharsets.UTF_8);
-        String modelEvidence = Files.readString(modelLog, StandardCharsets.UTF_8);
+        if (!ordinaryFile(promptDebug) || !ordinaryFile(modelLog)) return;
+        String promptEvidence = NoFollowPathPolicy.readString(
+                promptDebug, StandardCharsets.UTF_8);
+        String modelEvidence = NoFollowPathPolicy.readString(
+                modelLog, StandardCharsets.UTF_8);
         boolean promptNotApplicable = QualificationProviderEvidence.isPromptNotApplicable(promptEvidence);
         boolean modelNotApplicable = QualificationProviderEvidence.isModelRuntimeNotApplicable(modelEvidence);
         if (promptNotApplicable != modelNotApplicable) {
@@ -891,11 +912,12 @@ final class QualificationEvidenceValidator {
 
     static Map<String, byte[]> readBytes(Path root) throws IOException {
         Map<String, byte[]> files = new HashMap<>();
-        try (var paths = Files.walk(root)) {
-            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
-                String relative = root.relativize(path).toString().replace('\\', '/');
-                files.put(relative, Files.readAllBytes(path));
-            }
+        NoFollowPathPolicy.GuardedRoot rootFiles =
+                NoFollowPathPolicy.bindExistingDirectory(root);
+        for (NoFollowPathPolicy.TreeEntry entry : rootFiles.walk(root)) {
+            if (entry.type() != NoFollowPathPolicy.EntryType.REGULAR_FILE) continue;
+            String relative = root.relativize(entry.path()).toString().replace('\\', '/');
+            files.put(relative, rootFiles.readAllBytes(entry.path()));
         }
         return Map.copyOf(files);
     }
@@ -1011,10 +1033,28 @@ final class QualificationEvidenceValidator {
         }
     }
 
-    private static void validateExternalArtifacts(
+    static void validateExternalArtifacts(
             QualificationRecords.CandidateManifest candidate,
             QualificationRecords.EngineFacts engine,
             List<String> findings) {
+        validateExternalArtifacts(
+                candidate,
+                engine,
+                findings,
+                QualificationEvidenceValidator::sha256);
+    }
+
+    @FunctionalInterface
+    interface ContentHasher {
+        String hash(Path path) throws IOException;
+    }
+
+    static void validateExternalArtifacts(
+            QualificationRecords.CandidateManifest candidate,
+            QualificationRecords.EngineFacts engine,
+            List<String> findings,
+            ContentHasher hasher) {
+        Objects.requireNonNull(hasher, "content hasher");
         try {
             String ordinaryModel = argumentValue(engine.launchArguments(), "-m");
             String verificationModel = argumentValue(engine.verificationLaunchArguments(), "-m");
@@ -1022,26 +1062,22 @@ final class QualificationEvidenceValidator {
                 findings.add("Engine launch arguments must bind one identical model path");
             } else {
                 Path model = Path.of(ordinaryModel).toAbsolutePath().normalize();
-                if (!Files.isRegularFile(model)) {
-                    findings.add("Pinned model artifact is missing: " + model);
-                } else {
-                    if (model.getFileName() == null
-                            || !model.getFileName().toString().equals(candidate.artifact())) {
-                        findings.add("Pinned model artifact filename differs from candidate manifest");
-                    }
-                    if (Files.size(model) != candidate.sizeBytes()) {
-                        findings.add("Pinned model artifact size differs from candidate manifest");
-                    }
-                    if (!sha256(model).equalsIgnoreCase(candidate.sha256())) {
-                        findings.add("Pinned model artifact SHA-256 differs from candidate manifest");
-                    }
+                NoFollowPathPolicy.requireUnlinkedRegularFile(model);
+                if (model.getFileName() == null
+                        || !model.getFileName().toString().equals(candidate.artifact())) {
+                    findings.add("Pinned model artifact filename differs from candidate manifest");
+                }
+                if (Files.size(model) != candidate.sizeBytes()) {
+                    findings.add("Pinned model artifact size differs from candidate manifest");
+                }
+                if (!hasher.hash(model).equalsIgnoreCase(candidate.sha256())) {
+                    findings.add("Pinned model artifact SHA-256 differs from candidate manifest");
                 }
             }
 
             Path executable = Path.of(engine.executable()).toAbsolutePath().normalize();
-            if (!Files.isRegularFile(executable)) {
-                findings.add("Pinned engine executable is missing: " + executable);
-            } else if (!sha256(executable).equalsIgnoreCase(engine.sha256())) {
+            NoFollowPathPolicy.requireUnlinkedRegularFile(executable);
+            if (!hasher.hash(executable).equalsIgnoreCase(engine.sha256())) {
                 findings.add("Pinned engine executable SHA-256 differs from engine manifest");
             }
         } catch (IOException | InvalidPathException e) {
@@ -1060,7 +1096,7 @@ final class QualificationEvidenceValidator {
     private static String sha256(Path path) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path);
+            try (InputStream input = NoFollowPathPolicy.openUnlinkedRegularFile(path);
                     DigestInputStream hashing = new DigestInputStream(input, digest)) {
                 byte[] buffer = new byte[1024 * 1024];
                 while (hashing.read(buffer) >= 0) {
@@ -1198,9 +1234,10 @@ final class QualificationEvidenceValidator {
         Path guide = candidateRoot.resolve("calibration-guide.md");
         verifyHash(packetRoot, guide, campaign.calibrationGuideSha256(),
                 "calibrationGuideSha256", findings);
-        if (Files.isRegularFile(guide)) {
+        if (ordinaryFile(guide)) {
             try {
-                String text = Files.readString(guide, StandardCharsets.UTF_8);
+                String text = NoFollowPathPolicy.readString(
+                        guide, StandardCharsets.UTF_8);
                 if (text.isBlank()) findings.add("Calibration guide must not be blank");
                 for (String heading : CALIBRATION_GUIDE_HEADINGS) {
                     if (!text.contains(heading)) {
@@ -1220,12 +1257,13 @@ final class QualificationEvidenceValidator {
             String field,
             List<String> findings) {
         Path contained = contained(root, path, findings, field);
-        if (contained == null || !Files.isRegularFile(contained)) {
+        if (contained == null || !ordinaryFile(contained)) {
             findings.add("Missing file bound by " + field + ": " + path);
             return;
         }
         try {
-            String actual = QualificationScenarioBank.sha256(Files.readAllBytes(contained));
+            String actual = QualificationScenarioBank.sha256(
+                    NoFollowPathPolicy.readAllBytes(contained));
             if (!actual.equalsIgnoreCase(expected)) {
                 findings.add(field + " mismatch: expected " + expected + " but was " + actual);
             }
@@ -1235,12 +1273,12 @@ final class QualificationEvidenceValidator {
     }
 
     private static <T> T read(Path path, Class<T> type, List<String> findings, String label) {
-        if (path == null || !Files.isRegularFile(path)) {
+        if (path == null) {
             findings.add("Missing " + label + ": " + path);
             return null;
         }
         try {
-            return QualificationJson.read(path, type);
+            return QualificationJson.read(NoFollowPathPolicy.readAllBytes(path), type);
         } catch (IOException | RuntimeException e) {
             findings.add("Invalid " + label + ": " + message(e));
             return null;
@@ -1252,12 +1290,13 @@ final class QualificationEvidenceValidator {
             int protocolVersion,
             List<String> findings,
             String label) {
-        if (path == null || !Files.isRegularFile(path)) {
+        if (path == null) {
             findings.add("Missing " + label + ": " + path);
             return null;
         }
         try {
-            return QualificationJson.readScenario(path, protocolVersion);
+            return QualificationJson.readScenario(
+                    NoFollowPathPolicy.readAllBytes(path), protocolVersion);
         } catch (IOException | RuntimeException e) {
             findings.add("Invalid " + label + ": " + message(e));
             return null;
@@ -1267,12 +1306,13 @@ final class QualificationEvidenceValidator {
     private static QualificationRecords.CalibrationRules readCalibration(
             Path path,
             List<String> findings) {
-        if (path == null || !Files.isRegularFile(path)) {
+        if (path == null) {
             findings.add("Missing calibration-rules.json: " + path);
             return null;
         }
         try {
-            JsonNode tree = QualificationJson.readTree(path);
+            JsonNode tree = QualificationJson.readTree(
+                    NoFollowPathPolicy.readAllBytes(path));
             if (tree instanceof ObjectNode object) {
                 if (!object.has("directPreflightLaunchArguments")) {
                     object.putArray("directPreflightLaunchArguments");
@@ -1362,8 +1402,27 @@ final class QualificationEvidenceValidator {
 
     private static boolean nonEmptyFile(Path path) {
         try {
-            return Files.isRegularFile(path) && Files.size(path) > 0;
+            NoFollowPathPolicy.requireUnlinkedRegularFile(path);
+            return Files.size(path) > 0;
         } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean ordinaryFile(Path path) {
+        try {
+            NoFollowPathPolicy.requireUnlinkedRegularFile(path);
+            return true;
+        } catch (IOException rejected) {
+            return false;
+        }
+    }
+
+    private static boolean ordinaryDirectory(Path path) {
+        try {
+            NoFollowPathPolicy.requireUnlinkedDirectory(path);
+            return true;
+        } catch (IOException rejected) {
             return false;
         }
     }

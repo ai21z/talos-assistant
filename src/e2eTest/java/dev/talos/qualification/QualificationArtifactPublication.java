@@ -1,6 +1,9 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -16,9 +19,9 @@ import java.util.Set;
  * Fail-closed namespace and publication rules for protocol-v6 qualification artifacts.
  *
  * <p>This class deliberately does not claim crash-atomic or cross-process
- * qualification publication, multi-file transactions, or linked-ancestor
- * containment. T1192 owns the qualification transaction; T1172 may supply its
- * single-file primitive, and T1170 owns containment.
+ * qualification publication or multi-file transactions. T1192 owns the
+ * qualification transaction and T1172 may supply its single-file primitive.
+ * T1170's bound no-follow authority is enforced here before content I/O.
  */
 final class QualificationArtifactPublication {
     private static final int PUBLICATION_LOCK_STRIPES = 64;
@@ -28,6 +31,8 @@ final class QualificationArtifactPublication {
     record DeclaredRun(
             Path packetRoot,
             Path runRoot,
+            NoFollowPathPolicy.GuardedRoot packetFiles,
+            NoFollowPathPolicy.GuardedRoot runFiles,
             QualificationRecords.CampaignManifest campaign,
             int trialNumber,
             String repetitionId) {}
@@ -39,11 +44,13 @@ final class QualificationArtifactPublication {
         Objects.requireNonNull(catalog, "scenario catalog");
         requireWritableProtocol(catalog.protocolVersion());
 
-        Path packetRoot = requestedPacketRoot.toAbsolutePath().normalize().toRealPath();
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(requestedPacketRoot);
+        Path packetRoot = packetFiles.path();
         Path campaignPath = packetRoot.resolve("campaign.json");
-        requireOrdinaryFile(campaignPath, "campaign manifest");
         QualificationRecords.CampaignManifest campaign = QualificationJson.read(
-                campaignPath, QualificationRecords.CampaignManifest.class);
+                packetFiles.readAllBytes(campaignPath),
+                QualificationRecords.CampaignManifest.class);
         if (!QualificationRecords.CAMPAIGN_SCHEMA.equals(campaign.schemaName())
                 || campaign.schemaVersion() != QualificationRecords.SCHEMA_VERSION) {
             throw invalid("campaign manifest schema is not canonical");
@@ -77,9 +84,13 @@ final class QualificationArtifactPublication {
         QualificationRecords.CampaignManifest campaign =
                 requireWritableCampaign(requestedPacketRoot, catalog);
 
-        Path packetRoot = requestedPacketRoot.toAbsolutePath().normalize().toRealPath();
-        Path runRoot = requestedRunRoot.toAbsolutePath().normalize().toRealPath();
-        Path runsRoot = packetRoot.resolve("runs").toRealPath();
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(requestedPacketRoot);
+        Path packetRoot = packetFiles.path();
+        Path runRoot = requestedRunRoot.toAbsolutePath().normalize();
+        NoFollowPathPolicy.GuardedRoot runFiles =
+                NoFollowPathPolicy.bindExistingDirectory(runRoot);
+        Path runsRoot = packetFiles.requireDirectory(packetRoot.resolve("runs"));
         String candidateAlias = QualificationNamespace.requireSegment(
                 campaign.candidateAlias(), "campaign candidate alias");
         String machineId = QualificationNamespace.requireSegment(
@@ -94,11 +105,14 @@ final class QualificationArtifactPublication {
         List<String> repetitions = campaign.repetitions();
         for (int index = 0; index < repetitions.size(); index++) {
             Path declared = declaredBase.resolve("trial-%02d".formatted(index + 1));
-            if (Files.isDirectory(declared, LinkOption.NOFOLLOW_LINKS)
-                    && declared.toRealPath().equals(runRoot)) {
+            if (packetFiles.inspect(declared) == NoFollowPathPolicy.EntryType.DIRECTORY
+                    && declared.equals(runRoot)
+                    && Files.isSameFile(declared, runFiles.path())) {
                 return new DeclaredRun(
                         packetRoot,
                         runRoot,
+                        packetFiles,
+                        runFiles,
                         campaign,
                         index + 1,
                         repetitions.get(index));
@@ -119,8 +133,14 @@ final class QualificationArtifactPublication {
      * Publishes bytes once, or accepts an exact existing/racing winner without overwriting it.
      * Returns {@code true} only when this invocation created the target.
      */
-    static boolean publishNewOrVerifyExact(Path requestedTarget, byte[] canonicalBytes, String label)
+    static boolean publishNewOrVerifyExact(
+            NoFollowPathPolicy.GuardedRoot owner,
+            Path requestedTarget,
+            byte[] canonicalBytes,
+            String label
+    )
             throws IOException {
+        Objects.requireNonNull(owner, "publication owner");
         Objects.requireNonNull(requestedTarget, "publication target");
         Objects.requireNonNull(canonicalBytes, "canonical bytes");
         String safeLabel = label == null || label.isBlank() ? "qualification artifact" : label;
@@ -132,37 +152,39 @@ final class QualificationArtifactPublication {
         // Cross-process qualification serialization and the multi-file transaction remain
         // T1192 scope; T1172 may supply the single-file atomic-promotion primitive.
         synchronized (publicationLock(target)) {
-            Files.createDirectories(parent);
+            owner.createDirectories(parent);
 
-            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-                verifyExactOrdinaryFile(target, canonicalBytes, safeLabel);
+            if (owner.inspect(target) != NoFollowPathPolicy.EntryType.MISSING) {
+                verifyExactOrdinaryFile(owner, target, canonicalBytes, safeLabel);
                 return false;
             }
+            owner.requireRegularFileTarget(target);
             try {
-                Files.write(target, canonicalBytes,
-                        StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                try (OutputStream output = Files.newOutputStream(
+                        target,
+                        StandardOpenOption.CREATE_NEW,
+                        StandardOpenOption.WRITE,
+                        LinkOption.NOFOLLOW_LINKS)) {
+                    output.write(canonicalBytes);
+                }
             } catch (FileAlreadyExistsException raced) {
-                verifyExactOrdinaryFile(target, canonicalBytes, safeLabel);
+                verifyExactOrdinaryFile(owner, target, canonicalBytes, safeLabel);
                 return false;
             }
-            verifyExactOrdinaryFile(target, canonicalBytes, safeLabel);
+            verifyExactOrdinaryFile(owner, target, canonicalBytes, safeLabel);
             return true;
         }
     }
 
     private static void verifyExactOrdinaryFile(
-            Path target, byte[] canonicalBytes, String label) throws IOException {
-        requireOrdinaryFile(target, label);
-        byte[] existing = Files.readAllBytes(target);
+            NoFollowPathPolicy.GuardedRoot owner,
+            Path target,
+            byte[] canonicalBytes,
+            String label
+    ) throws IOException {
+        byte[] existing = owner.readAllBytes(target);
         if (!Arrays.equals(existing, canonicalBytes)) {
-            throw invalid("conflicting published " + label + ": " + target);
-        }
-    }
-
-    private static void requireOrdinaryFile(Path path, String label) {
-        if (Files.isSymbolicLink(path)
-                || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw invalid(label + " is missing or is not an ordinary file: " + path);
+            throw invalid("conflicting published " + label);
         }
     }
 

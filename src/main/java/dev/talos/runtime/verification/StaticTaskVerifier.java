@@ -7,7 +7,6 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -600,7 +599,8 @@ public final class StaticTaskVerifier {
 
         for (String htmlFile : StaticWebSurfaceDetector.primaryHtmlTargets(primary)) {
             try {
-                String html = Files.readString(root.resolve(htmlFile));
+                String html = StaticWebFileAccess.readString(
+                        root, root.resolve(htmlFile));
                 for (String linked : StaticWebSelectorAnalyzer.linkedJavaScriptOccurrences(html)) {
                     if (pathCollectionContains(mutatedJavaScript, linked)) return true;
                 }
@@ -774,7 +774,8 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderTargetAwareSelectorInspection(Path workspace, Collection<String> targetHints) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         List<String> primary = obviousPrimaryFiles(workspace);
         if (!hasPrimaryWebSurface(primary)) {
             primary = targetAwarePrimaryFiles(workspace, targetHints);
@@ -788,7 +789,8 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderStaticSelectorSearch(Path workspace, String userRequest) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         String selector = requestedStaticSelectorLiteral(userRequest);
         if (selector.isBlank()) return null;
 
@@ -813,10 +815,9 @@ public final class StaticTaskVerifier {
             String name = StaticWebSurfaceDetector.visibleFileName(file).replace('\\', '/');
             if (!StaticWebSurfaceDetector.isSmallWorkspaceWebFile(name)) continue;
             int lineNumber = 0;
-            try (var lines = Files.lines(file)) {
-                var it = lines.iterator();
-                while (it.hasNext()) {
-                    String line = it.next();
+            try (var reader = StaticWebFileAccess.newBufferedReader(root, file)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
                     lineNumber++;
                     if (!line.contains(selector)) continue;
                     matches.add(name + ":" + lineNumber + " | " + truncateSelectorSearchLine(line.strip()));
@@ -872,7 +873,8 @@ public final class StaticTaskVerifier {
             Collection<String> readPaths,
             String userRequest
     ) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         List<String> inspected = inspectedStaticWebReadFiles(workspace, readPaths);
         if (inspected.isEmpty()) return null;
         Path root = workspace.toAbsolutePath().normalize();
@@ -930,7 +932,7 @@ public final class StaticTaskVerifier {
         if (htmlFile.isBlank()) return null;
         String html;
         try {
-            html = Files.readString(root.resolve(htmlFile));
+            html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
         } catch (Exception e) {
             return null;
         }
@@ -966,7 +968,8 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderScriptImportInspection(Path workspace, String userRequest) {
-        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (workspace == null
+                || !StaticWebFileAccess.isDirectory(workspace, workspace)) return null;
         if (!StaticWebImportIntent.matches(userRequest)) return null;
         Set<String> extractedTargets = TaskContractResolver.extractExpectedTargets(userRequest);
         List<String> candidateScripts = StaticWebImportIntent.scriptCandidates(extractedTargets);
@@ -993,7 +996,7 @@ public final class StaticTaskVerifier {
 
         String html;
         try {
-            html = Files.readString(root.resolve(htmlTarget));
+            html = StaticWebFileAccess.readString(root, root.resolve(htmlTarget));
         } catch (Exception e) {
             return null;
         }
@@ -1036,7 +1039,8 @@ public final class StaticTaskVerifier {
 
         List<String> problems = new ArrayList<>();
         try {
-            String html = Files.readString(root.resolve(facts.htmlFile()));
+            String html = StaticWebFileAccess.readString(
+                    root, root.resolve(facts.htmlFile()));
             problems.addAll(StaticWebStructureVerifier.htmlStructureProblems(facts.htmlFile(), html));
         } catch (Exception e) {
             problems.add(facts.htmlFile() + ": could not be read for HTML structure checks.");
@@ -1064,7 +1068,8 @@ public final class StaticTaskVerifier {
             if (normalized.isBlank() || !StaticWebSurfaceDetector.isSmallWorkspaceWebFile(normalized)) continue;
             try {
                 Path resolved = root.resolve(normalized).toAbsolutePath().normalize();
-                if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) continue;
+                if (!resolved.startsWith(root)
+                        || !StaticWebFileAccess.isRegularFile(root, resolved)) continue;
                 String relative = root.relativize(resolved).toString().replace('\\', '/');
                 if (relative.contains("/")) continue;
                 if (!out.contains(relative)) out.add(relative);
@@ -1215,7 +1220,8 @@ public final class StaticTaskVerifier {
             if (normalized.isBlank()) continue;
             try {
                 Path resolved = root.resolve(normalized).toAbsolutePath().normalize();
-                if (resolved.startsWith(root) && Files.isRegularFile(resolved)) {
+                if (resolved.startsWith(root)
+                        && StaticWebFileAccess.isRegularFile(root, resolved)) {
                     return normalized;
                 }
             } catch (RuntimeException ignored) {

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.util.RuntimeArtifactIdentity;
 
 import java.io.IOException;
@@ -723,7 +724,9 @@ final class QualificationExecutionIdentityWriter {
 
     private static HarnessInputSpecification readInputSpecification(Path path) throws IOException {
         try {
-            return STRICT_MAPPER.readValue(Files.readAllBytes(path), HarnessInputSpecification.class);
+            return STRICT_MAPPER.readValue(
+                    NoFollowPathPolicy.readAllBytes(path),
+                    HarnessInputSpecification.class);
         } catch (RuntimeException failure) {
             throw invalid("harness input specification is invalid", failure);
         }
@@ -1217,19 +1220,18 @@ final class QualificationExecutionIdentityWriter {
         }
 
         Set<String> actualLib = new HashSet<>();
-        try (var children = Files.newDirectoryStream(lib)) {
-            for (Path child : children) {
-                if (Files.isSymbolicLink(child)
-                        || !Files.isRegularFile(child, LinkOption.NOFOLLOW_LINKS)
-                        || !child.getFileName().toString().endsWith(".jar")) {
+        NoFollowPathPolicy.GuardedRoot libFiles =
+                NoFollowPathPolicy.bindExistingDirectory(lib);
+        for (NoFollowPathPolicy.TreeEntry child : libFiles.list(lib)) {
+                if (child.type() != NoFollowPathPolicy.EntryType.REGULAR_FILE
+                        || !child.path().getFileName().toString().endsWith(".jar")) {
                     throw invalid("installed lib contains a linked, non-regular, or non-JAR entry");
                 }
-                String logical = "lib/" + child.getFileName();
+                String logical = "lib/" + child.path().getFileName();
                 String collisionKey = logical.toLowerCase(Locale.ROOT);
                 if (!actualLib.add(collisionKey)) {
                     throw invalid("installed lib contains case-colliding entries");
                 }
-            }
         }
         if (!actualLib.equals(collisionKeys)) {
             throw invalid("frozen runtime classpath does not cover the exact installed lib contents");
@@ -1255,7 +1257,7 @@ final class QualificationExecutionIdentityWriter {
             String separator,
             String prefix,
             String label) throws IOException {
-        String text = Files.readString(launcher, StandardCharsets.UTF_8)
+        String text = NoFollowPathPolicy.readString(launcher, StandardCharsets.UTF_8)
                 .replace("\r\n", "\n").replace('\r', '\n');
         List<String> matches = text.lines()
                 .filter(line -> line.startsWith(marker))
@@ -1314,6 +1316,7 @@ final class QualificationExecutionIdentityWriter {
             String label) throws IOException {
         String hash = sha256File(path);
         long size = Files.size(path);
+        NoFollowPathPolicy.requireUnlinkedRegularFile(path);
         try (JarFile jar = new JarFile(path.toFile(), false)) {
             if (jar.getManifest() == null) throw invalid(label + " manifest is missing");
             Attributes attributes = jar.getManifest().getMainAttributes();
@@ -1338,12 +1341,16 @@ final class QualificationExecutionIdentityWriter {
 
     private static Existing inspectExisting(Path path, byte[] expected, String label)
             throws IOException {
-        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return Existing.MISSING;
-        if (Files.isSymbolicLink(path)
-                || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+        Path parent = path.toAbsolutePath().normalize().getParent();
+        if (parent == null) throw invalid("existing " + label + " has no parent");
+        NoFollowPathPolicy.GuardedRoot owner =
+                NoFollowPathPolicy.bindExistingDirectory(parent);
+        NoFollowPathPolicy.EntryType type = owner.inspect(path);
+        if (type == NoFollowPathPolicy.EntryType.MISSING) return Existing.MISSING;
+        if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
             throw invalid("existing " + label + " is linked or not a regular file");
         }
-        if (!java.util.Arrays.equals(Files.readAllBytes(path), expected)) {
+        if (!java.util.Arrays.equals(owner.readAllBytes(path), expected)) {
             throw invalid("existing " + label + " conflicts with derived exact bytes");
         }
         return Existing.IDENTICAL;
@@ -1354,26 +1361,35 @@ final class QualificationExecutionIdentityWriter {
             QualificationRecords.CampaignManifest campaign) throws IOException {
         if (campaign.endedAt() != null && !campaign.endedAt().isBlank()) return true;
         Path runs = packetRoot.resolve("runs");
-        if (!Files.exists(runs, LinkOption.NOFOLLOW_LINKS)) return false;
-        if (Files.isSymbolicLink(runs)
-                || !Files.isDirectory(runs, LinkOption.NOFOLLOW_LINKS)) {
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(packetRoot);
+        NoFollowPathPolicy.EntryType type = packetFiles.inspect(runs);
+        if (type == NoFollowPathPolicy.EntryType.MISSING) return false;
+        if (type != NoFollowPathPolicy.EntryType.DIRECTORY) {
             throw invalid("packet runs path is linked or not a directory");
         }
-        try (var paths = Files.walk(runs)) {
-            return paths.skip(1).anyMatch(path ->
-                    Files.isSymbolicLink(path)
-                            || Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS));
-        }
+        return packetFiles.walk(runs).stream().skip(1).anyMatch(entry ->
+                entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE);
     }
 
     private static void createExact(Path path, byte[] bytes, String label) throws IOException {
+        Path parent = path.toAbsolutePath().normalize().getParent();
+        if (parent == null) throw invalid(label + " has no parent");
+        NoFollowPathPolicy.GuardedRoot owner =
+                NoFollowPathPolicy.bindExistingDirectory(parent);
+        owner.requireRegularFileTarget(path);
         try {
-            Files.write(path, bytes, new OpenOption[] {
-                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE});
+            try (var output = Files.newOutputStream(
+                    path,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE,
+                    LinkOption.NOFOLLOW_LINKS)) {
+                output.write(bytes);
+            }
         } catch (FileAlreadyExistsException race) {
             throw invalid("refusing concurrent or pre-existing " + label + " creation", race);
         }
-        if (!java.util.Arrays.equals(Files.readAllBytes(path), bytes)) {
+        if (!java.util.Arrays.equals(owner.readAllBytes(path), bytes)) {
             throw invalid("created " + label + " bytes do not match the derived representation");
         }
     }
@@ -1382,8 +1398,12 @@ final class QualificationExecutionIdentityWriter {
         for (int i = created.size() - 1; i >= 0; i--) {
             Created item = created.get(i);
             try {
-                if (Files.isRegularFile(item.path(), LinkOption.NOFOLLOW_LINKS)
-                        && java.util.Arrays.equals(Files.readAllBytes(item.path()), item.bytes())) {
+                Path parent = item.path().toAbsolutePath().normalize().getParent();
+                NoFollowPathPolicy.GuardedRoot owner =
+                        NoFollowPathPolicy.bindExistingDirectory(parent);
+                if (owner.inspect(item.path()) == NoFollowPathPolicy.EntryType.REGULAR_FILE
+                        && java.util.Arrays.equals(
+                                owner.readAllBytes(item.path()), item.bytes())) {
                     Files.delete(item.path());
                 } else {
                     failure.addSuppressed(new IllegalStateException(
@@ -1397,13 +1417,13 @@ final class QualificationExecutionIdentityWriter {
 
     private static void ensureNoCaseVariant(Path root, Path expected) throws IOException {
         String wanted = expected.getFileName().toString();
-        try (var children = Files.newDirectoryStream(root)) {
-            for (Path child : children) {
-                String name = child.getFileName().toString();
+        NoFollowPathPolicy.GuardedRoot rootFiles =
+                NoFollowPathPolicy.bindExistingDirectory(root);
+        for (NoFollowPathPolicy.TreeEntry child : rootFiles.list(root)) {
+                String name = child.path().getFileName().toString();
                 if (name.equalsIgnoreCase(wanted) && !name.equals(wanted)) {
                     throw invalid("case-colliding identity output exists: " + name);
                 }
-            }
         }
     }
 
@@ -1422,41 +1442,36 @@ final class QualificationExecutionIdentityWriter {
 
     private static byte[] requiredPacketBytes(Path root, Path path, String label)
             throws IOException {
-        return Files.readAllBytes(requiredPacketFile(root, path, label));
+        Path file = requiredPacketFile(root, path, label);
+        return NoFollowPathPolicy.bindExistingDirectory(root).readAllBytes(file);
     }
 
-    private static Path requiredPacketFile(Path root, Path path, String label) {
+    private static Path requiredPacketFile(Path root, Path path, String label)
+            throws IOException {
         Path normalized = path.toAbsolutePath().normalize();
         if (!normalized.startsWith(root)) throw invalid(label + " is outside the packet");
         return requiredRootFile(root, normalized, label);
     }
 
-    private static Path requiredRootFile(Path root, Path path, String label) {
+    private static Path requiredRootFile(Path root, Path path, String label)
+            throws IOException {
         Path normalized = path.toAbsolutePath().normalize();
-        if (!normalized.startsWith(root)
-                || Files.isSymbolicLink(normalized)
-                || !Files.isRegularFile(normalized, LinkOption.NOFOLLOW_LINKS)) {
+        NoFollowPathPolicy.GuardedRoot rootFiles =
+                NoFollowPathPolicy.bindExistingDirectory(root);
+        if (!normalized.startsWith(rootFiles.path())) {
             throw invalid(label + " is missing, linked, or outside its declared root");
         }
-        return normalized;
+        return rootFiles.requireRegularFile(normalized);
     }
 
     private static Path requiredAbsoluteDirectory(Path requested, String label) throws IOException {
         Path path = requiredAbsolute(requested, label);
-        if (Files.isSymbolicLink(path)
-                || !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw invalid(label + " is missing, linked, or not a directory");
-        }
-        return path;
+        return NoFollowPathPolicy.requireUnlinkedDirectory(path);
     }
 
     private static Path requiredAbsoluteFile(Path requested, String label) throws IOException {
         Path path = requiredAbsolute(requested, label);
-        if (Files.isSymbolicLink(path)
-                || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw invalid(label + " is missing, linked, or not a regular file");
-        }
-        return path;
+        return NoFollowPathPolicy.requireUnlinkedRegularFile(path);
     }
 
     private static Path requiredAbsolute(Path requested, String label) {
@@ -1593,7 +1608,7 @@ final class QualificationExecutionIdentityWriter {
 
     private static BasicFileAttributes stableAttributes(Path path, String label)
             throws IOException {
-        if (Files.isSymbolicLink(path)) throw invalid(label + " is linked");
+        NoFollowPathPolicy.requireUnlinkedRegularFile(path);
         BasicFileAttributes attributes = Files.readAttributes(
                 path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (!attributes.isRegularFile() || attributes.size() <= 0) {
@@ -1620,7 +1635,7 @@ final class QualificationExecutionIdentityWriter {
     static String sha256File(Path path) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path);
+            try (InputStream input = NoFollowPathPolicy.openUnlinkedRegularFile(path);
                     DigestInputStream hashing = new DigestInputStream(input, digest)) {
                 byte[] buffer = new byte[1024 * 1024];
                 while (hashing.read(buffer) >= 0) {

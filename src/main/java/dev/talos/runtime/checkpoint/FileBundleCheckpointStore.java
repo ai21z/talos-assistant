@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.core.io.AtomicFileWriter;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -107,11 +108,20 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
 
         Path ws = workspace.toAbsolutePath().normalize();
         Path target = ws.resolve(pathParam).normalize();
-        if (!WorkspaceContainment.contains(ws, target)) {
+        if (!target.startsWith(ws)) {
             return CheckpointCaptureResult.failure("Checkpoint target escapes workspace: " + pathParam);
         }
-        if (Files.isDirectory(target)) {
-            return CheckpointCaptureResult.failure("Checkpoint target is a directory: " + pathParam);
+        try {
+            NoFollowPathPolicy.EntryType targetType =
+                    NoFollowPathPolicy.bindExistingDirectory(ws).inspect(target);
+            if (targetType == NoFollowPathPolicy.EntryType.DIRECTORY) {
+                return CheckpointCaptureResult.failure(
+                        "Checkpoint target is a directory: " + pathParam);
+            }
+        } catch (IOException rejected) {
+            return CheckpointCaptureResult.failure(
+                    "Checkpoint target failed containment validation: "
+                            + rejected.getMessage());
         }
 
         return captureRelativePaths(
@@ -195,25 +205,42 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         }
 
         try {
+            NoFollowPathPolicy.GuardedRoot workspace =
+                    NoFollowPathPolicy.bindExistingDirectory(ws);
             List<Path> targets = new ArrayList<>();
             for (String requestedRel : normalizedPaths) {
                 Path target = ws.resolve(requestedRel).normalize();
-                if (!WorkspaceContainment.contains(ws, target)) {
+                if (!target.startsWith(ws)) {
                     return CheckpointCaptureResult.failure("Checkpoint target escapes workspace: " + requestedRel);
                 }
                 targets.add(target);
             }
 
+            List<CaptureTarget> preflight = new ArrayList<>();
+            for (Path target : targets) {
+                NoFollowPathPolicy.EntryType type = workspace.inspect(target);
+                List<NoFollowPathPolicy.TreeEntry> entries =
+                        type == NoFollowPathPolicy.EntryType.MISSING
+                                ? List.of()
+                                : workspace.walk(target);
+                preflight.add(new CaptureTarget(target, type, entries));
+            }
+
             String workspaceId = JsonSessionStore.sessionIdFor(ws);
             String checkpointId = newCheckpointId();
-            Path dir = checkpointDir(workspaceId, checkpointId);
+            Path safeCheckpointRoot = NoFollowPathPolicy.createUnlinkedDirectories(root);
+            NoFollowPathPolicy.GuardedRoot checkpointRoot =
+                    NoFollowPathPolicy.bindExistingDirectory(safeCheckpointRoot);
+            Path dir = checkpointRoot.createDirectories(
+                    checkpointDir(workspaceId, checkpointId));
             Path blobs = dir.resolve("blobs");
-            Files.createDirectories(blobs);
+            checkpointRoot.createDirectories(blobs);
 
             List<Map<String, Object>> files = new ArrayList<>();
             long byteCount = 0L;
-            for (Path target : targets) {
-                CaptureStats stats = capturePath(ws, target, blobs, cfg, files);
+            for (CaptureTarget target : preflight) {
+                CaptureStats stats = capturePath(
+                        workspace, checkpointRoot, target, blobs, cfg, files);
                 byteCount += stats.byteCount();
             }
 
@@ -580,26 +607,24 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
     }
 
     private CaptureStats capturePath(
-            Path workspace,
-            Path target,
+            NoFollowPathPolicy.GuardedRoot workspace,
+            NoFollowPathPolicy.GuardedRoot checkpointRoot,
+            CaptureTarget target,
             Path blobs,
             CheckpointConfig cfg,
             List<Map<String, Object>> files
     ) throws Exception {
-        String rel = normalizeRelative(workspace.relativize(target));
-        if (!Files.exists(target)) {
+        String rel = normalizeRelative(workspace.path().relativize(target.path()));
+        if (target.type() == NoFollowPathPolicy.EntryType.MISSING) {
             files.add(fileEntry(rel, "PATH", false, "", 0, "RECORDED_ABSENT"));
             return new CaptureStats(0);
         }
-        if (Files.isDirectory(target)) {
+        if (target.type() == NoFollowPathPolicy.EntryType.DIRECTORY) {
             long bytes = 0;
-            try (var stream = Files.walk(target)) {
-                for (Path directory : stream
-                        .filter(Files::isDirectory)
-                        .sorted()
-                        .toList()) {
+            for (NoFollowPathPolicy.TreeEntry entry : target.entries()) {
+                if (entry.type() == NoFollowPathPolicy.EntryType.DIRECTORY) {
                     files.add(fileEntry(
-                            normalizeRelative(workspace.relativize(directory)),
+                            normalizeRelative(workspace.path().relativize(entry.path())),
                             "DIRECTORY",
                             true,
                             "",
@@ -607,48 +632,55 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                             "DIRECTORY_RECORDED"));
                 }
             }
-            try (var stream = Files.walk(target)) {
-                for (Path file : stream
-                        .filter(Files::isRegularFile)
-                        .sorted()
-                        .toList()) {
-                    CaptureStats stats = captureExistingFile(workspace, file, blobs, cfg, files);
+            for (NoFollowPathPolicy.TreeEntry entry : target.entries()) {
+                if (entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                    CaptureStats stats = captureExistingFile(
+                            workspace, checkpointRoot, entry.path(), blobs, cfg, files);
                     bytes += stats.byteCount();
                 }
             }
             return new CaptureStats(bytes);
         }
-        return captureExistingFile(workspace, target, blobs, cfg, files);
+        return captureExistingFile(
+                workspace, checkpointRoot, target.path(), blobs, cfg, files);
     }
 
     private CaptureStats captureExistingFile(
-            Path workspace,
+            NoFollowPathPolicy.GuardedRoot workspace,
+            NoFollowPathPolicy.GuardedRoot checkpointRoot,
             Path target,
             Path blobs,
             CheckpointConfig cfg,
             List<Map<String, Object>> files
     ) throws Exception {
-        byte[] bytes = Files.readAllBytes(target);
-        String rel = normalizeRelative(workspace.relativize(target));
+        byte[] bytes = workspace.readAllBytes(target);
+        String rel = normalizeRelative(workspace.path().relativize(target));
         if (bytes.length > cfg.maxFileBytes()) {
             throw new IOException("Checkpoint target exceeds max_file_bytes: " + rel);
         }
         String blobSha = sha256(bytes);
-        writeBlobAtomically(blobs.resolve(blobSha), bytes);
+        writeBlobAtomically(checkpointRoot, blobs.resolve(blobSha), bytes);
         files.add(fileEntry(rel, "FILE", true, blobSha, bytes.length, "CAPTURED"));
         return new CaptureStats(bytes.length);
     }
 
-    private void writeBlobAtomically(Path blob, byte[] bytes) throws Exception {
+    private void writeBlobAtomically(
+            NoFollowPathPolicy.GuardedRoot checkpointRoot,
+            Path blob,
+            byte[] bytes
+    ) throws Exception {
         Path parent = blob.getParent();
-        if (parent != null) Files.createDirectories(parent);
-        if (Files.isRegularFile(blob)) {
-            byte[] existing = Files.readAllBytes(blob);
+        if (parent != null) checkpointRoot.createDirectories(parent);
+        NoFollowPathPolicy.EntryType existingType = checkpointRoot.inspect(blob);
+        if (existingType == NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+            byte[] existing = checkpointRoot.readAllBytes(blob);
             if (sha256(existing).equalsIgnoreCase(blob.getFileName().toString())) {
                 return;
             }
         }
+        checkpointRoot.requireRegularFileTarget(blob);
         blobFileWriter.replaceCurrent(blob, bytes);
+        checkpointRoot.requireRegularFile(blob);
     }
 
     private static Map<String, Object> fileEntry(
@@ -714,4 +746,13 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
     ) {}
 
     private record CaptureStats(long byteCount) {}
+
+    private record CaptureTarget(
+            Path path,
+            NoFollowPathPolicy.EntryType type,
+            List<NoFollowPathPolicy.TreeEntry> entries) {
+        private CaptureTarget {
+            entries = entries == null ? List.of() : List.copyOf(entries);
+        }
+    }
 }

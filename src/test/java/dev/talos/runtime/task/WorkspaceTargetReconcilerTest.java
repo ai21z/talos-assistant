@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -202,6 +203,34 @@ class WorkspaceTargetReconcilerTest {
     }
 
     @Test
+    void linkedExternalIndexCannotReconstructProviderTaskTargets(@TempDir Path workspace)
+            throws Exception {
+        Path external = Files.createTempFile(
+                "talos-t1170-reconciler-external-",
+                ".html");
+        try {
+            Files.writeString(
+                    external,
+                    "<script src=\"T1170_EXTERNAL_RECONCILER_CANARY.js\"></script>");
+            createSymbolicLinkOrAbort(workspace.resolve("index.html"), external);
+            TaskContract raw =
+                    TaskContractResolver.fromUserRequest("Make this website better.");
+
+            TaskContract reconciled =
+                    WorkspaceTargetReconciler.reconcile(raw, workspace);
+
+            assertEquals(raw.expectedTargets(), reconciled.expectedTargets());
+            assertFalse(reconciled.expectedTargets().stream()
+                    .anyMatch(target -> target.contains(
+                            "T1170_EXTERNAL_RECONCILER_CANARY")));
+            assertFalse(reconciled.classificationReason().contains(
+                    "workspace-static-web-surface"));
+        } finally {
+            Files.deleteIfExists(external);
+        }
+    }
+
+    @Test
     void statusQuestionOverExistingWebSurfaceDoesNotBecomeMutationTargetBinding(@TempDir Path workspace)
             throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
@@ -223,5 +252,15 @@ class WorkspaceTargetReconcilerTest {
         TaskContract raw = TaskContractResolver.fromUserRequest(
                 "Create a modern synthwave website here with CSS styling and JavaScript interaction.");
         return WorkspaceTargetReconciler.reconcile(raw, workspace);
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target)
+            throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException unavailable) {
+            assumeTrue(false, "symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
     }
 }

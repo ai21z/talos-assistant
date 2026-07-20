@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.core.util.RuntimeArtifactIdentity;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 
@@ -14,7 +15,6 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
-import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -141,6 +141,7 @@ final class QualificationExecutionIdentity {
         Objects.requireNonNull(machine, "machine");
         Objects.requireNonNull(engine, "engine");
         Path root = packetRoot.toAbsolutePath().normalize();
+        NoFollowPathPolicy.bindExistingDirectory(root);
         QualificationRecords.CampaignManifest canonicalCampaign =
                 QualificationArtifactPublication.requireWritableCampaign(
                         root, QualificationScenarioBank.loadDefault());
@@ -332,16 +333,27 @@ final class QualificationExecutionIdentity {
         String rulesHash = safe(calibration.directPreflightEvidenceManifestSha256());
         String runtimeHash = safe(runtimeDeclaredHash);
         Path manifestPath = root.resolve(PREFLIGHT_FILE);
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(root);
         if (!adapted) {
             if (!rulesHash.isEmpty() || !runtimeHash.isEmpty()
-                    || Files.exists(manifestPath, LinkOption.NOFOLLOW_LINKS)) {
+                    || packetFiles.inspect(manifestPath)
+                            != NoFollowPathPolicy.EntryType.MISSING) {
                 throw invalid("preserve-as-written layout has undeclared preflight evidence");
             }
             return "";
         }
         requireHash(rulesHash, "direct preflight evidence manifest");
         requireHash(runtimeHash, "runtime preflight evidence manifest");
-        byte[] manifestBytes = requiredFile(root, manifestPath);
+        byte[] manifestBytes;
+        try {
+            manifestBytes = requiredFile(root, manifestPath);
+        } catch (NoFollowPathPolicy.Violation rejected) {
+            if (rejected.reason() == NoFollowPathPolicy.Reason.MISSING) {
+                throw invalid(PREFLIGHT_FILE + " is missing", rejected);
+            }
+            throw rejected;
+        }
         String actualHash = sha256(manifestBytes);
         equalHash(rulesHash, actualHash, "calibration preflight manifest hash mismatch");
         equalHash(runtimeHash, actualHash, "runtime preflight manifest hash mismatch");
@@ -439,13 +451,9 @@ final class QualificationExecutionIdentity {
     }
 
     private static byte[] requiredFile(Path packetRoot, Path requested) throws IOException {
-        Path root = packetRoot.toAbsolutePath().normalize();
-        Path path = requested.toAbsolutePath().normalize();
-        if (!path.startsWith(root) || Files.isSymbolicLink(path)
-                || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw invalid("identity artifact is missing, linked, or outside the packet: " + path);
-        }
-        return Files.readAllBytes(path);
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(packetRoot);
+        return packetFiles.readAllBytes(requested);
     }
 
     private static <T> T strict(byte[] bytes, Class<T> type, String label) throws IOException {
@@ -463,27 +471,25 @@ final class QualificationExecutionIdentity {
         Path source = Path.of(anchor.getProtectionDomain().getCodeSource().getLocation().toURI())
                 .toAbsolutePath().normalize();
         updateLengthDelimited(digest, label.getBytes(StandardCharsets.UTF_8));
-        if (Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
-            updateLengthDelimited(digest, Files.readAllBytes(source));
+        try {
+            updateLengthDelimited(digest, NoFollowPathPolicy.readAllBytes(source));
             return;
+        } catch (NoFollowPathPolicy.Violation notARegularFile) {
+            if (notARegularFile.reason() != NoFollowPathPolicy.Reason.NOT_REGULAR_FILE) {
+                throw notARegularFile;
+            }
         }
-        if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
-            throw invalid("finalizer code source is unavailable: " + source);
-        }
-        List<Path> classes;
-        try (var paths = Files.walk(source)) {
-            classes = paths
-                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                    .filter(path -> path.getFileName().toString().endsWith(".class"))
-                    .sorted(Comparator.comparing(path ->
-                            source.relativize(path).toString().replace('\\', '/')))
-                    .toList();
-        }
-        if (classes.isEmpty()) throw invalid("finalizer class tree is empty: " + source);
-        for (Path path : classes) {
-            updateLengthDelimited(digest, source.relativize(path).toString()
+        NoFollowPathPolicy.GuardedRoot sourceFiles =
+                NoFollowPathPolicy.bindExistingDirectory(source);
+        List<NoFollowPathPolicy.TreeFile> classes =
+                sourceFiles.readRegularFiles(
+                        source,
+                        path -> path.getFileName().toString().endsWith(".class"));
+        if (classes.isEmpty()) throw invalid("finalizer class tree is empty");
+        for (NoFollowPathPolicy.TreeFile file : classes) {
+            updateLengthDelimited(digest, source.relativize(file.path()).toString()
                     .replace('\\', '/').getBytes(StandardCharsets.UTF_8));
-            updateLengthDelimited(digest, Files.readAllBytes(path));
+            updateLengthDelimited(digest, file.bytes());
         }
     }
 
@@ -494,24 +500,6 @@ final class QualificationExecutionIdentity {
 
     private static String sha256(byte[] bytes) {
         return QualificationScenarioBank.sha256(bytes);
-    }
-
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path);
-                    DigestInputStream hashing = new DigestInputStream(input, digest)) {
-                byte[] buffer = new byte[1024 * 1024];
-                while (hashing.read(buffer) >= 0) {
-                    // DigestInputStream updates the digest while streaming.
-                }
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (IOException failure) {
-            throw failure;
-        } catch (Exception impossible) {
-            throw invalid("SHA-256 unavailable", impossible);
-        }
     }
 
     private static Map<String, String> immutable(Map<String, String> value) {

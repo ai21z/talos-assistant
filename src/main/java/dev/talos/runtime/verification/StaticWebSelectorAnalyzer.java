@@ -1,6 +1,5 @@
 package dev.talos.runtime.verification;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -65,7 +64,7 @@ final class StaticWebSelectorAnalyzer {
         try {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
-            String html = Files.readString(root.resolve(htmlFile));
+            String html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
             Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
             List<String> htmlIdOccurrences = htmlIdOccurrences(html);
             Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
@@ -76,8 +75,8 @@ final class StaticWebSelectorAnalyzer {
             String cssFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedCssFiles, preferredAssetFiles, ".css");
             String jsFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedJsFiles, preferredAssetFiles, ".js");
             if (cssFile == null || jsFile == null) return null;
-            String css = Files.readString(root.resolve(cssFile));
-            String js = Files.readString(root.resolve(jsFile));
+            String css = StaticWebFileAccess.readString(root, root.resolve(cssFile));
+            String js = StaticWebFileAccess.readString(root, root.resolve(jsFile));
             return new Facts(
                     htmlFile,
                     cssFile,
@@ -112,7 +111,7 @@ final class StaticWebSelectorAnalyzer {
         try {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
-            String html = Files.readString(root.resolve(htmlFile));
+            String html = StaticWebFileAccess.readString(root, root.resolve(htmlFile));
             Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
             List<String> htmlIdOccurrences = htmlIdOccurrences(html);
             Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
@@ -129,12 +128,12 @@ final class StaticWebSelectorAnalyzer {
             Set<String> cssIds = Set.of();
             Set<String> cssBareClassSelectors = Set.of();
             if (cssFile != null) {
-                css = Files.readString(root.resolve(cssFile));
+                css = StaticWebFileAccess.readString(root, root.resolve(cssFile));
                 cssClasses = extractCssSelectors(css, CSS_CLASS_SELECTOR);
                 cssIds = extractCssSelectors(css, CSS_ID_SELECTOR);
                 cssBareClassSelectors = extractBareClassSelectors(css, htmlClasses);
             }
-            String js = Files.readString(root.resolve(jsFile));
+            String js = StaticWebFileAccess.readString(root, root.resolve(jsFile));
 
             return new Facts(
                     htmlFile,
@@ -355,16 +354,12 @@ final class StaticWebSelectorAnalyzer {
     }
 
     static Set<String> existingFileNames(Path root) {
-        Set<String> out = new LinkedHashSet<>();
-        try (var stream = Files.list(root)) {
-            stream.filter(Files::isRegularFile)
-                    .map(path -> path.getFileName() == null ? "" : path.getFileName().toString())
-                    .filter(name -> !name.isBlank())
-                    .forEach(out::add);
+        try {
+            return StaticWebFileAccess.immediateRegularFileNames(root);
         } catch (Exception ignored) {
             // Linkage verification will fail elsewhere if primary files cannot be read.
+            return Set.of();
         }
-        return out;
     }
 
     static String pickPrimary(List<String> files, String... exts) {

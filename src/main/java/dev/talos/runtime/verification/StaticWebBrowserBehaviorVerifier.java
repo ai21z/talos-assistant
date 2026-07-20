@@ -1,5 +1,6 @@
 package dev.talos.runtime.verification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import org.htmlunit.BrowserVersion;
 import org.htmlunit.HttpHeader;
 import org.htmlunit.WebClient;
@@ -136,7 +137,12 @@ final class StaticWebBrowserBehaviorVerifier {
             }
             List<String> scriptErrors = new ArrayList<>();
             List<String> workspaceRequests = new ArrayList<>();
-            try (WebClient client = new WorkspaceOnlyWebClient(safeRoot, workspaceRequests)) {
+            try {
+                NoFollowPathPolicy.GuardedRoot guardedRoot =
+                        NoFollowPathPolicy.bindExistingDirectory(safeRoot);
+                guardedRoot.requireRegularFile(htmlPath);
+                try (WebClient client = new WorkspaceOnlyWebClient(
+                        guardedRoot, workspaceRequests)) {
                 client.getOptions().setJavaScriptEnabled(true);
                 client.getOptions().setCssEnabled(false);
                 client.getOptions().setDownloadImages(false);
@@ -205,12 +211,13 @@ final class StaticWebBrowserBehaviorVerifier {
                                     + "` did not change it."),
                             limitations);
                 }
-                return BrowserRunResult.failed(
+                    return BrowserRunResult.failed(
                         facts,
                         List.of("Browser behavior assertion failed: `" + binding.outputSelector()
                                 + "` visible text did not change after clicking `" + binding.triggerSelector()
                                 + "`."),
                         limitations);
+                }
             } catch (IOException | RuntimeException e) {
                 return BrowserRunResult.unavailable(
                         "Browser behavior verifier could not execute the static page: " + safeMessage(e));
@@ -231,12 +238,17 @@ final class StaticWebBrowserBehaviorVerifier {
     }
 
     private static final class WorkspaceOnlyWebClient extends WebClient {
+        private final NoFollowPathPolicy.GuardedRoot guardedRoot;
         private final Path root;
         private final List<String> workspaceRequests;
 
-        WorkspaceOnlyWebClient(Path root, List<String> workspaceRequests) {
+        WorkspaceOnlyWebClient(
+                NoFollowPathPolicy.GuardedRoot guardedRoot,
+                List<String> workspaceRequests
+        ) {
             super(BrowserVersion.CHROME);
-            this.root = root;
+            this.guardedRoot = guardedRoot;
+            this.root = guardedRoot.path();
             this.workspaceRequests = workspaceRequests == null ? new ArrayList<>() : workspaceRequests;
         }
 
@@ -263,7 +275,8 @@ final class StaticWebBrowserBehaviorVerifier {
                 throw new IOException("Blocked non-workspace browser request: " + redactedUrl(url));
             }
             record(requested);
-            if (!Files.exists(requested) || Files.isDirectory(requested)) {
+            NoFollowPathPolicy.EntryType type = guardedRoot.inspect(requested);
+            if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
                 WebResponseData data = new WebResponseData(
                         ("Missing workspace resource: " + root.relativize(requested)).getBytes(StandardCharsets.UTF_8),
                         404,
@@ -271,7 +284,7 @@ final class StaticWebBrowserBehaviorVerifier {
                         List.of(new NameValuePair(HttpHeader.CONTENT_TYPE, "text/plain; charset=UTF-8")));
                 return new WebResponse(data, request, 0);
             }
-            byte[] body = Files.readAllBytes(requested);
+            byte[] body = guardedRoot.readAllBytes(requested);
             WebResponseData data = new WebResponseData(
                     body,
                     200,

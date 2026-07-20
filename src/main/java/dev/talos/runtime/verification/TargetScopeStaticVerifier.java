@@ -5,7 +5,6 @@ import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -179,7 +178,8 @@ final class TargetScopeStaticVerifier {
         } catch (InvalidPathException e) {
             return false;
         }
-        return target.startsWith(root) && Files.isRegularFile(target);
+        return target.startsWith(root)
+                && StaticWebFileAccess.isRegularFile(root, target);
     }
 
     static boolean expectedTargetMatches(String expectedTarget, String mutatedPath, boolean caseInsensitive) {

@@ -3,7 +3,6 @@ package dev.talos.runtime.verification;
 import dev.talos.core.security.WorkspaceContainment;
 import dev.talos.runtime.task.TaskContract;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -217,11 +216,13 @@ final class StaticWebContentRequirementVerifier {
 
         try {
             Path candidate = root.resolve(target).toAbsolutePath().normalize();
-            if (!WorkspaceContainment.contains(root, candidate) || !Files.isRegularFile(candidate)) {
+            if (!WorkspaceContainment.contains(root, candidate)
+                    || !StaticWebFileAccess.isRegularFile(root, candidate)) {
                 return TargetReadback.unavailable(
                         "Static-web content verification target is not a readable workspace file: `" + target + "`.");
             }
-            return new TargetReadback(target, Files.readString(candidate), "");
+            return new TargetReadback(
+                    target, StaticWebFileAccess.readString(root, candidate), "");
         } catch (Exception e) {
             return TargetReadback.unavailable(
                     "Static-web content verification could not read target `" + target + "`.");
@@ -229,7 +230,7 @@ final class StaticWebContentRequirementVerifier {
     }
 
     private static List<String> visibleHtmlTargets(Path root) {
-        if (root == null || !Files.isDirectory(root)) return List.of();
+        if (root == null || !StaticWebFileAccess.isDirectory(root, root)) return List.of();
         try {
             return StaticWebSurfaceDetector.visibleRegularFiles(root).stream()
                     .map(StaticWebSurfaceDetector::visibleFileName)

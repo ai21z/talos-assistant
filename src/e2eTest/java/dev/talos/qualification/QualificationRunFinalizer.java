@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 
 import java.io.IOException;
@@ -216,10 +217,13 @@ final class QualificationRunFinalizer {
                     "run finalization writes exactly protocol v"
                             + QualificationProtocol.VERSION);
         }
-        Path runRoot = QualificationRequirementFinalizer.containedRunRoot(
-                packetRoot, requestedRunRoot, scenarioId, catalog);
+        QualificationArtifactPublication.DeclaredRun declaredRun =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        packetRoot, requestedRunRoot, scenarioId, catalog);
+        Path runRoot = declaredRun.runRoot();
+        NoFollowPathPolicy.GuardedRoot runFiles = declaredRun.runFiles();
         Path resultPath = runRoot.resolve(RESULT_FILE);
-        if (Files.exists(resultPath)) {
+        if (runFiles.inspect(resultPath) != NoFollowPathPolicy.EntryType.MISSING) {
             throw new IllegalStateException(
                     "refusing to alter a published run result: " + resultPath);
         }
@@ -234,8 +238,10 @@ final class QualificationRunFinalizer {
 
         Path causalPath = runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE);
         Path canaryPath = runRoot.resolve(CANARY_FILE);
-        writeOrVerifyCompanion(causalPath, QualificationJson.bytes(publication.causal()));
-        writeOrVerifyCompanion(canaryPath, QualificationJson.bytes(publication.canary()));
+        writeOrVerifyCompanion(
+                runFiles, causalPath, QualificationJson.bytes(publication.causal()));
+        writeOrVerifyCompanion(
+                runFiles, canaryPath, QualificationJson.bytes(publication.canary()));
 
         observer.beforeResultPublication(stable);
         QualificationPreResultEvidence.Snapshot beforeResult =
@@ -248,13 +254,13 @@ final class QualificationRunFinalizer {
         }
         requireCanonicalAuthority(
                 causalPath,
-                Files.readAllBytes(causalPath),
+                runFiles.readAllBytes(causalPath),
                 QualificationJson.bytes(publication.causal()));
         requireCanonicalAuthority(
                 canaryPath,
-                Files.readAllBytes(canaryPath),
+                runFiles.readAllBytes(canaryPath),
                 QualificationJson.bytes(publication.canary()));
-        writeCreateNew(resultPath, QualificationJson.bytes(publication.result()));
+        writeCreateNew(runFiles, resultPath, QualificationJson.bytes(publication.result()));
         return resultPath;
     }
 
@@ -273,11 +279,16 @@ final class QualificationRunFinalizer {
             throw new IllegalArgumentException("expected a result.json path");
         }
         Path runRoot = normalizedResult.getParent();
+        NoFollowPathPolicy.GuardedRoot packetFiles =
+                NoFollowPathPolicy.bindExistingDirectory(packetRoot);
+        packetFiles.requireRegularFile(normalizedResult);
+        NoFollowPathPolicy.GuardedRoot runFiles =
+                NoFollowPathPolicy.bindExistingDirectory(runRoot);
         Path causalPath = runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE);
         Path canaryPath = runRoot.resolve(CANARY_FILE);
-        byte[] resultBytes = Files.readAllBytes(normalizedResult);
-        byte[] causalBytes = Files.readAllBytes(causalPath);
-        byte[] canaryBytes = Files.readAllBytes(canaryPath);
+        byte[] resultBytes = runFiles.readAllBytes(normalizedResult);
+        byte[] causalBytes = runFiles.readAllBytes(causalPath);
+        byte[] canaryBytes = runFiles.readAllBytes(canaryPath);
         QualificationRecords.RunResult result = QualificationJson.read(
                 resultBytes, QualificationRecords.RunResult.class);
         QualificationJson.requireRunSchemaForProtocol(
@@ -367,25 +378,42 @@ final class QualificationRunFinalizer {
         }
     }
 
-    private static void writeOrVerifyCompanion(Path path, byte[] expected) throws IOException {
-        if (Files.exists(path)) {
-            if (!Files.isRegularFile(path)
-                    || !java.util.Arrays.equals(Files.readAllBytes(path), expected)) {
+    private static void writeOrVerifyCompanion(
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path path,
+            byte[] expected
+    ) throws IOException {
+        NoFollowPathPolicy.EntryType type = runFiles.inspect(path);
+        if (type != NoFollowPathPolicy.EntryType.MISSING) {
+            if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE
+                    || !java.util.Arrays.equals(runFiles.readAllBytes(path), expected)) {
                 throw new IllegalStateException(
-                        "conflicting qualification finalization orphan: " + path);
+                        "conflicting qualification finalization orphan");
             }
             return;
         }
-        writeCreateNew(path, expected);
+        writeCreateNew(runFiles, path, expected);
     }
 
-    private static void writeCreateNew(Path path, byte[] bytes) throws IOException {
+    private static void writeCreateNew(
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path path,
+            byte[] bytes
+    ) throws IOException {
+        runFiles.requireRegularFileTarget(path);
         try {
-            Files.write(path, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+            try (var output = Files.newOutputStream(
+                    path,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                output.write(bytes);
+            }
         } catch (FileAlreadyExistsException race) {
             throw new IllegalStateException(
-                    "refusing concurrent qualification artifact publication: " + path, race);
+                    "refusing concurrent qualification artifact publication", race);
         }
+        runFiles.requireRegularFile(path);
     }
 
     private static void requireCanonicalAuthority(

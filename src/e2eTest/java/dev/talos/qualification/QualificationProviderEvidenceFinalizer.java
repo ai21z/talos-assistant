@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -27,24 +29,32 @@ final class QualificationProviderEvidenceFinalizer {
         if (serverPort < 1 || serverPort > 65_535) {
             throw new IllegalArgumentException("server port must be between 1 and 65535");
         }
-        Path runRoot = QualificationRequirementFinalizer.containedRunRoot(
-                packetRoot, requestedRunRoot, scenarioId, catalog);
-        Path root = packetRoot.toAbsolutePath().normalize().toRealPath();
+        QualificationArtifactPublication.DeclaredRun declared =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        packetRoot, requestedRunRoot, scenarioId, catalog);
+        NoFollowPathPolicy.GuardedRoot packetFiles = declared.packetFiles();
+        NoFollowPathPolicy.GuardedRoot runFiles = declared.runFiles();
+        Path runRoot = declared.runRoot();
+        Path root = declared.packetRoot();
         Path promptOutput = runRoot.resolve(PROMPT_OUTPUT);
         Path modelOutput = runRoot.resolve(MODEL_OUTPUT);
-        List<Path> renders = providerRenders(runRoot);
-        boolean promptExists = Files.exists(promptOutput, LinkOption.NOFOLLOW_LINKS);
-        boolean modelExists = Files.exists(modelOutput, LinkOption.NOFOLLOW_LINKS);
+        List<Path> renders = providerRenders(runFiles, runRoot);
+        boolean promptExists =
+                runFiles.inspect(promptOutput) != NoFollowPathPolicy.EntryType.MISSING;
+        boolean modelExists =
+                runFiles.inspect(modelOutput) != NoFollowPathPolicy.EntryType.MISSING;
 
         if (promptExists || modelExists) {
             if (!promptExists || !modelExists) {
                 throw new IllegalStateException("provider NOT_APPLICABLE evidence must be paired");
             }
-            requireRegular(promptOutput, "prompt evidence");
-            requireRegular(modelOutput, "model runtime evidence");
+            runFiles.requireRegularFile(promptOutput);
+            runFiles.requireRegularFile(modelOutput);
             if (renders.isEmpty()) {
-                String prompt = boundedText(promptOutput, MAX_PROMPT_BYTES, "prompt evidence");
-                String model = boundedText(modelOutput, MAX_MODEL_LOG_BYTES, "model runtime evidence");
+                String prompt = boundedText(
+                        runFiles, promptOutput, MAX_PROMPT_BYTES, "prompt evidence");
+                String model = boundedText(
+                        runFiles, modelOutput, MAX_MODEL_LOG_BYTES, "model runtime evidence");
                 if (!prompt.equals(QualificationProviderEvidence.promptNotApplicableText())
                         || !model.equals(QualificationProviderEvidence.modelRuntimeNotApplicableText())) {
                     throw new IllegalStateException(
@@ -58,13 +68,13 @@ final class QualificationProviderEvidenceFinalizer {
             }
             Path sourceLog = root.resolve(
                     Path.of("home", ".talos", "logs", "llama_cpp-" + serverPort + ".log"));
-            sourceLog = containedRegular(root, sourceLog, "llama.cpp source log");
+            sourceLog = requiredSourceLog(packetFiles, sourceLog);
             byte[] promptBytes = boundedBytes(
-                    renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
+                    runFiles, renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
             byte[] modelBytes = boundedBytes(
-                    sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
-            if (!java.util.Arrays.equals(Files.readAllBytes(promptOutput), promptBytes)
-                    || !java.util.Arrays.equals(Files.readAllBytes(modelOutput), modelBytes)) {
+                    packetFiles, sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
+            if (!java.util.Arrays.equals(runFiles.readAllBytes(promptOutput), promptBytes)
+                    || !java.util.Arrays.equals(runFiles.readAllBytes(modelOutput), modelBytes)) {
                 throw new IllegalStateException(
                         "pre-existing provider evidence conflicts with the canonical source pair");
             }
@@ -77,54 +87,68 @@ final class QualificationProviderEvidenceFinalizer {
         }
         Path sourceLog = root.resolve(
                 Path.of("home", ".talos", "logs", "llama_cpp-" + serverPort + ".log"));
-        sourceLog = containedRegular(root, sourceLog, "llama.cpp source log");
-        byte[] promptBytes = boundedBytes(renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
-        byte[] modelBytes = boundedBytes(sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
-        writePair(promptOutput, promptBytes, modelOutput, modelBytes);
+        sourceLog = requiredSourceLog(packetFiles, sourceLog);
+        byte[] promptBytes = boundedBytes(
+                runFiles, renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
+        byte[] modelBytes = boundedBytes(
+                packetFiles, sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
+        writePair(runFiles, promptOutput, promptBytes, modelOutput, modelBytes);
         return new Result(promptOutput, modelOutput, true);
     }
 
-    private static List<Path> providerRenders(Path runRoot) throws IOException {
-        try (var files = Files.list(runRoot)) {
-            return files.filter(path -> {
-                        String name = path.getFileName().toString();
-                        return name.startsWith("prompt-debug-")
-                                && name.endsWith(".md")
-                                && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
-                    })
-                    .sorted()
-                    .toList();
+    private static List<Path> providerRenders(
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path runRoot
+    ) throws IOException {
+        return runFiles.walk(runRoot).stream()
+                .filter(entry ->
+                        entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE)
+                .map(NoFollowPathPolicy.TreeEntry::path)
+                .filter(path -> path.getParent().equals(runRoot))
+                .filter(path -> {
+                    String name = path.getFileName().toString();
+                    return name.startsWith("prompt-debug-") && name.endsWith(".md");
+                })
+                .sorted()
+                .toList();
+    }
+
+    private static Path requiredSourceLog(
+            NoFollowPathPolicy.GuardedRoot packetFiles,
+            Path sourceLog
+    ) throws IOException {
+        NoFollowPathPolicy.EntryType type = packetFiles.inspect(sourceLog);
+        if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+            throw new IllegalStateException("llama.cpp source log is missing");
         }
+        return packetFiles.requireRegularFile(sourceLog);
     }
 
-    private static void requireRegular(Path path, String label) {
-        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalStateException(label + " is missing or not a regular file: " + path);
-        }
+    private static String boundedText(
+            NoFollowPathPolicy.GuardedRoot root,
+            Path path,
+            long maxBytes,
+            String label
+    ) throws IOException {
+        return new String(boundedBytes(root, path, maxBytes, label), StandardCharsets.UTF_8);
     }
 
-    private static Path containedRegular(Path root, Path path, String label) throws IOException {
-        requireRegular(path, label);
-        Path real = path.toRealPath();
-        if (!real.startsWith(root)) {
-            throw new IllegalStateException(label + " escapes the qualification packet: " + real);
-        }
-        return real;
-    }
-
-    private static String boundedText(Path path, long maxBytes, String label) throws IOException {
-        return new String(boundedBytes(path, maxBytes, label), StandardCharsets.UTF_8);
-    }
-
-    private static byte[] boundedBytes(Path path, long maxBytes, String label) throws IOException {
+    private static byte[] boundedBytes(
+            NoFollowPathPolicy.GuardedRoot root,
+            Path path,
+            long maxBytes,
+            String label
+    ) throws IOException {
+        root.requireRegularFile(path);
         long size = Files.size(path);
         if (size <= 0 || size > maxBytes) {
             throw new IllegalStateException(label + " size is outside the allowed range: " + size);
         }
-        return Files.readAllBytes(path);
+        return root.readAllBytes(path);
     }
 
     static void writePair(
+            NoFollowPathPolicy.GuardedRoot runFiles,
             Path promptOutput,
             byte[] promptBytes,
             Path modelOutput,
@@ -132,8 +156,10 @@ final class QualificationProviderEvidenceFinalizer {
         // Never delete an already-published first member when the second fails;
         // exact retry is safe, while transactional pair visibility remains T1192.
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                runFiles,
                 promptOutput, promptBytes, "provider prompt evidence");
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                runFiles,
                 modelOutput, modelBytes, "provider model evidence");
     }
 }

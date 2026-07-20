@@ -1,7 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import dev.talos.core.security.WorkspaceContainment;
+import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 
 import java.io.IOException;
@@ -133,13 +133,17 @@ final class QualificationPreResultEvidence {
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
         Objects.requireNonNull(catalog, "catalog");
-        Path root = packetRoot.toAbsolutePath().normalize();
-        Path runRoot = QualificationRequirementFinalizer.containedRunRoot(
-                root, requestedRunRoot, scenarioId, catalog);
+        QualificationArtifactPublication.DeclaredRun declaredRun =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        packetRoot, requestedRunRoot, scenarioId, catalog);
+        Path root = declaredRun.packetRoot();
+        Path runRoot = declaredRun.runRoot();
+        NoFollowPathPolicy.GuardedRoot packetFiles = declaredRun.packetFiles();
+        NoFollowPathPolicy.GuardedRoot runFiles = declaredRun.runFiles();
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         List<String> findings = new ArrayList<>();
 
-        Map<Path, byte[]> runArtifacts = captureTree(runRoot);
+        Map<Path, byte[]> runArtifacts = captureTree(runFiles, runRoot);
         Map<String, String> artifactHashes = new TreeMap<>();
         runArtifacts.forEach((path, bytes) -> {
             String relative = runRoot.relativize(path).toString().replace('\\', '/');
@@ -172,7 +176,8 @@ final class QualificationPreResultEvidence {
             if (bytes == null || bytes.length == 0) findings.add("MISSING_OR_EMPTY_TEXT:" + name);
         }
         for (String name : REQUIRED_DIRECTORIES) {
-            if (!Files.isDirectory(runRoot.resolve(name))) {
+            if (runFiles.inspect(runRoot.resolve(name))
+                    != NoFollowPathPolicy.EntryType.DIRECTORY) {
                 findings.add("MISSING_DIRECTORY:" + name);
             }
         }
@@ -187,21 +192,26 @@ final class QualificationPreResultEvidence {
             findings.add("SCENARIO_SNAPSHOT_MISMATCH");
         }
 
-        byte[] campaignBytes = readFile(root.resolve("campaign.json"), "campaign.json", findings);
+        byte[] campaignBytes = readFile(
+                packetFiles, root.resolve("campaign.json"), "campaign.json", findings);
         putHash(artifactHashes, "packet/campaign.json", campaignBytes);
         byte[] runtimeIdentityBytes = readFile(
+                packetFiles,
                 root.resolve(QualificationExecutionIdentity.RUNTIME_FILE),
                 QualificationExecutionIdentity.RUNTIME_FILE, findings);
         putHash(artifactHashes, "packet/" + QualificationExecutionIdentity.RUNTIME_FILE,
                 runtimeIdentityBytes);
         byte[] harnessManifestBytes = readFile(
+                packetFiles,
                 root.resolve(QualificationExecutionIdentity.HARNESS_FILE),
                 QualificationExecutionIdentity.HARNESS_FILE, findings);
         putHash(artifactHashes, "packet/" + QualificationExecutionIdentity.HARNESS_FILE,
                 harnessManifestBytes);
         Path preflightManifestPath = root.resolve(QualificationExecutionIdentity.PREFLIGHT_FILE);
-        if (Files.exists(preflightManifestPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        if (packetFiles.inspect(preflightManifestPath)
+                != NoFollowPathPolicy.EntryType.MISSING) {
             byte[] preflightManifestBytes = readFile(
+                    packetFiles,
                     preflightManifestPath, QualificationExecutionIdentity.PREFLIGHT_FILE, findings);
             putHash(artifactHashes, "packet/" + QualificationExecutionIdentity.PREFLIGHT_FILE,
                     preflightManifestBytes);
@@ -216,38 +226,43 @@ final class QualificationPreResultEvidence {
         byte[] calibrationBytes = null;
         byte[] guideBytes = null;
         if (campaign != null) {
-            Path candidateRoot = contained(root,
+            Path candidateRoot = contained(packetFiles,
                     root.resolve("candidates").resolve(nullToEmpty(campaign.candidateAlias())), findings,
                     "candidate-root");
-            Path machinePath = contained(root,
+            Path machinePath = contained(packetFiles,
                     root.resolve("machines").resolve(nullToEmpty(campaign.machineId()) + ".json"), findings,
                     "machine-path");
-            Path enginePath = contained(root,
+            Path enginePath = contained(packetFiles,
                     root.resolve("engines").resolve(nullToEmpty(campaign.engineLaneId()) + ".json"), findings,
                     "engine-path");
             if (candidateRoot != null) {
-                byte[] candidateBytes = readFile(candidateRoot.resolve("candidate.json"),
+                byte[] candidateBytes = readFile(
+                        packetFiles, candidateRoot.resolve("candidate.json"),
                         "candidate.json", findings);
                 putHash(artifactHashes, "packet/candidate.json", candidateBytes);
                 candidate = parse(candidateBytes,
                         QualificationRecords.CandidateManifest.class, "candidate.json", findings);
-                calibrationBytes = readFile(candidateRoot.resolve("calibration-rules.json"),
+                calibrationBytes = readFile(
+                        packetFiles, candidateRoot.resolve("calibration-rules.json"),
                         "calibration-rules.json", findings);
                 putHash(artifactHashes, "packet/calibration-rules.json", calibrationBytes);
                 calibration = parse(calibrationBytes, QualificationRecords.CalibrationRules.class,
                         "calibration-rules.json", findings);
-                guideBytes = readFile(candidateRoot.resolve("calibration-guide.md"),
+                guideBytes = readFile(
+                        packetFiles, candidateRoot.resolve("calibration-guide.md"),
                         "calibration-guide.md", findings);
                 putHash(artifactHashes, "packet/calibration-guide.md", guideBytes);
             }
             if (machinePath != null) {
-                byte[] machineBytes = readFile(machinePath, "machine.json", findings);
+                byte[] machineBytes = readFile(
+                        packetFiles, machinePath, "machine.json", findings);
                 putHash(artifactHashes, "packet/machine.json", machineBytes);
                 machine = parse(machineBytes, QualificationRecords.MachineFacts.class,
                         "machine.json", findings);
             }
             if (enginePath != null) {
-                byte[] engineBytes = readFile(enginePath, "engine.json", findings);
+                byte[] engineBytes = readFile(
+                        packetFiles, enginePath, "engine.json", findings);
                 putHash(artifactHashes, "packet/engine.json", engineBytes);
                 engine = parse(engineBytes, QualificationRecords.EngineFacts.class,
                         "engine.json", findings);
@@ -871,13 +886,14 @@ final class QualificationPreResultEvidence {
                 .toList();
     }
 
-    private static Map<Path, byte[]> captureTree(Path root) throws IOException {
+    private static Map<Path, byte[]> captureTree(
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path root
+    ) throws IOException {
         Map<Path, byte[]> captured = new LinkedHashMap<>();
-        try (var paths = Files.walk(root)) {
-            for (Path path : paths.filter(Files::isRegularFile)
-                    .sorted(Comparator.comparing(Path::toString)).toList()) {
-                captured.put(path.toAbsolutePath().normalize(), Files.readAllBytes(path));
-            }
+        for (NoFollowPathPolicy.TreeEntry entry : runFiles.walk(root)) {
+            if (entry.type() != NoFollowPathPolicy.EntryType.REGULAR_FILE) continue;
+            captured.put(entry.path(), runFiles.readAllBytes(entry.path()));
         }
         return Map.copyOf(captured);
     }
@@ -915,13 +931,20 @@ final class QualificationPreResultEvidence {
         return Map.copyOf(copy);
     }
 
-    private static byte[] readFile(Path path, String label, List<String> findings) {
-        if (path == null || !Files.isRegularFile(path)) {
+    private static byte[] readFile(
+            NoFollowPathPolicy.GuardedRoot root,
+            Path path,
+            String label,
+            List<String> findings
+    ) throws IOException {
+        if (path == null || root.inspect(path) != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
             findings.add("MISSING_PACKET_ARTIFACT:" + label);
             return null;
         }
         try {
-            return Files.readAllBytes(path);
+            return root.readAllBytes(path);
+        } catch (NoFollowPathPolicy.Violation containment) {
+            throw containment;
         } catch (IOException failure) {
             findings.add("UNREADABLE_PACKET_ARTIFACT:" + label);
             return null;
@@ -954,12 +977,18 @@ final class QualificationPreResultEvidence {
     }
 
     private static Path contained(
-            Path root,
+            NoFollowPathPolicy.GuardedRoot root,
             Path candidate,
             List<String> findings,
-            String label) {
+            String label
+    ) throws IOException {
         Path normalized = candidate.toAbsolutePath().normalize();
-        if (!WorkspaceContainment.contains(root, normalized)) {
+        try {
+            root.inspect(normalized);
+        } catch (NoFollowPathPolicy.Violation containment) {
+            if (containment.reason() != NoFollowPathPolicy.Reason.OUTSIDE_ROOT) {
+                throw containment;
+            }
             findings.add("PATH_CONTAINMENT_FAILED:" + label);
             return null;
         }

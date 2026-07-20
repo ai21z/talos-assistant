@@ -1,7 +1,10 @@
 package dev.talos.core.util;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,6 +61,84 @@ class RuntimeArtifactIdentityTest {
     }
 
     @Test
+    void directoryIdentityContinuesToBindNonClassResources() throws Exception {
+        Path classes = Files.createDirectories(temp.resolve("classes/dev/talos"));
+        Files.writeString(classes.resolve("Main.class"), "class-bytes");
+        Path resource = Files.writeString(
+                temp.resolve("classes/dev/talos/build.properties"), "version=one\n");
+
+        RuntimeArtifactIdentity.ClasspathSnapshot before =
+                RuntimeArtifactIdentity.identifyClasspath(List.of(temp.resolve("classes")));
+        Files.writeString(resource, "version=two\n");
+        RuntimeArtifactIdentity.ClasspathSnapshot after =
+                RuntimeArtifactIdentity.identifyClasspath(List.of(temp.resolve("classes")));
+
+        assertTrue(before.exact());
+        assertTrue(after.exact());
+        assertEquals(1, before.entryCount());
+        assertEquals(1, after.entryCount());
+        assertEquals("class-bytes".length() + "version=one\n".length(), before.sizeBytes());
+        assertEquals("class-bytes".length() + "version=two\n".length(), after.sizeBytes());
+        assertNotEquals(before.sha256(), after.sha256());
+    }
+
+    @Test
+    void linkedClasspathAncestorAndDescendantMakeTheWholeIdentityUnavailable()
+            throws Exception {
+        Path realParent = Files.createDirectories(temp.resolve("real-parent"));
+        Path realClasspath = Files.createDirectories(realParent.resolve("real-classes"));
+        Path realDirectory = Files.createDirectories(realClasspath.resolve("dev/talos"));
+        Files.writeString(realDirectory.resolve("Main.class"), "class-bytes");
+        Path linkedParent = temp.resolve("linked-parent");
+        createSymbolicLinkOrAbort(linkedParent, realParent);
+        Path linkedDirectory = linkedParent.resolve("real-classes");
+
+        RuntimeArtifactIdentity.ClasspathSnapshot linkedAncestor =
+                RuntimeArtifactIdentity.identifyClasspath(List.of(linkedDirectory));
+
+        assertFalse(linkedAncestor.exact(),
+                "an ordinary class reached through a linked ancestor must not be identified");
+
+        Path ordinaryRoot = Files.createDirectories(temp.resolve("ordinary-classes/dev/talos"));
+        Files.writeString(ordinaryRoot.resolve("Safe.class"), "safe");
+        createSymbolicLinkOrAbort(
+                ordinaryRoot.resolve("Linked.class"),
+                realDirectory.resolve("Main.class"));
+
+        RuntimeArtifactIdentity.ClasspathSnapshot linkedDescendant =
+                RuntimeArtifactIdentity.identifyClasspath(List.of(temp.resolve("ordinary-classes")));
+
+        assertFalse(linkedDescendant.exact(),
+                "a linked descendant must reject the complete classpath entry, not be omitted");
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void windowsJunctionMakesTheWholeClasspathIdentityUnavailable()
+            throws Exception {
+        Path classes = Files.createDirectories(temp.resolve("windows-classes/dev/talos"));
+        Files.writeString(classes.resolve("Main.class"), "class-bytes");
+        Path external = Files.createDirectory(temp.resolve("windows-external-classes"));
+        Files.writeString(external.resolve("External.class"), "external");
+        Path junction = classes.resolve("junction");
+        Process process = new ProcessBuilder(
+                "cmd.exe", "/d", "/c", "mklink", "/J",
+                junction.toString(), external.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+
+        RuntimeArtifactIdentity.ClasspathSnapshot snapshot =
+                RuntimeArtifactIdentity.identifyClasspath(
+                        List.of(temp.resolve("windows-classes")));
+
+        assertFalse(snapshot.exact());
+        assertEquals("", snapshot.sha256());
+    }
+
+    @Test
     void currentPathFreeEntryLedgerExactlyReconstructsCurrentAggregate() {
         List<RuntimeArtifactIdentity.ClasspathEntryIdentity> entries =
                 RuntimeArtifactIdentity.currentClasspathEntryIdentities();
@@ -101,6 +182,15 @@ class RuntimeArtifactIdentityTest {
             if (previous != null) {
                 System.setProperty("talos.qualification.root", previous);
             }
+        }
+    }
+
+    private static void createSymbolicLinkOrAbort(Path link, Path target) throws Exception {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (java.io.IOException | UnsupportedOperationException unavailable) {
+            Assumptions.abort("symbolic-link fixture is unavailable: "
+                    + unavailable.getClass().getSimpleName());
         }
     }
 }

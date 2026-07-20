@@ -5,7 +5,6 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.VerificationStatus;
 
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -90,13 +89,13 @@ final class MutationTargetReadbackVerifier {
             problems.add(pathHint + ": target path resolves outside the workspace.");
             return;
         }
-        if (!Files.isRegularFile(target)) {
+        if (!StaticWebFileAccess.isRegularFile(root, target)) {
             problems.add(pathHint + ": mutated target is not a readable file after apply.");
             return;
         }
         String content;
         try {
-            content = Files.readString(target);
+            content = StaticWebFileAccess.readString(root, target);
         } catch (Exception e) {
             problems.add(pathHint + ": mutated target could not be read after apply (" + e.getMessage() + ")");
             return;

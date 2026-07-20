@@ -1,5 +1,7 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -41,12 +43,17 @@ final class QualificationRequirementFinalizer {
             Path requestedRunRoot,
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
-        Path runRoot = containedRunRoot(packetRoot, requestedRunRoot, scenarioId, catalog);
+        QualificationArtifactPublication.DeclaredRun declared =
+                QualificationArtifactPublication.requireWritableDeclaredRun(
+                        packetRoot, requestedRunRoot, scenarioId, catalog);
+        Path runRoot = declared.runRoot();
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         Document document = evaluate(
-                catalog.protocolVersion(), catalog.sha256(), scenario, runRoot);
+                catalog.protocolVersion(), catalog.sha256(), scenario,
+                declared.runFiles(), runRoot);
         Path output = runRoot.resolve(OUTPUT_FILE);
         QualificationArtifactPublication.publishNewOrVerifyExact(
+                declared.runFiles(),
                 output,
                 QualificationJson.bytes(document),
                 "mechanical requirements");
@@ -58,10 +65,26 @@ final class QualificationRequirementFinalizer {
             String scenarioBankSha256,
             QualificationProtocol.Scenario scenario,
             Path runRoot) throws IOException {
-        String answer = Files.readString(runRoot.resolve("answer.txt"), StandardCharsets.UTF_8);
-        String trace = Files.readString(runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
-        Map<String, byte[]> before = readBytes(runRoot.resolve("before-files"));
-        Map<String, byte[]> after = readBytes(runRoot.resolve("final-files"));
+        NoFollowPathPolicy.GuardedRoot runFiles =
+                NoFollowPathPolicy.bindExistingDirectory(runRoot);
+        return evaluate(protocolVersion, scenarioBankSha256, scenario, runFiles, runRoot);
+    }
+
+    private static Document evaluate(
+            int protocolVersion,
+            String scenarioBankSha256,
+            QualificationProtocol.Scenario scenario,
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path runRoot
+    ) throws IOException {
+        String answer = runFiles.readString(
+                runRoot.resolve("answer.txt"), StandardCharsets.UTF_8);
+        String trace = runFiles.readString(
+                runRoot.resolve("trace.json"), StandardCharsets.UTF_8);
+        Map<String, byte[]> before = readBytes(
+                runFiles, runRoot.resolve("before-files"));
+        Map<String, byte[]> after = readBytes(
+                runFiles, runRoot.resolve("final-files"));
         return evaluate(protocolVersion, scenarioBankSha256, scenario,
                 new QualificationRequirementEvaluator.Evidence(
                         answer, trace, before, after));
@@ -101,13 +124,15 @@ final class QualificationRequirementFinalizer {
                 packetRoot, requestedRunRoot, scenarioId, catalog).runRoot();
     }
 
-    private static Map<String, byte[]> readBytes(Path root) throws IOException {
+    private static Map<String, byte[]> readBytes(
+            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path root
+    ) throws IOException {
         Map<String, byte[]> files = new HashMap<>();
-        try (var paths = Files.walk(root)) {
-            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
-                String relative = root.relativize(path).toString().replace('\\', '/');
-                files.put(relative, Files.readAllBytes(path));
-            }
+        for (NoFollowPathPolicy.TreeEntry entry : runFiles.walk(root)) {
+            if (entry.type() != NoFollowPathPolicy.EntryType.REGULAR_FILE) continue;
+            String relative = root.relativize(entry.path()).toString().replace('\\', '/');
+            files.put(relative, runFiles.readAllBytes(entry.path()));
         }
         return Map.copyOf(files);
     }

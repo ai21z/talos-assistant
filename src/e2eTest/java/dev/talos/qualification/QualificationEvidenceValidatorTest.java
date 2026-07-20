@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1270,6 +1272,37 @@ class QualificationEvidenceValidatorTest {
                 packet.root(), packet.runRoot(), result.scenarioId(), catalog);
     }
 
+    private static void replaceArgument(ArrayNode arguments, String name, String value) {
+        for (int index = 0; index + 1 < arguments.size(); index++) {
+            if (name.equals(arguments.get(index).asText())) {
+                arguments.set(
+                        index + 1,
+                        com.fasterxml.jackson.databind.node.TextNode.valueOf(value));
+                return;
+            }
+        }
+        throw new IllegalArgumentException("missing argument " + name);
+    }
+
+    private static QualificationRecords.EngineFacts engineWithPaths(
+            ObjectNode source,
+            Path model,
+            Path executable) throws IOException {
+        ObjectNode copy = source.deepCopy();
+        copy.put("executable", executable.toString());
+        replaceArgument(
+                (ArrayNode) copy.path("launchArguments"),
+                "-m",
+                model.toString());
+        replaceArgument(
+                (ArrayNode) copy.path("verificationLaunchArguments"),
+                "-m",
+                model.toString());
+        return QualificationJson.read(
+                QualificationJson.write(copy).getBytes(StandardCharsets.UTF_8),
+                QualificationRecords.EngineFacts.class);
+    }
+
     private static int eventIndex(ArrayNode events, String type) {
         for (int index = 0; index < events.size(); index++) {
             if (type.equals(events.get(index).path("type").asText(""))) return index;
@@ -1318,6 +1351,84 @@ class QualificationEvidenceValidatorTest {
         assertFalse(result.valid());
         assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("engine executable SHA-256")),
                 () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void linkedExternalModelAndEngineAreRejectedBeforeValidatorHashing()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("linked-validator-packet"), catalog);
+        QualificationRecords.CandidateManifest candidate = QualificationJson.read(
+                packet.root().resolve("candidates/qwen14/candidate.json"),
+                QualificationRecords.CandidateManifest.class);
+        ObjectNode engineNode = (ObjectNode) QualificationJson.readTree(
+                packet.root().resolve("engines/cuda.json"));
+
+        Path external = Files.createDirectory(
+                temp.resolve("T1170_VALIDATOR_EXTERNAL_CANARY"));
+        Path model = Files.copy(
+                packet.root().resolve("artifacts/model.gguf"),
+                external.resolve("model.gguf"));
+        Path executable = Files.copy(
+                packet.root().resolve("artifacts/llama-server.exe"),
+                external.resolve("llama-server.exe"));
+        Path linkedParent = temp.resolve("linked-validator-artifacts");
+        try {
+            Files.createSymbolicLink(linkedParent, external);
+        } catch (Exception unavailable) {
+            Assumptions.abort("symbolic-link fixture unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+        Path linkedModel = linkedParent.resolve(model.getFileName());
+        Path linkedExecutable = linkedParent.resolve(executable.getFileName());
+        QualificationRecords.EngineFacts linkedModelEngine = engineWithPaths(
+                engineNode,
+                linkedModel,
+                packet.root().resolve("artifacts/llama-server.exe"));
+        QualificationRecords.EngineFacts linkedExecutableEngine = engineWithPaths(
+                engineNode,
+                packet.root().resolve("artifacts/model.gguf"),
+                linkedExecutable);
+        List<String> modelFindings = new ArrayList<>();
+        List<String> executableFindings = new ArrayList<>();
+        List<Path> modelHashInputs = new ArrayList<>();
+        List<Path> executableHashInputs = new ArrayList<>();
+
+        QualificationEvidenceValidator.validateExternalArtifacts(
+                candidate,
+                linkedModelEngine,
+                modelFindings,
+                path -> {
+                    modelHashInputs.add(path);
+                    return QualificationScenarioBank.sha256(Files.readAllBytes(path));
+                });
+        QualificationEvidenceValidator.validateExternalArtifacts(
+                candidate,
+                linkedExecutableEngine,
+                executableFindings,
+                path -> {
+                    executableHashInputs.add(path);
+                    return QualificationScenarioBank.sha256(Files.readAllBytes(path));
+                });
+
+        assertTrue(modelFindings.stream().anyMatch(finding ->
+                finding.contains("LINKED_COMPONENT")), modelFindings::toString);
+        assertTrue(executableFindings.stream().anyMatch(finding ->
+                finding.contains("LINKED_COMPONENT")), executableFindings::toString);
+        assertTrue(modelHashInputs.isEmpty(),
+                "linked model must be rejected before the hashing boundary");
+        assertEquals(
+                List.of(packet.root().resolve("artifacts/model.gguf")
+                        .toAbsolutePath().normalize()),
+                executableHashInputs,
+                "only the ordinary model may be hashed before the linked engine is rejected");
+        assertFalse(executableHashInputs.contains(
+                linkedExecutable.toAbsolutePath().normalize()));
+        assertTrue(java.util.stream.Stream.concat(
+                        modelFindings.stream(), executableFindings.stream())
+                .noneMatch(finding ->
+                        finding.contains("T1170_VALIDATOR_EXTERNAL_CANARY")));
     }
 
     @Test

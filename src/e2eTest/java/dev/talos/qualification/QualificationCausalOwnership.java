@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import dev.talos.core.security.NoFollowPathPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
@@ -246,7 +247,8 @@ final class QualificationCausalOwnership {
         try {
             Path absolute = resultPath.toAbsolutePath().normalize();
             QualificationRecords.RunResult result = QualificationJson.read(
-                    absolute, QualificationRecords.RunResult.class);
+                    NoFollowPathPolicy.readAllBytes(absolute),
+                    QualificationRecords.RunResult.class);
             int protocolVersion = result.schemaVersion()
                     == QualificationRecords.LEGACY_RUN_SCHEMA_VERSION
                     ? 5 : QualificationProtocol.VERSION;
@@ -270,10 +272,16 @@ final class QualificationCausalOwnership {
     static QualificationRecords.AnswerOrigin matchedAnswerOriginForRun(Path runRoot) {
         if (runRoot == null) return QualificationRecords.AnswerOrigin.NONE;
         Path resultPath = runRoot.toAbsolutePath().normalize().resolve("result.json");
-        if (!Files.isRegularFile(resultPath)) return QualificationRecords.AnswerOrigin.NONE;
         try {
+            NoFollowPathPolicy.GuardedRoot runFiles =
+                    NoFollowPathPolicy.bindExistingDirectory(runRoot);
+            if (runFiles.inspect(resultPath)
+                    != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                return QualificationRecords.AnswerOrigin.NONE;
+            }
             QualificationRecords.RunResult result = QualificationJson.read(
-                    resultPath, QualificationRecords.RunResult.class);
+                    runFiles.readAllBytes(resultPath),
+                    QualificationRecords.RunResult.class);
             int protocolVersion = result.schemaVersion()
                     == QualificationRecords.LEGACY_RUN_SCHEMA_VERSION
                     ? 5 : QualificationProtocol.VERSION;
@@ -290,12 +298,19 @@ final class QualificationCausalOwnership {
         runRoot = runRoot.toAbsolutePath().normalize();
         Path answerPath = runRoot.resolve("answer.txt");
         Path tracePath = runRoot.resolve("trace.json");
-        if (!Files.isRegularFile(answerPath) || !Files.isRegularFile(tracePath)) {
-            return QualificationRecords.AnswerOrigin.NONE;
-        }
         try {
+            NoFollowPathPolicy.GuardedRoot runFiles =
+                    NoFollowPathPolicy.bindExistingDirectory(runRoot);
+            if (runFiles.inspect(answerPath)
+                            != NoFollowPathPolicy.EntryType.REGULAR_FILE
+                    || runFiles.inspect(tracePath)
+                            != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                return QualificationRecords.AnswerOrigin.NONE;
+            }
             return matchedAnswerOrigin(
-                    Files.readAllBytes(answerPath), Files.readAllBytes(tracePath), protocolVersion);
+                    runFiles.readAllBytes(answerPath),
+                    runFiles.readAllBytes(tracePath),
+                    protocolVersion);
         } catch (IOException | RuntimeException failure) {
             return QualificationRecords.AnswerOrigin.NONE;
         }
