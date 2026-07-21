@@ -10,6 +10,7 @@ import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ToolSpec;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -86,18 +87,26 @@ public final class PromptDebugInspector {
         }
 
         out.append("## Structured Messages\n\n");
-        Set<String> protectedToolCallIds = PromptDebugRedactor.protectedToolCallIds(snapshot.messages());
+        Set<String> nativeToolCallIds = new HashSet<>();
+        Set<String> protectedToolCallIds = new HashSet<>();
         boolean pendingProtectedReadAnswer = false;
         for (int i = 0; i < snapshot.messages().size(); i++) {
             ChatMessage message = snapshot.messages().get(i);
+            if (message != null) {
+                nativeToolCallIds.addAll(PromptDebugRedactor.nativeToolCallIds(List.of(message)));
+                protectedToolCallIds.addAll(PromptDebugRedactor.protectedToolCallIds(List.of(message)));
+            }
             out.append("### Message ").append(i + 1).append(" - ")
                     .append(Objects.toString(message.role(), "")).append("\n\n");
             out.append("```text\n")
                     .append(PromptDebugRedactor.redactMessageContent(
-                            message, protectedToolCallIds, pendingProtectedReadAnswer))
+                            message,
+                            nativeToolCallIds,
+                            protectedToolCallIds,
+                            pendingProtectedReadAnswer))
                     .append("\n```\n\n");
             pendingProtectedReadAnswer = PromptDebugRedactor.nextPendingProtectedReadAnswer(
-                    pendingProtectedReadAnswer, message);
+                    pendingProtectedReadAnswer, message, nativeToolCallIds);
         }
 
         if (!snapshot.providerBodyJson().isBlank()) {

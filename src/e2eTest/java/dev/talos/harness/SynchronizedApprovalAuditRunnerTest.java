@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -753,20 +754,7 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
 
-        String allArtifacts;
-        try (var paths = Files.walk(bundle.root())) {
-            allArtifacts = paths
-                    .filter(Files::isRegularFile)
-                    .map(path -> {
-                        try {
-                            return Files.readString(path);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .reduce("", (left, right) -> left + "\n" + right);
-        }
-        assertFalse(allArtifacts.contains("private-mode-opt-in-handoff-ok"), allArtifacts);
+        assertByteSequenceAbsent(bundle.root(), "private-mode-opt-in-handoff-ok");
         assertTrue(Files.readString(bundle.finalAnswer()).contains("protected read answer redacted"),
                 Files.readString(bundle.finalAnswer()));
     }
@@ -775,10 +763,16 @@ class SynchronizedApprovalAuditRunnerTest {
     void artifact_bundle_replaces_stale_files_from_prior_run(@TempDir Path artifacts) throws Exception {
         Files.writeString(workspace.resolve(".env"),
                 "VISIBLE_OPT_IN_VALUE=private-mode-opt-in-handoff-ok\n");
-        Path staleDir = Files.createDirectories(
-                artifacts.resolve("artifact-bundle-explicit-send-to-model").resolve("sessions"));
+        Path staleRoot = artifacts.resolve("artifact-bundle-explicit-send-to-model");
+        Path staleDir = Files.createDirectories(staleRoot.resolve("sessions"));
+        Path stalePrompt = Files.createDirectories(staleRoot.resolve("prompt-debug"))
+                .resolve("prompt-debug.md");
+        Path staleProvider = Files.createDirectories(staleRoot.resolve("provider-bodies"))
+                .resolve("provider-body.json");
         Files.writeString(staleDir.resolve("stale.turns.jsonl"),
                 "private-mode-opt-in-handoff-ok\n");
+        Files.writeString(stalePrompt, "private-mode-opt-in-handoff-ok\n");
+        Files.writeString(staleProvider, "private-mode-opt-in-handoff-ok\n");
 
         SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
                 "artifact bundle explicit send to model",
@@ -794,22 +788,11 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
                 SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
 
-        String allArtifacts;
-        try (var paths = Files.walk(bundle.root())) {
-            allArtifacts = paths
-                    .filter(Files::isRegularFile)
-                    .map(path -> {
-                        try {
-                            return Files.readString(path);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .reduce("", (left, right) -> left + "\n" + right);
-        }
         assertFalse(Files.exists(staleDir.resolve("stale.turns.jsonl")),
                 staleDir.resolve("stale.turns.jsonl").toString());
-        assertFalse(allArtifacts.contains("private-mode-opt-in-handoff-ok"), allArtifacts);
+        assertTrue(Files.exists(stalePrompt), stalePrompt.toString());
+        assertTrue(Files.exists(staleProvider), staleProvider.toString());
+        assertByteSequenceAbsent(bundle.root(), "private-mode-opt-in-handoff-ok");
     }
 
     @Test
@@ -1674,6 +1657,27 @@ class SynchronizedApprovalAuditRunnerTest {
             count++;
             from = index + needle.length();
         }
+    }
+
+    private static void assertByteSequenceAbsent(Path root, String value) throws IOException {
+        byte[] needle = value.getBytes(StandardCharsets.UTF_8);
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.filter(Files::isRegularFile).toList()) {
+                assertFalse(containsBytes(Files.readAllBytes(path), needle), path.toString());
+            }
+        }
+    }
+
+    private static boolean containsBytes(byte[] haystack, byte[] needle) {
+        if (needle.length == 0) return true;
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            int j = 0;
+            while (j < needle.length && haystack[i + j] == needle[j]) {
+                j++;
+            }
+            if (j == needle.length) return true;
+        }
+        return false;
     }
 
     private static void writeDocx(Path path, String text) throws IOException {
