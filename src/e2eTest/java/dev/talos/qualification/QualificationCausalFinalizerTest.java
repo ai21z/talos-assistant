@@ -8,6 +8,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.PromptAuditSnapshot;
 import dev.talos.runtime.trace.TraceRedactionMode;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1157,16 +1158,10 @@ class QualificationCausalFinalizerTest {
                 temp.resolve("required-tool-native-disappeared"), catalog, scenario);
         setToolSurface(nativeDisappeared, List.of(expected.allowedTools().getFirst()));
         setDispatchedNativeTools(nativeDisappeared, List.of());
-        QualificationCausalFinalizer.DecisionEvidence disappearedEvidence =
-                QualificationCausalFinalizer.decisionEvidence(
-                        scenario,
-                        QualificationTraceEvidence.read(
-                                nativeDisappeared.runRoot().resolve("trace.json"), scenario),
-                        QualificationRecords.AnswerOrigin.MODEL_PROVIDER,
-                        false);
-        assertEquals(QualificationRecords.CausalOwner.UNKNOWN,
-                disappearedEvidence.observations().getFirst().owner());
-        assertFalse(disappearedEvidence.complete());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(
+                        nativeDisappeared.runRoot().resolve("trace.json"), scenario));
 
         QualificationTestPacket promptOnly = QualificationTestPacket.create(
                 temp.resolve("required-tool-prompt-only"), catalog, scenario);
@@ -1262,7 +1257,10 @@ class QualificationCausalFinalizerTest {
             ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                     ProviderResponseCapture.AttemptKind.PRIMARY,
                     ProviderResponseCapture.RetryReason.NONE);
-            attempt.requestDispatched();
+            attempt.requestDispatched(
+                    ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
+                            "production-unbound-provider-body",
+                            List.of()));
             ProviderResponseCapture.Receipt receipt = attempt.respond(
                     new ProviderResponseCapture.Response(
                             answer,
@@ -2431,12 +2429,13 @@ class QualificationCausalFinalizerTest {
         String attemptId = generationId + "-attempt-1";
         String assistantHash = answerHash("background partial");
 
-        events.insert(insertion++, ledgerEvent("GENERATION_STARTED", Map.of(
-                "providerLedgerVersion", 1,
-                "ledgerSequence", 6,
-                "generationId", generationId,
-                "source", "BACKGROUND_PROVIDER",
-                "purpose", "BACKGROUND_MAINTENANCE")));
+        events.insert(insertion++, ledgerEvent("GENERATION_STARTED", Map.ofEntries(
+                Map.entry("providerLedgerVersion", 1),
+                Map.entry("ledgerSequence", 6),
+                Map.entry("generationId", generationId),
+                Map.entry("source", "BACKGROUND_PROVIDER"),
+                Map.entry("purpose", "BACKGROUND_MAINTENANCE"),
+                Map.entry("toolAuthorityMode", "NONE"))));
         events.insert(insertion++, ledgerEvent("GENERATION_ATTEMPT_STARTED", Map.ofEntries(
                 Map.entry("providerLedgerVersion", 1),
                 Map.entry("ledgerSequence", 7),
@@ -2447,7 +2446,8 @@ class QualificationCausalFinalizerTest {
                 Map.entry("attemptOrdinal", 1),
                 Map.entry("attemptKind", "PRIMARY"),
                 Map.entry("retryReason", "NONE"),
-                Map.entry("requestDispatched", false))));
+                Map.entry("requestDispatched", false),
+                Map.entry("toolAuthorityMode", "NONE"))));
         events.insert(insertion++, ledgerEvent("GENERATION_REQUEST_DISPATCHED", Map.ofEntries(
                 Map.entry("providerLedgerVersion", 1),
                 Map.entry("ledgerSequence", 8),
@@ -2458,7 +2458,12 @@ class QualificationCausalFinalizerTest {
                 Map.entry("attemptOrdinal", 1),
                 Map.entry("attemptKind", "PRIMARY"),
                 Map.entry("retryReason", "NONE"),
-                Map.entry("requestDispatched", true))));
+                Map.entry("requestDispatched", true),
+                Map.entry("toolAuthorityMode", "NONE"),
+                Map.entry("providerBodyHash", "sha256:" + "8".repeat(64)),
+                Map.entry("dispatchedNativeTools", List.of()),
+                Map.entry("toolAuthoritySurface",
+                        toolAuthoritySurface("NONE", List.of())))));
         events.insert(insertion++, ledgerEvent("GENERATION_RESPONSE_CAPTURED", Map.ofEntries(
                 Map.entry("providerLedgerVersion", 1),
                 Map.entry("ledgerSequence", 9),
@@ -2470,6 +2475,7 @@ class QualificationCausalFinalizerTest {
                 Map.entry("attemptKind", "PRIMARY"),
                 Map.entry("retryReason", "NONE"),
                 Map.entry("requestDispatched", true),
+                Map.entry("toolAuthorityMode", "NONE"),
                 Map.entry("assistantHash", assistantHash),
                 Map.entry("assistantChars", "background partial".length()),
                 Map.entry("nativeToolCallCount", 0),
@@ -2488,6 +2494,7 @@ class QualificationCausalFinalizerTest {
                 Map.entry("generationId", generationId),
                 Map.entry("source", "BACKGROUND_PROVIDER"),
                 Map.entry("purpose", "BACKGROUND_MAINTENANCE"),
+                Map.entry("toolAuthorityMode", "NONE"),
                 Map.entry("selectedAttemptId", attemptId),
                 Map.entry("selectedAttemptOrdinal", 1),
                 Map.entry("completion", "PROVIDER_LENGTH"),
@@ -2507,12 +2514,13 @@ class QualificationCausalFinalizerTest {
         String attemptId = generationId + "-attempt-1";
         String assistantHash = answerHash(answer);
 
-        events.insert(insertion++, ledgerEvent("GENERATION_STARTED", Map.of(
-                "providerLedgerVersion", 1,
-                "ledgerSequence", 6,
-                "generationId", generationId,
-                "source", "FOREGROUND_PROVIDER",
-                "purpose", "TURN_RESPONSE")));
+        events.insert(insertion++, ledgerEvent("GENERATION_STARTED", Map.ofEntries(
+                Map.entry("providerLedgerVersion", 1),
+                Map.entry("ledgerSequence", 6),
+                Map.entry("generationId", generationId),
+                Map.entry("source", "FOREGROUND_PROVIDER"),
+                Map.entry("purpose", "TURN_RESPONSE"),
+                Map.entry("toolAuthorityMode", "NONE"))));
         events.insert(insertion++, ledgerEvent("GENERATION_ATTEMPT_STARTED", Map.ofEntries(
                 Map.entry("providerLedgerVersion", 1),
                 Map.entry("ledgerSequence", 7),
@@ -2523,7 +2531,8 @@ class QualificationCausalFinalizerTest {
                 Map.entry("attemptOrdinal", 1),
                 Map.entry("attemptKind", "PRIMARY"),
                 Map.entry("retryReason", "NONE"),
-                Map.entry("requestDispatched", false))));
+                Map.entry("requestDispatched", false),
+                Map.entry("toolAuthorityMode", "NONE"))));
         events.insert(insertion++, ledgerEvent("GENERATION_REQUEST_DISPATCHED", Map.ofEntries(
                 Map.entry("providerLedgerVersion", 1),
                 Map.entry("ledgerSequence", 8),
@@ -2534,7 +2543,12 @@ class QualificationCausalFinalizerTest {
                 Map.entry("attemptOrdinal", 1),
                 Map.entry("attemptKind", "PRIMARY"),
                 Map.entry("retryReason", "NONE"),
-                Map.entry("requestDispatched", true))));
+                Map.entry("requestDispatched", true),
+                Map.entry("toolAuthorityMode", "NONE"),
+                Map.entry("providerBodyHash", "sha256:" + "8".repeat(64)),
+                Map.entry("dispatchedNativeTools", List.of()),
+                Map.entry("toolAuthoritySurface",
+                        toolAuthoritySurface("NONE", List.of())))));
         events.insert(insertion++, ledgerEvent("GENERATION_RESPONSE_CAPTURED", Map.ofEntries(
                 Map.entry("providerLedgerVersion", 1),
                 Map.entry("ledgerSequence", 9),
@@ -2546,6 +2560,7 @@ class QualificationCausalFinalizerTest {
                 Map.entry("attemptKind", "PRIMARY"),
                 Map.entry("retryReason", "NONE"),
                 Map.entry("requestDispatched", true),
+                Map.entry("toolAuthorityMode", "NONE"),
                 Map.entry("assistantHash", assistantHash),
                 Map.entry("assistantChars", answer.length()),
                 Map.entry("nativeToolCallCount", 0),
@@ -2564,6 +2579,7 @@ class QualificationCausalFinalizerTest {
                 Map.entry("generationId", generationId),
                 Map.entry("source", "FOREGROUND_PROVIDER"),
                 Map.entry("purpose", "TURN_RESPONSE"),
+                Map.entry("toolAuthorityMode", "NONE"),
                 Map.entry("selectedAttemptId", attemptId),
                 Map.entry("selectedAttemptOrdinal", 1),
                 Map.entry("completion", "PROVIDER_EOS"),
@@ -2630,6 +2646,32 @@ class QualificationCausalFinalizerTest {
         ArrayNode auditPrompt = promptAudit.putArray("promptTools");
         nativeSurface.forEach(auditNative::add);
         promptSurface.forEach(auditPrompt::add);
+        String authorityMode = !nativeSurface.isEmpty()
+                ? "PROVIDER_NATIVE"
+                : !promptSurface.isEmpty() ? "PROVIDER_TEXT_JSON" : "NONE";
+        for (var candidate : trace.withArray("events")) {
+            String type = candidate.path("type").asText("");
+            if (type.startsWith("GENERATION_")) {
+                ((ObjectNode) candidate.path("data"))
+                        .put("toolAuthorityMode", authorityMode);
+            }
+            if ("GENERATION_REQUEST_DISPATCHED".equals(type)) {
+                ObjectNode dispatch = (ObjectNode) candidate.path("data");
+                dispatch.put("providerBodyHash", "sha256:" + "8".repeat(64));
+                ArrayNode dispatched = dispatch.putArray("dispatchedNativeTools");
+                if ("PROVIDER_NATIVE".equals(authorityMode)) {
+                    nativeSurface.forEach(dispatched::add);
+                }
+                List<String> selectedSurface = "PROVIDER_NATIVE".equals(authorityMode)
+                        ? nativeSurface
+                        : promptSurface;
+                dispatch.set(
+                        "toolAuthoritySurface",
+                        QualificationJson.tree(toolAuthoritySurface(
+                                authorityMode,
+                                selectedSurface)));
+            }
+        }
         QualificationJson.write(packet.runRoot().resolve("trace.json"), trace);
     }
 
@@ -2648,10 +2690,40 @@ class QualificationCausalFinalizerTest {
     private static void setLegacyUnboundDispatch(
             QualificationTestPacket packet) throws Exception {
         ObjectNode trace = trace(packet);
-        ObjectNode dispatch = event(trace, "GENERATION_REQUEST_DISPATCHED");
-        ObjectNode data = (ObjectNode) dispatch.path("data");
-        data.remove(List.of("providerBodyHash", "dispatchedNativeTools"));
+        trace.put("schemaVersion", 3);
+        for (var candidate : trace.withArray("events")) {
+            String type = candidate.path("type").asText("");
+            if (type.startsWith("GENERATION_")) {
+                ((ObjectNode) candidate.path("data")).remove("toolAuthorityMode");
+            }
+            if ("GENERATION_REQUEST_DISPATCHED".equals(type)) {
+                ((ObjectNode) candidate.path("data"))
+                        .remove(List.of(
+                                "providerBodyHash",
+                                "dispatchedNativeTools",
+                                "toolAuthoritySurface"));
+            }
+        }
         QualificationJson.write(packet.runRoot().resolve("trace.json"), trace);
+    }
+
+    private static Map<String, Object> toolAuthoritySurface(
+            String toolAuthorityMode,
+            List<String> selectedTools
+    ) {
+        boolean bound = !"NONE".equals(toolAuthorityMode);
+        List<String> hashes = bound
+                ? selectedTools.stream()
+                        .map(ProviderResponseCapture::toolNameHash)
+                        .toList()
+                : List.of();
+        return Map.of(
+                "schemaVersion", 1,
+                "bound", bound,
+                "toolChoiceMode", bound ? "AUTO" : "NONE",
+                "namedToolNameHash", ProviderResponseCapture.toolNameHash(""),
+                "selectedToolNameHashes", hashes,
+                "authorizedToolNameHashes", hashes);
     }
 
     private static String answerHash(String answer) {

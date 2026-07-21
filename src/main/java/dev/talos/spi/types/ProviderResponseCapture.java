@@ -48,6 +48,169 @@ public final class ProviderResponseCapture {
         HARNESS_FIXTURE
     }
 
+    /** Runtime-owned provider tool protocol enabled for one generation. */
+    public enum ToolAuthorityMode {
+        NONE,
+        PROVIDER_NATIVE,
+        PROVIDER_TEXT_JSON
+    }
+
+    /**
+     * Immutable runtime-selected tool authority for one provider generation.
+     *
+     * <p>The selected names come from the exact typed request surface, never
+     * from provider prose or a broader turn registry. A bound native contract
+     * still requires matching transport evidence for the exact serialized
+     * native surface. A bound text-JSON contract requires a body-bound dispatch
+     * with no native tools. Legacy mode-only openings remain explicitly
+     * unbound and can never authorize a provider tool proposal.
+     */
+    public record ToolAuthorityContract(
+            ToolAuthorityMode mode,
+            List<String> selectedToolNames,
+            ToolChoiceMode toolChoice,
+            String namedTool,
+            boolean bound
+    ) {
+        private static final int MAX_SELECTED_TOOLS = 256;
+
+        public ToolAuthorityContract {
+            mode = mode == null ? ToolAuthorityMode.NONE : mode;
+            selectedToolNames = selectedToolNames == null
+                    ? List.of()
+                    : List.copyOf(selectedToolNames);
+            toolChoice = toolChoice == null ? ToolChoiceMode.NONE : toolChoice;
+            namedTool = Objects.toString(namedTool, "");
+
+            if (selectedToolNames.size() > MAX_SELECTED_TOOLS) {
+                throw new IllegalArgumentException(
+                        "provider tool authority surface exceeds the bounded tool count");
+            }
+            java.util.LinkedHashSet<String> distinct = new java.util.LinkedHashSet<>();
+            for (String name : selectedToolNames) {
+                String exact = Objects.requireNonNull(name, "selected tool name");
+                if (exact.isBlank() || !exact.equals(exact.strip()) || exact.length() > 256) {
+                    throw new IllegalArgumentException(
+                            "selected tool names must be exact, nonblank, and bounded");
+                }
+                if (!distinct.add(exact)) {
+                    throw new IllegalArgumentException(
+                            "selected provider tool names must be unique");
+                }
+            }
+            if (!namedTool.equals(namedTool.strip()) || namedTool.length() > 256) {
+                throw new IllegalArgumentException(
+                        "named provider tool identity must be exact and bounded");
+            }
+
+            if (mode == ToolAuthorityMode.NONE || !bound) {
+                if (bound || !selectedToolNames.isEmpty()
+                        || toolChoice != ToolChoiceMode.NONE || !namedTool.isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "unbound provider tool authority cannot carry a tool surface");
+                }
+            } else {
+                if (selectedToolNames.isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "bound provider tool authority requires a selected tool surface");
+                }
+                if (toolChoice == ToolChoiceMode.NONE) {
+                    throw new IllegalArgumentException(
+                            "tool choice NONE cannot grant provider tool authority");
+                }
+                if (toolChoice == ToolChoiceMode.NAMED) {
+                    if (namedTool.isBlank() || !selectedToolNames.contains(namedTool)) {
+                        throw new IllegalArgumentException(
+                                "named provider tool must belong to the selected tool surface");
+                    }
+                } else if (!namedTool.isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "named provider tool is valid only with NAMED tool choice");
+                }
+            }
+        }
+
+        public static ToolAuthorityContract none() {
+            return new ToolAuthorityContract(
+                    ToolAuthorityMode.NONE, List.of(), ToolChoiceMode.NONE, "", false);
+        }
+
+        public static ToolAuthorityContract unbound(ToolAuthorityMode mode) {
+            ToolAuthorityMode typed = mode == null ? ToolAuthorityMode.NONE : mode;
+            return typed == ToolAuthorityMode.NONE
+                    ? none()
+                    : new ToolAuthorityContract(
+                            typed, List.of(), ToolChoiceMode.NONE, "", false);
+        }
+
+        public static ToolAuthorityContract bound(
+                ToolAuthorityMode mode,
+                List<String> selectedToolNames,
+                ToolChoiceMode toolChoice,
+                String namedTool
+        ) {
+            return new ToolAuthorityContract(
+                    mode, selectedToolNames, toolChoice, namedTool, true);
+        }
+
+        public List<String> authorizedToolNames() {
+            if (!bound) return List.of();
+            return toolChoice == ToolChoiceMode.NAMED
+                    ? List.of(namedTool)
+                    : selectedToolNames;
+        }
+
+        public List<String> selectedToolNameHashes() {
+            return selectedToolNames.stream()
+                    .map(ProviderResponseCapture::toolNameHash)
+                    .toList();
+        }
+
+        public List<String> authorizedToolNameHashes() {
+            return authorizedToolNames().stream()
+                    .map(ProviderResponseCapture::toolNameHash)
+                    .toList();
+        }
+
+        public boolean authorizesExactToolName(String rawToolName) {
+            if (!bound || rawToolName == null || !selectedToolNames.contains(rawToolName)) {
+                return false;
+            }
+            return toolChoice != ToolChoiceMode.NAMED || namedTool.equals(rawToolName);
+        }
+
+        public ToolAuthorityBinding bindDispatch(
+                ProviderTransportHandoff.DispatchEvidence evidence
+        ) {
+            if (mode == ToolAuthorityMode.NONE) return ToolAuthorityBinding.NOT_APPLICABLE;
+            if (!bound) return ToolAuthorityBinding.SURFACE_UNBOUND;
+            ProviderTransportHandoff.DispatchEvidence typed = evidence == null
+                    ? ProviderTransportHandoff.DispatchEvidence.unbound()
+                    : evidence;
+            if (typed.providerBodyHash().isBlank()) {
+                return ToolAuthorityBinding.DISPATCH_UNBOUND;
+            }
+            if (mode == ToolAuthorityMode.PROVIDER_NATIVE
+                    && !selectedToolNames.equals(typed.nativeTools())) {
+                return ToolAuthorityBinding.DISPATCH_SURFACE_MISMATCH;
+            }
+            if (mode == ToolAuthorityMode.PROVIDER_TEXT_JSON
+                    && !typed.nativeTools().isEmpty()) {
+                return ToolAuthorityBinding.DISPATCH_SURFACE_MISMATCH;
+            }
+            return ToolAuthorityBinding.BOUND;
+        }
+    }
+
+    /** Exact relationship between the selected surface and transport evidence. */
+    public enum ToolAuthorityBinding {
+        NOT_APPLICABLE,
+        SURFACE_UNBOUND,
+        DISPATCH_UNBOUND,
+        DISPATCH_SURFACE_MISMATCH,
+        BOUND
+    }
+
     public enum AttemptKind {
         PRIMARY,
         TRANSIENT_RETRY,
@@ -119,7 +282,37 @@ public final class ProviderResponseCapture {
             long ledgerSequence,
             String generationId,
             Source source,
-            Purpose purpose) {}
+            Purpose purpose,
+            ToolAuthorityMode toolAuthorityMode,
+            ToolAuthorityContract toolAuthorityContract) {
+        public GenerationEvent {
+            toolAuthorityMode = requireToolAuthorityMode(
+                    source, purpose, toolAuthorityMode);
+            toolAuthorityContract = requireToolAuthorityContract(
+                    source, purpose, toolAuthorityMode, toolAuthorityContract);
+        }
+
+        public GenerationEvent(
+                long ledgerSequence,
+                String generationId,
+                Source source,
+                Purpose purpose,
+                ToolAuthorityMode toolAuthorityMode
+        ) {
+            this(ledgerSequence, generationId, source, purpose, toolAuthorityMode,
+                    ToolAuthorityContract.unbound(toolAuthorityMode));
+        }
+
+        public GenerationEvent(
+                long ledgerSequence,
+                String generationId,
+                Source source,
+                Purpose purpose
+        ) {
+            this(ledgerSequence, generationId, source, purpose, ToolAuthorityMode.NONE,
+                    ToolAuthorityContract.none());
+        }
+    }
 
     public record AttemptEvent(
             long ledgerSequence,
@@ -130,7 +323,49 @@ public final class ProviderResponseCapture {
             Purpose purpose,
             AttemptKind attemptKind,
             RetryReason retryReason,
-            boolean requestDispatched) {}
+            boolean requestDispatched,
+            ToolAuthorityMode toolAuthorityMode,
+            ToolAuthorityContract toolAuthorityContract) {
+        public AttemptEvent {
+            toolAuthorityMode = requireToolAuthorityMode(
+                    source, purpose, toolAuthorityMode);
+            toolAuthorityContract = requireToolAuthorityContract(
+                    source, purpose, toolAuthorityMode, toolAuthorityContract);
+        }
+
+        public AttemptEvent(
+                long ledgerSequence,
+                String generationId,
+                String attemptId,
+                int attemptOrdinal,
+                Source source,
+                Purpose purpose,
+                AttemptKind attemptKind,
+                RetryReason retryReason,
+                boolean requestDispatched,
+                ToolAuthorityMode toolAuthorityMode
+        ) {
+            this(ledgerSequence, generationId, attemptId, attemptOrdinal,
+                    source, purpose, attemptKind, retryReason, requestDispatched,
+                    toolAuthorityMode, ToolAuthorityContract.unbound(toolAuthorityMode));
+        }
+
+        public AttemptEvent(
+                long ledgerSequence,
+                String generationId,
+                String attemptId,
+                int attemptOrdinal,
+                Source source,
+                Purpose purpose,
+                AttemptKind attemptKind,
+                RetryReason retryReason,
+                boolean requestDispatched
+        ) {
+            this(ledgerSequence, generationId, attemptId, attemptOrdinal,
+                    source, purpose, attemptKind, retryReason, requestDispatched,
+                    ToolAuthorityMode.NONE, ToolAuthorityContract.none());
+        }
+    }
 
     public record RequestDispatch(
             AttemptEvent attempt,
@@ -326,6 +561,9 @@ public final class ProviderResponseCapture {
         private final Completion completion;
         private final boolean terminalEligibilityClaim;
         private final boolean toolEligibilityClaim;
+        private final ToolAuthorityMode toolAuthorityMode;
+        private final ToolAuthorityContract toolAuthorityContract;
+        private final ToolAuthorityBinding toolAuthorityBinding;
         private final String assistantHash;
         private final List<ToolProposalReceipt> toolProposals;
         private final Generation ownerGeneration;
@@ -338,7 +576,9 @@ public final class ProviderResponseCapture {
                 Completion completion,
                 boolean providerTerminalEligible) {
             this(generationId, "", 0, source, purposeFor(source), completion,
-                    providerTerminalEligible, false, "", List.of(), null, null);
+                    providerTerminalEligible, false, ToolAuthorityMode.NONE,
+                    ToolAuthorityContract.none(), ToolAuthorityBinding.NOT_APPLICABLE,
+                    "", List.of(), null, null);
         }
 
         public Receipt(
@@ -348,7 +588,9 @@ public final class ProviderResponseCapture {
                 boolean providerTerminalEligible,
                 boolean providerToolCallEligible) {
             this(generationId, "", 0, source, purposeFor(source), completion,
-                    providerTerminalEligible, providerToolCallEligible, "",
+                    providerTerminalEligible, providerToolCallEligible,
+                    ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
+                    ToolAuthorityBinding.NOT_APPLICABLE, "",
                     List.of(), null, null);
         }
 
@@ -360,7 +602,9 @@ public final class ProviderResponseCapture {
                 boolean providerToolCallEligible,
                 String assistantHash) {
             this(generationId, "", 0, source, purposeFor(source), completion,
-                    providerTerminalEligible, providerToolCallEligible, assistantHash,
+                    providerTerminalEligible, providerToolCallEligible,
+                    ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
+                    ToolAuthorityBinding.NOT_APPLICABLE, assistantHash,
                     List.of(), null, null);
         }
 
@@ -375,7 +619,9 @@ public final class ProviderResponseCapture {
                 boolean providerToolCallEligible,
                 String assistantHash) {
             this(generationId, attemptId, attemptOrdinal, source, purpose, completion,
-                    providerTerminalEligible, providerToolCallEligible, assistantHash,
+                    providerTerminalEligible, providerToolCallEligible,
+                    ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
+                    ToolAuthorityBinding.NOT_APPLICABLE, assistantHash,
                     List.of(), null, null);
         }
 
@@ -388,6 +634,9 @@ public final class ProviderResponseCapture {
                 Completion completion,
                 boolean providerTerminalEligible,
                 boolean providerToolCallEligible,
+                ToolAuthorityMode toolAuthorityMode,
+                ToolAuthorityContract toolAuthorityContract,
+                ToolAuthorityBinding toolAuthorityBinding,
                 String assistantHash,
                 List<ToolProposalReceipt> toolProposals,
                 Generation ownerGeneration,
@@ -398,6 +647,13 @@ public final class ProviderResponseCapture {
             this.source = Objects.requireNonNull(source, "receipt source");
             this.purpose = purpose == null ? purposeFor(source) : purpose;
             this.completion = Objects.requireNonNull(completion, "receipt completion");
+            this.toolAuthorityMode = requireToolAuthorityMode(
+                    source, this.purpose, toolAuthorityMode);
+            this.toolAuthorityContract = requireToolAuthorityContract(
+                    source, this.purpose, this.toolAuthorityMode, toolAuthorityContract);
+            this.toolAuthorityBinding = toolAuthorityBinding == null
+                    ? ToolAuthorityBinding.NOT_APPLICABLE
+                    : toolAuthorityBinding;
             this.terminalEligibilityClaim = providerTerminalEligible
                     && !this.generationId.isBlank()
                     && !this.attemptId.isBlank()
@@ -407,8 +663,9 @@ public final class ProviderResponseCapture {
                     && !this.generationId.isBlank()
                     && !this.attemptId.isBlank()
                     && source == Source.FOREGROUND_PROVIDER
-                    && (completion == Completion.PROVIDER_EOS
-                            || completion == Completion.RUNTIME_LEGACY_TEXT_STOP);
+                    && completion == Completion.PROVIDER_EOS
+                    && this.toolAuthorityMode != ToolAuthorityMode.NONE
+                    && this.toolAuthorityBinding == ToolAuthorityBinding.BOUND;
             this.assistantHash = safe(assistantHash);
             this.toolProposals = toolProposals == null ? List.of() : List.copyOf(toolProposals);
             this.ownerGeneration = ownerGeneration;
@@ -421,6 +678,9 @@ public final class ProviderResponseCapture {
         public Source source() { return source; }
         public Purpose purpose() { return purpose; }
         public Completion completion() { return completion; }
+        public ToolAuthorityMode toolAuthorityMode() { return toolAuthorityMode; }
+        public ToolAuthorityContract toolAuthorityContract() { return toolAuthorityContract; }
+        public ToolAuthorityBinding toolAuthorityBinding() { return toolAuthorityBinding; }
         public String assistantHash() { return assistantHash; }
 
         /** True only after the owning generation selected this exact receipt. */
@@ -432,6 +692,12 @@ public final class ProviderResponseCapture {
 
         public boolean providerToolCallEligible() {
             return selected && toolEligibilityClaim;
+        }
+
+        /** Exact raw-name membership in this selected provider request authority. */
+        public boolean authorizesExactToolName(String rawToolName) {
+            return selected && toolEligibilityClaim
+                    && toolAuthorityContract.authorizesExactToolName(rawToolName);
         }
 
         public int capturedToolProposalCount() {
@@ -455,7 +721,9 @@ public final class ProviderResponseCapture {
 
         public static Receipt detached(Source source, Completion completion) {
             return new Receipt("", "", 0, source, purposeFor(source), completion,
-                    false, false, "", List.of(), null, null);
+                    false, false, ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
+                    ToolAuthorityBinding.NOT_APPLICABLE,
+                    "", List.of(), null, null);
         }
 
         public static Receipt none() {
@@ -491,16 +759,49 @@ public final class ProviderResponseCapture {
         }
 
         public Generation openGeneration(Source source, Purpose purpose) {
+            return openGeneration(source, purpose, ToolAuthorityMode.NONE);
+        }
+
+        public Generation openGeneration(
+                Source source,
+                Purpose purpose,
+                ToolAuthorityMode toolAuthorityMode
+        ) {
+            return openGeneration(
+                    source, purpose, ToolAuthorityContract.unbound(toolAuthorityMode));
+        }
+
+        public Generation openGeneration(
+                Source source,
+                Purpose purpose,
+                ToolAuthorityContract toolAuthorityContract
+        ) {
             Objects.requireNonNull(source, "source");
             Purpose typedPurpose = purpose == null ? purposeFor(source) : purpose;
             if (typedPurpose != purposeFor(source)) {
                 throw new IllegalArgumentException(
                         "generation source and purpose must use the canonical pairing");
             }
+            ToolAuthorityContract typedToolAuthorityContract =
+                    requireToolAuthorityContract(
+                            source,
+                            typedPurpose,
+                            toolAuthorityContract == null
+                                    ? ToolAuthorityMode.NONE
+                                    : toolAuthorityContract.mode(),
+                            toolAuthorityContract);
             synchronized (this) {
-                if (closed) return Generation.detached(source, typedPurpose);
+                if (closed) {
+                    return Generation.detached(
+                            source, typedPurpose, typedToolAuthorityContract);
+                }
                 String generationId = idPrefix + "-generation-" + (++generationSequence);
-                Generation generation = new Generation(this, generationId, source, typedPurpose);
+                Generation generation = new Generation(
+                        this,
+                        generationId,
+                        source,
+                        typedPurpose,
+                        typedToolAuthorityContract);
                 openGenerations.add(generation);
                 listener.generationStarted(generation.event(nextSequence()));
                 return generation;
@@ -526,20 +827,40 @@ public final class ProviderResponseCapture {
         private final String generationId;
         private final Source source;
         private final Purpose purpose;
+        private final ToolAuthorityMode toolAuthorityMode;
+        private final ToolAuthorityContract toolAuthorityContract;
         private int attemptSequence;
         private Attempt activeAttempt;
         private Receipt selectableReceipt;
         private boolean terminal;
 
-        private Generation(Scope owner, String generationId, Source source, Purpose purpose) {
+        private Generation(
+                Scope owner,
+                String generationId,
+                Source source,
+                Purpose purpose,
+                ToolAuthorityContract toolAuthorityContract
+        ) {
             this.owner = owner;
             this.generationId = generationId;
             this.source = source;
             this.purpose = purpose;
+            this.toolAuthorityContract = requireToolAuthorityContract(
+                    source,
+                    purpose,
+                    toolAuthorityContract == null
+                            ? ToolAuthorityMode.NONE
+                            : toolAuthorityContract.mode(),
+                    toolAuthorityContract);
+            this.toolAuthorityMode = this.toolAuthorityContract.mode();
         }
 
-        private static Generation detached(Source source, Purpose purpose) {
-            return new Generation(null, "", source, purpose);
+        private static Generation detached(
+                Source source,
+                Purpose purpose,
+                ToolAuthorityContract toolAuthorityContract
+        ) {
+            return new Generation(null, "", source, purpose, toolAuthorityContract);
         }
 
         public String generationId() {
@@ -552,6 +873,14 @@ public final class ProviderResponseCapture {
 
         public Purpose purpose() {
             return purpose;
+        }
+
+        public ToolAuthorityMode toolAuthorityMode() {
+            return toolAuthorityMode;
+        }
+
+        public ToolAuthorityContract toolAuthorityContract() {
+            return toolAuthorityContract;
         }
 
         /**
@@ -679,7 +1008,9 @@ public final class ProviderResponseCapture {
         }
 
         private GenerationEvent event(long sequence) {
-            return new GenerationEvent(sequence, generationId, source, purpose);
+            return new GenerationEvent(
+                    sequence, generationId, source, purpose, toolAuthorityMode,
+                    toolAuthorityContract);
         }
     }
 
@@ -794,6 +1125,15 @@ public final class ProviderResponseCapture {
                 }
                 terminal = true;
                 AttemptEvent event = event(owner.nextSequence());
+                boolean responseMatchesToolAuthorityMode = switch (
+                        generation.toolAuthorityMode) {
+                    case NONE -> false;
+                    case PROVIDER_NATIVE -> response.nativeToolCallCount() > 0;
+                    case PROVIDER_TEXT_JSON -> response.nativeToolCallCount() == 0
+                            && response.textualToolCallPresent();
+                };
+                ToolAuthorityBinding toolAuthorityBinding =
+                        generation.toolAuthorityContract.bindDispatch(dispatchEvidence);
                 Receipt receipt = new Receipt(
                         generation.generationId,
                         attemptId,
@@ -802,7 +1142,11 @@ public final class ProviderResponseCapture {
                         generation.purpose,
                         response.completion(),
                         requestDispatched && response.completedNormally(),
-                        requestDispatched && response.foreground() && response.toolCallPresent(),
+                        requestDispatched && response.foreground()
+                                && responseMatchesToolAuthorityMode,
+                        generation.toolAuthorityMode,
+                        generation.toolAuthorityContract,
+                        toolAuthorityBinding,
                         sha256(response.assistantText()),
                         proposalReceipts(response.nativeToolCalls()),
                         generation,
@@ -857,7 +1201,9 @@ public final class ProviderResponseCapture {
                     generation.purpose,
                     kind,
                     retryReason,
-                    requestDispatched);
+                    requestDispatched,
+                    generation.toolAuthorityMode,
+                    generation.toolAuthorityContract);
         }
     }
 
@@ -880,10 +1226,36 @@ public final class ProviderResponseCapture {
     }
 
     public static Generation openGeneration(Source source, Purpose purpose) {
+        return openGeneration(source, purpose, ToolAuthorityMode.NONE);
+    }
+
+    public static Generation openGeneration(
+            Source source,
+            Purpose purpose,
+            ToolAuthorityMode toolAuthorityMode
+    ) {
+        return openGeneration(
+                source, purpose, ToolAuthorityContract.unbound(toolAuthorityMode));
+    }
+
+    public static Generation openGeneration(
+            Source source,
+            Purpose purpose,
+            ToolAuthorityContract toolAuthorityContract
+    ) {
+        Objects.requireNonNull(source, "source");
+        Purpose typedPurpose = purpose == null ? purposeFor(source) : purpose;
+        ToolAuthorityContract typedToolAuthorityContract = requireToolAuthorityContract(
+                source,
+                typedPurpose,
+                toolAuthorityContract == null
+                        ? ToolAuthorityMode.NONE
+                        : toolAuthorityContract.mode(),
+                toolAuthorityContract);
         Scope scope = CURRENT.get();
         return scope == null
-                ? Generation.detached(source, purpose == null ? purposeFor(source) : purpose)
-                : scope.openGeneration(source, purpose);
+                ? Generation.detached(source, typedPurpose, typedToolAuthorityContract)
+                : scope.openGeneration(source, typedPurpose, typedToolAuthorityContract);
     }
 
     /** Compatibility bridge for direct tests and legacy non-worker callers. */
@@ -926,6 +1298,46 @@ public final class ProviderResponseCapture {
             case PLACEHOLDER_RUNTIME -> Purpose.PLACEHOLDER_RESPONSE;
             case SCRIPTED_HARNESS -> Purpose.HARNESS_FIXTURE;
         };
+    }
+
+    private static ToolAuthorityMode requireToolAuthorityMode(
+            Source source,
+            Purpose purpose,
+            ToolAuthorityMode mode
+    ) {
+        Source typedSource = Objects.requireNonNull(source, "tool authority source");
+        Purpose typedPurpose = Objects.requireNonNull(purpose, "tool authority purpose");
+        ToolAuthorityMode typedMode = mode == null ? ToolAuthorityMode.NONE : mode;
+        if (typedMode != ToolAuthorityMode.NONE
+                && (typedSource != Source.FOREGROUND_PROVIDER
+                    || typedPurpose != Purpose.TURN_RESPONSE)) {
+            throw new IllegalArgumentException(
+                    "provider tool authority is valid only for a foreground turn response");
+        }
+        return typedMode;
+    }
+
+    private static ToolAuthorityContract requireToolAuthorityContract(
+            Source source,
+            Purpose purpose,
+            ToolAuthorityMode mode,
+            ToolAuthorityContract contract
+    ) {
+        ToolAuthorityMode typedMode = requireToolAuthorityMode(source, purpose, mode);
+        ToolAuthorityContract typed = contract == null
+                ? ToolAuthorityContract.unbound(typedMode)
+                : contract;
+        if (typed.mode() != typedMode) {
+            throw new IllegalArgumentException(
+                    "provider tool authority contract mode differs from its generation mode");
+        }
+        if (typed.bound()
+                && (source != Source.FOREGROUND_PROVIDER
+                    || purpose != Purpose.TURN_RESPONSE)) {
+            throw new IllegalArgumentException(
+                    "bound provider tool authority is valid only for a foreground turn response");
+        }
+        return typed;
     }
 
     private static String safe(String value) {

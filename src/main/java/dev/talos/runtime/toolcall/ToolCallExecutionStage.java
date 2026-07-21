@@ -13,6 +13,8 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolError;
+import dev.talos.tools.ToolFailureReason;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
@@ -110,14 +112,26 @@ public final class ToolCallExecutionStage {
 
         for (int i = 0; i < parsed.calls().size(); i++) {
             ToolCall call = parsed.calls().get(i);
-            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit = null;
-            if (LocalTurnTraceCapture.isActive()) {
-                parsedPermit = LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                            "tool_loop",
-                            call,
-                            state.currentResponseReceipt,
-                            parsed.useNativePath() ? i + 1 : 0);
+            LocalTurnTraceCapture.ToolCallAuthorityDecision authority =
+                    LocalTurnTraceCapture.authorizeParsedToolCallForExecution(
+                            "tool_loop", call, parsed.lineage(i));
+            if (!authority.authorized()) {
+                String diagnostic = "Tool call blocked because executable authority is invalid ("
+                        + authority.rejectionReason().name() + ").";
+                ToolResult blocked = ToolResult.fail(ToolError.invalidAuthority(
+                        ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                        diagnostic));
+                state.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(call, diagnostic));
+                ToolFailureStateAccounting.recordFailure(state, call, "");
+                failuresThisIter++;
+                appendResultMessage(
+                        state,
+                        parsed.useNativePath(),
+                        i,
+                        ToolCallSupport.formatToolResult(call, blocked));
+                continue;
             }
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit = authority.permit();
 
             ToolCall effective = ToolCallSupport.repairMissingPath(call);
             recordTransformation(
@@ -192,10 +206,8 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            ToolResult rawResult = parsedPermit == null
-                    ? turnProcessor.executeTool(state.toolSession, effective, state.ctx)
-                    : turnProcessor.executeToolAfterParsed(
-                            state.toolSession, effective, state.ctx, parsedPermit);
+            ToolResult rawResult = turnProcessor.executeToolAfterParsed(
+                    state.toolSession, effective, state.ctx, parsedPermit);
             ToolResultModelContextHandoff.Decision handoffDecision =
                     ToolResultModelContextHandoff.decide(
                             effective,

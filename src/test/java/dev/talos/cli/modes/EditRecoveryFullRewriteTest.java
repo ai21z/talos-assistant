@@ -8,6 +8,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ToolSpec;
@@ -15,8 +16,11 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -41,6 +45,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @DisplayName("Invalid-edit full-rewrite recovery")
 class EditRecoveryFullRewriteTest {
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        ProviderAuthorityTestTrace.begin("edit-recovery", testInfo);
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        ProviderAuthorityTestTrace.clear();
+    }
 
     private static final String README_BEFORE = """
             # Acme Widget Tracker

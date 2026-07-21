@@ -4,7 +4,9 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -121,7 +123,11 @@ class DeterministicAnswerTraceRecorderTest {
         LlmClient.StreamResult result;
         try (LlmClient client = ScriptedNativeLlmClient.of(List.of(
                 new LlmClient.StreamResult("provider terminal", List.of())))) {
-            result = client.chatFull(List.of(ChatMessage.user("inspect")));
+            result = client.chatFull(
+                    List.of(ChatMessage.user("inspect")),
+                    List.of(readFileSpec()),
+                    ChatRequestControls.defaults().withToolAuthorityMode(
+                            ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE));
         }
         LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.text());
 
@@ -201,8 +207,14 @@ class DeterministicAnswerTraceRecorderTest {
         LlmClient.StreamResult result;
         try (LlmClient client = ScriptedNativeLlmClient.of(List.of(
                 new LlmClient.StreamResult("", List.of(nativeCall))))) {
-            result = client.chatFull(List.of(ChatMessage.user("inspect")));
+            result = client.chatFull(
+                    List.of(ChatMessage.user("inspect")),
+                    List.of(readFileSpec()),
+                    ChatRequestControls.defaults().withToolAuthorityMode(
+                            ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE));
         }
+        assertTrue(result.provenance().providerToolCallEligible(),
+                result.provenance().toString());
         LocalTurnTraceCapture.recordToolCallParsed(
                 "tool_loop",
                 new ToolCall("talos.read_file", Map.of("path", "README.md")),
@@ -235,10 +247,15 @@ class DeterministicAnswerTraceRecorderTest {
                 ```
                 """;
         LlmClient.StreamResult result;
-        try (LlmClient client = ScriptedNativeLlmClient.of(List.of(
-                new LlmClient.StreamResult(toolText, List.of())))) {
-            result = client.chatFull(List.of(ChatMessage.user("inspect")));
+        try (LlmClient client = ScriptedNativeLlmClient.textToolFallbackStrings(toolText)) {
+            result = client.chatFull(
+                    List.of(ChatMessage.user("inspect")),
+                    List.of(readFileSpec()),
+                    ChatRequestControls.defaults().withToolAuthorityMode(
+                            ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON));
         }
+        assertTrue(result.provenance().providerToolCallEligible(),
+                result.provenance().toString());
         LocalTurnTraceCapture.recordToolCallParsed(
                 "tool_loop",
                 new ToolCall("talos.read_file", Map.of("path", "README.md")),
@@ -261,6 +278,10 @@ class DeterministicAnswerTraceRecorderTest {
                 ProviderResponseCapture.Completion.RUNTIME_ABORT,
                 false,
                 false));
+    }
+
+    private static ToolSpec readFileSpec() {
+        return new ToolSpec("talos.read_file", "read a file", "{}");
     }
 
     @Test

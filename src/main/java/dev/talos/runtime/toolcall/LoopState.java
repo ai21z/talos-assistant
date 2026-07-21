@@ -28,6 +28,8 @@ public final class LoopState {
     public String currentText;
     public List<NativeToolCall> currentNativeCalls;
     public ProviderResponseCapture.Receipt currentResponseReceipt;
+    public LocalTurnTraceCapture.ToolCallSource currentToolCallSource;
+    public LocalTurnTraceCapture.RuntimeToolAuthorityReason currentRuntimeToolAuthorityReason;
 
     public int iterations;
     public int totalToolsInvoked;
@@ -103,6 +105,9 @@ public final class LoopState {
         this.currentResponseReceipt = initialResponseReceipt == null
                 ? ProviderResponseCapture.Receipt.none()
                 : initialResponseReceipt;
+        this.currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE;
+        this.currentRuntimeToolAuthorityReason =
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         this.messages = messages;
         this.workspace = workspace;
         this.readEvidence = new ReadEvidenceLedger(workspace);
@@ -132,6 +137,9 @@ public final class LoopState {
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.UNBOUND;
+        currentRuntimeToolAuthorityReason =
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         LocalTurnTraceCapture.recordDeterministicAnswerSelected(answer);
     }
 
@@ -149,6 +157,9 @@ public final class LoopState {
         currentResponseReceipt = receipt == null
                 ? ProviderResponseCapture.Receipt.none()
                 : receipt;
+        currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE;
+        currentRuntimeToolAuthorityReason =
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         LocalTurnTraceCapture.recordProviderAnswerSelectedAfterTransformation(
                 answer,
                 currentResponseReceipt,
@@ -159,6 +170,9 @@ public final class LoopState {
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.UNBOUND;
+        currentRuntimeToolAuthorityReason =
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         LocalTurnTraceCapture.recordToolAnswerSelected(answer);
     }
 
@@ -166,6 +180,9 @@ public final class LoopState {
         currentText = answer;
         currentNativeCalls = List.of();
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.UNBOUND;
+        currentRuntimeToolAuthorityReason =
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
         LocalTurnTraceCapture.recordOperatorAnswerSelected(answer);
     }
 
@@ -185,12 +202,23 @@ public final class LoopState {
         currentResponseReceipt = result == null
                 ? ProviderResponseCapture.Receipt.none()
                 : result.provenance();
+        currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE;
+        currentRuntimeToolAuthorityReason =
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE;
     }
 
-    public void setRuntimeNativeCalls(String text, List<NativeToolCall> nativeCalls) {
+    public void setRuntimeNativeCalls(
+            String text,
+            List<NativeToolCall> nativeCalls,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason reason
+    ) {
         currentText = text == null ? "" : text;
         currentNativeCalls = nativeCalls == null ? List.of() : List.copyOf(nativeCalls);
         currentResponseReceipt = ProviderResponseCapture.Receipt.none();
+        currentToolCallSource = LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC;
+        currentRuntimeToolAuthorityReason = reason == null
+                ? LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE
+                : reason;
     }
 
     public void stopWithFailure(dev.talos.runtime.failure.FailureDecision decision, String answer) {

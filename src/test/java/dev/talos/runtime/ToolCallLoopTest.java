@@ -23,11 +23,15 @@ import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,6 +50,26 @@ import static org.junit.jupiter.api.Assertions.*;
 class ToolCallLoopTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        LocalTurnTraceCapture.clear();
+        LocalTurnTraceCapture.begin(
+                "tool-loop-" + testInfo.getDisplayName().hashCode(),
+                "tool-loop-tests",
+                1,
+                "2026-07-20T00:00:00Z",
+                "workspace-hash",
+                "test",
+                "llama_cpp",
+                "test-model",
+                testInfo.getDisplayName());
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        LocalTurnTraceCapture.clear();
+    }
 
     // ── No tool calls → pass through ───────────────────────────────
 
@@ -117,7 +141,7 @@ class ToolCallLoopTest {
                     ```""";
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("")))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("")))
                     .build();
 
             var result = loop.run(llmResponse, messages, ws, ctx);
@@ -164,7 +188,7 @@ class ToolCallLoopTest {
                                     "content", "Intro\nRelease gate note\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .llm(textProvider(registry, List.of("Done.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -212,7 +236,7 @@ class ToolCallLoopTest {
                                     "content", "Intro\nRelease gate note\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .llm(textProvider(registry, List.of("Done.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -270,7 +294,7 @@ class ToolCallLoopTest {
                                     "content", "1 | def bar():\n2 |     return 99\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("No file was changed.")))
+                    .llm(textProvider(registry, List.of("No file was changed.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -340,7 +364,7 @@ class ToolCallLoopTest {
                                     "content", "Intro\nRelease gate note\n")));
             Context ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .llm(textProvider(registry, List.of("Done.")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -545,7 +569,7 @@ class ToolCallLoopTest {
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         """
                         {
                           "name": "talos.grep",
@@ -560,7 +584,8 @@ class ToolCallLoopTest {
 
         var result = loop.run(initialResponse, messages, WS, ctx);
 
-        assertEquals(2, result.iterations(), "A standalone raw JSON continuation should be parsed and executed");
+        assertEquals(2, result.iterations(),
+                "A standalone raw JSON continuation should be parsed and executed");
         assertEquals(2, result.toolsInvoked());
         assertEquals("Grounded final answer.", result.finalAnswer());
     }
@@ -587,7 +612,7 @@ class ToolCallLoopTest {
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         // Follow-up: two adjacent standalone raw JSON calls (different params)
                         """
                         {
@@ -618,7 +643,7 @@ class ToolCallLoopTest {
     }
 
     @Test
-    void malformedContinuationAfterToolExecutionUsesTruthfulFallback() {
+    void malformedContinuationAfterToolExecutionUsesNoAnswerFallback() {
         var registry = new ToolRegistry();
         registry.register(listDirTool());
         var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
@@ -635,7 +660,7 @@ class ToolCallLoopTest {
 
         var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         """
                         {
                           "name": "talos.grep",
@@ -644,12 +669,23 @@ class ToolCallLoopTest {
                 .build();
 
         var result = loop.run(initialResponse, messages, WS, ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
         assertEquals(1, result.iterations(), "Malformed continuation should stop after the first executed tool");
         assertEquals(1, result.toolsInvoked());
+        assertEquals(List.of("talos.list_dir"), trace.events().stream()
+                        .filter(event -> "TOOL_EXECUTED".equals(event.type()))
+                        .map(event -> event.toolName())
+                        .toList(),
+                trace.events().toString());
+        assertFalse(trace.events().stream().anyMatch(event ->
+                        "talos.grep".equals(event.toolName())
+                                && ("TOOL_CALL_PARSED".equals(event.type())
+                                || "TOOL_EXECUTED".equals(event.type()))),
+                trace.events().toString());
         assertFalse(result.finalAnswer().contains("talos.grep"));
-        assertTrue(result.finalAnswer().contains("No further tool calls were executed."),
-                "Should surface a truthful fallback instead of raw tool JSON");
+        assertEquals("(no answer from model after tool execution)", result.finalAnswer(),
+                "Should surface the settled no-answer fallback instead of raw tool JSON");
     }
 
     // ── LoopResult accessors ────────────────────────────────────────
@@ -702,7 +738,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("edit index.html")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body{}\"}}")))
                 .build();
 
@@ -738,7 +774,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Check the workspace. Do not change anything yet.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body{}\"}}")))
                 .build();
 
@@ -776,7 +812,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("try the failing thing")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(failingCall)))
+                .llm(textProvider(registry, List.of(failingCall)))
                 .build();
 
         var result = loop.run(failingCall, messages, WS, ctx);
@@ -823,7 +859,7 @@ class ToolCallLoopTest {
                     ChatMessage.user("Now apply the smallest fix by editing index.html.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readFile, emptyEdit, "should not be called")))
+                    .llm(textProvider(registry, List.of(readFile, emptyEdit, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Now apply the smallest fix by editing index.html.");
@@ -891,7 +927,7 @@ class ToolCallLoopTest {
                     ChatMessage.user("Now apply the smallest fix by editing index.html.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readFile, validEdit, "should not be called")))
+                    .llm(textProvider(registry, List.of(readFile, validEdit, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Now apply the smallest fix by editing index.html.");
@@ -956,7 +992,7 @@ class ToolCallLoopTest {
                     ChatMessage.user("Repair this broken BMI website.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readIndex, missingNewScript, emptyStyle, "should not be called")))
+                    .llm(textProvider(registry, List.of(readIndex, missingNewScript, emptyStyle, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Repair this broken BMI website.");
@@ -1021,7 +1057,7 @@ class ToolCallLoopTest {
                     ChatMessage.user("Fix index.html with the smallest edits.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(ignoredRereadRequirement, "should not be called")))
+                    .llm(textProvider(registry, List.of(ignoredRereadRequirement, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Fix index.html with the smallest edits.");
@@ -1085,7 +1121,7 @@ class ToolCallLoopTest {
                     ChatMessage.user("Fix index.html with the smallest edits.")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(readCurrentFile, validRecoveredEdit, "should not be called")))
+                    .llm(textProvider(registry, List.of(readCurrentFile, validRecoveredEdit, "should not be called")))
                     .build();
 
             TurnUserRequestCapture.set("Fix index.html with the smallest edits.");
@@ -1358,7 +1394,7 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("All done, ready to use. Open it in your browser.")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("All done, ready to use. Open it in your browser.")))
                 .build();
         String llmResponse = """
                 <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
@@ -1404,7 +1440,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("Complete. Everything is ready to use.")))
                     .build();
             String llmResponse = """
                     <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html><head><link rel=\\"stylesheet\\" href=\\"styles.css\\"></head><body><script src=\\"scripts.js\\"></script></body></html>"}}</tool_call>
@@ -1459,7 +1495,7 @@ class ToolCallLoopTest {
                         """),
                 ChatMessage.user("Fix the remaining static verification problems.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("Complete. Everything is ready to use.")))
                 .build();
         String llmResponse = """
                 <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
@@ -1511,7 +1547,7 @@ class ToolCallLoopTest {
                         """),
                 ChatMessage.user("Fix the remaining static verification problems.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of("Complete. Everything is ready to use.")))
                 .build();
         String llmResponse = """
                 <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
@@ -1581,7 +1617,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("""
+                    .llm(textProvider(registry, List.of("""
                             {"name":"talos.write_file","arguments":{"path":"styles.css","content":""}}
                             """)))
                     .build();
@@ -1676,7 +1712,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use. Open it in your browser.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use. Open it in your browser.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":""}}
@@ -1790,7 +1826,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":".button { color: red; }\\nbody { margin: 0; }\\n"}}
@@ -1905,7 +1941,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"scripts.js","content":"document.querySelector('.missing-button').addEventListener('click', () => {\\n  document.querySelector('#result').textContent = 'Clicked';\\n});\\n"}}
@@ -1999,7 +2035,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .llm(textProvider(registry, List.of("Complete. Everything is ready to use.")))
                     .build();
             String initial = """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body { color: black; }\\n"}}
@@ -2577,12 +2613,18 @@ class ToolCallLoopTest {
 
     @Test
     void expectedTargetProgressToolCallKeepsHappyPathOpen() {
-        var loop = createLoop(writeFileTool());
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                new NoOpApprovalGate(),
+                registry);
+        var loop = new ToolCallLoop(processor);
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"console.log('ok');\"}}")))
                 .build();
         String llmResponse = """
@@ -2633,7 +2675,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not be called")))
+                    .llm(textProvider(registry, List.of("should not be called")))
                     .build();
             String initial = """
                     Complete and ready to use.
@@ -2708,7 +2750,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not be called")))
+                    .llm(textProvider(registry, List.of("should not be called")))
                     .build();
             String initial = """
                     {"name":"talos.read_file","arguments":{"path":"script.js"}}
@@ -2788,7 +2830,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "Complete. Everything is ready to use.")))
                     .build();
 
@@ -2877,12 +2919,12 @@ class ToolCallLoopTest {
                       document.getElementById('result').textContent = 'Clicked';
                     });
                     """;
-            String rewrite = """
+            String rewrite = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(correctedScript));
+                    """.formatted(jsonEscape(correctedScript)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(badEdit, rewrite, "done")))
+                    .llm(textProvider(registry, List.of(badEdit, rewrite, "done")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -2962,7 +3004,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             badEdit,
                             readFileCall("script.js"),
                             "Complete. Everything is ready to use.")))
@@ -3059,7 +3101,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             badEdit,
                             repeatedEdit,
                             "Complete. Everything is ready to use.")))
@@ -3120,7 +3162,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("styles.css"),
                             readFileCall("scripts.js"),
                             readFileCall("index.html", 200),
@@ -3199,7 +3241,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("styles.css"),
                             readFileCall("scripts.js"),
                             writeScripts,
@@ -3272,14 +3314,19 @@ class ToolCallLoopTest {
                         : 'Enter height';
                     });
                     """;
-            String fileWrites = """
+            String fileWrites = jsonToolFences(
+                    """
                     {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"styles.css","content":"%s"}}
+                    """.formatted(jsonEscape(stylesCss)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(indexHtml), jsonEscape(stylesCss), jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(fileWrites, "done")))
+                    .llm(textProvider(registry, List.of(fileWrites, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result = loop.run(mkdirOnly, messages, ws, ctx);
@@ -3344,14 +3391,19 @@ class ToolCallLoopTest {
                       document.getElementById('status').textContent = 'Synthwave engaged';
                     });
                     """;
-            String fileWrites = """
+            String fileWrites = jsonToolFences(
+                    """
                     {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    """.formatted(jsonEscape(styleCss)),
+                    """
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss), jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(fileWrites, "done")))
+                    .llm(textProvider(registry, List.of(fileWrites, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
@@ -3426,12 +3478,12 @@ class ToolCallLoopTest {
             String wrongTarget = """
                     {"name":"talos.write_file","arguments":{"path":"README.md","content":"wrong target"}}
                     """;
-            String remainingScript = """
+            String remainingScript = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(wrongTarget, remainingScript, "done")))
+                    .llm(textProvider(registry, List.of(wrongTarget, remainingScript, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
@@ -3443,7 +3495,6 @@ class ToolCallLoopTest {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
             }
-
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
@@ -3503,12 +3554,12 @@ class ToolCallLoopTest {
             String directoryWrite = """
                     {"name":"talos.write_file","arguments":{"path":"./","content":"wrong target"}}
                     """;
-            String remainingScript = """
+            String remainingScript = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(directoryWrite, remainingScript, "done")))
+                    .llm(textProvider(registry, List.of(directoryWrite, remainingScript, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
@@ -3520,7 +3571,6 @@ class ToolCallLoopTest {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
             }
-
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
@@ -3564,7 +3614,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("no retry should be needed")))
+                    .llm(textProvider(registry, List.of("no retry should be needed")))
                     .build();
 
             ToolCallLoop.LoopResult result;
@@ -3648,12 +3698,12 @@ class ToolCallLoopTest {
                     {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
                     {"name":"talos.write_file","arguments":{"path":"readme_site.txt","content":"wrong target"}}
                     """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss));
-            String remainingScript = """
+            String remainingScript = jsonToolFences("""
                     {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
-                    """.formatted(jsonEscape(scriptJs));
+                    """.formatted(jsonEscape(scriptJs)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(remainingScript, "done")))
+                    .llm(textProvider(registry, List.of(remainingScript, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result;
@@ -3665,7 +3715,6 @@ class ToolCallLoopTest {
                 TurnUserRequestCapture.clear();
                 TurnTaskContractCapture.clear();
             }
-
             assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
             assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
             assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
@@ -3795,7 +3844,7 @@ class ToolCallLoopTest {
                     """.formatted(jsonEscape(stylesCss), jsonEscape(scriptJs));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(assetWrites, "done")))
+                    .llm(textProvider(registry, List.of(assetWrites, "done")))
                     .build();
 
             ToolCallLoop.LoopResult result = loop.run(initialIndexOnly, messages, ws, ctx);
@@ -3844,7 +3893,7 @@ class ToolCallLoopTest {
                     """.formatted(jsonEscape(initialIndex.replace("Calculate BMI", "Calculate")));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(repeatedWrongTarget, "should not be called")))
+                    .llm(textProvider(registry, List.of(repeatedWrongTarget, "should not be called")))
                     .build();
 
             ToolCallLoop.LoopResult result = loop.run(initialIndexWrite, messages, ws, ctx);
@@ -3908,7 +3957,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(wrongSecondEdit, "should not be reached")))
+                    .llm(textProvider(registry, List.of(wrongSecondEdit, "should not be reached")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -3988,7 +4037,7 @@ class ToolCallLoopTest {
                     """;
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not need a retry")))
+                    .llm(textProvider(registry, List.of("should not need a retry")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -4080,7 +4129,7 @@ class ToolCallLoopTest {
                                             """)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of("should not need a retry")))
+                    .llm(textProvider(registry, List.of("should not need a retry")))
                     .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
                     .build();
 
@@ -4344,7 +4393,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("styles.css"),
                             readFileCall("scripts.js"),
                             readFileCall("index.html", 200),
@@ -4409,7 +4458,7 @@ class ToolCallLoopTest {
                     ChatMessage.user(request)));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             readFileCall("script.js", 200),
                             readFileCall("script.js", 200),
                             readFileCall("index.html", 200),
@@ -5232,8 +5281,38 @@ class ToolCallLoopTest {
 
     private static Context defaultCtx() {
         return Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of("")))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(
+                        List.of("")))
                 .build();
+    }
+
+    private static LlmClient textProvider(
+            ToolRegistry registry,
+            List<String> responses
+    ) {
+        LlmClient client =
+                ScriptedNativeLlmClient.textToolFallbackStrings(responses);
+        client.setToolSpecs(nativeSpecs(registry));
+        return client;
+    }
+
+    private static LlmClient textProvider(
+            ToolRegistry registry,
+            String response
+    ) {
+        return textProvider(registry, List.of(response));
+    }
+
+    private static List<ToolSpec> nativeSpecs(ToolRegistry registry) {
+        if (registry == null) return List.of();
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema() == null
+                                ? "{}"
+                                : descriptor.parametersSchema()))
+                .toList();
     }
 
     private static List<ToolSpec> nativeSpecs(TalosTool... tools) {
@@ -5278,6 +5357,13 @@ class ToolCallLoopTest {
             }
         }
         return escaped.toString();
+    }
+
+    private static String jsonToolFences(String... calls) {
+        return Arrays.stream(calls)
+                .map(String::strip)
+                .map(call -> "```json\n" + call + "\n```")
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private static TalosTool echoTool() {

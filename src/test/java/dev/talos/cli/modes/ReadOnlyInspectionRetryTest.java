@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
@@ -49,20 +50,35 @@ class ReadOnlyInspectionRetryTest {
     void retriesReadOnlyEvidenceRequestAndRunsToolLoop(@TempDir Path workspace) throws Exception {
         beginTrace("read-only-retry-receipt");
         Files.writeString(workspace.resolve("README.md"), "Workspace facts from README.\n");
-        Context ctx = context(workspace, "Answer from retry evidence.");
-        List<ChatMessage> messages = messages("Explain this workspace.");
+        String request = "Explain this workspace.";
+        String readJson =
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
+        var provider = ScriptedNativeLlmClient.recordingTextToolFallbackWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult(readJson, List.of()),
+                        new LlmClient.StreamResult("Answer from retry evidence.", List.of())),
+                16_384);
+        Context ctx = providerContext(workspace, provider.client());
+        List<ChatMessage> messages = messages(request);
+        TaskContract contract = TaskContractResolver.fromUserRequest(request);
+        CurrentTurnPlan retryPlan = CurrentTurnPlan.compatibility(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of(),
+                List.of("talos.read_file"),
+                List.of());
         AtomicReference<List<ChatMessage>> retryMessages = new AtomicReference<>();
 
         ReadOnlyInspectionRetry.Result result = ReadOnlyInspectionRetry.retryIfNeeded(
                 "I cannot inspect from here.",
                 messages,
-                plan(TaskContractResolver.fromUserRequest("Explain this workspace."), ExecutionPhase.INSPECT),
+                retryPlan,
                 workspace,
                 ctx,
                 sentMessages -> {
                     retryMessages.set(List.copyOf(sentMessages));
-                    return providerTextToolResult(
-                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}");
+                    return TurnModelDispatcher.dispatchBuffered(
+                            ctx, sentMessages, retryPlan);
                 });
 
         assertNotNull(result.loopResult(), "retry tool calls should re-enter the tool loop");
@@ -86,6 +102,43 @@ class ReadOnlyInspectionRetryTest {
                 .findFirst().orElseThrow();
         assertEquals(completed.data().get("selectedAttemptId"),
                 parsed.data().get("providerAttemptId"));
+    }
+
+    @Test
+    void runtimeLegacyTextStopCannotAuthorizeReadOnlyRetryToolCall(
+            @TempDir Path workspace) throws Exception {
+        beginTrace("read-only-legacy-stop-rejected");
+        Files.writeString(workspace.resolve("README.md"), "must not be read\n");
+        String request = "Explain this workspace.";
+        String readJson =
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
+        Context ctx = context(workspace, "unused continuation");
+
+        ReadOnlyInspectionRetry.Result result = ReadOnlyInspectionRetry.retryIfNeeded(
+                "I cannot inspect from here.",
+                messages(request),
+                plan(TaskContractResolver.fromUserRequest(request), ExecutionPhase.INSPECT),
+                workspace,
+                ctx,
+                ignored -> legacyStoppedTextToolResult(readJson));
+
+        assertNotNull(result.loopResult(), "the textual proposal should reach the guarded loop");
+        assertEquals(List.of(), result.loopResult().readPaths());
+        assertEquals(0, result.loopResult().toolOutcomes().stream()
+                .filter(ToolCallLoop.ToolOutcome::success)
+                .count());
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertTrue(trace.events().stream().noneMatch(event ->
+                "TOOL_EXECUTED".equals(event.type())));
+        TurnTraceEvent rejected = trace.events().stream()
+                .filter(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        @SuppressWarnings("unchecked")
+        var authority = (java.util.Map<String, Object>)
+                rejected.data().get("executionAuthority");
+        assertEquals("REJECTED", authority.get("status"));
+        assertEquals("PROVIDER_TOOL_MODE_MISMATCH", authority.get("reasonCode"));
     }
 
     @Test
@@ -245,6 +298,28 @@ class ReadOnlyInspectionRetryTest {
                 .build();
     }
 
+    private static Context providerContext(Path workspace, LlmClient llm) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        return Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(processor, 5))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+    }
+
+    private static List<ToolSpec> specsFrom(ToolRegistry registry) {
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
+    }
+
     private static List<ChatMessage> messages(String request) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system("You are Talos."));
@@ -252,7 +327,7 @@ class ReadOnlyInspectionRetryTest {
         return messages;
     }
 
-    private static LlmClient.StreamResult providerTextToolResult(String text) {
+    private static LlmClient.StreamResult legacyStoppedTextToolResult(String text) {
         ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
                 ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
                 ProviderResponseCapture.Purpose.TURN_RESPONSE);

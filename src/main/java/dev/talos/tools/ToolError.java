@@ -27,6 +27,7 @@ public record ToolError(String code, String message, ToolFailureReason reason) {
     public static final String TOOL_ERROR     = "TOOL_ERROR";
     public static final String DENIED         = "DENIED";
     public static final String UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT";
+    public static final String INVALID_AUTHORITY = "INVALID_AUTHORITY";
 
     public static ToolError invalidParams(String message) {
         return new ToolError(INVALID_PARAMS, message);
@@ -59,6 +60,13 @@ public record ToolError(String code, String message, ToolFailureReason reason) {
 
     public static ToolError denied(ToolFailureReason reason, String message) {
         return new ToolError(DENIED, message, reason);
+    }
+
+    public static ToolError invalidAuthority(
+            ToolFailureReason reason,
+            String message
+    ) {
+        return new ToolError(INVALID_AUTHORITY, message, reason);
     }
 }
 

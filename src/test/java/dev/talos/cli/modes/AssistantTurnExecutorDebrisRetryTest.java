@@ -2,9 +2,13 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
 import dev.talos.spi.types.ChatMessage;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -21,6 +25,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * rescues the turn instead of returning the no-action notice.
  */
 class AssistantTurnExecutorDebrisRetryTest {
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        ProviderAuthorityTestTrace.begin("debris-retry", testInfo);
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        ProviderAuthorityTestTrace.clear();
+    }
 
     @Test
     void malformedDebrisOnMutationTurnIsRescuedByBoundedRetry(@TempDir Path workspace)
@@ -37,7 +50,7 @@ class AssistantTurnExecutorDebrisRetryTest {
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
         var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         // turn 1: malformed protocol debris (single-quoted JSON)
                         """
                         {

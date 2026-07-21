@@ -748,10 +748,13 @@ class LlmClientProviderProvenanceTest {
     private static ChatRequestControls requiredControls(int cap) {
         return new ChatRequestControls(
                 ToolChoiceMode.REQUIRED,
-                "talos.write_file",
+                "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of()).withMaxOutputTokens(cap);
+                List.of())
+                .withMaxOutputTokens(cap)
+                .withToolAuthorityMode(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
     }
 
     private static final class FixedResolver implements LlmEngineResolver {

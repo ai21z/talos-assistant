@@ -6,6 +6,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.core.util.UiChrome;
+import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
@@ -13,14 +14,20 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,6 +51,8 @@ class AssistantTurnExecutorAbortTruthTest {
             """;
     private static final String TOOL_JSON_THEN_ABORT_MARKER =
             PASS_2B_TOOL_JSON_PARTIAL + "\n[turn aborted: stream transport failed after partial output]";
+    private static final String READ_TOOL_JSON_PARTIAL =
+            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}";
 
     @Test
     void bufferedRepetitionAbortRecordsCanonicalReasonWithoutPartialOutput(@TempDir Path workspace) {
@@ -527,6 +536,114 @@ class AssistantTurnExecutorAbortTruthTest {
     }
 
     @Test
+    void streamingTransportFailureWithCompleteReadToolJsonDoesNotAuthorizeExecution(
+            @TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "must not be read\n");
+        LlmClient llm = ScriptedNativeLlmClient.transientTextToolAfterPartialOutput(
+                READ_TOOL_JSON_PARTIAL);
+        List<String> chunks = new ArrayList<>();
+        ToolCallStreamFilter streamFilter = new ToolCallStreamFilter(chunks::add);
+        AtomicInteger approvals = new AtomicInteger();
+        ApprovalGate gate = (description, detail) -> {
+            approvals.incrementAndGet();
+            return true;
+        };
+        ToolRegistry registry = readRegistry();
+        Context ctx = Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .streamSink(streamFilter)
+                .onStreamComplete(() -> { })
+                .toolRegistry(registry)
+                .nativeToolSpecs(specsFrom(registry))
+                .toolCallLoop(new ToolCallLoop(
+                        new TurnProcessor(null, gate, registry), 1))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-abort-streaming-complete-tool-json",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Explain briefly.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Explain briefly."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(out.streamed(), "the read-only request should use the streaming path");
+            assertTrue(out.text().contains("retry-output"),
+                    "a safely buffered failed attempt may be replaced by a later provider answer");
+            assertFalse(out.text().contains("talos.read_file"), out.text());
+            assertFalse(String.join("", chunks).contains("talos.read_file"),
+                    "raw tool protocol must not reach the streamed surface: " + chunks);
+            assertEquals(0, approvals.get(), "unsettled provider output must not request approval");
+            assertTrue(trace.events().stream().noneMatch(event ->
+                    "TOOL_EXECUTED".equals(event.type())));
+            assertTrue(String.join("", chunks).contains("retry-output"), chunks.toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void bufferedTransportFailureWithCompleteWriteToolJsonDoesNotAuthorizeExecution(
+            @TempDir Path workspace) {
+        LlmClient llm = ScriptedNativeLlmClient.transientTextToolAfterPartialOutput(
+                PASS_2B_TOOL_JSON_PARTIAL);
+        AtomicInteger approvals = new AtomicInteger();
+        ApprovalGate gate = (description, detail) -> {
+            approvals.incrementAndGet();
+            return true;
+        };
+        ToolRegistry registry = writeRegistry();
+        Context ctx = Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .approvalGate(gate)
+                .toolRegistry(registry)
+                .nativeToolSpecs(specsFrom(registry))
+                .toolCallLoop(new ToolCallLoop(
+                        new TurnProcessor(null, gate, registry), 1))
+                .build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-abort-buffered-complete-tool-json",
+                "sid",
+                1,
+                "2026-07-09T00:00:00Z",
+                "workspace-hash",
+                "agent",
+                "llama_cpp",
+                "test-model",
+                "Create the files.");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages("Create the files."),
+                    workspace,
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertFalse(out.text().contains("talos.write_file"), out.text());
+            assertEquals(0, approvals.get(), "unsettled provider output must not request approval");
+            assertFalse(Files.exists(workspace.resolve("index.html")));
+            assertFalse(Files.exists(workspace.resolve("style.css")));
+            assertTrue(trace.events().stream().noneMatch(event ->
+                    "TOOL_EXECUTED".equals(event.type())));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
     void normalToolTurnMayMentionAbortMarkerInsideToolContent(@TempDir Path workspace) {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 List.of(new LlmClient.StreamResult(
@@ -574,5 +691,26 @@ class AssistantTurnExecutorAbortTruthTest {
         messages.add(ChatMessage.system("You are Talos."));
         messages.add(ChatMessage.user(request));
         return messages;
+    }
+
+    private static ToolRegistry writeRegistry() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        return registry;
+    }
+
+    private static ToolRegistry readRegistry() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        return registry;
+    }
+
+    private static List<ToolSpec> specsFrom(ToolRegistry registry) {
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
     }
 }

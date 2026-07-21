@@ -101,6 +101,21 @@ class ToolProtocolTextTest {
     }
 
     @Test
+    void containsToolCallsMatchesAdjacentJsonParserLanguage() {
+        String adjacent = """
+                {"name":"talos.edit_file","arguments":{"path":"a.css","old_string":".a { color: red; }","new_string":".a { color: blue; }"}}{"name":"talos.edit_file","arguments":{"path":"b.css","old_string":".b { margin: 0; }","new_string":".b { margin: 1px; }"}}
+                """;
+
+        assertTrue(ToolProtocolText.containsToolCalls(adjacent));
+        assertFalse(ToolProtocolText.containsToolCalls(
+                "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"a.css\","
+                        + "\"old_string\":\".a { color: red; }\""));
+        assertFalse(ToolProtocolText.containsToolCalls(
+                "{\"name\":\"ordinary\",\"arguments\":{\"value\":\"{not a tool}\"}}"
+                        + "{\"name\":\"also-ordinary\",\"arguments\":{}}"));
+    }
+
+    @Test
     void foreignNamedXmlBlocksAreNotDetectedAsToolProtocol() {
         assertFalse(ToolProtocolText.containsToolCalls(
                 "<tool_call>{\"name\": \"demo-app\", \"arguments\": {}}</tool_call>"));

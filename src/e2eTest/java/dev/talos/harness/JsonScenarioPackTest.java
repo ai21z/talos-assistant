@@ -443,20 +443,23 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/35-no-tool-mutation-retry-create-file-alias.json] 35: no-tool mutation retry executes create_file alias")
-    void noToolMutationRetryExecutesCreateFileAlias() {
+    @DisplayName("[json-scenario:scenarios/35-no-tool-mutation-retry-create-file-alias.json] 35: no-tool mutation retry rejects create_file alias outside selected surface")
+    void noToolMutationRetryRejectsCreateFileAliasOutsideSelectedSurface() {
         var loaded = JsonScenarioLoader.load("scenarios/35-no-tool-mutation-retry-create-file-alias.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
-            result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("File write/readback passed")
-                    .assertAnswerContains("task completion was not verified")
-                    .assertAnswerNotContains("Static verification: passed")
-                    .assertAnswerContains("script.js")
-                    .assertFileContains("script.js", "retry-create-file-alias");
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("mutating tool call failed")
+                    .assertAnswerContains("No successful file change was applied")
+                    .assertAnswerNotContains("File write/readback passed")
+                    .assertFileAbsent("script.js");
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type())
+                            && event.data().toString().contains("PROVIDER_TOOL_SURFACE_MISMATCH")),
+                    result.localTrace().events().toString());
         }
     }
 
@@ -909,12 +912,16 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("invalid tool-call payload")
-                    .assertAnswerContains("No file changes were applied")
+                    .assertLocalTraceRecorded()
+                    .assertAnswerContains("[Action obligation failed: no file was changed in this turn.]")
                     .assertAnswerNotContains("talos.edit_file")
                     .assertAnswerNotContains("old_string")
                     .assertFileContains("script.js", "document.getElementById('bmi-form')")
                     .assertFileNotContains("script.js", "document.querySelector(\"button\")");
+            assertFalse(result.localTrace().events().stream().anyMatch(event ->
+                            "TOOL_CALL_PARSED".equals(event.type())
+                                    || "TOOL_EXECUTED".equals(event.type())),
+                    result.localTrace().events().toString());
         }
     }
 
@@ -1389,7 +1396,7 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("I apologize")
                     .assertLocalTraceRecorded();
             assertEquals("DIRECTORY_LISTING", result.localTrace().taskContract().type());
-            assertEquals(List.of("talos.list_dir"), result.localTrace().toolSurface().nativeTools());
+            assertEquals(List.of(), result.localTrace().toolSurface().nativeTools());
             assertEquals(List.of("talos.list_dir"), result.localTrace().toolSurface().promptTools());
             assertTrue(result.localTrace().events().stream()
                     .anyMatch(event -> "TOOL_EXECUTED".equals(event.type())

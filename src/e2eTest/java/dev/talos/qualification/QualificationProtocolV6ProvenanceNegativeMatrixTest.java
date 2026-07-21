@@ -3,6 +3,7 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.spi.types.ProviderResponseCapture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -79,6 +80,121 @@ class QualificationProtocolV6ProvenanceNegativeMatrixTest {
         data(wrongProposalHash, "PROVIDER_TOOL_PROPOSAL_CAPTURED")
                 .put("argumentsHash", "not-a-hash");
         assertLedgerRejected(wrongProposalHash, "lowercase SHA-256");
+    }
+
+    @Test
+    void traceFourRequiresOneCanonicalAuthorityModeAcrossThePhysicalRequest() {
+        assertEquals(
+                dev.talos.spi.types.ProviderResponseCapture.ToolAuthorityMode
+                        .PROVIDER_TEXT_JSON,
+                QualificationProviderAttemptLedger.parse(validTextToolTrace())
+                        .generations().getFirst().toolAuthorityMode());
+
+        ObjectNode missing = validTextToolTrace();
+        data(missing, "GENERATION_RESPONSE_CAPTURED").remove("toolAuthorityMode");
+        assertLedgerRejected(missing, "data keys differ");
+
+        ObjectNode coerced = validTextToolTrace();
+        data(coerced, "GENERATION_STARTED").put("toolAuthorityMode", 1);
+        assertLedgerRejected(coerced, "must be text");
+
+        ObjectNode unknown = validTextToolTrace();
+        data(unknown, "GENERATION_STARTED")
+                .put("toolAuthorityMode", "PROVIDER_MAGIC");
+        assertLedgerRejected(unknown, "toolAuthorityMode has unknown value");
+
+        ObjectNode crossEvent = validTextToolTrace();
+        data(crossEvent, "GENERATION_RESPONSE_CAPTURED")
+                .put("toolAuthorityMode", "NONE");
+        assertLedgerRejected(
+                crossEvent,
+                "source/purpose/tool authority differs from generation start");
+
+        ObjectNode nonForeground = retypePhysicalGeneration(
+                validTextToolTrace(),
+                "BACKGROUND_PROVIDER",
+                "BACKGROUND_MAINTENANCE");
+        assertLedgerRejected(
+                nonForeground,
+                "provider tool authority mode is attached to a non-foreground turn");
+
+        ObjectNode nativeDispatchWithoutTools = validNativeToolTrace();
+        data(nativeDispatchWithoutTools, "GENERATION_REQUEST_DISPATCHED")
+                .set("dispatchedNativeTools", QualificationJson.tree(List.of()));
+        assertLedgerRejected(
+                nativeDispatchWithoutTools,
+                "native tool authority dispatch lacks native tool names");
+
+        ObjectNode textDispatchWithNativeTools = validTextToolTrace();
+        data(textDispatchWithNativeTools, "GENERATION_REQUEST_DISPATCHED")
+                .set("dispatchedNativeTools",
+                        QualificationJson.tree(List.of("talos.read_file")));
+        assertLedgerRejected(
+                textDispatchWithNativeTools,
+                "non-native tool authority dispatch carries native tool names");
+    }
+
+    @Test
+    void retryCannotSubstituteTheGenerationSelectedToolSurface() {
+        ObjectNode trace = validRetryModelTrace();
+        for (JsonNode event : events(trace)) {
+            JsonNode eventData = event.path("data");
+            if (!eventData.has("toolAuthorityMode")) continue;
+            ((ObjectNode) eventData).put("toolAuthorityMode", "PROVIDER_NATIVE");
+            if ("GENERATION_REQUEST_DISPATCHED".equals(
+                    event.path("type").asText(""))) {
+                ((ObjectNode) eventData).set(
+                        "dispatchedNativeTools",
+                        QualificationJson.tree(List.of("talos.read_file")));
+                ((ObjectNode) eventData).set(
+                        "toolAuthoritySurface",
+                        QualificationJson.tree(toolAuthoritySurface(
+                                "PROVIDER_NATIVE", List.of("talos.read_file"))));
+            }
+        }
+        assertEquals(2, QualificationProviderAttemptLedger.parse(trace)
+                .generations().getFirst().attempts().size());
+
+        ObjectNode substituted = trace.deepCopy();
+        int secondDispatch = secondEventIndex(
+                substituted, "GENERATION_REQUEST_DISPATCHED");
+        ObjectNode dispatchData = (ObjectNode) events(substituted)
+                .get(secondDispatch).path("data");
+        dispatchData.set(
+                "dispatchedNativeTools",
+                QualificationJson.tree(List.of("talos.write_file")));
+        dispatchData.set(
+                "toolAuthoritySurface",
+                QualificationJson.tree(toolAuthoritySurface(
+                        "PROVIDER_NATIVE", List.of("talos.write_file"))));
+
+        assertLedgerRejected(
+                substituted,
+                "provider retry substituted the generation authority surface");
+    }
+
+    @Test
+    void traceThreePhysicalLedgerRemainsReadableWithoutAuthorityMode() {
+        ObjectNode trace = validModelTrace();
+        trace.put(
+                "schemaVersion",
+                QualificationProviderAttemptLedger.PRE_AUTHORITY_TRACE_SCHEMA_VERSION);
+        for (JsonNode event : events(trace)) {
+            if (PHYSICAL_EVENTS.contains(event.path("type").asText(""))
+                    || "PROVIDER_TOOL_PROPOSAL_CAPTURED".equals(
+                            event.path("type").asText(""))) {
+                ((ObjectNode) event.path("data")).remove("toolAuthorityMode");
+                ((ObjectNode) event.path("data")).remove("toolAuthoritySurface");
+            }
+        }
+
+        QualificationProviderAttemptLedger.Ledger ledger =
+                QualificationProviderAttemptLedger.parse(trace);
+
+        assertEquals(1, ledger.generations().size());
+        assertEquals(
+                dev.talos.spi.types.ProviderResponseCapture.ToolAuthorityMode.NONE,
+                ledger.generations().getFirst().toolAuthorityMode());
     }
 
     @Test
@@ -269,7 +385,9 @@ class QualificationProtocolV6ProvenanceNegativeMatrixTest {
         ObjectNode badSource = validModelTrace();
         data(badSource, "GENERATION_REQUEST_DISPATCHED")
                 .put("source", "BACKGROUND_PROVIDER");
-        assertLedgerRejected(badSource, "source/purpose differs from generation start");
+        assertLedgerRejected(
+                badSource,
+                "source/purpose/tool authority differs from generation start");
 
         List<FieldMutation> derivedContradictions = List.of(
                 new FieldMutation("providerBacked", false),
@@ -595,6 +713,25 @@ class QualificationProtocolV6ProvenanceNegativeMatrixTest {
         return modelTrace(physical, ATTEMPT_ID);
     }
 
+    private static ObjectNode validTextToolTrace() {
+        List<Map<String, Object>> physical = new ArrayList<>();
+        physical.add(event("GENERATION_STARTED", generationData(1)));
+        physical.add(event("GENERATION_ATTEMPT_STARTED", attemptData(
+                2, ATTEMPT_ID, 1, "PRIMARY", "NONE", false)));
+        physical.add(event("GENERATION_REQUEST_DISPATCHED", attemptData(
+                3, ATTEMPT_ID, 1, "PRIMARY", "NONE", true)));
+        Map<String, Object> response = responseData(
+                4, ATTEMPT_ID, 1, "PRIMARY", "NONE", "PROVIDER_EOS",
+                false, false, true);
+        response.put("textualToolCallPresent", true);
+        physical.add(event("GENERATION_RESPONSE_CAPTURED", response));
+        Map<String, Object> completed = completionData(
+                5, ATTEMPT_ID, 1, "PROVIDER_EOS", true);
+        completed.put("providerToolCallEligible", true);
+        physical.add(event("GENERATION_COMPLETED", completed));
+        return modelTrace(physical, ATTEMPT_ID, "PROVIDER_TEXT_JSON");
+    }
+
     private static ObjectNode failedTraceWithoutAttempt(String generationFailure) {
         List<Map<String, Object>> physical = new ArrayList<>();
         physical.add(event("GENERATION_STARTED", generationData(1)));
@@ -751,6 +888,33 @@ class QualificationProtocolV6ProvenanceNegativeMatrixTest {
     private static ObjectNode modelTrace(
             List<Map<String, Object>> physical,
             String selectedAttemptId) {
+        boolean nativeAuthorityMode = physical.stream().anyMatch(event ->
+                "PROVIDER_TOOL_PROPOSAL_CAPTURED".equals(event.get("type")));
+        String toolAuthorityMode =
+                nativeAuthorityMode ? "PROVIDER_NATIVE" : "NONE";
+        return modelTrace(physical, selectedAttemptId, toolAuthorityMode);
+    }
+
+    private static ObjectNode modelTrace(
+            List<Map<String, Object>> physical,
+            String selectedAttemptId,
+            String toolAuthorityMode) {
+        boolean nativeAuthorityMode = "PROVIDER_NATIVE".equals(toolAuthorityMode);
+        for (Map<String, Object> event : physical) {
+            Object rawData = event.get("data");
+            if (!(rawData instanceof Map<?, ?> rawMap)) continue;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) rawMap;
+            data.put("toolAuthorityMode", toolAuthorityMode);
+            if ("GENERATION_REQUEST_DISPATCHED".equals(event.get("type"))) {
+                data.putIfAbsent("providerBodyHash", "sha256:" + "e".repeat(64));
+                data.putIfAbsent("dispatchedNativeTools",
+                        nativeAuthorityMode ? List.of("talos.read_file") : List.of());
+                data.putIfAbsent(
+                        "toolAuthoritySurface",
+                        toolAuthoritySurface(toolAuthorityMode));
+            }
+        }
         List<Map<String, Object>> all = new ArrayList<>(physical);
         all.add(event("TERMINAL_ANSWER_SELECTED", Map.ofEntries(
                 Map.entry("answerHash", ANSWER_HASH),
@@ -766,6 +930,32 @@ class QualificationProtocolV6ProvenanceNegativeMatrixTest {
         return (ObjectNode) QualificationJson.tree(Map.of(
                 "schemaVersion", QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION,
                 "events", all));
+    }
+
+    private static Map<String, Object> toolAuthoritySurface(String toolAuthorityMode) {
+        return toolAuthoritySurface(
+                toolAuthorityMode,
+                "NONE".equals(toolAuthorityMode)
+                        ? List.of()
+                        : List.of("talos.read_file"));
+    }
+
+    private static Map<String, Object> toolAuthoritySurface(
+            String toolAuthorityMode,
+            List<String> selectedToolNames
+    ) {
+        boolean bound = !"NONE".equals(toolAuthorityMode);
+        List<String> exactSelectedToolNames = bound ? List.copyOf(selectedToolNames) : List.of();
+        List<String> selectedToolNameHashes = exactSelectedToolNames.stream()
+                .map(ProviderResponseCapture::toolNameHash)
+                .toList();
+        return Map.of(
+                "schemaVersion", 1,
+                "bound", bound,
+                "toolChoiceMode", bound ? "AUTO" : "NONE",
+                "namedToolNameHash", ProviderResponseCapture.toolNameHash(""),
+                "selectedToolNameHashes", selectedToolNameHashes,
+                "authorizedToolNameHashes", selectedToolNameHashes);
     }
 
     private static ObjectNode deterministicTrace(
@@ -793,7 +983,8 @@ class QualificationProtocolV6ProvenanceNegativeMatrixTest {
                 Map.entry("ledgerSequence", sequence),
                 Map.entry("generationId", GENERATION_ID),
                 Map.entry("source", "FOREGROUND_PROVIDER"),
-                Map.entry("purpose", "TURN_RESPONSE")));
+                Map.entry("purpose", "TURN_RESPONSE"),
+                Map.entry("toolAuthorityMode", "NONE")));
     }
 
     private static Map<String, Object> attemptData(

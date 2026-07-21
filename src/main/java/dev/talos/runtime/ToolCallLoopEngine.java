@@ -46,6 +46,46 @@ final class ToolCallLoopEngine {
             Path workspace,
             RuntimeTurnContext ctx
     ) {
+        return run(
+                initialAnswer,
+                nativeToolCalls,
+                responseReceipt,
+                LocalTurnTraceCapture.ToolCallSource.PROVIDER_RESPONSE,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE,
+                messages,
+                workspace,
+                ctx);
+    }
+
+    ToolCallLoop.LoopResult runRuntimeDeterministic(
+            String initialAnswer,
+            List<NativeToolCall> nativeToolCalls,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason reason,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        return run(
+                initialAnswer,
+                nativeToolCalls,
+                ProviderResponseCapture.Receipt.none(),
+                LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC,
+                reason,
+                messages,
+                workspace,
+                ctx);
+    }
+
+    private ToolCallLoop.LoopResult run(
+            String initialAnswer,
+            List<NativeToolCall> nativeToolCalls,
+            ProviderResponseCapture.Receipt responseReceipt,
+            LocalTurnTraceCapture.ToolCallSource initialSource,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeReason,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
         if (initialAnswer == null) initialAnswer = "";
 
         boolean hasNative = nativeToolCalls != null && !nativeToolCalls.isEmpty();
@@ -70,6 +110,9 @@ final class ToolCallLoopEngine {
                 toolSession,
                 maxIterations,
                 turnProcessor.toolRegistry().aliasRescueCount());
+        if (initialSource == LocalTurnTraceCapture.ToolCallSource.RUNTIME_DETERMINISTIC) {
+            state.setRuntimeNativeCalls(initialAnswer, nativeToolCalls, runtimeReason);
+        }
 
         ToolCallParseStage parseStage = new ToolCallParseStage();
         ToolCallExecutionStage executionStage = new ToolCallExecutionStage(turnProcessor, progressSink, strict);
@@ -77,7 +120,7 @@ final class ToolCallLoopEngine {
 
         while (state.iterations < maxIterations) {
             ToolCallParseStage.ParsedCalls parsed =
-                    parseStage.parse(state.currentText, state.currentNativeCalls, state.iterations + 1);
+                    parseStage.parse(state, state.iterations + 1);
             if (!parsed.useNativePath() && !parsed.useTextPath()) {
                 if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
                     break;

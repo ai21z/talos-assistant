@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -85,6 +86,26 @@ public record TurnTraceEvent(
             String providerAttemptId,
             ProviderResponseCapture.ToolProposalReceipt proposal,
             String toolCallId) {
+        return toolCallParsed(
+                timestamp,
+                phase,
+                call,
+                providerGenerationId,
+                providerAttemptId,
+                proposal,
+                toolCallId,
+                Map.of());
+    }
+
+    public static TurnTraceEvent toolCallParsed(
+            String timestamp,
+            String phase,
+            ToolCall call,
+            String providerGenerationId,
+            String providerAttemptId,
+            ProviderResponseCapture.ToolProposalReceipt proposal,
+            String toolCallId,
+            Map<String, Object> executionAuthority) {
         Map<String, Object> extra = new LinkedHashMap<>();
         addToolCallId(extra, toolCallId);
         if (providerGenerationId != null && !providerGenerationId.isBlank()) {
@@ -108,7 +129,28 @@ public record TurnTraceEvent(
                     ProviderResponseCapture.canonicalArgumentsHash(
                             call == null ? Map.of() : call.parameters()));
         }
+        if (executionAuthority != null && !executionAuthority.isEmpty()) {
+            extra.put("executionAuthority", Map.copyOf(executionAuthority));
+        }
         return toolCallEvent("TOOL_CALL_PARSED", timestamp, phase, call, extra);
+    }
+
+    public static TurnTraceEvent toolCallAuthorityRejected(
+            String timestamp,
+            String phase,
+            ToolCall call,
+            String candidateKind,
+            String reasonCode
+    ) {
+        Map<String, Object> authority = new LinkedHashMap<>();
+        authority.put("schemaVersion", 1);
+        authority.put("status", "REJECTED");
+        authority.put("kind", safe(candidateKind));
+        authority.put("reasonCode", safe(reasonCode));
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("executionAuthority", Map.copyOf(authority));
+        return toolCallEvent(
+                "TOOL_CALL_AUTHORITY_REJECTED", timestamp, phase, call, extra);
     }
 
     public static TurnTraceEvent toolCallBlocked(String timestamp, String phase, ToolCall call, String reason) {
@@ -261,11 +303,13 @@ public record TurnTraceEvent(
     }
 
     private static void addToolNameSummary(Map<String, Object> out, ToolCall call) {
-        String raw = call == null ? "" : safe(call.toolName());
+        String raw = call == null ? "" : Objects.toString(call.toolName(), "");
+        String canonical = safeToolName(call);
         ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(raw);
         out.put("toolNameClassification", raw.isBlank() ? "BLANK" : decision.status().name());
         out.put("toolNameHash", ProviderResponseCapture.toolNameHash(raw));
         out.put("toolNameChars", raw.length());
+        out.put("canonicalToolNameHash", ProviderResponseCapture.toolNameHash(canonical));
     }
 
     private static void summarizeTextParam(Map<String, Object> out, String label, String value) {

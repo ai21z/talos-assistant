@@ -13,6 +13,7 @@ import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.ActiveToolAuthorityTraceTest;
 import dev.talos.runtime.trace.TurnTraceEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -37,7 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class TurnProcessorTest {
+class TurnProcessorTest extends ActiveToolAuthorityTraceTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -1428,7 +1429,7 @@ class TurnProcessorTest {
 
         assertNotNull(result.audit().localTrace());
         LocalTurnTrace trace = result.audit().localTrace();
-        assertEquals(3, trace.schemaVersion());
+        assertEquals(4, trace.schemaVersion());
         assertFalse(trace.traceId().isBlank());
         assertTrue(trace.events().stream().anyMatch(event -> "TRACE_STARTED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "ROUTED_ANSWER_CAPTURED".equals(event.type())));
@@ -1593,7 +1594,7 @@ class TurnProcessorTest {
         ToolResult result = processor.executeToolAfterParsed(session, call, ctx, null);
 
         assertFalse(result.success());
-        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolError.INVALID_AUTHORITY, result.error().code());
         assertFalse(Files.exists(workspace.resolve("bypass.txt")));
         assertEquals(0, approvals.get());
     }
@@ -1623,13 +1624,17 @@ class TurnProcessorTest {
                 "test-model",
                 "write substituted.txt");
         LocalTurnTraceCapture.ParsedToolCallPermit permit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", recorded, null, 0);
+                LocalTurnTraceCapture.beginRuntimeToolCallForExecution(
+                        "tool_loop",
+                        recorded,
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                .DIRECT_RUNTIME_API)
+                        .permit();
 
         ToolResult result = processor.executeToolAfterParsed(session, substituted, ctx, permit);
 
         assertFalse(result.success());
-        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertEquals(ToolError.INVALID_AUTHORITY, result.error().code());
         assertFalse(Files.exists(workspace.resolve("substituted.txt")));
         assertEquals(0, approvals.get());
     }

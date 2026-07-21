@@ -102,6 +102,12 @@ final class ExactWriteContextFallback {
     }
 
     private static CurrentTurnPlan compactPlan(CurrentTurnPlan plan) {
+        List<String> nativeTools = plan.nativeTools().contains("talos.write_file")
+                ? List.of("talos.write_file")
+                : List.of();
+        List<String> promptTools = plan.promptTools().contains("talos.write_file")
+                ? List.of("talos.write_file")
+                : List.of();
         return new CurrentTurnPlan(
                 plan.taskContract(),
                 plan.originalUserRequest(),
@@ -109,8 +115,8 @@ final class ExactWriteContextFallback {
                 plan.phaseFinal(),
                 plan.actionObligation(),
                 plan.taskExpectations(),
-                List.of("talos.write_file"),
-                List.of("talos.write_file"),
+                nativeTools,
+                promptTools,
                 plan.blockedTools(),
                 plan.evidenceObligation(),
                 plan.outputObligation(),
@@ -165,6 +171,7 @@ final class ExactWriteContextFallback {
                 safe.jsonSchema(),
                 tags,
                 safe.sampling(),
-                0);
+                0,
+                safe.toolAuthorityMode());
     }
 }

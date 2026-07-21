@@ -42,7 +42,7 @@ final class DeniedMutationResponseOnlySynthesizer {
 
         try {
             LlmClient.StreamResult terminal =
-                    state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
+                    state.ctx.llm().chatFull(state.messages, java.util.List.of());
             String text = terminal.text() == null ? "" : terminal.text();
             if (terminal.hasToolCalls()) {
                 return Result.deterministicStop();

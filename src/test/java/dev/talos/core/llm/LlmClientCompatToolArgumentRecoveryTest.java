@@ -6,6 +6,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -90,7 +91,9 @@ class LlmClientCompatToolArgumentRecoveryTest {
                 "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("required-mutation"));
+                List.of("required-mutation"))
+                .withToolAuthorityMode(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
     }
 
     private static ToolSpec writeSpec() {

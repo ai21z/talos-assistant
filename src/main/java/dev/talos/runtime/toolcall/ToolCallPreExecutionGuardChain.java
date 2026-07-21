@@ -311,16 +311,37 @@ final class ToolCallPreExecutionGuardChain {
                 currentTaskContract,
                 pathHint);
         if (appendLineSteeredEdit != null) {
+            if (!LocalTurnTraceCapture.recordToolCallTransformedForExecution(
+                    parsedPermit,
+                    "tool_loop",
+                    appendLineSteeredEdit,
+                    LocalTurnTraceCapture.ToolCallTransformationReason
+                            .APPEND_WRITE_TO_EDIT)) {
+                String diagnostic = "Tool call blocked because the deterministic edit "
+                        + "target was not in the selected provider tool surface.";
+                int failures = 0;
+                if (ToolFailureStateAccounting.recordFailure(
+                        state, effective, pathHint).failureRecorded()) {
+                    failures++;
+                }
+                ToolResult result = ToolResult.fail(ToolError.invalidAuthority(
+                        ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                        diagnostic));
+                toolResultEmitter.emit(effective.toolName(), result);
+                state.toolOutcomes.add(ToolOutcomeFactory.failedAuthority(
+                        effective, diagnostic));
+                resultMessageAppender.append(
+                        state,
+                        nativePath,
+                        callIndex,
+                        ToolCallSupport.formatToolResult(effective, result));
+                return Result.blocked(effective, pathContext, failures, false);
+            }
             LocalTurnTraceCapture.recordActionObligation(
                     "APPEND_LINE_EDIT_SHAPE",
                     "REPAIRED",
                     "append-shaped write_file steered to talos.edit_file before approval",
                     "APPEND_LINE_WRITE_STEERED_TO_EDIT_FILE");
-            recordTransformation(
-                    parsedPermit,
-                    effective,
-                    appendLineSteeredEdit,
-                    LocalTurnTraceCapture.ToolCallTransformationReason.APPEND_WRITE_TO_EDIT);
             effective = appendLineSteeredEdit;
             pathContext = ToolExecutionPathContext.from(effective);
             workspaceOperationPlan = pathContext.workspaceOperationPlan();

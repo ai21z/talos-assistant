@@ -4,6 +4,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -67,7 +68,24 @@ class ProviderResponseTraceHardeningTest {
     @Test
     void legacyUnboundDispatchOmitsTypedReceiptFields() {
         begin("trace-unbound-dispatch");
-        capture(List.of());
+        ProviderResponseCapture.Generation generation =
+                ProviderResponseCapture.openGeneration(
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.TURN_RESPONSE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched();
+        ProviderResponseCapture.Receipt receipt = attempt.respond(
+                new ProviderResponseCapture.Response(
+                        "",
+                        List.of(),
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Completion.PROVIDER_EOS,
+                        false,
+                        false,
+                        false));
+        generation.complete(receipt);
 
         TurnTraceEvent dispatch = event(
                 LocalTurnTraceCapture.complete(), "GENERATION_REQUEST_DISPATCHED");
@@ -93,7 +111,12 @@ class ProviderResponseTraceHardeningTest {
                                 "talos.read_file", "read", "{\"type\":\"object\"}")));
         ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
                 ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
-                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+                ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file"),
+                        ToolChoiceMode.AUTO,
+                        ""));
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
@@ -267,11 +290,22 @@ class ProviderResponseTraceHardeningTest {
             List<ChatMessage.NativeToolCall> calls) {
         ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
                 ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
-                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+                ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file"),
+                        ToolChoiceMode.AUTO,
+                        ""));
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        attempt.requestDispatched(
+                ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
+                        "provider-response-trace-hardening-body",
+                        List.of(new ToolSpec(
+                                "talos.read_file",
+                                "fixture tool",
+                                "{}"))));
         ProviderResponseCapture.Receipt receipt = attempt.respond(
                 new ProviderResponseCapture.Response(
                         "",

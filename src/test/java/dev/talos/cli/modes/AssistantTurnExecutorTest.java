@@ -31,14 +31,19 @@ import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -55,10 +60,64 @@ class AssistantTurnExecutorTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
 
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        LocalTurnTraceCapture.clear();
+        LocalTurnTraceCapture.begin(
+                "assistant-turn-" + testInfo.getDisplayName().hashCode(),
+                "assistant-turn-tests",
+                1,
+                "2026-07-20T00:00:00Z",
+                "workspace-hash",
+                "test",
+                "llama_cpp",
+                "test-model",
+                testInfo.getDisplayName());
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        LocalTurnTraceCapture.clear();
+    }
+
     private static Context scriptedContext(String... responses) {
         return Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(responses)))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(
+                        List.of(responses)))
                 .build();
+    }
+
+    private static LlmClient textProvider(
+            ToolRegistry registry,
+            List<String> responses
+    ) {
+        LlmClient client =
+                ScriptedNativeLlmClient.textToolFallbackStrings(responses);
+        client.setToolSpecs(registry == null
+                ? List.of()
+                : registry.descriptors().stream()
+                        .map(descriptor -> new ToolSpec(
+                                descriptor.name(),
+                                descriptor.description(),
+                                descriptor.parametersSchema() == null
+                                        ? "{}"
+                                        : descriptor.parametersSchema()))
+                        .toList());
+        return client;
+    }
+
+    private static LlmClient textProvider(
+            ToolRegistry registry,
+            String response
+    ) {
+        return textProvider(registry, List.of(response));
+    }
+
+    private static String jsonToolFences(String... calls) {
+        return Arrays.stream(calls)
+                .map(String::strip)
+                .map(call -> "```json\n" + call + "\n```")
+                .collect(java.util.stream.Collectors.joining("\n"));
     }
 
     private record BlockedSmallTalkCapture(
@@ -331,7 +390,7 @@ class AssistantTurnExecutorTest {
                 0,
                 0);
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted("""
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( """
                         {"name":"talos.read_file","arguments":{"path":"index.html"}}"""))
                 .toolCallLoop(new dev.talos.runtime.ToolCallLoop(new dev.talos.runtime.TurnProcessor(null)))
                 .build();
@@ -353,7 +412,7 @@ class AssistantTurnExecutorTest {
         StringBuilder stream = new StringBuilder();
         var ctx = Context.builder(new Config())
                 .session(sessionWithDebugLevel(DebugLevel.PROMPT))
-                .llm(LlmClient.scripted("hello"))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "hello"))
                 .streamSink(stream::append)
                 .build();
         List<ChatMessage> messages = new ArrayList<>(List.of(
@@ -422,7 +481,7 @@ class AssistantTurnExecutorTest {
         SessionMemory memory = new SessionMemory();
         var ctx = Context.builder(new Config())
                 .memory(memory)
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "I will answer confidently without evidence.",
                         "I read notes.md.")))
                 .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -457,7 +516,7 @@ class AssistantTurnExecutorTest {
                 new dev.talos.runtime.TurnRecord.ToolCallSummary("talos.read_file", "notes.md", true)));
         var ctx = Context.builder(new Config())
                 .memory(memory)
-                .llm(LlmClient.scripted("This model response should not be used."))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "This model response should not be used."))
                 .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                 .build();
         var messages = new ArrayList<ChatMessage>();
@@ -497,12 +556,21 @@ class AssistantTurnExecutorTest {
         var processor = new dev.talos.runtime.TurnProcessor(
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
         var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult(
+                                "",
+                                List.of(new ChatMessage.NativeToolCall(
+                                        "call_write_readme",
+                                        "talos.write_file",
+                                        java.util.Map.of(
+                                                "path", "README.md",
+                                                "content", "# Talos\n\nUsage: run Talos.\n")))),
+                        new LlmClient.StreamResult("Updated README.md.", List.of())),
+                4096);
         var ctx = Context.builder(new Config())
                 .memory(memory)
-                .llm(LlmClient.scripted(List.of(
-                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"README.md\","
-                                + "\"content\":\"# Talos\\n\\nUsage: run Talos.\\n\"}}",
-                        "Updated README.md.")))
+                .llm(recorded.client())
                 .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
@@ -563,7 +631,7 @@ class AssistantTurnExecutorTest {
         memory.setArtifactGoal(goal);
         var ctx = Context.builder(new Config())
                 .memory(memory)
-                .llm(LlmClient.scripted("No problem, we can just chat."))
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "No problem, we can just chat."))
                 .build();
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("system"));
@@ -624,7 +692,7 @@ class AssistantTurnExecutorTest {
             registry.register(new dev.talos.tools.impl.ReadFileTool());
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("Hello. I am doing well."))
+                    .llm(textProvider(registry, "Hello. I am doing well."))
                     .toolRegistry(registry)
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -1017,7 +1085,7 @@ class AssistantTurnExecutorTest {
         var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         var loop = new ToolCallLoop(processor, 3);
         var ctx = Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(
+                .llm(textProvider(registry, List.of(
                         "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
                         "Top-level entries include README.md and script.js.")))
                 .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1082,12 +1150,21 @@ class AssistantTurnExecutorTest {
         var processor = new dev.talos.runtime.TurnProcessor(
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
         var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult(
+                                "",
+                                List.of(new ChatMessage.NativeToolCall(
+                                        "call_write_readme",
+                                        "talos.write_file",
+                                        java.util.Map.of(
+                                                "path", "README.md",
+                                                "content", "# Talos\n\nUsage: run Talos.\n")))),
+                        new LlmClient.StreamResult("Updated README.md.", List.of())),
+                4096);
         var ctx = Context.builder(new Config())
                 .memory(memory)
-                .llm(LlmClient.scripted(List.of(
-                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"README.md\","
-                                + "\"content\":\"# Talos\\n\\nUsage: run Talos.\\n\"}}",
-                        "Updated README.md.")))
+                .llm(recorded.client())
                 .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
@@ -1208,7 +1285,7 @@ class AssistantTurnExecutorTest {
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             String unsupportedNoToolProse = "Create `script.js` with the following JavaScript code.";
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             unsupportedNoToolProse,
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
                                     + "\"content\":\"document.body.dataset.ready = 'true';\"}}",
@@ -1253,7 +1330,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.delete_path\",\"arguments\":{\"path\":\"docs/synthwave-webpage-plan.md\"}}",
                             "Deleted docs/synthwave-webpage-plan.md.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1274,7 +1351,8 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void naturalDeleteRequestAcceptsDeleteFileAlias(@TempDir Path workspace) throws Exception {
+        void naturalDeleteRequestRejectsAliasOutsideExactSelectedSurface(@TempDir Path workspace)
+                throws Exception {
             Files.writeString(workspace.resolve("obsolete-guide.md"), "delete me");
 
             var registry = new dev.talos.tools.ToolRegistry();
@@ -1283,7 +1361,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.delete_file\",\"arguments\":{\"path\":\"obsolete-guide.md\"}}",
                             "Deleted obsolete-guide.md.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1297,9 +1375,9 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
-            assertFalse(Files.exists(workspace.resolve("obsolete-guide.md")));
-            assertTrue(out.text().contains("[Used 1 tool(s):"), out.text());
-            assertFalse(out.text().contains("Unknown tool"), out.text());
+            assertTrue(Files.exists(workspace.resolve("obsolete-guide.md")));
+            assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+            assertFalse(out.text().contains("Deleted obsolete-guide.md"), out.text());
         }
 
         @Test
@@ -1311,7 +1389,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"should-not-be-on-desktop\"}}",
                             "Created should-not-be-on-desktop.")))
                     .memory(memory)
@@ -1438,7 +1516,7 @@ class AssistantTurnExecutorTest {
                     "Move a workspace path.",
                     "{\"type\":\"object\",\"properties\":{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}},\"required\":[\"from\",\"to\"]}");
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"archive\"}}",
                             "I stopped after the policy block.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1456,8 +1534,8 @@ class AssistantTurnExecutorTest {
 
             assertFalse(Files.exists(workspace.resolve("archive")),
                     "hidden talos.mkdir must be rejected before it creates a directory");
-            assertTrue(out.text().contains("talos.mkdir"), out.text());
-            assertTrue(out.text().contains("not allowed") || out.text().contains("policy"), out.text());
+            assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+            assertFalse(out.text().contains("I stopped after the policy block"), out.text());
         }
 
         @Test
@@ -1533,7 +1611,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
                             "I apologize for the confusion. Let's proceed with the task as originally requested.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1565,7 +1643,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
                             "No, docs/summary.md does not mention the private notes marker.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1595,7 +1673,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
                             "Yes - line 1 references the private-notes marker.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1626,7 +1704,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
                             "Yes, docs/summary.md mentions the private notes marker.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -1661,7 +1739,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}\n"
                                     + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
                                     + "\"content\":\"- Prototype shipped.\\n- Onboarding needs clearer guidance.\\n"
@@ -1713,7 +1791,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}\n"
                                     + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"ideas/summary.md\","
                                     + "\"content\":\"- Prototype shipped.\\n- Onboarding needs clearer guidance.\"}}\n"
@@ -1767,9 +1845,10 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
-                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"brief.txt\"}}\n"
-                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\","
+                    .llm(textProvider(registry, List.of(
+                            jsonToolFences(
+                                    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"brief.txt\"}}",
+                                    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\","
                                     + "\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n"
                                     + "  <meta charset=\\\"utf-8\\\">\\n  <title>Neon Harbor</title>\\n"
                                     + "  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n"
@@ -1777,14 +1856,14 @@ class AssistantTurnExecutorTest {
                                     + "    <p>Tour dates and mailing list signup.</p>\\n"
                                     + "    <button id=\\\"join-list\\\">Join list</button>\\n"
                                     + "    <p id=\\\"status\\\"></p>\\n  </main>\\n"
-                                    + "  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\\n\"}}\n"
-                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"styles.css\","
+                                    + "  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\\n\"}}",
+                                    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"styles.css\","
                                     + "\"content\":\"body { font-family: system-ui, sans-serif; background: #101018; color: white; }\\n"
                                     + "main { max-width: 42rem; margin: 3rem auto; }\\n"
-                                    + "button { padding: 0.75rem 1rem; }\\n\"}}\n"
-                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\","
+                                    + "button { padding: 0.75rem 1rem; }\\n\"}}",
+                                    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\","
                                     + "\"content\":\"document.getElementById('join-list').addEventListener('click', () => {\\n"
-                                    + "  document.getElementById('status').textContent = 'Signed up';\\n});\\n\"}}",
+                                    + "  document.getElementById('status').textContent = 'Signed up';\\n});\\n\"}}"),
                             "Created the static page from brief.txt.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
@@ -1833,7 +1912,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}",
                             "I read long-notes.txt.",
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
@@ -1875,7 +1954,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"dijkstra.py\","
                                     + "\"content\":\"# placeholder before source read\"}}\n"
                                     + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"test_dijkstra.py\","
@@ -1939,7 +2018,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}",
                             "I read long-notes.txt.",
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
@@ -1974,7 +2053,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
                                     + "\"content\":\"- Ungrounded summary.\"}}",
                             "Created docs/summary.md.")))
@@ -2020,7 +2099,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I am unable to create or modify files within your workspace directly "
                                     + "as I do not have access to the underlying file system. "
                                     + "However, I can provide code snippets.",
@@ -2056,7 +2135,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I am unable to create or modify files within your workspace directly.",
                             "I still do not have access to the underlying file system.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -2088,7 +2167,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I'm sorry, but I cannot assist with that request.",
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\","
                                     + "\"content\":\"console.log(\\\"repair ok\\\");\"}}",
@@ -2132,7 +2211,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can help with the repair.",
                             "I still need to know what to change.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -2223,7 +2302,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\","
                                     + "\"content\":\"AFTER\"}}",
                             "Updated index.html.")))
@@ -2433,7 +2512,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "The BMI calculator is now working in the browser.",
                             "The BMI calculator is now working in the browser.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -2485,7 +2564,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "Sure, please provide the path of the folder you want me to inspect.",
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
@@ -2515,7 +2594,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void directoryListingWithContentReadIsDowngradedByEvidenceVerifier(@TempDir Path workspace)
+        void directoryListingRejectsContentReadOutsideExactSelectedSurface(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("README.md"), "Hidden project token: ALPHA-742\n");
 
@@ -2526,7 +2605,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             "README.md contains ALPHA-742.")))
@@ -2541,8 +2620,10 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
-            assertTrue(out.text().contains("[Evidence incomplete:"), out.text());
-            assertFalse(out.text().startsWith("Directory entries:"), out.text());
+            assertTrue(out.text().contains("Directory entries:"), out.text());
+            assertTrue(out.text().contains("README.md"), out.text());
+            assertFalse(out.text().contains("ALPHA-742"), out.text());
+            assertTrue(out.text().contains("[1 failed]"), out.text());
         }
 
         @Test
@@ -2564,7 +2645,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"natural-notes\"}}\n"
                                     + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"audit-output\"}}\n"
@@ -2607,7 +2688,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"natural-notes\"}}",
                             "Directory entries:\n- README.md")))
@@ -2645,7 +2726,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"archive\"}}\n"
                                     + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"copies\"}}\n"
                                     + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"scratch/nested/reports\"}}\n"
@@ -2678,7 +2759,7 @@ class AssistantTurnExecutorTest {
             Files.writeString(workspace.resolve("README.md"), "# Project\nActual read content.\n");
 
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("README says Actual read content."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "README says Actual read content."))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -2720,7 +2801,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can summarize the README.",
                             "README evidence gathered: Actual read content.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -2768,7 +2849,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"a.txt\"}}",
                             "I only read a.txt.",
                             "Both targets were gathered: Alpha evidence and Beta evidence.")))
@@ -2821,7 +2902,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(documentExtractionEnabled("word"))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"protected/private-notes.md\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"secrets/private-notes.md\"}}",
                             "Protected content was not read because approval was denied.",
@@ -2873,7 +2954,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             """
                                     The README should add setup steps:
@@ -2910,7 +2991,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             "Keep the existing setup commands `npm install` and `node script.js`, then add a purpose sentence.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -2942,7 +3023,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             """
                                     Add usage instructions.
@@ -2979,7 +3060,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             """
                                     Current Content:
@@ -3020,7 +3101,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             "The README should document that main.py loads data.csv at startup.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -3051,7 +3132,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
                             """
                                     Add a file overview:
@@ -3087,7 +3168,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can read config.json.",
                             "{\"name\": <function-name>, \"arguments\": <args-json-object>}")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -3119,7 +3200,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can summarize the README.",
                             "README evidence gathered: Actual read content.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -3152,7 +3233,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I updated index.html.",
                             "I still cannot edit files here.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -3200,7 +3281,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "I inspected index.html and updated it in this response.",
                             "I still cannot edit files here.")))
@@ -3249,7 +3330,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "I inspected index.html and updated it in this response.",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
@@ -3302,7 +3383,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I reviewed the BMI calculator and it is ready to use.",
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
@@ -3344,7 +3425,7 @@ class AssistantTurnExecutorTest {
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("repair/fix turn inspected files but did not change them"),
+                assertTrue(out.text().contains("[Action obligation failed: no file was changed"),
                         out.text());
                 assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"),
                         out.text());
@@ -3359,7 +3440,7 @@ class AssistantTurnExecutorTest {
                         .filter(event -> "FAILED".equals(event.data().get("status")))
                         .reduce((first, second) -> second)
                         .orElseThrow();
-                assertEquals("REPAIR_INSPECTION_ONLY", failed.data().get("failureKind"));
+                assertFalse(failed.data().containsKey("failureKind"), failed.data().toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -3378,7 +3459,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
@@ -3440,7 +3521,7 @@ class AssistantTurnExecutorTest {
                     {"name":"talos.edit_file","arguments":{"path":"bmi_calculator.js","old_string":"old","new_string":"new"}}
                     """;
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
                             missingEdit,
                             "No file change is required.",
@@ -3511,7 +3592,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
                             "No file change is required.")))
@@ -3584,7 +3665,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
@@ -3636,7 +3717,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
@@ -3681,11 +3762,11 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
-                            """
-                            {"name":"talos.edit_file","arguments":{"path":"scripts.js","old_string":"result.textContent = 'BMI: pending';","new_string":"const height = Number(document.getElementById('height').value) / 100;\\n  const weight = Number(document.getElementById('weight').value);\\n  const bmi = weight / (height * height);\\n  result.textContent = `BMI: ${bmi.toFixed(1)}`;"}}
-                            """)))
+                            jsonToolFences("""
+                            {"name":"talos.edit_file","arguments":{"path":"scripts.js","old_string":"result.textContent = 'BMI: pending';","new_string":"const height = Number(document.getElementById('height').value) / 100;\\n  const weight = Number(document.getElementById('weight').value);\\n  const bmi = weight / (height * height);\\n  result.textContent = 'BMI: ' + bmi.toFixed(1);"}}
+                            """))))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
@@ -3700,8 +3781,9 @@ class AssistantTurnExecutorTest {
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
             assertFalse(out.text().contains("[Action obligation failed:"), out.text());
-            assertTrue(Files.readString(workspace.resolve("scripts.js"))
-                    .contains("result.textContent = `BMI: ${bmi.toFixed(1)}`;"));
+            String actualScript = Files.readString(workspace.resolve("scripts.js"));
+            assertTrue(actualScript.contains("result.textContent = 'BMI: ' + bmi.toFixed(1);"),
+                    actualScript);
         }
 
         @Test
@@ -3725,7 +3807,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I reviewed the BMI calculator and it is ready to use.",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
                             "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"scripts.js\","
@@ -3793,7 +3875,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void repairFixRetryWithPartialMutationAndStaticFullRewriteTargetEditFileGetsTypedWrongToolBreach(
+        void repairFixRetryRejectsSecondMutationOutsideExactContinuationSurfaceAfterPartialWrite(
                 @TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("index.html"), """
                     <!doctype html>
@@ -3813,12 +3895,15 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I reviewed the BMI calculator and it is ready to use.",
-                            """
-                            {"name":"talos.write_file","arguments":{"path":"index.html","content":"<!doctype html>\\n<html>\\n<head><title>Partial Repair</title><link rel=\\"stylesheet\\" href=\\"styles.css\\"></head>\\n<body><button id=\\"calculate\\">Calculate</button><script src=\\"scripts.js\\"></script></body>\\n</html>\\n"}}
-                            {"name":"talos.edit_file","arguments":{"path":"scripts.js","old_string":"console.log('old');\\n","new_string":"console.log('fixed');\\n"}}
-                            """,
+                            jsonToolFences(
+                                    """
+                                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"<!doctype html>\\n<html>\\n<head><title>Partial Repair</title><link rel=\\"stylesheet\\" href=\\"styles.css\\"></head>\\n<body><button id=\\"calculate\\">Calculate</button><script src=\\"scripts.js\\"></script></body>\\n</html>\\n"}}
+                                    """,
+                                    """
+                                    {"name":"talos.edit_file","arguments":{"path":"scripts.js","old_string":"console.log('old');\\n","new_string":"console.log('fixed');\\n"}}
+                                    """),
                             "I fixed scripts.js and everything is complete.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
@@ -3857,11 +3942,13 @@ class AssistantTurnExecutorTest {
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("static repair used the wrong mutation tool"),
+                assertTrue(out.text().contains(
+                                "pending static repair progress was not satisfied"),
                         out.text());
                 assertTrue(out.text().contains("talos.write_file"), out.text());
                 assertTrue(out.text().contains("scripts.js"), out.text());
-                assertTrue(out.text().contains("Some files may have changed before this failure"),
+                assertTrue(out.text().contains(
+                                "Talos applied mutation(s) before this action-obligation block"),
                         out.text());
                 assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"),
                         out.text());
@@ -3872,12 +3959,11 @@ class AssistantTurnExecutorTest {
                 assertEquals("BLOCKED", trace.outcome().status());
                 assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
 
-                var failed = trace.events().stream()
-                        .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
-                        .filter(event -> "FAILED".equals(event.data().get("status")))
-                        .reduce((first, second) -> second)
-                        .orElseThrow();
-                assertEquals("STATIC_REPAIR_WRONG_TOOL", failed.data().get("failureKind"));
+                assertTrue(trace.events().stream()
+                        .filter(event -> "TOOL_CALL_AUTHORITY_REJECTED".equals(event.type()))
+                        .map(event -> (Map<?, ?>) event.data().get("executionAuthority"))
+                        .anyMatch(authority -> "PROVIDER_TOOL_SURFACE_MISMATCH".equals(
+                                authority.get("reasonCode"))), trace.events().toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -3895,7 +3981,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "I inspected index.html and updated it in this response.",
                             "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"index.html\","
@@ -3944,7 +4030,7 @@ class AssistantTurnExecutorTest {
                     null, (description, detail) -> false, registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
                             "The file says SECRET=manual-test.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -3999,7 +4085,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"\\\\.env\"}}",
                             "The approved file says SECRET=manual-test.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4055,7 +4141,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"\\\\.env\"}}",
                             "The file says SECRET=manual-test.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4111,7 +4197,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can help with that.",
                             "The file says SECRET=manual-test.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4169,7 +4255,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can help with that.",
                             "The approved file says SECRET=manual-test.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4224,7 +4310,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can help with that.",
                             "I'm sorry, but I can't provide that.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4284,7 +4370,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can help with that.",
                             "The approved files say SECRET=manual-test and Public project notes.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4342,7 +4428,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config(null))
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I cannot access local files directly.",
                             "The approved file says SECRET=manual-test.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4401,7 +4487,7 @@ class AssistantTurnExecutorTest {
                     registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of("README is the target.")))
+                    .llm(textProvider(registry, List.of("README is the target.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
@@ -4437,7 +4523,7 @@ class AssistantTurnExecutorTest {
         void staleProtectedContentFromEarlierTurnIsSuppressedWithoutFreshApproval(@TempDir Path workspace)
                 throws Exception {
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( List.of(
                             "The earlier approved file said TALOS_T61B_SECRET=visible-only-after-approval.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .build();
@@ -4483,7 +4569,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"slides.pptx\"}}",
                             "The report says PROFIT-ALPHA.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
@@ -4532,7 +4618,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}",
@@ -4653,7 +4739,7 @@ class AssistantTurnExecutorTest {
         void markdownSummaryFromOfficeDocumentSourcesDoesNotTriggerUnsupportedBinaryCreationAnswer(
                 @TempDir Path workspace) {
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("No tool call from provider."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "No tool call from provider."))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -4758,7 +4844,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
@@ -4777,13 +4863,15 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void malformedSingleQuotedToolProtocolIsReplacedWithoutMutation(@TempDir Path workspace)
+        void malformedSingleQuotedToolProtocolFailsActionObligationWithoutMutation(@TempDir Path workspace)
                 throws Exception {
-            Files.writeString(workspace.resolve("scripts.js"), """
+            Path script = workspace.resolve("scripts.js");
+            String initialScript = """
                     document.querySelector("#wrongButton").addEventListener("click", () => {
                       console.log("wrong");
                     });
-                    """);
+                    """;
+            Files.writeString(script, initialScript);
 
             var registry = new dev.talos.tools.ToolRegistry();
             registry.register(new dev.talos.tools.impl.FileEditTool());
@@ -4791,7 +4879,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of("""
+                    .llm(textProvider(registry, List.of("""
                             {
                               "name": "talos.edit_file",
                               "arguments": {
@@ -4813,12 +4901,19 @@ class AssistantTurnExecutorTest {
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, out.text());
+            assertTrue(out.text().startsWith(
+                            "[Action obligation failed: no file was changed in this turn.]"),
+                    out.text());
             assertFalse(out.text().contains("talos.edit_file"), out.text());
             assertFalse(out.text().contains("old_string"), out.text());
-            assertTrue(Files.readString(workspace.resolve("scripts.js")).contains("#wrongButton"),
-                    "malformed protocol must not mutate files");
+            assertFalse(trace.events().stream().anyMatch(event ->
+                            "TOOL_CALL_PARSED".equals(event.type())
+                                    || "TOOL_EXECUTED".equals(event.type())),
+                    trace.events().toString());
+            assertEquals(initialScript, Files.readString(script),
+                    "malformed protocol must leave the target byte-for-byte unchanged");
         }
 
         @Test
@@ -4929,7 +5024,7 @@ class AssistantTurnExecutorTest {
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             String prompt = "Can you look at this page and tell me what is wrong? Do not edit files yet.";
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             """
                             ```json
                             {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Changed</h1>"}}
@@ -4982,7 +5077,7 @@ class AssistantTurnExecutorTest {
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             String prompt = "Can you diagnose this page without changing files?";
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             """
                             ```json
                             {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"<h1>Current</h1>","new_string":"<h1>Changed</h1>"}}
@@ -5035,7 +5130,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
                             "The folder contains index.html, style.css, and script.js, so it is a basic website.",
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
@@ -5089,7 +5184,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"notes\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes/project-notes.md\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes/meeting-notes.md\"}}",
@@ -5150,7 +5245,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I can't provide a definitive answer without being able to see and analyze the files myself.",
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
@@ -5198,7 +5293,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n"
@@ -5235,7 +5330,7 @@ class AssistantTurnExecutorTest {
         void returns_answer_and_marks_streamed() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("streamed answer"))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "streamed answer"))
                     .streamSink(chunks::add)
                     .build();
             var messages = basicMessages();
@@ -5252,7 +5347,7 @@ class AssistantTurnExecutorTest {
         void streamed_text_matches_returned_text() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("streamed parity"))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "streamed parity"))
                     .streamSink(chunks::add)
                     .build();
             var messages = basicMessages();
@@ -5269,7 +5364,7 @@ class AssistantTurnExecutorTest {
         void streamingIdentityQuestionEmitsTalosIdentity() {
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("I'm Qwen, made by Alibaba Cloud."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "I'm Qwen, made by Alibaba Cloud."))
                     .streamSink(chunks::add)
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -5300,7 +5395,7 @@ class AssistantTurnExecutorTest {
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var streamFilter = new dev.talos.runtime.ToolCallStreamFilter(visibleChunks::add);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "I will inspect.\n"
                                     + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "The file contains Hello.")))
@@ -5341,7 +5436,7 @@ class AssistantTurnExecutorTest {
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var streamFilter = new dev.talos.runtime.ToolCallStreamFilter(visibleChunks::add);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "```json\n\n```",
                             "plain second turn")))
@@ -5371,7 +5466,7 @@ class AssistantTurnExecutorTest {
             var visibleChunks = new ArrayList<String>();
             var streamFilter = new dev.talos.runtime.ToolCallStreamFilter(visibleChunks::add);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("""
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( """
                             [
                                 ,
 
@@ -5407,7 +5502,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "Create `script.js` with this JavaScript code.",
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
                                     + "\"content\":\"document.body.dataset.ready = 'stream-buffered';\"}}",
@@ -6093,43 +6188,43 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void mutationRetryExecutesTextFallbackToolCallsInsteadOfReturningRawJson() {
+        void mutationRetryExecutesTextFallbackToolCallsInsteadOfReturningRawJson(
+                @TempDir Path workspace) throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
-            registry.register(new dev.talos.tools.TalosTool() {
-                @Override public String name() { return "talos.list_dir"; }
-                @Override public String description() { return "List files"; }
-                @Override public dev.talos.tools.ToolDescriptor descriptor() {
-                    return new dev.talos.tools.ToolDescriptor(
-                            name(), description(), "{\"path\":\"string\"}");
-                }
-                @Override public dev.talos.tools.ToolResult execute(
-                        dev.talos.tools.ToolCall call, dev.talos.tools.ToolContext ctx) {
-                    return dev.talos.tools.ToolResult.ok("index.html\nstyle.css");
-                }
-            });
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
 
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
-                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
-                            "Listed files from the retry.")))
+                    .llm(textProvider(registry, List.of(
+                            jsonToolFences("""
+                            {"name":"talos.write_file","arguments":{"path":"result.txt","content":"updated\\n"}}
+                            """),
+                            "Updated result.txt from the retry.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("change the file"));
+            messages.add(ChatMessage.user("Create result.txt with updated content."));
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "original answer", 1, 1, List.of("talos.read_file"), messages,
                     0, 0, false, 0, List.of(), 0, 0, 0, 0);
+            CurrentTurnPlan retryPlan = CurrentTurnPlan.compatibility(
+                    TaskContractResolver.fromMessages(messages),
+                    ExecutionPhase.APPLY,
+                    List.of(),
+                    List.of("talos.write_file"),
+                    List.of());
 
             var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
-                    "original answer", messages, loopResult, WS, ctx);
+                    "original answer", messages, retryPlan, loopResult, workspace, ctx);
 
-            assertEquals(ResponseObligationVerifier.deterministicNoActionAnswer(), result.answer());
-            assertTrue(result.actionObligationFailed());
+            assertEquals("updated\n", Files.readString(workspace.resolve("result.txt")));
+            assertEquals(1, result.mutationsInRetry());
+            assertFalse(result.actionObligationFailed());
             assertFalse(result.answer().contains("\"name\""),
                     "text-fallback tool JSON must not leak as the final answer");
             assertNotNull(result.extraSummary(),
@@ -6226,7 +6321,7 @@ class AssistantTurnExecutorTest {
         void mutationRetryForFreshExplicitRequestDoesNotReissueOlderMutationRequest() {
             var processor = new dev.talos.runtime.TurnProcessor(null);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("I still will not call tools."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "I still will not call tools."))
                     .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
                     .build();
 
@@ -6326,7 +6421,7 @@ class AssistantTurnExecutorTest {
         void mutationRetryForRepairFollowUpCanReissuePreviousMutationRequest() {
             var processor = new dev.talos.runtime.TurnProcessor(null);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("I still will not call tools."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "I still will not call tools."))
                     .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
                     .build();
 
@@ -6493,7 +6588,7 @@ class AssistantTurnExecutorTest {
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of("retry should not be called")))
+                    .llm(textProvider(registry, List.of("retry should not be called")))
                     .toolRegistry(registry)
                     .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
                     .build();
@@ -6535,7 +6630,7 @@ class AssistantTurnExecutorTest {
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of("retry should not be called")))
+                    .llm(textProvider(registry, List.of("retry should not be called")))
                     .toolRegistry(registry)
                     .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
                     .build();
@@ -6583,7 +6678,7 @@ class AssistantTurnExecutorTest {
                     null, (description, detail) -> false, registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"index.html\","
                                     + "\"old_string\":\"<div class=\\\"hero-content\\\">\","
                                     + "\"new_string\":\"<div class=\\\"hero-content cta-button\\\">\"}}")))
@@ -7222,7 +7317,7 @@ class AssistantTurnExecutorTest {
             // markers MUST NOT cause the annotation to be appended.
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("This is a short scripted answer."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "This is a short scripted answer."))
                     .streamSink(chunks::add)
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -7247,7 +7342,7 @@ class AssistantTurnExecutorTest {
             // the original streamed content is never replaced or shortened.
             var chunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted("Streamed content for evidence request."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "Streamed content for evidence request."))
                     .streamSink(chunks::add)
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -7916,7 +8011,7 @@ class AssistantTurnExecutorTest {
                         null, new dev.talos.runtime.NoOpApprovalGate(), registry);
                 var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
                 var ctx = Context.builder(new Config())
-                        .llm(LlmClient.scripted(List.of(
+                        .llm(textProvider(registry, List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                                 "index.html imports the BMI script from scripts.js.")))
                         .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
@@ -8602,7 +8697,7 @@ class AssistantTurnExecutorTest {
                         null, new dev.talos.runtime.NoOpApprovalGate(), registry);
                 var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
                 var ctx = Context.builder(new Config())
-                        .llm(LlmClient.scripted(List.of(
+                        .llm(textProvider(registry, List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                                 "The BMI calculation is in scripts.js.")))
                         .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
@@ -8652,7 +8747,7 @@ class AssistantTurnExecutorTest {
                         null, new dev.talos.runtime.NoOpApprovalGate(), registry);
                 var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
                 var ctx = Context.builder(new Config())
-                        .llm(LlmClient.scripted(List.of(
+                        .llm(textProvider(registry, List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
                                 "script.js imports the BMI script.")))
                         .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
@@ -8709,7 +8804,7 @@ class AssistantTurnExecutorTest {
                         null, new dev.talos.runtime.NoOpApprovalGate(), registry);
                 var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
                 var ctx = Context.builder(new Config())
-                        .llm(LlmClient.scripted(List.of(
+                        .llm(textProvider(registry, List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
                                 """
                                 Based on the current contents of the files, `scripts.js` contains the reference to the BMI script.
@@ -9026,7 +9121,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\".missing-button\",\"include\":\"*.html\"}}",
                             "No matches were found in the workspace.")))
                     .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
@@ -9067,7 +9162,7 @@ class AssistantTurnExecutorTest {
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\".missing-button\",\"include\":\"*.css,*.html\"}}",
                             "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\".missing-button\",\"include\":\"*.{html,css}\"}}",
                             "There are no matching selectors in .html or .css files.")))
@@ -9355,7 +9450,7 @@ class AssistantTurnExecutorTest {
             SessionMemory memory = new SessionMemory();
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("The audit changed README.md."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "The audit changed README.md."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9379,7 +9474,7 @@ class AssistantTurnExecutorTest {
             SessionMemory memory = new SessionMemory();
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("README.md and .env changed."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "README.md and .env changed."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9411,7 +9506,7 @@ class AssistantTurnExecutorTest {
                             "Calculator/form task is missing a result output element.")));
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("The audit changed .env and README.md."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "The audit changed .env and README.md."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9465,7 +9560,7 @@ class AssistantTurnExecutorTest {
                             List.of("README.md: exact content mismatch; expected 27 bytes/2 lines, observed 28 bytes/3 lines.")))));
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("Everything is verified now."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "Everything is verified now."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9512,7 +9607,7 @@ class AssistantTurnExecutorTest {
                     List.of()));
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("Everything is verified."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "Everything is verified."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9554,7 +9649,7 @@ class AssistantTurnExecutorTest {
                     List.of()));
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("No uncertainty."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "No uncertainty."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9601,7 +9696,7 @@ class AssistantTurnExecutorTest {
                     List.of("scripts.js: expected target was not successfully mutated.")));
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("I am Talos, a local-first workspace assistant."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "I am Talos, a local-first workspace assistant."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9648,7 +9743,7 @@ class AssistantTurnExecutorTest {
                             "script.js: expected target was not successfully mutated.")));
             var ctx = Context.builder(new Config())
                     .memory(memory)
-                    .llm(LlmClient.scripted("The static verification indicates that everything is present and working."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "The static verification indicates that everything is present and working."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9671,7 +9766,7 @@ class AssistantTurnExecutorTest {
         void verificationStatusQuestionWithoutLoadedVerifierStateDoesNotInferSuccess() {
             var ctx = Context.builder(new Config())
                     .memory(new SessionMemory())
-                    .llm(LlmClient.scripted("Yes, it is verified now."))
+                    .llm(ScriptedNativeLlmClient.textToolFallbackStrings( "Yes, it is verified now."))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -9710,7 +9805,7 @@ class AssistantTurnExecutorTest {
             var loop = new ToolCallLoop(processor, 3);
             var ctx = Context.builder(new Config())
                     .memory(new SessionMemory())
-                    .llm(LlmClient.scripted(List.of(
+                    .llm(textProvider(registry, List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
                             "Inspected index.html for the repair pass.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))

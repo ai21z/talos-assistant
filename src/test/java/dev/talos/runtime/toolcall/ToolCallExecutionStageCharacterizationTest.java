@@ -333,10 +333,15 @@ class ToolCallExecutionStageCharacterizationTest {
     }
 
     private ToolCallExecutionStage.IterationOutcome execute(StageHarness harness) {
-        ToolCallParseStage.ParsedCalls parsed = new ToolCallParseStage().parse(
+        if (!LocalTurnTraceCapture.isActive()) {
+            beginTrace("Run the deterministic test tool.");
+        }
+        harness.state().setRuntimeNativeCalls(
                 harness.state().currentText,
                 harness.state().currentNativeCalls,
-                1);
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.DIRECT_RUNTIME_API);
+        ToolCallParseStage.ParsedCalls parsed =
+                new ToolCallParseStage().parse(harness.state(), 1);
         assertFalse(parsed.calls().isEmpty(), "test fixture must produce parsed tool calls");
         return harness.stage().execute(harness.state(), parsed);
     }

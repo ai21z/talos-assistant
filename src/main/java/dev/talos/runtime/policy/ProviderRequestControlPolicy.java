@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -44,6 +45,8 @@ public final class ProviderRequestControlPolicy {
         if (plan == null || visibleTools == null || visibleTools.isEmpty()) {
             return ChatRequestControls.defaults();
         }
+        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                toolAuthorityMode(plan, visibleTools);
 
         ActionObligation action = plan.actionObligation();
         EvidenceObligation evidence = EvidenceObligationPolicy.parse(plan.evidenceObligation());
@@ -61,7 +64,9 @@ public final class ProviderRequestControlPolicy {
                 explicitCommandRequest(plan));
 
         if (!requiredToolChoiceSupported) {
-            return ChatRequestControls.defaults().withMaxOutputTokens(maxOutputTokens);
+            return ChatRequestControls.defaults()
+                    .withMaxOutputTokens(maxOutputTokens)
+                    .withToolAuthorityMode(toolAuthorityMode);
         }
 
         boolean require = false;
@@ -107,7 +112,11 @@ public final class ProviderRequestControlPolicy {
             tags.add("evidence-obligation:" + evidence.name());
         }
 
-        if (!require) return ChatRequestControls.defaults().withMaxOutputTokens(maxOutputTokens);
+        if (!require) {
+            return ChatRequestControls.defaults()
+                    .withMaxOutputTokens(maxOutputTokens)
+                    .withToolAuthorityMode(toolAuthorityMode);
+        }
         // Tool-obligation turns run near-greedy: server-default sampling with a
         // random seed produced divergent outputs for byte-identical requests in
         // the 0.10.1 release banks (T740).
@@ -118,7 +127,26 @@ public final class ProviderRequestControlPolicy {
                 "",
                 tags,
                 SamplingControls.NEAR_GREEDY,
-                maxOutputTokens);
+                maxOutputTokens)
+                .withToolAuthorityMode(toolAuthorityMode);
+    }
+
+    private static ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode(
+            CurrentTurnPlan plan,
+            List<ToolSpec> visibleTools
+    ) {
+        Set<String> visibleNames = visibleTools.stream()
+                .filter(Objects::nonNull)
+                .map(ToolSpec::name)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (plan.nativeTools().stream().anyMatch(visibleNames::contains)) {
+            return ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE;
+        }
+        if (plan.promptTools().stream().anyMatch(visibleNames::contains)) {
+            return ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON;
+        }
+        return ProviderResponseCapture.ToolAuthorityMode.NONE;
     }
 
     private static int initialGenerationCap(

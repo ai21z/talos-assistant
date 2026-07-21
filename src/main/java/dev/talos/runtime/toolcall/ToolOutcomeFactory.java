@@ -75,6 +75,25 @@ final class ToolOutcomeFactory {
                 ToolError.INVALID_PARAMS);
     }
 
+    static ToolCallLoop.ToolOutcome failedAuthority(
+            ToolCall call,
+            String diagnosticError
+    ) {
+        return new ToolCallLoop.ToolOutcome(
+                toolName(call),
+                "",
+                false,
+                call != null && ToolCallSupport.isMutatingTool(call.toolName()),
+                false,
+                "",
+                diagnosticError,
+                null,
+                ToolError.INVALID_AUTHORITY,
+                null,
+                null,
+                ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID);
+    }
+
     static ToolCallLoop.ToolOutcome executed(
             ToolCall call,
             String pathHint,

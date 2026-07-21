@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
@@ -16,6 +17,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
@@ -68,15 +70,21 @@ class MissingMutationRetryTest {
         var loopResult = new ToolCallLoop.LoopResult(
                 "", 1, 1, List.of("talos.write_file"), messages, 1, 0, false, 0,
                 List.of(), 0, 0, 0, 0, List.of(invalid));
+        var writeCall = new ChatMessage.NativeToolCall(
+                "call_write_notes",
+                "talos.write_file",
+                Map.of("path", "notes.md", "content", "hello\n"));
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("", List.of(writeCall))),
+                16_384);
+        Context ctx = testContext(provider.client(), new FileWriteTool());
 
         MissingMutationRetry.retryIfNeeded(
                 "I tried to create the file.", messages, safePlan, loopResult, workspace,
-                testContext(),
-                (retryMessages, plan, specs) -> providerNativeToolResult(
-                        new ChatMessage.NativeToolCall(
-                                "call_write_notes",
-                                "talos.write_file",
-                                Map.of("path", "notes.md", "content", "hello\n"))));
+                ctx,
+                (retryMessages, plan, specs) ->
+                        TurnModelDispatcher.dispatchEscalatedRetry(
+                                ctx, retryMessages, plan, specs));
 
         var trace = LocalTurnTraceCapture.complete();
         var parsed = trace.events().stream()
@@ -252,6 +260,14 @@ class MissingMutationRetryTest {
                         : result;
             }
         };
+        var writeCall = new ChatMessage.NativeToolCall(
+                "call_write_notes",
+                "talos.write_file",
+                Map.of("path", "notes.md", "content", "hello\n"));
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(new LlmClient.StreamResult("", List.of(writeCall))),
+                16_384);
+        Context ctx = testContext(provider.client(), blankOutputWrite);
 
         MissingMutationRetry.Result result = MissingMutationRetry.retryIfNeeded(
                 original,
@@ -259,12 +275,10 @@ class MissingMutationRetryTest {
                 safePlan,
                 retryableMutationLoop(messages),
                 workspace,
-                testContext(blankOutputWrite),
-                (retryMessages, plan, specs) -> providerNativeToolResult(
-                        new ChatMessage.NativeToolCall(
-                                "call_write_notes",
-                                "talos.write_file",
-                                Map.of("path", "notes.md", "content", "hello\n"))));
+                ctx,
+                (retryMessages, plan, specs) ->
+                        TurnModelDispatcher.dispatchEscalatedRetry(
+                                ctx, retryMessages, plan, specs));
 
         assertEquals(original, result.answer());
         assertEquals(1, result.mutationsInRetry());
@@ -382,6 +396,28 @@ class MissingMutationRetryTest {
                 .build();
     }
 
+    private Context testContext(LlmClient llm, TalosTool writeTool) {
+        var registry = new ToolRegistry();
+        registry.register(writeTool);
+        var processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        return Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(processor, 3))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+    }
+
+    private static List<ToolSpec> specsFrom(ToolRegistry registry) {
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
+    }
+
     @Test
     void compactStaticRepairContextBelongsToMissingMutationRetry() {
         ChatMessage compact = MissingMutationRetry.compactStaticVerificationRepairInstructionForRetry(
@@ -489,27 +525,4 @@ class MissingMutationRetryTest {
                 "compact write spec must keep minLength 1 on path");
     }
 
-    private static LlmClient.StreamResult providerNativeToolResult(
-            ChatMessage.NativeToolCall call) {
-        ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
-                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
-                ProviderResponseCapture.Purpose.TURN_RESPONSE);
-        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
-                ProviderResponseCapture.AttemptKind.PRIMARY,
-                ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
-        ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
-                "",
-                List.of(call),
-                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
-                ProviderResponseCapture.Completion.PROVIDER_EOS,
-                false,
-                false,
-                false));
-        generation.complete(receipt);
-        return new LlmClient.StreamResult(
-                "", List.of(call), "", "", ProviderResponseCapture.AbortOrigin.NONE,
-                ProviderResponseCapture.Completion.PROVIDER_EOS,
-                false, false, receipt);
-    }
 }

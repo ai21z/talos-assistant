@@ -669,7 +669,7 @@ public final class LlmClient implements AutoCloseable {
 
         return LlmRetryExecutor.executeIndexed(MAX_RETRIES, tryNumber -> {
             ChatRequest req = new ChatRequest(
-                    backend, model, sys, usr, sn, timeout, List.of(), effectiveToolSpecs(toolSpecs),
+                    backend, model, sys, usr, sn, timeout, List.of(), List.of(),
                     withConfigSampling(controls));
             return invokePhysicalTextAttempt(
                     generation,
@@ -751,7 +751,7 @@ public final class LlmClient implements AutoCloseable {
 
         return LlmRetryExecutor.executeIndexed(MAX_RETRIES, tryNumber -> {
             ChatRequest req = new ChatRequest(
-                    backend, model, "", "", List.of(), timeout, sanitized, effectiveToolSpecs(toolSpecs));
+                    backend, model, "", "", List.of(), timeout, sanitized, List.of());
             return invokePhysicalTextAttempt(
                     generation,
                     tryNumber == 0
@@ -1023,7 +1023,7 @@ public final class LlmClient implements AutoCloseable {
             Consumer<String> onChunk,
             List<ToolSpec> requestToolSpecs) {
         return chatStreamFull(messages, onChunk, defaultWallClockBudgetMs,
-                requestToolSpecs, ChatRequestControls.defaults());
+                requestToolSpecs, legacyToolControls(requestToolSpecs));
     }
 
     public StreamResult chatStreamFull(
@@ -1052,14 +1052,20 @@ public final class LlmClient implements AutoCloseable {
     public StreamResult chatStreamFull(List<ChatMessage> messages,
                                        Consumer<String> onChunk,
                                        long wallClockMs) {
-        return chatStreamFull(messages, onChunk, wallClockMs, null, ChatRequestControls.defaults());
+        return chatStreamFull(
+                messages, onChunk, wallClockMs, null, legacyToolControls(null));
     }
 
     public StreamResult chatStreamFull(List<ChatMessage> messages,
                                        Consumer<String> onChunk,
                                        long wallClockMs,
                                        List<ToolSpec> requestToolSpecs) {
-        return chatStreamFull(messages, onChunk, wallClockMs, requestToolSpecs, ChatRequestControls.defaults());
+        return chatStreamFull(
+                messages,
+                onChunk,
+                wallClockMs,
+                requestToolSpecs,
+                legacyToolControls(requestToolSpecs));
     }
 
     public StreamResult chatStreamFull(List<ChatMessage> messages,
@@ -1071,7 +1077,13 @@ public final class LlmClient implements AutoCloseable {
         // don't immediately short-circuit this call.
         externalCancelReset.run();
         ProviderResponseCapture.Source source = responseSource(controls);
-        return captureStreamGeneration(source, generation -> {
+        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                toolAuthorityMode(source, controls);
+        List<ToolSpec> selectedToolSpecs = selectedToolSpecs(requestToolSpecs);
+        ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract =
+                toolAuthorityContract(
+                        source, toolAuthorityMode, selectedToolSpecs, controls);
+        return captureStreamGeneration(source, toolAuthorityContract, generation -> {
             if (scriptedFailure != null) {
                 throw scriptedFailure;
             }
@@ -1103,7 +1115,7 @@ public final class LlmClient implements AutoCloseable {
             return callBudget.run(
                     activeStream -> engineAssembledWithMessagesFullTracked(
                             messages, onChunk, decodedProgressSink, engineRequestTimeout, cancel,
-                             lastChunkAt, activeStream, requestToolSpecs, controls, true, generation),
+                             lastChunkAt, activeStream, selectedToolSpecs, controls, true, generation),
                     wallClockMs,
                     lastChunkAt,
                     "streaming chat",
@@ -1123,7 +1135,7 @@ public final class LlmClient implements AutoCloseable {
 
     public StreamResult chatFull(List<ChatMessage> messages, List<ToolSpec> requestToolSpecs) {
         return chatFull(messages, defaultWallClockBudgetMs,
-                requestToolSpecs, ChatRequestControls.defaults());
+                requestToolSpecs, legacyToolControls(requestToolSpecs));
     }
 
     public StreamResult chatFull(
@@ -1138,13 +1150,17 @@ public final class LlmClient implements AutoCloseable {
      * See {@link #chatStreamFull(List, Consumer, long)}.
      */
     public StreamResult chatFull(List<ChatMessage> messages, long wallClockMs) {
-        return chatFull(messages, wallClockMs, null, ChatRequestControls.defaults());
+        return chatFull(messages, wallClockMs, null, legacyToolControls(null));
     }
 
     public StreamResult chatFull(List<ChatMessage> messages,
                                  long wallClockMs,
                                  List<ToolSpec> requestToolSpecs) {
-        return chatFull(messages, wallClockMs, requestToolSpecs, ChatRequestControls.defaults());
+        return chatFull(
+                messages,
+                wallClockMs,
+                requestToolSpecs,
+                legacyToolControls(requestToolSpecs));
     }
 
     public StreamResult chatFull(List<ChatMessage> messages,
@@ -1154,7 +1170,13 @@ public final class LlmClient implements AutoCloseable {
         // P2 - see chatStreamFull: clear stale cancel flag per call.
         externalCancelReset.run();
         ProviderResponseCapture.Source source = responseSource(controls);
-        return captureStreamGeneration(source, generation -> {
+        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                toolAuthorityMode(source, controls);
+        List<ToolSpec> selectedToolSpecs = selectedToolSpecs(requestToolSpecs);
+        ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract =
+                toolAuthorityContract(
+                        source, toolAuthorityMode, selectedToolSpecs, controls);
+        return captureStreamGeneration(source, toolAuthorityContract, generation -> {
             if (scriptedFailure != null) {
                 throw scriptedFailure;
             }
@@ -1178,7 +1200,7 @@ public final class LlmClient implements AutoCloseable {
             return callBudget.run(
                     activeStream -> engineAssembledWithMessagesFullTracked(
                             messages, null, decodedProgressSink, engineRequestTimeout, cancel,
-                             lastChunkAt, activeStream, requestToolSpecs, controls, false, generation),
+                             lastChunkAt, activeStream, selectedToolSpecs, controls, false, generation),
                     wallClockMs,
                     lastChunkAt,
                     "non-streaming chat",
@@ -1219,9 +1241,10 @@ public final class LlmClient implements AutoCloseable {
 
     private StreamResult captureStreamGeneration(
             ProviderResponseCapture.Source source,
+            ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract,
             Function<ProviderResponseCapture.Generation, StreamResult> generationWork) {
         ProviderResponseCapture.Generation generation = ProviderResponseCapture.openGeneration(
-                source, ProviderResponseCapture.purposeFor(source));
+                source, ProviderResponseCapture.purposeFor(source), toolAuthorityContract);
         try {
             StreamResult result = generationWork.apply(generation);
             if (result != null
@@ -1266,6 +1289,77 @@ public final class LlmClient implements AutoCloseable {
                 && controls.debugTags().stream()
                         .anyMatch(PromptDebugCapture.BACKGROUND_MAINTENANCE_TAG::equals);
         return providerSource(!background);
+    }
+
+    private static ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode(
+            ProviderResponseCapture.Source source,
+            ChatRequestControls controls
+    ) {
+        if (source != ProviderResponseCapture.Source.FOREGROUND_PROVIDER) {
+            return ProviderResponseCapture.ToolAuthorityMode.NONE;
+        }
+        ChatRequestControls safe = controls == null
+                ? ChatRequestControls.defaults()
+                : controls;
+        return safe.toolAuthorityMode();
+    }
+
+    private List<ToolSpec> selectedToolSpecs(List<ToolSpec> requestToolSpecs) {
+        List<ToolSpec> selected = requestToolSpecs == null
+                ? toolSpecs
+                : requestToolSpecs;
+        return selected == null ? List.of() : List.copyOf(selected);
+    }
+
+    private static ProviderResponseCapture.ToolAuthorityContract toolAuthorityContract(
+            ProviderResponseCapture.Source source,
+            ProviderResponseCapture.ToolAuthorityMode mode,
+            List<ToolSpec> selectedToolSpecs,
+            ChatRequestControls controls
+    ) {
+        if (source != ProviderResponseCapture.Source.FOREGROUND_PROVIDER
+                || mode == null
+                || mode == ProviderResponseCapture.ToolAuthorityMode.NONE) {
+            return ProviderResponseCapture.ToolAuthorityContract.none();
+        }
+        ChatRequestControls safe = controls == null
+                ? ChatRequestControls.defaults()
+                : controls;
+        List<String> selectedNames = selectedToolSpecs == null
+                ? List.of()
+                : selectedToolSpecs.stream()
+                        .map(spec -> Objects.requireNonNull(
+                                spec, "selected provider tool spec").name())
+                        .toList();
+        return ProviderResponseCapture.ToolAuthorityContract.bound(
+                mode,
+                selectedNames,
+                safe.toolChoice(),
+                safe.namedTool());
+    }
+
+    /**
+     * Classifies one explicit runtime-selected tool surface without consulting
+     * provider output. Callers retain ownership of whether that surface is
+     * permitted for the request.
+     */
+    public ProviderResponseCapture.ToolAuthorityMode toolAuthorityModeForToolSurface(
+            List<ToolSpec> requestToolSpecs
+    ) {
+        List<ToolSpec> requested = requestToolSpecs == null
+                ? toolSpecs
+                : List.copyOf(requestToolSpecs);
+        if (requested.isEmpty()) {
+            return ProviderResponseCapture.ToolAuthorityMode.NONE;
+        }
+        return nativeToolsCurrentlyEnabled()
+                ? ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                : ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON;
+    }
+
+    private ChatRequestControls legacyToolControls(List<ToolSpec> requestToolSpecs) {
+        return ChatRequestControls.defaults().withToolAuthorityMode(
+                toolAuthorityModeForToolSurface(requestToolSpecs));
     }
 
     private static ProviderResponseCapture.Source providerSource(boolean foreground) {
@@ -1572,7 +1666,8 @@ public final class LlmClient implements AutoCloseable {
                         m.toolCalls(),
                         m.toolCallId()))
                 .toList();
-        List<ToolSpec> tools = effectiveToolSpecs(requestToolSpecs);
+        List<ToolSpec> tools = effectiveToolSpecs(
+                requestToolSpecs, generation.toolAuthorityMode());
         ChatRequestControls requestControls = withConfigSampling(controls);
         List<ChatMessage> requestMessages = fitMessagesToContextBudget(sanitized, tools, requestControls);
         if (requestMessages.size() < sanitized.size()) {
@@ -2046,9 +2141,31 @@ public final class LlmClient implements AutoCloseable {
         return !ToolProtocolText.containsToolCalls(result.text());
     }
 
-    private List<ToolSpec> effectiveToolSpecs(List<ToolSpec> requestToolSpecs) {
-        if (!nativeToolsCurrentlyEnabled()) return List.of();
-        return requestToolSpecs == null ? toolSpecs : List.copyOf(requestToolSpecs);
+    private List<ToolSpec> effectiveToolSpecs(
+            List<ToolSpec> requestToolSpecs,
+            ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode
+    ) {
+        ProviderResponseCapture.ToolAuthorityMode mode = toolAuthorityMode == null
+                ? ProviderResponseCapture.ToolAuthorityMode.NONE
+                : toolAuthorityMode;
+        List<ToolSpec> requested = requestToolSpecs == null
+                ? toolSpecs
+                : List.copyOf(requestToolSpecs);
+        if (mode == ProviderResponseCapture.ToolAuthorityMode.NONE) {
+            return List.of();
+        }
+        if (requested.isEmpty()) {
+            throw new IllegalStateException(
+                    "provider tool authority requires an explicit nonempty tool surface");
+        }
+        if (mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON) {
+            return List.of();
+        }
+        if (!nativeToolsCurrentlyEnabled()) {
+            throw new IllegalStateException(
+                    "native provider tool authority requires native engine capability");
+        }
+        return requested;
     }
 
     private Capabilities effectiveCapabilities() {
@@ -2071,7 +2188,8 @@ public final class LlmClient implements AutoCloseable {
                 safe.jsonSchema(),
                 tags,
                 safe.sampling(),
-                safe.maxOutputTokens());
+                safe.maxOutputTokens(),
+                safe.toolAuthorityMode());
     }
 
     /** Layers llm.sampling config values under turn-level sampling decisions (set fields win). */

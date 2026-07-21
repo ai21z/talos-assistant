@@ -11,6 +11,7 @@ import dev.talos.runtime.Session;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.command.RunCommandTool;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import org.junit.jupiter.api.AfterEach;
@@ -36,6 +37,7 @@ class RunCommandOutputHandoffTest {
     @AfterEach
     void clearCaptures() {
         ContextLedgerCapture.clear();
+        LocalTurnTraceCapture.clear();
     }
 
     @Test
@@ -140,10 +142,24 @@ class RunCommandOutputHandoffTest {
 
 
     private ToolCallExecutionStage.IterationOutcome execute(StageHarness harness) {
-        ToolCallParseStage.ParsedCalls parsed = new ToolCallParseStage().parse(
+        if (!LocalTurnTraceCapture.isActive()) {
+            LocalTurnTraceCapture.begin(
+                    "trc-command-output-handoff",
+                    "session-command-output-handoff",
+                    1,
+                    "2026-07-20T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "runtime",
+                    "test-model",
+                    "Run the deterministic command fixture.");
+        }
+        harness.state().setRuntimeNativeCalls(
                 harness.state().currentText,
                 harness.state().currentNativeCalls,
-                1);
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.DIRECT_RUNTIME_API);
+        ToolCallParseStage.ParsedCalls parsed =
+                new ToolCallParseStage().parse(harness.state(), 1);
         assertFalse(parsed.calls().isEmpty(), "test fixture must produce parsed command calls");
         return harness.stage().execute(harness.state(), parsed);
     }

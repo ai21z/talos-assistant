@@ -147,11 +147,17 @@ class ProviderResponseCaptureOwnershipTest {
                 new Capture(), "receipt-proposal");
         ProviderResponseCapture.Generation generation = scope.openGeneration(
                 ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
-                ProviderResponseCapture.Purpose.TURN_RESPONSE);
+                ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file"),
+                        ToolChoiceMode.AUTO,
+                        ""));
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        attempt.requestDispatched(new ProviderTransportHandoff.DispatchEvidence(
+                "sha256:" + "a".repeat(64), List.of("talos.read_file")));
         Map<String, Object> firstOrder = new LinkedHashMap<>();
         firstOrder.put("z", List.of(Map.of("b", 2, "a", 1)));
         firstOrder.put("a", true);
@@ -178,6 +184,111 @@ class ProviderResponseCaptureOwnershipTest {
         assertEquals(
                 ProviderResponseCapture.toolNameHash("talos.read_file"),
                 proposal.toolNameHash());
+    }
+
+    @Test
+    void toolAuthorityContractRejectsAmbiguousOrBroadenedSelections() {
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of(), ToolChoiceMode.AUTO, ""));
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of(" "), ToolChoiceMode.AUTO, ""));
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file "), ToolChoiceMode.AUTO, ""));
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file", "talos.read_file"),
+                        ToolChoiceMode.AUTO, ""));
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file"), ToolChoiceMode.NONE, ""));
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file"), ToolChoiceMode.NAMED,
+                        "talos.write_file"));
+        assertThrows(IllegalArgumentException.class, () ->
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file"), ToolChoiceMode.REQUIRED,
+                        "talos.read_file"));
+        assertThrows(IllegalArgumentException.class, () ->
+                new ProviderResponseCapture.ToolAuthorityContract(
+                        ProviderResponseCapture.ToolAuthorityMode.NONE,
+                        List.of("talos.read_file"), ToolChoiceMode.AUTO, "", true));
+    }
+
+    @Test
+    void dispatchBindingRequiresTheExactOrderedSelectedSurface() {
+        ProviderResponseCapture.ToolAuthorityContract nativeContract =
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                        List.of("talos.read_file", "talos.write_file"),
+                        ToolChoiceMode.AUTO, "");
+        String bodyHash = "sha256:" + "b".repeat(64);
+
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.DISPATCH_UNBOUND,
+                nativeContract.bindDispatch(
+                        ProviderTransportHandoff.DispatchEvidence.unbound()));
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.DISPATCH_SURFACE_MISMATCH,
+                nativeContract.bindDispatch(new ProviderTransportHandoff.DispatchEvidence(
+                        bodyHash, List.of("talos.write_file", "talos.read_file"))));
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.DISPATCH_SURFACE_MISMATCH,
+                nativeContract.bindDispatch(new ProviderTransportHandoff.DispatchEvidence(
+                        bodyHash, List.of("talos.read_file"))));
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.BOUND,
+                nativeContract.bindDispatch(new ProviderTransportHandoff.DispatchEvidence(
+                        bodyHash, List.of("talos.read_file", "talos.write_file"))));
+
+        ProviderResponseCapture.ToolAuthorityContract textContract =
+                ProviderResponseCapture.ToolAuthorityContract.bound(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                        List.of("talos.read_file"), ToolChoiceMode.AUTO, "");
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.BOUND,
+                textContract.bindDispatch(new ProviderTransportHandoff.DispatchEvidence(
+                        bodyHash, List.of())));
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.DISPATCH_SURFACE_MISMATCH,
+                textContract.bindDispatch(new ProviderTransportHandoff.DispatchEvidence(
+                        bodyHash, List.of("talos.read_file"))));
+    }
+
+    @Test
+    void legacyModeOnlyGenerationRemainsUnboundAndCannotAuthorizeAProposal() {
+        ProviderResponseCapture.Scope scope = ProviderResponseCapture.begin(
+                new Capture(), "legacy-mode-only-authority");
+        ProviderResponseCapture.Generation generation = scope.openGeneration(
+                ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
+        ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                ProviderResponseCapture.AttemptKind.PRIMARY,
+                ProviderResponseCapture.RetryReason.NONE);
+        attempt.requestDispatched(new ProviderTransportHandoff.DispatchEvidence(
+                "sha256:" + "c".repeat(64), List.of("talos.read_file")));
+        ProviderResponseCapture.Receipt receipt = attempt.respond(
+                new ProviderResponseCapture.Response(
+                        "",
+                        List.of(new ChatMessage.NativeToolCall(
+                                "call-1", "talos.read_file", Map.of("path", "README.md"))),
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Completion.PROVIDER_EOS,
+                        false,
+                        false,
+                        false));
+        generation.complete(receipt);
+
+        assertEquals(ProviderResponseCapture.ToolAuthorityBinding.SURFACE_UNBOUND,
+                receipt.toolAuthorityBinding());
+        assertFalse(receipt.providerToolCallEligible());
+        assertFalse(receipt.authorizesExactToolName("talos.read_file"));
+        assertTrue(receipt.selectedToolProposal(1).isEmpty());
     }
 
     @Test

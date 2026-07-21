@@ -2,15 +2,19 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -26,6 +30,16 @@ class UnsupportedFinalAnswerTruthfulnessTest {
     @TempDir
     Path workspace;
 
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        ProviderAuthorityTestTrace.begin("unsupported-truth", testInfo);
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        ProviderAuthorityTestTrace.clear();
+    }
+
     @Test
     void model_attempted_fabrication_is_overridden_by_runtime_postcondition() throws Exception {
         Files.writeString(workspace.resolve("report.docx"), "fake docx payload");
@@ -35,7 +49,7 @@ class UnsupportedFinalAnswerTruthfulnessTest {
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(new Config(null))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.docx\"}}",
                         "I reviewed report.docx. The document says revenue is high.")))
                 .sandbox(new Sandbox(workspace, java.util.Map.of()))
@@ -65,7 +79,7 @@ class UnsupportedFinalAnswerTruthfulnessTest {
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(new Config(null))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.txt\"}}\n"
                                 + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"workbook.xlsx\"}}",
                         "I compared report.txt and workbook.xlsx. The spreadsheet contains matching revenue data.")))
@@ -142,7 +156,7 @@ class UnsupportedFinalAnswerTruthfulnessTest {
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(new Config(null))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\"budget\"}}",
                         "No matches found.")))
                 .sandbox(new Sandbox(workspace, java.util.Map.of()))
@@ -183,7 +197,7 @@ class UnsupportedFinalAnswerTruthfulnessTest {
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(new Config(null))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + fileName + "\"}}",
                         badAnswer)))
                 .sandbox(new Sandbox(workspace, java.util.Map.of()))
@@ -211,7 +225,7 @@ class UnsupportedFinalAnswerTruthfulnessTest {
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(new Config(null))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.txt\"}}\n"
                                 + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + unsupportedFile + "\"}}",
                         badAnswer)))
@@ -239,7 +253,7 @@ class UnsupportedFinalAnswerTruthfulnessTest {
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(new Config(null))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"" + fileName
                                 + "\",\"content\":\"fake\"}}",
                         badAnswer)))

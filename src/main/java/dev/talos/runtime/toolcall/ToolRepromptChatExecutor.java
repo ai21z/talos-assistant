@@ -103,11 +103,16 @@ final class ToolRepromptChatExecutor {
             String noAnswerFallback,
             boolean failPendingObligationOnEmptyResult
     ) {
+        ChatRequestControls authorityBoundControls =
+                (controls == null ? ChatRequestControls.defaults() : controls)
+                        .withToolAuthorityMode(
+                                state.ctx.llm().toolAuthorityModeForToolSurface(
+                                        repromptToolSpecs));
         LlmClient.StreamResult repromptResult =
                 state.ctx.llm().chatFull(
                         requestMessages,
                         repromptToolSpecs,
-                        controls);
+                        authorityBoundControls);
         return applyResult(
                 state,
                 repromptResult,

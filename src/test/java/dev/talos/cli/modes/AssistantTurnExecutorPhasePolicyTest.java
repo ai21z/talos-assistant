@@ -2,12 +2,13 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
-import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.phase.ExecutionPhaseState;
+import dev.talos.runtime.trace.ProviderAuthorityTestTrace;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
@@ -16,7 +17,10 @@ import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
@@ -31,6 +35,16 @@ class AssistantTurnExecutorPhasePolicyTest {
 
     @TempDir
     Path workspace;
+
+    @BeforeEach
+    void beginProviderAuthorityTrace(TestInfo testInfo) {
+        ProviderAuthorityTestTrace.begin("phase-policy", testInfo);
+    }
+
+    @AfterEach
+    void clearProviderAuthorityTrace() {
+        ProviderAuthorityTestTrace.clear();
+    }
 
     @Test
     void explicitMutationTurnStartsInApplyAndMovesToVerifyAfterSuccessfulMutation() {
@@ -48,7 +62,7 @@ class AssistantTurnExecutorPhasePolicyTest {
         var phaseState = new ExecutionPhaseState(ExecutionPhase.INSPECT);
         var ctx = Context.builder(new Config())
                 .sandbox(new Sandbox(workspace, Map.of()))
-                .llm(LlmClient.scripted(List.of(
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\",\"content\":\"ok\"}}",
                         "Done.")))
                 .toolRegistry(registry)

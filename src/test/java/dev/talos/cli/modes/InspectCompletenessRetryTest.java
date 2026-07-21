@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
@@ -17,6 +18,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
@@ -90,20 +92,29 @@ class InspectCompletenessRetryTest {
                 List.of("talos.read_file"),
                 List.of("index.html"),
                 List.of(outcome("talos.read_file", "index.html")));
-        Context ctx = context(workspace, "Script evidence answer.");
+        String request = "Read the main files and verify the web page.";
+        CurrentTurnPlan retryPlan = plan(request);
+        var call = new ChatMessage.NativeToolCall(
+                "call_1", "talos.read_file", Map.of("path", "script.js"));
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(call)),
+                        new LlmClient.StreamResult("Script evidence answer.", List.of())),
+                16_384);
+        Context ctx = providerContext(workspace, provider.client());
         AtomicReference<List<ChatMessage>> retryMessages = new AtomicReference<>();
 
         InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
                 "HTML-only answer.",
                 messages,
-                plan("Read the main files and verify the web page."),
+                retryPlan,
                 original,
                 workspace,
                 ctx,
                 sentMessages -> {
                     retryMessages.set(List.copyOf(sentMessages));
-                    return providerResult("", List.of(new ChatMessage.NativeToolCall(
-                            "call_1", "talos.read_file", Map.of("path", "script.js"))));
+                    return TurnModelDispatcher.dispatchBuffered(
+                            ctx, sentMessages, retryPlan);
                 });
 
         assertEquals("Script evidence answer.", result.answer());
@@ -214,6 +225,7 @@ class InspectCompletenessRetryTest {
 
     @Test
     void projectSummaryRetryReadsAnchorAndMergesEvidence(@TempDir Path workspace) throws Exception {
+        beginTrace("inspect-project-summary-retry-receipt");
         Files.writeString(workspace.resolve("README.md"), "A small local qualification project.\n");
         Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
         ToolCallLoop.LoopResult original = loopResult(
@@ -225,22 +237,33 @@ class InspectCompletenessRetryTest {
                 List.of(
                         outcome("talos.list_dir", "."),
                         outcome("talos.read_file", "script.js")));
-        Context ctx = context(workspace, "This is a small local qualification project.");
+        String request = "What does this project do?";
+        CurrentTurnPlan retryPlan = plan(request);
+        var call = new ChatMessage.NativeToolCall(
+                "call_readme",
+                "talos.read_file",
+                Map.of("path", "README.md"));
+        var provider = ScriptedNativeLlmClient.recordingWithContextWindow(
+                List.of(
+                        new LlmClient.StreamResult("", List.of(call)),
+                        new LlmClient.StreamResult(
+                                "This is a small local qualification project.",
+                                List.of())),
+                16_384);
+        Context ctx = providerContext(workspace, provider.client());
         AtomicReference<List<ChatMessage>> retryMessages = new AtomicReference<>();
 
         InspectCompletenessRetry.Result result = InspectCompletenessRetry.retryIfNeeded(
                 original.finalAnswer(),
-                messages("What does this project do?"),
-                plan("What does this project do?"),
+                messages(request),
+                retryPlan,
                 original,
                 workspace,
                 ctx,
                 sentMessages -> {
                     retryMessages.set(List.copyOf(sentMessages));
-                    return new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
-                            "call_readme",
-                            "talos.read_file",
-                            Map.of("path", "README.md"))));
+                    return TurnModelDispatcher.dispatchBuffered(
+                            ctx, sentMessages, retryPlan);
                 });
 
         assertEquals("This is a small local qualification project.", result.answer());
@@ -321,6 +344,28 @@ class InspectCompletenessRetryTest {
                 .toolRegistry(registry)
                 .toolCallLoop(new ToolCallLoop(processor, 5))
                 .build();
+    }
+
+    private static Context providerContext(Path workspace, LlmClient llm) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        return Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(processor, 5))
+                .nativeToolSpecs(specsFrom(registry))
+                .build();
+    }
+
+    private static List<ToolSpec> specsFrom(ToolRegistry registry) {
+        return registry.descriptors().stream()
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
     }
 
     private static List<ChatMessage> messages(String request) {

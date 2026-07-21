@@ -100,8 +100,11 @@ final class ReadEvidenceHandoff {
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("");
         try {
-            ToolCallLoop.LoopResult loop = ctx.toolCallLoop().run(
+            ToolCallLoop.LoopResult loop = ctx.toolCallLoop().runRuntimeDeterministic(
                     handoffCalls,
+                    List.of(),
+                    dev.talos.runtime.trace.LocalTurnTraceCapture
+                            .RuntimeToolAuthorityReason.READ_EVIDENCE_HANDOFF,
                     messages,
                     workspace,
                     ctx);

@@ -28,8 +28,7 @@ class LocalTurnTraceParsedToolPermitTest {
         beginTrace("trc-permit-double-consume", 1);
         ToolCall call = readCall("README.md");
         LocalTurnTraceCapture.ParsedToolCallPermit permit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", call, null, 0);
+                runtimePermit(call);
 
         assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call));
         assertFalse(LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call));
@@ -38,7 +37,9 @@ class LocalTurnTraceParsedToolPermitTest {
                         "tool_loop", call, true, ""));
 
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-        assertEquals(List.of("TOOL_CALL_PARSED"), toolLifecycle(trace));
+        assertEquals(
+                List.of("TOOL_CALL_PARSED", "TOOL_CALL_BLOCKED"),
+                toolLifecycle(trace));
     }
 
     @Test
@@ -46,8 +47,7 @@ class LocalTurnTraceParsedToolPermitTest {
         beginTrace("trc-permit-wrong-thread", 2);
         ToolCall call = readCall("docs/guide.md");
         LocalTurnTraceCapture.ParsedToolCallPermit permit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", call, null, 0);
+                runtimePermit(call);
         AtomicBoolean foreignConsumed = new AtomicBoolean(true);
         AtomicReference<Throwable> foreignFailure = new AtomicReference<>();
 
@@ -81,8 +81,7 @@ class LocalTurnTraceParsedToolPermitTest {
         beginTrace("trc-permit-replaced-old", 3);
         ToolCall oldCall = readCall("old.txt");
         LocalTurnTraceCapture.ParsedToolCallPermit oldPermit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", oldCall, null, 0);
+                runtimePermit(oldCall);
 
         beginTrace("trc-permit-replaced-new", 4);
         assertFalse(LocalTurnTraceCapture.consumeToolCallParsedPermit(
@@ -90,8 +89,7 @@ class LocalTurnTraceParsedToolPermitTest {
 
         ToolCall newCall = readCall("new.txt");
         LocalTurnTraceCapture.ParsedToolCallPermit newPermit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", newCall, null, 0);
+                runtimePermit(newCall);
         assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(
                 newPermit, newCall));
         LocalTurnTraceCapture.recordToolExecuted(
@@ -111,15 +109,13 @@ class LocalTurnTraceParsedToolPermitTest {
         beginTrace("trc-permit-identical-calls", 5);
         ToolCall call = readCall("same.txt");
         LocalTurnTraceCapture.ParsedToolCallPermit firstPermit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", call, null, 0);
+                runtimePermit(call);
         assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(firstPermit, call));
         LocalTurnTraceCapture.recordToolExecuted(
                 "tool_loop", call, true, "first complete");
 
         LocalTurnTraceCapture.ParsedToolCallPermit secondPermit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", call, null, 0);
+                runtimePermit(call);
         assertFalse(LocalTurnTraceCapture.consumeToolCallParsedPermit(firstPermit, call),
                 "the settled first permit must not authorize the identical second call");
         assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(secondPermit, call),
@@ -142,15 +138,13 @@ class LocalTurnTraceParsedToolPermitTest {
     void blockedAndExecutedFailureRemainMechanicallyDistinctByExactCallId() {
         beginTrace("trc-permit-terminal-kind", 6);
         ToolCall blockedCall = readCall("blocked.txt");
-        LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                "tool_loop", blockedCall, null, 0);
+        runtimePermit(blockedCall);
         LocalTurnTraceCapture.recordToolCallBlocked(
                 "tool_loop", blockedCall, "policy denied before execution");
 
         ToolCall failedCall = readCall("failed.txt");
         LocalTurnTraceCapture.ParsedToolCallPermit failedPermit =
-                LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                        "tool_loop", failedCall, null, 0);
+                runtimePermit(failedCall);
         assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(
                 failedPermit, failedCall));
         LocalTurnTraceCapture.recordToolExecuted(
@@ -187,6 +181,19 @@ class LocalTurnTraceParsedToolPermitTest {
 
     private static ToolCall readCall(String path) {
         return new ToolCall("talos.read_file", Map.of("path", path));
+    }
+
+    private static LocalTurnTraceCapture.ParsedToolCallPermit runtimePermit(
+            ToolCall call
+    ) {
+        LocalTurnTraceCapture.ToolCallAuthorityDecision decision =
+                LocalTurnTraceCapture.beginRuntimeToolCallForExecution(
+                        "tool_loop",
+                        call,
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                .DIRECT_RUNTIME_API);
+        assertTrue(decision.authorized());
+        return decision.permit();
     }
 
     private static List<String> toolLifecycle(LocalTurnTrace trace) {

@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.talos.spi.types.ProviderResponseCapture;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -594,21 +595,30 @@ final class QualificationTestPacket {
 
         String generationId = "trace-1-generation-1";
         String attemptId = generationId + "-attempt-1";
-        java.util.Map<String, Object> generation = java.util.Map.of(
+        String toolAuthorityMode = dispatchedNativeTools.isEmpty()
+                ? "NONE" : "PROVIDER_NATIVE";
+        java.util.Map<String, Object> generation = new java.util.LinkedHashMap<>(java.util.Map.of(
                 "providerLedgerVersion", 1,
                 "ledgerSequence", 1,
                 "generationId", generationId,
                 "source", "FOREGROUND_PROVIDER",
-                "purpose", "TURN_RESPONSE");
-        java.util.Map<String, Object> attemptStarted = attemptData(
-                2, generationId, attemptId, false);
+                "purpose", "TURN_RESPONSE"));
+        generation.put("toolAuthorityMode", toolAuthorityMode);
+        java.util.Map<String, Object> attemptStarted = new java.util.LinkedHashMap<>(
+                attemptData(2, generationId, attemptId, false));
+        attemptStarted.put("toolAuthorityMode", toolAuthorityMode);
         java.util.Map<String, Object> requestDispatched = new java.util.LinkedHashMap<>(
                 attemptData(3, generationId, attemptId, true));
+        requestDispatched.put("toolAuthorityMode", toolAuthorityMode);
         requestDispatched.put("providerBodyHash", "sha256:" + QualificationScenarioBank.sha256(
                 "protocol-v6-fixture-provider-body".getBytes(StandardCharsets.UTF_8)));
         requestDispatched.put("dispatchedNativeTools", dispatchedNativeTools);
+        requestDispatched.put(
+                "toolAuthoritySurface",
+                toolAuthoritySurface(toolAuthorityMode, dispatchedNativeTools));
         java.util.Map<String, Object> response = new java.util.LinkedHashMap<>(
                 attemptData(4, generationId, attemptId, true));
+        response.put("toolAuthorityMode", toolAuthorityMode);
         response.put("assistantHash", answerHash);
         response.put("assistantChars", answer.length());
         response.put("nativeToolCallCount", 0);
@@ -649,6 +659,25 @@ final class QualificationTestPacket {
                         "status", status,
                         "classification", classification)),
                 traceEvent("TRACE_COMPLETED", java.util.Map.of()));
+    }
+
+    private static java.util.Map<String, Object> toolAuthoritySurface(
+            String toolAuthorityMode,
+            List<String> selectedTools
+    ) {
+        boolean bound = !"NONE".equals(toolAuthorityMode);
+        List<String> hashes = bound
+                ? selectedTools.stream()
+                        .map(ProviderResponseCapture::toolNameHash)
+                        .toList()
+                : List.of();
+        return java.util.Map.of(
+                "schemaVersion", 1,
+                "bound", bound,
+                "toolChoiceMode", bound ? "AUTO" : "NONE",
+                "namedToolNameHash", ProviderResponseCapture.toolNameHash(""),
+                "selectedToolNameHashes", hashes,
+                "authorizedToolNameHashes", hashes);
     }
 
     private static List<java.util.Map<String, Object>> legacyTraceEvents(

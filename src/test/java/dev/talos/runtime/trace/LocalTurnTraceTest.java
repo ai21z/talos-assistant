@@ -114,7 +114,7 @@ class LocalTurnTraceTest {
 
         String json = MAPPER.writeValueAsString(trace);
 
-        assertTrue(json.contains("\"schemaVersion\":3"));
+        assertTrue(json.contains("\"schemaVersion\":4"));
         assertTrue(json.contains("\"traceId\":\"trc-fixed\""));
         assertTrue(json.contains("\"promptAudit\""));
         assertTrue(json.contains("\"contentHash\""));
@@ -126,7 +126,7 @@ class LocalTurnTraceTest {
         assertFalse(json.contains("<h1>Hello</h1>"), "default trace must not store raw file content");
 
         LocalTurnTrace roundTrip = MAPPER.readValue(json, LocalTurnTrace.class);
-        assertEquals(3, roundTrip.schemaVersion());
+        assertEquals(4, roundTrip.schemaVersion());
         assertEquals("trc-fixed", roundTrip.traceId());
         assertEquals("FILE_CREATE", roundTrip.taskContract().type());
         assertEquals("MUTATING_TOOL_REQUIRED", roundTrip.promptAudit().actionObligation());
@@ -187,8 +187,12 @@ class LocalTurnTraceTest {
             ToolCall tracedCall = new ToolCall(
                     "talos.retrieve", Map.of("path", "config.json"));
             LocalTurnTraceCapture.ParsedToolCallPermit permit =
-                    LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                            "", tracedCall, null, 0);
+                    LocalTurnTraceCapture.beginRuntimeToolCallForExecution(
+                            "",
+                            tracedCall,
+                            LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                    .DIRECT_RUNTIME_API)
+                            .permit();
             assertTrue(LocalTurnTraceCapture.consumeToolCallParsedPermit(
                     permit, tracedCall));
             TurnAuditCapture.recordToolCall(

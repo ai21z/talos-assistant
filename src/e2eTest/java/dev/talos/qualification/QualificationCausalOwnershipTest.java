@@ -2,6 +2,7 @@ package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import dev.talos.spi.types.ProviderResponseCapture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -752,12 +753,17 @@ class QualificationCausalOwnershipTest {
                 "ledgerSequence", 6,
                 "generationId", retryGenerationId,
                 "source", "FOREGROUND_PROVIDER",
-                "purpose", "TURN_RESPONSE");
+                "purpose", "TURN_RESPONSE",
+                "toolAuthorityMode", "NONE");
         events.insert(terminal++, traceEvent("GENERATION_STARTED", generation));
         events.insert(terminal++, traceEvent("GENERATION_ATTEMPT_STARTED",
                 providerAttemptData(retryGenerationId, retryAttemptId, 7, false)));
-        events.insert(terminal++, traceEvent("GENERATION_REQUEST_DISPATCHED",
-                providerAttemptData(retryGenerationId, retryAttemptId, 8, true)));
+        Map<String, Object> dispatch = providerAttemptData(
+                retryGenerationId, retryAttemptId, 8, true);
+        dispatch.put("providerBodyHash", "sha256:" + "b".repeat(64));
+        dispatch.put("dispatchedNativeTools", List.of());
+        dispatch.put("toolAuthoritySurface", toolAuthoritySurface("NONE", List.of()));
+        events.insert(terminal++, traceEvent("GENERATION_REQUEST_DISPATCHED", dispatch));
         Map<String, Object> response = new java.util.LinkedHashMap<>(
                 providerAttemptData(retryGenerationId, retryAttemptId, 9, true));
         response.put("assistantHash", retryHash);
@@ -804,6 +810,7 @@ class QualificationCausalOwnershipTest {
                 Map.entry("generationId", generationId),
                 Map.entry("source", "FOREGROUND_PROVIDER"),
                 Map.entry("purpose", "TURN_RESPONSE"),
+                Map.entry("toolAuthorityMode", "NONE"),
                 Map.entry("attemptId", attemptId),
                 Map.entry("attemptOrdinal", 1),
                 Map.entry("attemptKind", "PRIMARY"),
@@ -835,8 +842,25 @@ class QualificationCausalOwnershipTest {
     private static void markSelectedResponseAsTextualToolBearing(ObjectNode trace) {
         ObjectNode response = event(trace, "GENERATION_RESPONSE_CAPTURED");
         ((ObjectNode) response.path("data")).put("textualToolCallPresent", true);
-        ObjectNode completed = event(trace, "GENERATION_COMPLETED");
-        ((ObjectNode) completed.path("data")).put("providerToolCallEligible", true);
+    }
+
+    private static Map<String, Object> toolAuthoritySurface(
+            String toolAuthorityMode,
+            List<String> selectedTools
+    ) {
+        boolean bound = !"NONE".equals(toolAuthorityMode);
+        List<String> hashes = bound
+                ? selectedTools.stream()
+                        .map(ProviderResponseCapture::toolNameHash)
+                        .toList()
+                : List.of();
+        return Map.of(
+                "schemaVersion", 1,
+                "bound", bound,
+                "toolChoiceMode", bound ? "AUTO" : "NONE",
+                "namedToolNameHash", ProviderResponseCapture.toolNameHash(""),
+                "selectedToolNameHashes", hashes,
+                "authorizedToolNameHashes", hashes);
     }
 
     private static void insertProviderToolSuppression(

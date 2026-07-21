@@ -2,6 +2,7 @@ package dev.talos.qualification;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ToolChoiceMode;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -12,9 +13,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Strict reader for the trace-v3 physical provider-attempt ledger. */
+/** Strict reader for the trace-v3/v4 physical provider-attempt ledger. */
 final class QualificationProviderAttemptLedger {
-    static final int TRACE_SCHEMA_VERSION = 3;
+    static final int PRE_AUTHORITY_TRACE_SCHEMA_VERSION = 3;
+    static final int TRACE_SCHEMA_VERSION = 4;
     static final int LEDGER_VERSION = 1;
 
     private static final Set<String> GENERATION_KEYS = Set.of(
@@ -23,6 +25,9 @@ final class QualificationProviderAttemptLedger {
             "attemptId", "attemptOrdinal", "attemptKind", "retryReason", "requestDispatched"));
     private static final Set<String> DISPATCH_KEYS = union(ATTEMPT_KEYS, Set.of(
             "providerBodyHash", "dispatchedNativeTools"));
+    private static final Set<String> AUTHORITY_SURFACE_KEYS = Set.of(
+            "schemaVersion", "bound", "toolChoiceMode", "namedToolNameHash",
+            "selectedToolNameHashes", "authorizedToolNameHashes");
     private static final Set<String> RESPONSE_KEYS = union(ATTEMPT_KEYS, Set.of(
             "assistantHash", "assistantChars", "nativeToolCallCount",
             "capturedNativeToolProposalCount", "nativeToolProposalsTruncated",
@@ -90,8 +95,13 @@ final class QualificationProviderAttemptLedger {
 
     record Proposal(
             int proposalOrdinal,
+            String providerCallIdHash,
             String toolNameHash,
-            String argumentsHash) {}
+            String argumentsHash) {
+        Proposal(int proposalOrdinal, String toolNameHash, String argumentsHash) {
+            this(proposalOrdinal, "", toolNameHash, argumentsHash);
+        }
+    }
 
     record Attempt(
             String attemptId,
@@ -101,7 +111,8 @@ final class QualificationProviderAttemptLedger {
             boolean requestDispatched,
             boolean transportUnobserved,
             String providerBodyHash,
-            Set<String> dispatchedNativeTools,
+            List<String> dispatchedNativeTools,
+            AuthoritySurface authoritySurface,
             Response response,
             List<Proposal> proposals,
             ProviderResponseCapture.Failure failure,
@@ -112,8 +123,11 @@ final class QualificationProviderAttemptLedger {
             proposals = List.copyOf(proposals);
             providerBodyHash = providerBodyHash == null ? "" : providerBodyHash;
             dispatchedNativeTools = dispatchedNativeTools == null
-                    ? Set.of()
-                    : Set.copyOf(dispatchedNativeTools);
+                    ? List.of()
+                    : List.copyOf(dispatchedNativeTools);
+            authoritySurface = authoritySurface == null
+                    ? AuthoritySurface.unbound()
+                    : authoritySurface;
         }
 
         Attempt(
@@ -130,9 +144,84 @@ final class QualificationProviderAttemptLedger {
                 int startEventIndex,
                 int closeEventIndex) {
             this(attemptId, attemptOrdinal, attemptKind, retryReason,
-                    requestDispatched, transportUnobserved, "", Set.of(),
+                    requestDispatched, transportUnobserved, "", List.of(),
+                    AuthoritySurface.unbound(),
                     response, proposals, failure, abandonment,
                     startEventIndex, closeEventIndex);
+        }
+
+        Attempt(
+                String attemptId,
+                int attemptOrdinal,
+                ProviderResponseCapture.AttemptKind attemptKind,
+                ProviderResponseCapture.RetryReason retryReason,
+                boolean requestDispatched,
+                boolean transportUnobserved,
+                String providerBodyHash,
+                Set<String> dispatchedNativeTools,
+                Response response,
+                List<Proposal> proposals,
+                ProviderResponseCapture.Failure failure,
+                ProviderResponseCapture.Abandonment abandonment,
+                int startEventIndex,
+                int closeEventIndex
+        ) {
+            this(attemptId, attemptOrdinal, attemptKind, retryReason,
+                    requestDispatched, transportUnobserved, providerBodyHash,
+                    dispatchedNativeTools == null
+                            ? List.of()
+                            : List.copyOf(dispatchedNativeTools),
+                    AuthoritySurface.fromNativeTools(dispatchedNativeTools),
+                    response, proposals, failure, abandonment,
+                    startEventIndex, closeEventIndex);
+        }
+    }
+
+    record AuthoritySurface(
+            boolean bound,
+            ToolChoiceMode toolChoiceMode,
+            String namedToolNameHash,
+            List<String> selectedToolNameHashes,
+            List<String> authorizedToolNameHashes
+    ) {
+        AuthoritySurface {
+            toolChoiceMode = toolChoiceMode == null ? ToolChoiceMode.NONE : toolChoiceMode;
+            namedToolNameHash = namedToolNameHash == null ? "" : namedToolNameHash;
+            selectedToolNameHashes = selectedToolNameHashes == null
+                    ? List.of()
+                    : List.copyOf(selectedToolNameHashes);
+            authorizedToolNameHashes = authorizedToolNameHashes == null
+                    ? List.of()
+                    : List.copyOf(authorizedToolNameHashes);
+        }
+
+        static AuthoritySurface unbound() {
+            return new AuthoritySurface(
+                    false,
+                    ToolChoiceMode.NONE,
+                    ProviderResponseCapture.toolNameHash(""),
+                    List.of(),
+                    List.of());
+        }
+
+        static AuthoritySurface fromNativeTools(Set<String> nativeTools) {
+            List<String> names = nativeTools == null
+                    ? List.of()
+                    : List.copyOf(nativeTools);
+            if (names.isEmpty()) return unbound();
+            List<String> hashes = names.stream()
+                    .map(ProviderResponseCapture::toolNameHash)
+                    .toList();
+            return new AuthoritySurface(
+                    true,
+                    ToolChoiceMode.AUTO,
+                    ProviderResponseCapture.toolNameHash(""),
+                    hashes,
+                    hashes);
+        }
+
+        boolean authorizes(String toolNameHash) {
+            return bound && authorizedToolNameHashes.contains(toolNameHash);
         }
     }
 
@@ -140,6 +229,7 @@ final class QualificationProviderAttemptLedger {
             String generationId,
             ProviderResponseCapture.Source source,
             ProviderResponseCapture.Purpose purpose,
+            ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode,
             List<Attempt> attempts,
             String terminalEvent,
             String selectedAttemptId,
@@ -152,6 +242,28 @@ final class QualificationProviderAttemptLedger {
             int terminalEventIndex) {
         Generation {
             attempts = List.copyOf(attempts);
+        }
+
+        Generation(
+                String generationId,
+                ProviderResponseCapture.Source source,
+                ProviderResponseCapture.Purpose purpose,
+                List<Attempt> attempts,
+                String terminalEvent,
+                String selectedAttemptId,
+                int selectedAttemptOrdinal,
+                boolean providerTerminalEligible,
+                boolean providerToolCallEligible,
+                ProviderResponseCapture.Failure failure,
+                ProviderResponseCapture.Abandonment abandonment,
+                int startEventIndex,
+                int terminalEventIndex
+        ) {
+            this(generationId, source, purpose,
+                    ProviderResponseCapture.ToolAuthorityMode.NONE,
+                    attempts, terminalEvent, selectedAttemptId, selectedAttemptOrdinal,
+                    providerTerminalEligible, providerToolCallEligible,
+                    failure, abandonment, startEventIndex, terminalEventIndex);
         }
 
         Response selectedResponse() {
@@ -192,6 +304,7 @@ final class QualificationProviderAttemptLedger {
     record Ledger(List<Generation> generations) {
         Ledger {
             generations = List.copyOf(generations);
+            requireSerializedNonBackgroundGenerations(generations);
         }
 
         static Ledger empty() {
@@ -370,6 +483,32 @@ final class QualificationProviderAttemptLedger {
                     .orElse(null);
         }
 
+        private static void requireSerializedNonBackgroundGenerations(
+                List<Generation> generations
+        ) {
+            List<Generation> ordered = generations.stream()
+                    .filter(generation -> generation.source()
+                            != ProviderResponseCapture.Source.BACKGROUND_PROVIDER)
+                    .sorted(java.util.Comparator.comparingInt(
+                            Generation::startEventIndex))
+                    .toList();
+            int latestTerminalIndex = -1;
+            String latestGenerationId = "";
+            for (Generation generation : ordered) {
+                if (latestTerminalIndex >= 0
+                        && generation.startEventIndex() <= latestTerminalIndex) {
+                    throw new IllegalArgumentException(
+                            "non-background generations overlap: "
+                                    + latestGenerationId + " and "
+                                    + generation.generationId());
+                }
+                if (generation.terminalEventIndex() > latestTerminalIndex) {
+                    latestTerminalIndex = generation.terminalEventIndex();
+                    latestGenerationId = generation.generationId();
+                }
+            }
+        }
+
         private static boolean isTimeout(ProviderResponseCapture.Abandonment abandonment) {
             return abandonment == ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT
                     || abandonment == ProviderResponseCapture.Abandonment.IDLE_TIMEOUT;
@@ -391,9 +530,10 @@ final class QualificationProviderAttemptLedger {
         }
         int schemaVersion = requiredInt(traceRoot, "schemaVersion");
         if (schemaVersion == 2) return Ledger.empty();
-        if (schemaVersion != TRACE_SCHEMA_VERSION) {
+        if (schemaVersion != PRE_AUTHORITY_TRACE_SCHEMA_VERSION
+                && schemaVersion != TRACE_SCHEMA_VERSION) {
             throw new IllegalArgumentException(
-                    "physical attempt ledger requires trace schema v3");
+                    "physical attempt ledger requires trace schema v3 or v4");
         }
         JsonNode events = traceRoot.path("events");
         if (!events.isArray()) {
@@ -409,22 +549,23 @@ final class QualificationProviderAttemptLedger {
             if ("MODEL_RESPONSE_RECEIVED".equals(type)
                     || "PROVIDER_GENERATION_RECEIVED".equals(type)) {
                 throw new IllegalArgumentException(
-                        "trace schema v3 contains obsolete response provenance event " + type);
+                        "trace schema v3/v4 contains obsolete response provenance event " + type);
             }
             if ("PROVIDER_TOOL_PROPOSAL_CAPTURED".equals(type)) {
-                parseProposal(event.path("data"), generations, index);
+                parseProposal(event.path("data"), generations, index, schemaVersion);
                 continue;
             }
             if (!PHYSICAL_STATE_EVENTS.contains(type)) continue;
             JsonNode data = requiredObject(event.path("data"), type + " data");
-            if ("GENERATION_REQUEST_DISPATCHED".equals(type)
+            if (schemaVersion == PRE_AUTHORITY_TRACE_SCHEMA_VERSION
+                    && "GENERATION_REQUEST_DISPATCHED".equals(type)
                     && fields(data).equals(ATTEMPT_KEYS)) {
                 // Early uncommitted schema-v3 fixtures have no attempt-bound
                 // body receipt. They remain readable but cannot prove a model
                 // tool opportunity.
                 exactKeys(data, ATTEMPT_KEYS, type);
             } else {
-                exactKeys(data, keys(type), type);
+                exactKeys(data, keys(type, schemaVersion), type);
             }
             requireLedgerHeader(data, expectedSequence++);
             switch (type) {
@@ -433,7 +574,7 @@ final class QualificationProviderAttemptLedger {
                 case "GENERATION_ATTEMPT_STARTED" -> attemptStarted(
                         data, generations, attemptIds, index);
                 case "GENERATION_REQUEST_DISPATCHED" -> requestDispatched(
-                        data, generations);
+                        data, generations, schemaVersion);
                 case "GENERATION_TRANSPORT_UNOBSERVED" -> transportUnobserved(
                         data, generations);
                 case "GENERATION_RESPONSE_CAPTURED" -> responseCaptured(
@@ -488,8 +629,13 @@ final class QualificationProviderAttemptLedger {
         ProviderResponseCapture.Purpose purpose = enumValue(
                 ProviderResponseCapture.Purpose.class, data, "purpose");
         requireCanonicalPurpose(source, purpose);
+        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                toolAuthorityMode(data);
+        requireCanonicalToolAuthorityMode(source, purpose, toolAuthorityMode);
         if (generations.putIfAbsent(generationId,
-                new MutableGeneration(generationId, source, purpose, eventIndex)) != null) {
+                new MutableGeneration(
+                        generationId, source, purpose, toolAuthorityMode,
+                        data.has("toolAuthorityMode"), eventIndex)) != null) {
             throw new IllegalArgumentException("duplicate physical generationId: " + generationId);
         }
     }
@@ -527,7 +673,8 @@ final class QualificationProviderAttemptLedger {
 
     private static void requestDispatched(
             JsonNode data,
-            Map<String, MutableGeneration> generations) {
+            Map<String, MutableGeneration> generations,
+            int traceSchemaVersion) {
         MutableAttempt attempt = openAttempt(data, generations);
         AttemptFields fields = attemptFields(data, attempt.generation);
         attempt.requireSame(fields);
@@ -540,10 +687,67 @@ final class QualificationProviderAttemptLedger {
             throw new IllegalArgumentException(
                     "request dispatch transition is duplicate or false: " + attempt.attemptId);
         }
-        DispatchFields dispatch = dispatchFields(data);
+        DispatchFields dispatch = dispatchFields(data, traceSchemaVersion);
+        if (data.has("toolAuthorityMode")) {
+            ProviderResponseCapture.ToolAuthorityMode mode =
+                    attempt.generation.toolAuthorityMode;
+            if (mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                    && !dispatch.providerBodyHash().isBlank()
+                    && dispatch.nativeTools().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "native tool authority dispatch lacks native tool names");
+            }
+            if (mode != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                    && !dispatch.nativeTools().isEmpty()) {
+                throw new IllegalArgumentException(
+                    "non-native tool authority dispatch carries native tool names");
+            }
+            validateAuthoritySurface(mode, dispatch);
+            if (traceSchemaVersion == TRACE_SCHEMA_VERSION) {
+                AuthoritySurface generationSurface =
+                        attempt.generation.authoritySurface;
+                if (generationSurface == null) {
+                    attempt.generation.authoritySurface = dispatch.authoritySurface();
+                } else if (!generationSurface.equals(dispatch.authoritySurface())) {
+                    throw new IllegalArgumentException(
+                            "provider retry substituted the generation authority surface");
+                }
+            }
+        }
         attempt.providerBodyHash = dispatch.providerBodyHash();
         attempt.dispatchedNativeTools = dispatch.nativeTools();
+        attempt.authoritySurface = dispatch.authoritySurface();
         attempt.requestDispatched = true;
+    }
+
+    private static void validateAuthoritySurface(
+            ProviderResponseCapture.ToolAuthorityMode mode,
+            DispatchFields dispatch
+    ) {
+        AuthoritySurface surface = dispatch.authoritySurface();
+        if (mode == ProviderResponseCapture.ToolAuthorityMode.NONE) {
+            if (surface.bound()) {
+                throw new IllegalArgumentException(
+                        "tool-authority NONE dispatch carries a bound surface");
+            }
+            return;
+        }
+        if (!surface.bound()) {
+            throw new IllegalArgumentException(
+                    "provider tool-authority dispatch lacks a bound selected surface");
+        }
+        if (mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE) {
+            List<String> dispatchedHashes = dispatch.nativeTools().stream()
+                    .map(ProviderResponseCapture::toolNameHash)
+                    .toList();
+            if (!dispatchedHashes.equals(surface.selectedToolNameHashes())) {
+                throw new IllegalArgumentException(
+                        "native dispatched tools differ from the selected authority surface");
+            }
+        } else if (!dispatch.nativeTools().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "text tool authority dispatch carries native tools");
+        }
     }
 
     private static void transportUnobserved(
@@ -819,13 +1023,30 @@ final class QualificationProviderAttemptLedger {
         boolean terminalEligible = requiredBoolean(data, "providerTerminalEligible");
         boolean toolEligible = requiredBoolean(data, "providerToolCallEligible");
         boolean expectedTerminal = selected.response.completedNormally();
-        boolean expectedTool = selected.requestDispatched
-                && selected.response.foreground()
-                && selected.response.toolCallPresent()
-                && (selected.response.completion()
-                        == ProviderResponseCapture.Completion.PROVIDER_EOS
-                    || selected.response.completion()
-                        == ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP);
+        boolean expectedTool;
+        if (!generation.authorityModeRecorded) {
+            expectedTool = selected.requestDispatched
+                    && selected.response.foreground()
+                    && selected.response.toolCallPresent()
+                    && (selected.response.completion()
+                            == ProviderResponseCapture.Completion.PROVIDER_EOS
+                        || selected.response.completion()
+                            == ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP);
+        } else {
+            boolean expectedToolShape = switch (generation.toolAuthorityMode) {
+                case NONE -> false;
+                case PROVIDER_NATIVE -> selected.response.nativeToolCallCount() > 0;
+                case PROVIDER_TEXT_JSON ->
+                        selected.response.nativeToolCallCount() == 0
+                                && selected.response.textualToolCallPresent();
+            };
+            expectedTool = selected.requestDispatched
+                    && selected.response.foreground()
+                    && selected.response.completion()
+                            == ProviderResponseCapture.Completion.PROVIDER_EOS
+                    && selected.authoritySurface.bound()
+                    && expectedToolShape;
+        }
         if (completion != selected.response.completion()
                 || !hash.equals(selected.response.assistantHash())
                 || terminalEligible != expectedTerminal
@@ -843,9 +1064,13 @@ final class QualificationProviderAttemptLedger {
     private static void parseProposal(
             JsonNode rawData,
             Map<String, MutableGeneration> generations,
-            int eventIndex) {
+            int eventIndex,
+            int traceSchemaVersion) {
         JsonNode data = requiredObject(rawData, "provider tool proposal data");
-        exactKeys(data, TOOL_PROPOSAL_KEYS, "PROVIDER_TOOL_PROPOSAL_CAPTURED");
+        exactKeys(
+                data,
+                keys(TOOL_PROPOSAL_KEYS, traceSchemaVersion),
+                "PROVIDER_TOOL_PROPOSAL_CAPTURED");
         if (requiredInt(data, "providerLedgerVersion") != LEDGER_VERSION) {
             throw new IllegalArgumentException("provider ledger version is not 1");
         }
@@ -865,7 +1090,7 @@ final class QualificationProviderAttemptLedger {
                 || ordinal != attempt.proposals.size() + 1) {
             throw new IllegalArgumentException("provider tool proposal ordinals are not contiguous");
         }
-        requiredHash(data, "providerCallIdHash");
+        String providerCallIdHash = requiredHash(data, "providerCallIdHash");
         String classification = requiredText(data, "toolNameClassification");
         if (!TOOL_NAME_CLASSIFICATIONS.contains(classification)) {
             throw new IllegalArgumentException(
@@ -899,7 +1124,8 @@ final class QualificationProviderAttemptLedger {
                     "provider tool proposal argument-name hashes/count are not canonical");
         }
         String argumentsHash = requiredHash(data, "argumentsHash");
-        attempt.proposals.add(new Proposal(ordinal, toolNameHash, argumentsHash));
+        attempt.proposals.add(new Proposal(
+                ordinal, providerCallIdHash, toolNameHash, argumentsHash));
     }
 
     private static MutableGeneration openGeneration(
@@ -926,9 +1152,13 @@ final class QualificationProviderAttemptLedger {
                 ProviderResponseCapture.Source.class, data, "source");
         ProviderResponseCapture.Purpose purpose = enumValue(
                 ProviderResponseCapture.Purpose.class, data, "purpose");
-        if (source != generation.source || purpose != generation.purpose) {
+        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode =
+                toolAuthorityMode(data);
+        if (source != generation.source
+                || purpose != generation.purpose
+                || toolAuthorityMode != generation.toolAuthorityMode) {
             throw new IllegalArgumentException(
-                    "physical event source/purpose differs from generation start");
+                    "physical event source/purpose/tool authority differs from generation start");
         }
         return generation;
     }
@@ -1022,6 +1252,31 @@ final class QualificationProviderAttemptLedger {
         }
     }
 
+    private static ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode(
+            JsonNode data
+    ) {
+        if (data == null || !data.has("toolAuthorityMode")) {
+            return ProviderResponseCapture.ToolAuthorityMode.NONE;
+        }
+        return enumValue(
+                ProviderResponseCapture.ToolAuthorityMode.class,
+                data,
+                "toolAuthorityMode");
+    }
+
+    private static void requireCanonicalToolAuthorityMode(
+            ProviderResponseCapture.Source source,
+            ProviderResponseCapture.Purpose purpose,
+            ProviderResponseCapture.ToolAuthorityMode mode
+    ) {
+        if (mode != ProviderResponseCapture.ToolAuthorityMode.NONE
+                && (source != ProviderResponseCapture.Source.FOREGROUND_PROVIDER
+                    || purpose != ProviderResponseCapture.Purpose.TURN_RESPONSE)) {
+            throw new IllegalArgumentException(
+                    "provider tool authority mode is attached to a non-foreground turn");
+        }
+    }
+
     private static void requireLedgerHeader(JsonNode data, long expectedSequence) {
         if (requiredInt(data, "providerLedgerVersion") != LEDGER_VERSION) {
             throw new IllegalArgumentException("provider ledger version is not 1");
@@ -1049,6 +1304,21 @@ final class QualificationProviderAttemptLedger {
         };
     }
 
+    private static Set<String> keys(String type, int traceSchemaVersion) {
+        Set<String> expected = keys(keys(type), traceSchemaVersion);
+        if (traceSchemaVersion == TRACE_SCHEMA_VERSION
+                && "GENERATION_REQUEST_DISPATCHED".equals(type)) {
+            expected = union(expected, Set.of("toolAuthoritySurface"));
+        }
+        return expected;
+    }
+
+    private static Set<String> keys(Set<String> base, int traceSchemaVersion) {
+        return traceSchemaVersion == TRACE_SCHEMA_VERSION
+                ? union(base, Set.of("toolAuthorityMode"))
+                : base;
+    }
+
     private static void exactKeys(JsonNode object, Set<String> expected, String label) {
         Set<String> actual = fields(object);
         if (!actual.equals(expected)) {
@@ -1063,24 +1333,100 @@ final class QualificationProviderAttemptLedger {
         return Set.copyOf(actual);
     }
 
-    private static DispatchFields dispatchFields(JsonNode data) {
+    private static DispatchFields dispatchFields(JsonNode data, int traceSchemaVersion) {
         if (!data.has("providerBodyHash") && !data.has("dispatchedNativeTools")) {
-            return new DispatchFields("", Set.of());
+            if (traceSchemaVersion == TRACE_SCHEMA_VERSION) {
+                throw new IllegalArgumentException(
+                        "trace-v4 request dispatch requires body-bound evidence");
+            }
+            return new DispatchFields("", List.of(), AuthoritySurface.unbound());
         }
         String bodyHash = requiredHash(data, "providerBodyHash");
         JsonNode values = data.path("dispatchedNativeTools");
         if (!values.isArray()) {
             throw new IllegalArgumentException("dispatchedNativeTools must be an array");
         }
-        LinkedHashSet<String> tools = new LinkedHashSet<>();
+        List<String> tools = new ArrayList<>();
+        LinkedHashSet<String> distinctTools = new LinkedHashSet<>();
         for (JsonNode value : values) {
-            String tool = requiredTextValue(value, "dispatchedNativeTools entry").strip();
-            if (tool.isBlank() || tool.length() > 256 || !tools.add(tool)) {
+            String tool = requiredTextValue(value, "dispatchedNativeTools entry");
+            if (tool.isBlank() || !tool.equals(tool.strip()) || tool.length() > 256
+                    || !distinctTools.add(tool)) {
                 throw new IllegalArgumentException(
-                        "dispatchedNativeTools contains a blank, oversized, or duplicate tool");
+                        "dispatchedNativeTools contains a blank, normalized, oversized, or duplicate tool");
             }
+            tools.add(tool);
         }
-        return new DispatchFields(bodyHash, Set.copyOf(tools));
+        AuthoritySurface authoritySurface = traceSchemaVersion == TRACE_SCHEMA_VERSION
+                ? authoritySurface(data.path("toolAuthoritySurface"))
+                : AuthoritySurface.unbound();
+        return new DispatchFields(bodyHash, List.copyOf(tools), authoritySurface);
+    }
+
+    private static AuthoritySurface authoritySurface(JsonNode raw) {
+        JsonNode surface = requiredObject(raw, "toolAuthoritySurface");
+        exactKeys(surface, AUTHORITY_SURFACE_KEYS, "toolAuthoritySurface");
+        if (requiredInt(surface, "schemaVersion") != 1) {
+            throw new IllegalArgumentException(
+                    "toolAuthoritySurface schemaVersion must be 1");
+        }
+        boolean bound = requiredBoolean(surface, "bound");
+        ToolChoiceMode choice = enumValue(
+                ToolChoiceMode.class, surface, "toolChoiceMode");
+        String namedHash = requiredHash(surface, "namedToolNameHash");
+        List<String> selected = requiredHashList(
+                surface.path("selectedToolNameHashes"),
+                "selectedToolNameHashes");
+        List<String> authorized = requiredHashList(
+                surface.path("authorizedToolNameHashes"),
+                "authorizedToolNameHashes");
+        String emptyHash = ProviderResponseCapture.toolNameHash("");
+        if (!bound) {
+            if (choice != ToolChoiceMode.NONE
+                    || !namedHash.equals(emptyHash)
+                    || !selected.isEmpty()
+                    || !authorized.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "unbound toolAuthoritySurface carries authority");
+            }
+            return AuthoritySurface.unbound();
+        }
+        if (selected.isEmpty() || selected.size() > 256
+                || new LinkedHashSet<>(selected).size() != selected.size()) {
+            throw new IllegalArgumentException(
+                    "bound toolAuthoritySurface selected names are empty, duplicate, or oversized");
+        }
+        if (choice == ToolChoiceMode.NONE) {
+            throw new IllegalArgumentException(
+                    "bound toolAuthoritySurface cannot use tool choice NONE");
+        }
+        if (choice == ToolChoiceMode.NAMED) {
+            if (authorized.size() != 1
+                    || !authorized.getFirst().equals(namedHash)
+                    || !selected.contains(namedHash)) {
+                throw new IllegalArgumentException(
+                        "NAMED toolAuthoritySurface is not an exact selected singleton");
+            }
+        } else if (!namedHash.equals(emptyHash) || !authorized.equals(selected)) {
+            throw new IllegalArgumentException(
+                    "non-NAMED toolAuthoritySurface authority differs from selection");
+        }
+        return new AuthoritySurface(bound, choice, namedHash, selected, authorized);
+    }
+
+    private static List<String> requiredHashList(JsonNode node, String label) {
+        if (node == null || !node.isArray()) {
+            throw new IllegalArgumentException(label + " must be an array");
+        }
+        List<String> hashes = new ArrayList<>();
+        for (JsonNode value : node) {
+            String hash = requiredTextValue(value, label + " entry");
+            if (!hash.matches("sha256:[0-9a-f]{64}")) {
+                throw new IllegalArgumentException(label + " contains an invalid hash");
+            }
+            hashes.add(hash);
+        }
+        return List.copyOf(hashes);
     }
 
     private static JsonNode requiredObject(JsonNode node, String label) {
@@ -1183,6 +1529,8 @@ final class QualificationProviderAttemptLedger {
         private final String generationId;
         private final ProviderResponseCapture.Source source;
         private final ProviderResponseCapture.Purpose purpose;
+        private final ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode;
+        private final boolean authorityModeRecorded;
         private final int startEventIndex;
         private final Map<String, MutableAttempt> attempts = new LinkedHashMap<>();
         private String terminalEvent = "";
@@ -1193,15 +1541,20 @@ final class QualificationProviderAttemptLedger {
         private ProviderResponseCapture.Failure failure;
         private ProviderResponseCapture.Abandonment abandonment;
         private int terminalEventIndex = -1;
+        private AuthoritySurface authoritySurface;
 
         private MutableGeneration(
                 String generationId,
                 ProviderResponseCapture.Source source,
                 ProviderResponseCapture.Purpose purpose,
+                ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode,
+                boolean authorityModeRecorded,
                 int startEventIndex) {
             this.generationId = generationId;
             this.source = source;
             this.purpose = purpose;
+            this.toolAuthorityMode = toolAuthorityMode;
+            this.authorityModeRecorded = authorityModeRecorded;
             this.startEventIndex = startEventIndex;
         }
 
@@ -1216,7 +1569,8 @@ final class QualificationProviderAttemptLedger {
 
         private Generation freeze(List<Attempt> frozenAttempts) {
             return new Generation(
-                    generationId, source, purpose, frozenAttempts, terminalEvent,
+                    generationId, source, purpose, toolAuthorityMode,
+                    frozenAttempts, terminalEvent,
                     selectedAttemptId, selectedAttemptOrdinal,
                     providerTerminalEligible, providerToolCallEligible,
                     failure, abandonment,
@@ -1234,7 +1588,8 @@ final class QualificationProviderAttemptLedger {
         private boolean requestDispatched;
         private boolean transportUnobserved;
         private String providerBodyHash = "";
-        private Set<String> dispatchedNativeTools = Set.of();
+        private List<String> dispatchedNativeTools = List.of();
+        private AuthoritySurface authoritySurface = AuthoritySurface.unbound();
         private Response response;
         private ProviderResponseCapture.Failure failure;
         private ProviderResponseCapture.Abandonment abandonment;
@@ -1274,10 +1629,14 @@ final class QualificationProviderAttemptLedger {
             return new Attempt(
                     attemptId, ordinal, kind, retryReason, requestDispatched,
                     transportUnobserved, providerBodyHash, dispatchedNativeTools,
+                    authoritySurface,
                     response, List.copyOf(proposals), failure, abandonment,
                     startEventIndex, closeEventIndex);
         }
     }
 
-    private record DispatchFields(String providerBodyHash, Set<String> nativeTools) {}
+    private record DispatchFields(
+            String providerBodyHash,
+            List<String> nativeTools,
+            AuthoritySurface authoritySurface) {}
 }

@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.SamplingControls;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
@@ -13,6 +14,70 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ProviderRequestControlPolicyTest {
+
+    @Test
+    void exactSelectedNativeSurfaceOwnsProviderToolAuthority() {
+        CurrentTurnPlan plan = plan(
+                List.of("talos.read_file"),
+                List.of("talos.read_file"));
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan, List.of(tool("talos.read_file")), true);
+
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                controls.toolAuthorityMode());
+    }
+
+    @Test
+    void exactSelectedPromptOnlySurfaceOwnsJsonTextAuthority() {
+        CurrentTurnPlan plan = plan(
+                List.of(),
+                List.of("talos.read_file"));
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan, List.of(tool("talos.read_file")), false);
+
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                controls.toolAuthorityMode());
+    }
+
+    @Test
+    void nativeAuthorityWinsWhenBothSelectedSurfacesContainTheVisibleTool() {
+        CurrentTurnPlan plan = plan(
+                List.of("talos.read_file"),
+                List.of("talos.read_file"));
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan, List.of(tool("talos.read_file")), false);
+
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE,
+                controls.toolAuthorityMode());
+    }
+
+    @Test
+    void emptyOrMismatchedVisibleSurfaceCannotCreateProviderToolAuthority() {
+        CurrentTurnPlan promptRead = plan(
+                List.of(),
+                List.of("talos.read_file"));
+
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                ProviderRequestControlPolicy.forTurn(
+                        promptRead, List.of(tool("talos.write_file")), false)
+                        .toolAuthorityMode());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                ProviderRequestControlPolicy.forTurn(
+                        promptRead, List.of(), false).toolAuthorityMode());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                ProviderRequestControlPolicy.forTurn(
+                        null, List.of(tool("talos.read_file")), false)
+                        .toolAuthorityMode());
+    }
 
     @Test
     void mutatingObligationRequiresToolChoiceWhenSupportedAndWriteToolsVisible() {
@@ -295,5 +360,17 @@ class ProviderRequestControlPolicyTest {
 
     private static ToolSpec tool(String name) {
         return new ToolSpec(name, "test tool", "{}");
+    }
+
+    private static CurrentTurnPlan plan(
+            List<String> nativeTools,
+            List<String> promptTools) {
+        return CurrentTurnPlan.create(
+                TaskContractResolver.fromUserRequest(
+                        "Inspect README.md and report what it contains."),
+                ExecutionPhase.INSPECT,
+                nativeTools,
+                promptTools,
+                List.of());
     }
 }

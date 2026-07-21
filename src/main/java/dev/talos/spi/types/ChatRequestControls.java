@@ -17,7 +17,8 @@ public record ChatRequestControls(
         String jsonSchema,
         List<String> debugTags,
         SamplingControls sampling,
-        int maxOutputTokens
+        int maxOutputTokens,
+        ProviderResponseCapture.ToolAuthorityMode toolAuthorityMode
 ) {
     private static final ChatRequestControls DEFAULTS = new ChatRequestControls(
             ToolChoiceMode.AUTO,
@@ -26,7 +27,8 @@ public record ChatRequestControls(
             "",
             List.of(),
             null,
-            0);
+            0,
+            ProviderResponseCapture.ToolAuthorityMode.NONE);
 
     public ChatRequestControls {
         toolChoice = toolChoice == null ? ToolChoiceMode.AUTO : toolChoice;
@@ -36,10 +38,27 @@ public record ChatRequestControls(
         debugTags = normalizeDebugTags(debugTags);
         sampling = sampling == null ? SamplingControls.none() : sampling;
         maxOutputTokens = Math.max(0, maxOutputTokens);
+        toolAuthorityMode = toolAuthorityMode == null
+                ? ProviderResponseCapture.ToolAuthorityMode.NONE
+                : toolAuthorityMode;
 
         if (toolChoice == ToolChoiceMode.NAMED && namedTool.isBlank()) {
             throw new IllegalArgumentException("namedTool is required when toolChoice is NAMED");
         }
+    }
+
+    /** Convenience constructor preserving the pre-T1193 seven-argument shape. */
+    public ChatRequestControls(
+            ToolChoiceMode toolChoice,
+            String namedTool,
+            ResponseFormatMode responseFormat,
+            String jsonSchema,
+            List<String> debugTags,
+            SamplingControls sampling,
+            int maxOutputTokens
+    ) {
+        this(toolChoice, namedTool, responseFormat, jsonSchema, debugTags,
+                sampling, maxOutputTokens, ProviderResponseCapture.ToolAuthorityMode.NONE);
     }
 
     /** Convenience constructor preserving the pre-T989 six-argument shape. */
@@ -67,12 +86,21 @@ public record ChatRequestControls(
 
     public ChatRequestControls withSampling(SamplingControls newSampling) {
         return new ChatRequestControls(
-                toolChoice, namedTool, responseFormat, jsonSchema, debugTags, newSampling, maxOutputTokens);
+                toolChoice, namedTool, responseFormat, jsonSchema, debugTags,
+                newSampling, maxOutputTokens, toolAuthorityMode);
     }
 
     public ChatRequestControls withMaxOutputTokens(int newMaxOutputTokens) {
         return new ChatRequestControls(
-                toolChoice, namedTool, responseFormat, jsonSchema, debugTags, sampling, newMaxOutputTokens);
+                toolChoice, namedTool, responseFormat, jsonSchema, debugTags,
+                sampling, newMaxOutputTokens, toolAuthorityMode);
+    }
+
+    public ChatRequestControls withToolAuthorityMode(
+            ProviderResponseCapture.ToolAuthorityMode newToolAuthorityMode) {
+        return new ChatRequestControls(
+                toolChoice, namedTool, responseFormat, jsonSchema, debugTags,
+                sampling, maxOutputTokens, newToolAuthorityMode);
     }
 
     public static ChatRequestControls defaults() {

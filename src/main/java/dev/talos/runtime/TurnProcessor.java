@@ -334,14 +334,23 @@ public final class TurnProcessor {
         if (session == null || ctx == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
         }
-        LocalTurnTraceCapture.ParsedToolCallPermit permit = null;
-        if (LocalTurnTraceCapture.isActive()) {
-            permit = LocalTurnTraceCapture.beginParsedToolCallForExecution(
-                    tracePhase(ctx), call, null, 0);
-            if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call)) {
-                return ToolResult.fail(ToolError.invalidParams(
-                        "Tool execution requires an exact parsed-call trace lineage"));
-            }
+        LocalTurnTraceCapture.ToolCallAuthorityDecision authority =
+                LocalTurnTraceCapture.beginRuntimeToolCallForExecution(
+                        tracePhase(ctx),
+                        call,
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason
+                                .DIRECT_RUNTIME_API);
+        LocalTurnTraceCapture.ParsedToolCallPermit permit = authority.permit();
+        if (!authority.authorized()) {
+            return ToolResult.fail(ToolError.invalidAuthority(
+                    ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                    "Deterministic runtime tool authority is unavailable ("
+                            + authority.rejectionReason().name() + ")"));
+        }
+        if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(permit, call)) {
+            return ToolResult.fail(ToolError.invalidAuthority(
+                    ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                    "Tool execution requires current deterministic runtime authority"));
         }
         return executeTool(session, call, ctx, permit);
     }
@@ -353,8 +362,9 @@ public final class TurnProcessor {
             RuntimeTurnContext ctx,
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
         if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
-            return ToolResult.fail(ToolError.invalidParams(
-                    "Tool execution requires the current exact parsed-call trace lineage"));
+            return ToolResult.fail(ToolError.invalidAuthority(
+                    ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
+                    "Tool execution requires the current exact parsed-call authority"));
         }
         return executeTool(session, call, ctx, parsedPermit);
     }

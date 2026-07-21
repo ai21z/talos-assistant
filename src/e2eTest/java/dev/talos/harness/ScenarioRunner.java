@@ -5,6 +5,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
+import dev.talos.core.llm.ForegroundProviderScriptedLlmClient;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
@@ -223,7 +224,7 @@ public final class ScenarioRunner {
 
         var processor = new TurnProcessor(modes, gate, registry, approvalPolicy);
         var loop = new ToolCallLoop(processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
-        var scriptedLlm = LlmClient.scripted(scriptedResponses);
+        var scriptedLlm = ForegroundProviderScriptedLlmClient.create(cfg, scriptedResponses);
         var ctx = Context.builder(cfg)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
@@ -482,8 +483,9 @@ public final class ScenarioRunner {
         // 6. Scripted LlmClient + Context wired with llm override,
         //    sandbox rooted at workspace, and the tool-call loop.
         //    No streamSink → non-streaming path, deterministic.
-        var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var ctx = Context.builder(new Config(null))
+        var config = new Config(null);
+        var scriptedLlm = ForegroundProviderScriptedLlmClient.create(config, scriptedResponses);
+        var ctx = Context.builder(config)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)
@@ -550,8 +552,9 @@ public final class ScenarioRunner {
                 ChatMessage.user(userPrompt)));
 
         var streamedChunks = new StringBuilder();
-        var scriptedLlm = LlmClient.scripted(scriptedResponses);
-        var ctx = Context.builder(new Config(null))
+        var config = new Config(null);
+        var scriptedLlm = ForegroundProviderScriptedLlmClient.create(config, scriptedResponses);
+        var ctx = Context.builder(config)
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(loop)

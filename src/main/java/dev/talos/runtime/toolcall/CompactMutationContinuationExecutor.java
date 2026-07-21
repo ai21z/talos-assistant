@@ -40,7 +40,9 @@ final class CompactMutationContinuationExecutor {
             LlmClient.StreamResult result = state.ctx.llm().chatFull(
                     compact.messages(),
                     compact.tools(),
-                    compact.controls());
+                    compact.controls().withToolAuthorityMode(
+                            state.ctx.llm().toolAuthorityModeForToolSurface(
+                                    compact.tools())));
             state.applyProviderResult(result);
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION",

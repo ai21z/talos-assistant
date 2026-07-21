@@ -26,15 +26,20 @@ public interface ProviderTransportHandoff {
         public DispatchEvidence {
             providerBodyHash = Objects.toString(providerBodyHash, "").strip();
             nativeTools = nativeTools == null ? List.of() : nativeTools.stream()
-                    .map(tool -> Objects.requireNonNull(tool, "native tool name").strip())
+                    .map(tool -> Objects.requireNonNull(tool, "native tool name"))
                     .toList();
             if (!providerBodyHash.isEmpty()
                     && !providerBodyHash.matches("sha256:[0-9a-f]{64}")) {
                 throw new IllegalArgumentException(
                         "provider body hash must be blank or lowercase SHA-256");
             }
-            if (nativeTools.stream().anyMatch(String::isBlank)) {
-                throw new IllegalArgumentException("native tool names must be nonblank");
+            if (nativeTools.stream().anyMatch(tool ->
+                    tool.isBlank() || !tool.equals(tool.strip()) || tool.length() > 256)) {
+                throw new IllegalArgumentException(
+                        "native tool names must be exact, nonblank, and bounded");
+            }
+            if (new java.util.LinkedHashSet<>(nativeTools).size() != nativeTools.size()) {
+                throw new IllegalArgumentException("native tool names must be unique");
             }
             if (providerBodyHash.isEmpty() && !nativeTools.isEmpty()) {
                 throw new IllegalArgumentException(

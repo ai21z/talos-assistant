@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Writes the redacted provider-attempt ledger contract used by trace schema v3. */
+/** Writes the redacted provider-attempt ledger contract used by trace schemas v3/v4. */
 final class ProviderResponseTraceRecorder {
     static final int LEDGER_VERSION = 1;
 
@@ -39,6 +39,8 @@ final class ProviderResponseTraceRecorder {
             data.put("providerBodyHash", dispatched.evidence().providerBodyHash());
             data.put("dispatchedNativeTools", dispatched.evidence().nativeTools());
         }
+        data.put("toolAuthoritySurface", toolAuthoritySurface(
+                dispatched.attempt().toolAuthorityContract()));
         emit(builder, "GENERATION_REQUEST_DISPATCHED", data);
     }
 
@@ -136,12 +138,12 @@ final class ProviderResponseTraceRecorder {
         data.put("proposalOrdinal", proposalOrdinal);
         String callId = call == null ? "" : Objects.toString(call.id(), "");
         data.put("providerCallIdHash", TraceRedactor.hash(callId));
-        String toolName = call == null ? "" : Objects.toString(call.name(), "").strip();
-        ToolAliasPolicy.Decision toolDecision = ToolAliasPolicy.resolve(toolName);
+        String rawToolName = call == null ? "" : Objects.toString(call.name(), "");
+        ToolAliasPolicy.Decision toolDecision = ToolAliasPolicy.resolve(rawToolName);
         data.put("toolNameClassification",
-                toolName.isBlank() ? "BLANK" : toolDecision.status().name());
-        data.put("toolNameHash", ProviderResponseCapture.toolNameHash(toolName));
-        data.put("toolNameChars", toolName.length());
+                rawToolName.isBlank() ? "BLANK" : toolDecision.status().name());
+        data.put("toolNameHash", ProviderResponseCapture.toolNameHash(rawToolName));
+        data.put("toolNameChars", rawToolName.length());
         List<String> argumentNames = call == null || call.arguments() == null
                 ? List.of()
                 : call.arguments().keySet().stream().filter(Objects::nonNull)
@@ -168,19 +170,38 @@ final class ProviderResponseTraceRecorder {
         data.put("generationId", event.generationId());
         data.put("source", event.source().name());
         data.put("purpose", event.purpose().name());
+        data.put("toolAuthorityMode", event.toolAuthorityMode().name());
         return data;
     }
 
     private static Map<String, Object> attemptData(
             ProviderResponseCapture.AttemptEvent event) {
         Map<String, Object> data = generationData(new ProviderResponseCapture.GenerationEvent(
-                event.ledgerSequence(), event.generationId(), event.source(), event.purpose()));
+                event.ledgerSequence(), event.generationId(), event.source(), event.purpose(),
+                event.toolAuthorityMode()));
         data.put("attemptId", event.attemptId());
         data.put("attemptOrdinal", event.attemptOrdinal());
         data.put("attemptKind", event.attemptKind().name());
         data.put("retryReason", event.retryReason().name());
         data.put("requestDispatched", event.requestDispatched());
         return data;
+    }
+
+    private static Map<String, Object> toolAuthoritySurface(
+            ProviderResponseCapture.ToolAuthorityContract contract
+    ) {
+        ProviderResponseCapture.ToolAuthorityContract typed = contract == null
+                ? ProviderResponseCapture.ToolAuthorityContract.none()
+                : contract;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("schemaVersion", 1);
+        data.put("bound", typed.bound());
+        data.put("toolChoiceMode", typed.toolChoice().name());
+        data.put("namedToolNameHash", ProviderResponseCapture.toolNameHash(
+                typed.namedTool()));
+        data.put("selectedToolNameHashes", typed.selectedToolNameHashes());
+        data.put("authorizedToolNameHashes", typed.authorizedToolNameHashes());
+        return Map.copyOf(data);
     }
 
     private static void emit(

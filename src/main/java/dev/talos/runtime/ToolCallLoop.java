@@ -5,6 +5,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.toolcall.ToolLoopResultSummaryFormatter;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.toolcall.ToolOutcomeFailureShape;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
@@ -352,14 +353,33 @@ public final class ToolCallLoop {
         }
     }
 
+    /**
+     * Receipt-less compatibility entry point. It is always deterministic
+     * runtime authority; provider-derived calls must use the receipt overload.
+     */
     public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx) {
-        return run(initialAnswer, List.of(), messages, workspace, ctx);
+        return runRuntimeDeterministic(
+                initialAnswer,
+                List.of(),
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.DIRECT_RUNTIME_API,
+                messages,
+                workspace,
+                ctx);
     }
 
+    /**
+     * Receipt-less compatibility entry point. It is always deterministic
+     * runtime authority; provider-derived calls must use the receipt overload.
+     */
     public LoopResult run(String initialAnswer, List<NativeToolCall> nativeToolCalls,
                           List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx) {
-        return run(initialAnswer, nativeToolCalls, ProviderResponseCapture.Receipt.none(),
-                messages, workspace, ctx);
+        return runRuntimeDeterministic(
+                initialAnswer,
+                nativeToolCalls,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.DIRECT_RUNTIME_API,
+                messages,
+                workspace,
+                ctx);
     }
 
     public LoopResult run(
@@ -371,6 +391,22 @@ public final class ToolCallLoop {
             RuntimeTurnContext ctx) {
         return engine.run(
                 initialAnswer, nativeToolCalls, responseReceipt, messages, workspace, ctx);
+    }
+
+    /**
+     * Runs an explicitly runtime-owned deterministic tool sequence. This path
+     * cannot claim provider authority and still requires the active turn trace.
+     */
+    public LoopResult runRuntimeDeterministic(
+            String initialAnswer,
+            List<NativeToolCall> nativeToolCalls,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason reason,
+            List<ChatMessage> messages,
+            Path workspace,
+            RuntimeTurnContext ctx
+    ) {
+        return engine.runRuntimeDeterministic(
+                initialAnswer, nativeToolCalls, reason, messages, workspace, ctx);
     }
 
     static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {

@@ -7,6 +7,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ForegroundProviderScriptedLlmClient;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.SessionApprovalPolicy;
@@ -168,7 +169,11 @@ public final class SynchronizedApprovalAuditRunner {
     }
 
     public static Result runScripted(Request request) {
-        return run(request, LlmClient.scripted(request.scriptedModelResponses()));
+        return run(
+                request,
+                ForegroundProviderScriptedLlmClient.create(
+                        request.config(),
+                        request.scriptedModelResponses()));
     }
 
     public static Result run(Request request, LlmClient llm) {

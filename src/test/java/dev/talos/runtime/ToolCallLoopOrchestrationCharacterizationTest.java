@@ -9,6 +9,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContentMetadata;
@@ -122,14 +123,24 @@ class ToolCallLoopOrchestrationCharacterizationTest {
 
     @Test
     void iterationLimitSetsFlagAndAppliesFinalizerNotice() {
+        beginTrace("trc-loop-iteration-limit");
         ToolCallLoop loop = createLoopWithMaxIterations(2, echoTool());
         List<ChatMessage> messages = baseMessages("Keep echoing until the loop stops.");
+        Context context = Context.builder(new Config())
+                .llm(ScriptedNativeLlmClient.textToolFallbackStrings(List.of(
+                        textToolCall("second"),
+                        textToolCall("third"))))
+                .nativeToolSpecs(List.of(new ToolSpec(
+                        "talos.echo",
+                        "Echo the supplied input.",
+                        "{\"type\":\"object\"}")))
+                .build();
 
         ToolCallLoop.LoopResult result = loop.run(
                 textToolCall("first"),
                 messages,
                 WORKSPACE,
-                ctxWithResponses(textToolCall("second"), textToolCall("third")));
+                context);
 
         assertAll(
                 () -> assertEquals(2, result.iterations()),

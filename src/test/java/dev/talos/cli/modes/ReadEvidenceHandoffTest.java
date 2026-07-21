@@ -7,6 +7,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.ActiveToolAuthorityTraceTest;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.task.TaskContract;
@@ -26,7 +27,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class ReadEvidenceHandoffTest {
+class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
 
     @Test
     void handoffReadsNonProtectedEvidenceTargetThroughToolLoop(@TempDir Path workspace) throws Exception {

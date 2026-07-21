@@ -3,12 +3,17 @@ package dev.talos.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.FileLookupAnswerGuard;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -60,6 +65,26 @@ final class QualificationTraceEvidence {
         EXECUTED_FAILURE,
         BLOCKED,
         UNSETTLED
+    }
+
+    private enum ExecutionAuthorityKind {
+        LEGACY,
+        PROVIDER_NATIVE,
+        PROVIDER_TEXT_JSON,
+        RUNTIME_DETERMINISTIC
+    }
+
+    private record ExecutionAuthority(
+            ExecutionAuthorityKind kind,
+            String sourceIdentity,
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeReason
+    ) {
+        private static ExecutionAuthority legacy() {
+            return new ExecutionAuthority(
+                    ExecutionAuthorityKind.LEGACY,
+                    "",
+                    LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE);
+        }
     }
 
     record Call(
@@ -336,8 +361,9 @@ final class QualificationTraceEvidence {
             return attempt != null
                     && dispatchMatchesPlannedNativeSurface(attempt)
                     && allowedTools != null && allowedTools.stream()
-                    .map(QualificationTraceEvidence::canonicalTool)
-                    .anyMatch(canonicalDispatchedTools(attempt)::contains);
+                    .map(ProviderResponseCapture::toolNameHash)
+                    .anyMatch(attempt.authoritySurface()
+                            .authorizedToolNameHashes()::contains);
         }
 
         boolean hasProviderToolOpportunity() {
@@ -354,7 +380,7 @@ final class QualificationTraceEvidence {
                 QualificationProviderAttemptLedger.Attempt attempt) {
             return attempt != null
                     && dispatchMatchesPlannedNativeSurface(attempt)
-                    && !canonicalDispatchedTools(attempt).isEmpty();
+                    && !attempt.authoritySurface().authorizedToolNameHashes().isEmpty();
         }
 
         private QualificationProviderAttemptLedger.Attempt selectedDispatchedAttempt() {
@@ -377,17 +403,16 @@ final class QualificationTraceEvidence {
 
         private boolean dispatchMatchesPlannedNativeSurface(
                 QualificationProviderAttemptLedger.Attempt attempt) {
-            Set<String> dispatched = canonicalDispatchedTools(attempt);
+            List<String> dispatched = attempt.dispatchedNativeTools();
+            List<String> dispatchedHashes = dispatched.stream()
+                    .map(ProviderResponseCapture::toolNameHash)
+                    .toList();
             return !attempt.providerBodyHash().isBlank()
-                    && dispatched.size() == attempt.dispatchedNativeTools().size()
-                    && dispatched.equals(providerToolSurface);
-        }
-
-        private Set<String> canonicalDispatchedTools(
-                QualificationProviderAttemptLedger.Attempt attempt) {
-            return attempt.dispatchedNativeTools().stream()
-                    .map(QualificationTraceEvidence::canonicalTool)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                    && !dispatched.isEmpty()
+                    && attempt.authoritySurface().bound()
+                    && dispatchedHashes.equals(
+                            attempt.authoritySurface().selectedToolNameHashes())
+                    && providerToolSurface.containsAll(dispatched);
         }
     }
 
@@ -403,11 +428,15 @@ final class QualificationTraceEvidence {
         int traceSchemaVersion = QualificationJson.requiredInt(
                 root.path("schemaVersion"), "trace schemaVersion");
         if (!root.isObject() || (traceSchemaVersion != 2
+                && traceSchemaVersion
+                        != QualificationProviderAttemptLedger.PRE_AUTHORITY_TRACE_SCHEMA_VERSION
                 && traceSchemaVersion != QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION)) {
             throw new IllegalArgumentException(
-                    "trace must be a Talos schemaVersion 2 or 3 object");
+                    "trace must be a Talos schemaVersion 2, 3, or 4 object");
         }
         boolean exactToolLineage = traceSchemaVersion
+                >= QualificationProviderAttemptLedger.PRE_AUTHORITY_TRACE_SCHEMA_VERSION;
+        boolean exactExecutionAuthority = traceSchemaVersion
                 == QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION;
         String traceId = required(QualificationJson.requiredText(
                 root.path("traceId"), "traceId"), "traceId");
@@ -432,6 +461,7 @@ final class QualificationTraceEvidence {
                     "trace taskContract and promptAudit authority disagree");
         }
         Set<String> providerToolSurface = Set.of();
+        Set<String> providerPromptSurface = Set.of();
         if (exactToolLineage) {
             JsonNode toolSurface = requiredObject(
                     root.path("toolSurface"), "trace toolSurface");
@@ -453,6 +483,7 @@ final class QualificationTraceEvidence {
             // Native tools can be matched to the selected attempt's exact
             // serialized provider-body receipt.
             providerToolSurface = Set.copyOf(selectedNativeTools);
+            providerPromptSurface = Set.copyOf(selectedPromptTools);
         }
         String terminalState = required(QualificationJson.requiredText(
                 root.path("outcome").path("classification"),
@@ -467,6 +498,10 @@ final class QualificationTraceEvidence {
         if (!events.isArray()) throw new IllegalArgumentException("trace events must be an array");
         QualificationProviderAttemptLedger.Ledger providerAttempts =
                 QualificationProviderAttemptLedger.parse(root);
+        if (exactToolLineage) {
+            validateAuthoritySurfacesWithinPlan(
+                    providerAttempts, providerToolSurface, providerPromptSurface);
+        }
 
         List<MutableCall> calls = new ArrayList<>();
         boolean approvalGranted = false;
@@ -482,12 +517,23 @@ final class QualificationTraceEvidence {
         int answerLineageCurrentChars = -1;
         boolean answerRestorationObserved = false;
         Set<String> suppressedProviderResponses = new HashSet<>();
+        Set<String> consumedExecutionAuthorities = new HashSet<>();
         for (int eventIndex = 0; eventIndex < events.size(); eventIndex++) {
             JsonNode event = events.get(eventIndex);
             String type = QualificationJson.requiredText(
                     event.path("type"), "trace event type");
-            String tool = canonicalTool(QualificationJson.optionalText(
-                    event.path("toolName"), "trace event toolName"));
+            String persistedToolName = QualificationJson.optionalText(
+                    event.path("toolName"), "trace event toolName");
+            if (exactExecutionAuthority
+                    && requiresCanonicalToolIdentity(type)
+                    && !ProviderResponseCapture.toolNameHash(persistedToolName).equals(
+                            requiredHash(
+                                    event.path("data").path("canonicalToolNameHash"),
+                                    type + " canonical tool-name hash"))) {
+                throw new IllegalArgumentException(
+                        type + " canonical tool-name identity does not match its event");
+            }
+            String tool = canonicalTool(persistedToolName);
             String pathHint = normalizedPathHint(QualificationJson.optionalText(
                     event.path("data").path("pathHint"), "trace event pathHint"));
             if (type.equals("TOOL_CALL_PARSED")) {
@@ -497,6 +543,22 @@ final class QualificationTraceEvidence {
                 String toolCallId = exactToolLineage
                         ? requiredToolCallId(event.path("data"), "parsed tool call")
                         : "";
+                ExecutionAuthority executionAuthority = exactExecutionAuthority
+                        ? executionAuthority(
+                                event.path("data"),
+                                providerLink,
+                                providerAttempts,
+                                traceId,
+                                toolCallId,
+                                tool)
+                        : ExecutionAuthority.legacy();
+                if (exactExecutionAuthority
+                        && !consumedExecutionAuthorities.add(
+                                executionAuthority.sourceIdentity())) {
+                    throw new IllegalArgumentException(
+                            "trace reuses executable tool authority: "
+                                    + executionAuthority.sourceIdentity());
+                }
                 if (exactToolLineage && calls.stream().anyMatch(
                         call -> call.toolCallId.equals(toolCallId))) {
                     throw new IllegalArgumentException(
@@ -516,13 +578,21 @@ final class QualificationTraceEvidence {
                         exactToolLineage
                                 ? requiredHash(event.path("data").path("argumentsHash"),
                                         "parsed tool arguments hash")
-                                : ""));
+                                : "",
+                        executionAuthority.kind(),
+                        executionAuthority.runtimeReason()));
             } else if (type.equals("TOOL_CALL_TRANSFORMED")) {
                 if (!exactToolLineage) {
                     throw new IllegalArgumentException(
-                            "tool transformation requires trace schemaVersion 3");
+                            "tool transformation requires trace schemaVersion 3 or newer");
                 }
-                applyTransformation(calls, event, tool, pathHint);
+                applyTransformation(
+                        calls,
+                        event,
+                        tool,
+                        pathHint,
+                        providerAttempts,
+                        eventIndex);
             } else if (type.equals("ANSWER_TRANSFORMED")) {
                 AnswerTransformation transformation = validateAnswerTransformation(event);
                 if (answerLineageSourceHash.isBlank()) {
@@ -562,6 +632,8 @@ final class QualificationTraceEvidence {
                 if (match == null) {
                     throw new IllegalArgumentException("blocked tool call lacks a parsed call: " + tool);
                 }
+                requireCurrentProviderAuthority(
+                        match, providerAttempts, eventIndex, "blocked tool call");
                 match.settled = true;
                 match.settlement = CallSettlement.BLOCKED;
             } else if (type.equals("TOOL_EXECUTED")) {
@@ -572,6 +644,14 @@ final class QualificationTraceEvidence {
                 if (match == null) {
                     throw new IllegalArgumentException("tool execution lacks a parsed call: " + tool);
                 }
+                requireCurrentProviderAuthority(
+                        match, providerAttempts, eventIndex, "tool execution");
+                if (exactExecutionAuthority
+                        && match.executionAuthorityKind
+                                == ExecutionAuthorityKind.LEGACY) {
+                    throw new IllegalArgumentException(
+                            "tool execution lacks executable authority: " + tool);
+                }
                 match.settled = true;
                 match.executed = QualificationJson.requiredBoolean(
                         event.path("data").path("success"), "tool execution success");
@@ -581,17 +661,22 @@ final class QualificationTraceEvidence {
                 if (match.executed) {
                     match.sourcePaths.addAll(sourcePaths(event.path("data"), pathHint));
                 }
+            } else if (type.equals("TOOL_CALL_AUTHORITY_REJECTED")) {
+                validateAuthorityRejection(event.path("data"));
             } else if (type.equals("APPROVAL_REQUIRED")) {
                 bindApproval(calls, event.path("data"), tool, pathHint,
-                        ApprovalDisposition.NONE, true, exactToolLineage);
+                        ApprovalDisposition.NONE, true, exactToolLineage,
+                        providerAttempts, eventIndex);
             } else if (type.equals("APPROVAL_GRANTED")) {
                 approvalGranted = true;
                 bindApproval(calls, event.path("data"), tool, pathHint,
-                        ApprovalDisposition.GRANTED, false, exactToolLineage);
+                        ApprovalDisposition.GRANTED, false, exactToolLineage,
+                        providerAttempts, eventIndex);
             } else if (type.equals("APPROVAL_DENIED")) {
                 approvalDenied = true;
                 bindApproval(calls, event.path("data"), tool, pathHint,
-                        ApprovalDisposition.DENIED, false, exactToolLineage);
+                        ApprovalDisposition.DENIED, false, exactToolLineage,
+                        providerAttempts, eventIndex);
             } else if (type.endsWith("APPROVAL_GRANTED")) {
                 approvalGranted = true;
             } else if (type.endsWith("APPROVAL_DENIED")) {
@@ -673,17 +758,56 @@ final class QualificationTraceEvidence {
                 providerToolSurface);
     }
 
+    private static void validateAuthoritySurfacesWithinPlan(
+            QualificationProviderAttemptLedger.Ledger ledger,
+            Set<String> selectedNativeTools,
+            Set<String> selectedPromptTools
+    ) {
+        Set<String> nativeHashes = selectedNativeTools.stream()
+                .map(ProviderResponseCapture::toolNameHash)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Set<String> promptHashes = selectedPromptTools.stream()
+                .map(ProviderResponseCapture::toolNameHash)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        for (QualificationProviderAttemptLedger.Generation generation : ledger.generations()) {
+            Set<String> planned = switch (generation.toolAuthorityMode()) {
+                case NONE -> Set.of();
+                case PROVIDER_NATIVE -> nativeHashes;
+                case PROVIDER_TEXT_JSON -> promptHashes;
+            };
+            for (QualificationProviderAttemptLedger.Attempt attempt : generation.attempts()) {
+                if (!attempt.requestDispatched()) continue;
+                QualificationProviderAttemptLedger.AuthoritySurface surface =
+                        attempt.authoritySurface();
+                if (generation.toolAuthorityMode()
+                        == ProviderResponseCapture.ToolAuthorityMode.NONE) {
+                    if (surface.bound()) {
+                        throw new IllegalArgumentException(
+                                "tool-authority NONE attempt carries a selected surface");
+                    }
+                    continue;
+                }
+                if (!surface.bound()
+                        || !planned.containsAll(surface.selectedToolNameHashes())) {
+                    throw new IllegalArgumentException(
+                            "provider attempt authority surface broadens the planned tool surface");
+                }
+            }
+        }
+    }
+
     private static Set<String> requiredToolNames(JsonNode values, String label) {
         if (values == null || !values.isArray()) {
             throw new IllegalArgumentException(label + " must be an array");
         }
         java.util.LinkedHashSet<String> tools = new java.util.LinkedHashSet<>();
         for (JsonNode value : values) {
-            String raw = required(QualificationJson.requiredText(value, label + " entry"),
+            String tool = required(QualificationJson.requiredText(value, label + " entry"),
                     label + " entry");
-            String tool = canonicalTool(raw);
-            if (tool.isBlank() || !tools.add(tool)) {
-                throw new IllegalArgumentException(label + " contains a blank or duplicate tool");
+            if (tool.isBlank() || !tool.equals(tool.strip()) || tool.length() > 256
+                    || !tools.add(tool)) {
+                throw new IllegalArgumentException(
+                        label + " contains a blank, normalized, oversized, or duplicate tool");
             }
         }
         return Set.copyOf(tools);
@@ -921,6 +1045,404 @@ final class QualificationTraceEvidence {
         }
     }
 
+    private static ExecutionAuthority executionAuthority(
+            JsonNode data,
+            ProviderLink providerLink,
+            QualificationProviderAttemptLedger.Ledger ledger,
+            String traceId,
+            String toolCallId,
+            String parsedToolName
+    ) {
+        JsonNode authority = requiredObject(
+                data.path("executionAuthority"), "tool execution authority");
+        int schemaVersion = QualificationJson.requiredInt(
+                authority.path("schemaVersion"), "tool execution authority schemaVersion");
+        if (schemaVersion != 1) {
+            throw new IllegalArgumentException(
+                    "tool execution authority schemaVersion must be 1");
+        }
+        String status = required(QualificationJson.requiredText(
+                authority.path("status"), "tool execution authority status"),
+                "tool execution authority status");
+        if (!"AUTHORIZED".equals(status)) {
+            throw new IllegalArgumentException(
+                    "parsed tool execution authority must be AUTHORIZED");
+        }
+        ExecutionAuthorityKind kind = QualificationJson.requiredEnum(
+                authority.path("kind"),
+                ExecutionAuthorityKind.class,
+                "tool execution authority kind");
+        if (kind == ExecutionAuthorityKind.LEGACY) {
+            throw new IllegalArgumentException(
+                    "trace-v4 parsed calls cannot claim legacy execution authority");
+        }
+        String authorityId = requiredHash(
+                authority.path("authorityId"), "tool execution authority id");
+        String toolNameHash = requiredHash(
+                authority.path("toolNameHash"), "authority tool-name hash");
+        String argumentsHash = requiredHash(
+                authority.path("argumentsHash"), "authority arguments hash");
+        if (!toolNameHash.equals(requiredHash(
+                data.path("toolNameHash"), "parsed tool-name hash"))
+                || !argumentsHash.equals(requiredHash(
+                        data.path("argumentsHash"), "parsed arguments hash"))) {
+            throw new IllegalArgumentException(
+                    "tool execution authority does not match the parsed call");
+        }
+        String expectedAuthorityId = sha256(
+                traceId + '\u0000' + toolCallId + '\u0000' + kind.name());
+        if (!expectedAuthorityId.equals(authorityId)) {
+            throw new IllegalArgumentException(
+                    "tool execution authority id does not match its trace owner");
+        }
+
+        return switch (kind) {
+            case PROVIDER_NATIVE -> nativeExecutionAuthority(
+                    data, authority, providerLink, ledger, toolNameHash);
+            case PROVIDER_TEXT_JSON -> textExecutionAuthority(
+                    authority, providerLink, ledger, toolNameHash);
+            case RUNTIME_DETERMINISTIC -> runtimeExecutionAuthority(
+                    authority, providerLink, authorityId, parsedToolName, toolNameHash);
+            case LEGACY -> throw new IllegalStateException("legacy authority already rejected");
+        };
+    }
+
+    private static ExecutionAuthority nativeExecutionAuthority(
+            JsonNode parsedData,
+            JsonNode authority,
+            ProviderLink providerLink,
+            QualificationProviderAttemptLedger.Ledger ledger,
+            String toolNameHash
+    ) {
+        requireExactKeys(authority, Set.of(
+                "schemaVersion", "status", "kind", "authorityId",
+                "toolNameHash", "argumentsHash",
+                "providerGenerationId", "providerAttemptId", "sourceOrdinal",
+                "parserFormat", "providerCallIdHash",
+                "providerToolNameHash", "providerArgumentsHash"),
+                "native tool execution authority");
+        if (!providerLink.nativeDecisionBound()) {
+            throw new IllegalArgumentException(
+                    "native execution authority lacks a native provider decision");
+        }
+        String generationId = required(QualificationJson.requiredText(
+                authority.path("providerGenerationId"),
+                "native authority provider generation id"),
+                "native authority provider generation id");
+        String attemptId = required(QualificationJson.requiredText(
+                authority.path("providerAttemptId"),
+                "native authority provider attempt id"),
+                "native authority provider attempt id");
+        if (!generationId.equals(providerLink.generationId())
+                || !attemptId.equals(providerLink.attemptId())) {
+            throw new IllegalArgumentException(
+                    "native execution authority provider identity disagrees");
+        }
+        int ordinal = QualificationJson.requiredInt(
+                authority.path("sourceOrdinal"), "native authority source ordinal");
+        if (ordinal < 1
+                || ordinal != QualificationJson.requiredInt(
+                        parsedData.path("providerProposalOrdinal"),
+                        "parsed provider proposal ordinal")) {
+            throw new IllegalArgumentException(
+                    "native execution authority source ordinal is invalid");
+        }
+        if (!"NATIVE".equals(QualificationJson.requiredText(
+                authority.path("parserFormat"), "native authority parser format"))) {
+            throw new IllegalArgumentException(
+                    "native execution authority parser format is invalid");
+        }
+        QualificationProviderAttemptLedger.Generation generation =
+                ledger.selectedGeneration(generationId, attemptId);
+        QualificationProviderAttemptLedger.Attempt selectedAttempt =
+                generation == null ? null : generation.selectedAttempt();
+        if (generation == null
+                || generation.toolAuthorityMode()
+                    != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
+                || !generation.providerTerminalEligible()
+                || selectedAttempt == null
+                || !selectedAttempt.authoritySurface().authorizes(toolNameHash)) {
+            throw new IllegalArgumentException(
+                    "native execution authority requires an exact selected tool surface");
+        }
+        QualificationProviderAttemptLedger.Proposal proposal =
+                ledger.selectedProposal(generationId, attemptId, ordinal);
+        if (proposal == null
+                || !proposal.providerCallIdHash().equals(requiredHash(
+                        authority.path("providerCallIdHash"),
+                        "native authority provider call-id hash"))
+                || !proposal.toolNameHash().equals(requiredHash(
+                        authority.path("providerToolNameHash"),
+                        "native authority provider tool-name hash"))
+                || !proposal.argumentsHash().equals(requiredHash(
+                        authority.path("providerArgumentsHash"),
+                        "native authority provider arguments hash"))
+                || !proposal.toolNameHash().equals(toolNameHash)) {
+            throw new IllegalArgumentException(
+                    "native execution authority does not match its provider proposal");
+        }
+        return new ExecutionAuthority(
+                ExecutionAuthorityKind.PROVIDER_NATIVE,
+                "native\u0000" + generationId + '\u0000' + attemptId + '\u0000' + ordinal,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE);
+    }
+
+    private static ExecutionAuthority textExecutionAuthority(
+            JsonNode authority,
+            ProviderLink providerLink,
+            QualificationProviderAttemptLedger.Ledger ledger,
+            String toolNameHash
+    ) {
+        requireExactKeys(authority, Set.of(
+                "schemaVersion", "status", "kind", "authorityId",
+                "toolNameHash", "argumentsHash",
+                "providerGenerationId", "providerAttemptId", "sourceOrdinal",
+                "parserFormat", "providerAssistantHash"),
+                "text tool execution authority");
+        if (providerLink.generationId().isBlank()
+                || providerLink.nativeDecisionBound()) {
+            throw new IllegalArgumentException(
+                    "text execution authority lacks a textual provider decision");
+        }
+        String generationId = required(QualificationJson.requiredText(
+                authority.path("providerGenerationId"),
+                "text authority provider generation id"),
+                "text authority provider generation id");
+        String attemptId = required(QualificationJson.requiredText(
+                authority.path("providerAttemptId"),
+                "text authority provider attempt id"),
+                "text authority provider attempt id");
+        if (!generationId.equals(providerLink.generationId())
+                || !attemptId.equals(providerLink.attemptId())) {
+            throw new IllegalArgumentException(
+                    "text execution authority provider identity disagrees");
+        }
+        int ordinal = QualificationJson.requiredInt(
+                authority.path("sourceOrdinal"), "text authority source ordinal");
+        if (ordinal < 1
+                || ordinal > ProviderResponseCapture.MAX_TRACE_TOOL_PROPOSALS) {
+            throw new IllegalArgumentException(
+                    "text execution authority source ordinal is invalid");
+        }
+        if (!"JSON_TEXT".equals(QualificationJson.requiredText(
+                authority.path("parserFormat"), "text authority parser format"))) {
+            throw new IllegalArgumentException(
+                    "text execution authority parser format is invalid");
+        }
+        QualificationProviderAttemptLedger.Generation generation =
+                ledger.selectedGeneration(generationId, attemptId);
+        QualificationProviderAttemptLedger.Attempt selectedAttempt =
+                generation == null ? null : generation.selectedAttempt();
+        QualificationProviderAttemptLedger.Response response =
+                generation == null ? null : generation.selectedResponse();
+        if (response == null
+                || generation.toolAuthorityMode()
+                    != ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON
+                || response.completion()
+                        != dev.talos.spi.types.ProviderResponseCapture.Completion.PROVIDER_EOS
+                || !generation.providerTerminalEligible()
+                || selectedAttempt == null
+                || !selectedAttempt.authoritySurface().authorizes(toolNameHash)
+                || response.normalized()
+                || response.truncated()
+                || response.nativeToolCallCount() != 0
+                || !response.textualToolCallPresent()
+                || !response.assistantHash().equals(requiredHash(
+                        authority.path("providerAssistantHash"),
+                        "text authority provider assistant hash"))) {
+            throw new IllegalArgumentException(
+                    "text execution authority does not match an eligible provider response");
+        }
+        return new ExecutionAuthority(
+                ExecutionAuthorityKind.PROVIDER_TEXT_JSON,
+                "text\u0000" + generationId + '\u0000' + attemptId + '\u0000' + ordinal,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE);
+    }
+
+    private static ExecutionAuthority runtimeExecutionAuthority(
+            JsonNode authority,
+            ProviderLink providerLink,
+            String authorityId,
+            String parsedToolName,
+            String parsedToolNameHash
+    ) {
+        requireExactKeys(authority, Set.of(
+                "schemaVersion", "status", "kind", "authorityId",
+                "toolNameHash", "argumentsHash", "runtimeReason"),
+                "runtime tool execution authority");
+        if (!providerLink.generationId().isBlank()
+                || !providerLink.attemptId().isBlank()) {
+            throw new IllegalArgumentException(
+                    "runtime execution authority cannot claim provider ownership");
+        }
+        LocalTurnTraceCapture.RuntimeToolAuthorityReason reason =
+                QualificationJson.requiredEnum(
+                        authority.path("runtimeReason"),
+                        LocalTurnTraceCapture.RuntimeToolAuthorityReason.class,
+                        "runtime tool authority reason");
+        if (reason == LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE) {
+            throw new IllegalArgumentException(
+                    "runtime execution authority reason is missing");
+        }
+        if (!runtimeReasonAllowsTool(reason, parsedToolName, parsedToolNameHash)) {
+            throw new IllegalArgumentException(
+                    "runtime execution authority reason does not permit the parsed tool");
+        }
+        return new ExecutionAuthority(
+                ExecutionAuthorityKind.RUNTIME_DETERMINISTIC,
+                "runtime\u0000" + authorityId,
+                reason);
+    }
+
+    private static void validateAuthorityRejection(JsonNode data) {
+        JsonNode authority = requiredObject(
+                data.path("executionAuthority"), "tool authority rejection");
+        requireExactKeys(authority, Set.of(
+                "schemaVersion", "status", "kind", "reasonCode"),
+                "tool authority rejection");
+        if (QualificationJson.requiredInt(
+                authority.path("schemaVersion"),
+                "tool authority rejection schemaVersion") != 1
+                || !"REJECTED".equals(QualificationJson.requiredText(
+                        authority.path("status"), "tool authority rejection status"))) {
+            throw new IllegalArgumentException(
+                    "tool authority rejection has invalid schema or status");
+        }
+        String kind = required(QualificationJson.requiredText(
+                authority.path("kind"), "tool authority rejection kind"),
+                "tool authority rejection kind");
+        if (!kind.equals("UNBOUND")) {
+            ExecutionAuthorityKind parsedKind = QualificationJson.requiredEnum(
+                    authority.path("kind"),
+                    ExecutionAuthorityKind.class,
+                    "tool authority rejection kind");
+            if (parsedKind == ExecutionAuthorityKind.LEGACY) {
+                throw new IllegalArgumentException(
+                        "trace-v4 authority rejection cannot claim legacy kind");
+            }
+        }
+        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason reason =
+                QualificationJson.requiredEnum(
+                authority.path("reasonCode"),
+                LocalTurnTraceCapture.ToolCallAuthorityRejectionReason.class,
+                "tool authority rejection reason");
+        validateAuthorityRejectionKind(kind, reason);
+    }
+
+    private static void validateAuthorityRejectionKind(
+            String kind,
+            LocalTurnTraceCapture.ToolCallAuthorityRejectionReason reason
+    ) {
+        Set<LocalTurnTraceCapture.ToolCallAuthorityRejectionReason> common = Set.of(
+                LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                        .LINEAGE_SCOPE_MISMATCH,
+                LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                        .LINEAGE_CALL_MISMATCH,
+                LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                        .ACTIVE_CALL_EXISTS);
+        Set<LocalTurnTraceCapture.ToolCallAuthorityRejectionReason> providerPreFormat =
+                Set.of(
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_RECEIPT_MISSING,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_RECEIPT_NOT_CURRENT,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_GENERATION_STALE,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_SOURCE_INELIGIBLE,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PURPOSE_INELIGIBLE,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_TOOL_SURFACE_UNBOUND,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_DISPATCH_SURFACE_MISMATCH,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_TOOL_SURFACE_MISMATCH,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_TOOL_INELIGIBLE,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_RESPONSE_MISSING,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_RESPONSE_MISMATCH);
+        java.util.LinkedHashSet<LocalTurnTraceCapture.ToolCallAuthorityRejectionReason>
+                reachable = new java.util.LinkedHashSet<>(common);
+        switch (kind) {
+            case "RUNTIME_DETERMINISTIC" -> reachable.addAll(Set.of(
+                    LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                            .RUNTIME_AUTHORITY_REASON_MISSING,
+                    LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                            .RUNTIME_AUTHORITY_SCOPE_INVALID));
+            case "PROVIDER_NATIVE" -> {
+                reachable.addAll(providerPreFormat);
+                reachable.addAll(Set.of(
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_TOOL_MODE_MISMATCH,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_TERMINAL_INELIGIBLE,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_ORDINAL_INVALID,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_EVIDENCE_MISSING,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_MISMATCH,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_ALREADY_USED));
+            }
+            case "PROVIDER_TEXT_JSON" -> {
+                reachable.addAll(providerPreFormat);
+                reachable.addAll(Set.of(
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_TOOL_MODE_MISMATCH,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .TEXT_PROTOCOL_INELIGIBLE,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_ORDINAL_INVALID,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_MISMATCH,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .PROVIDER_PROPOSAL_ALREADY_USED));
+            }
+            case "UNBOUND" -> {
+                reachable.addAll(providerPreFormat);
+                reachable.addAll(Set.of(
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .LINEAGE_MISSING,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .TEXT_PARSER_LINEAGE_REQUIRED,
+                        LocalTurnTraceCapture.ToolCallAuthorityRejectionReason
+                                .XML_COMPATIBILITY_NOT_AUTHORIZED));
+            }
+            default -> throw new IllegalArgumentException(
+                    "tool authority rejection kind is unknown");
+        }
+        if (!reachable.contains(reason)) {
+            throw new IllegalArgumentException(
+                    "tool authority rejection kind and reason are incompatible");
+        }
+    }
+
+    private static void requireExactKeys(
+            JsonNode object,
+            Set<String> expected,
+            String label
+    ) {
+        Set<String> actual = new HashSet<>();
+        object.fieldNames().forEachRemaining(actual::add);
+        if (!actual.equals(expected)) {
+            throw new IllegalArgumentException(label + " has unexpected fields");
+        }
+    }
+
+    private static String sha256(String value) {
+        try {
+            return "sha256:" + HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(
+                            String.valueOf(value).getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
+    }
+
     private static ProviderLink providerLink(
             JsonNode data,
             QualificationProviderAttemptLedger.Ledger ledger,
@@ -966,6 +1488,10 @@ final class QualificationTraceEvidence {
                     "parsed tool provider link resolves to a response without a tool call");
         }
         if (response.nativeToolCallCount() > 0) {
+            if (!generation.providerTerminalEligible()) {
+                throw new IllegalArgumentException(
+                        "native parsed tool link requires a terminal-eligible response");
+            }
             if (!hasProposalOrdinal || !hasToolHash || !hasArgumentsHash
                     || !hasParsedToolHash || !hasParsedArgumentsHash) {
                 throw new IllegalArgumentException(
@@ -1044,10 +1570,14 @@ final class QualificationTraceEvidence {
             List<MutableCall> calls,
             JsonNode event,
             String tool,
-            String pathHint) {
+            String pathHint,
+            QualificationProviderAttemptLedger.Ledger providerAttempts,
+            int eventIndex) {
         JsonNode data = requiredObject(event.path("data"), "tool transformation data");
         String toolCallId = requiredToolCallId(data, "tool transformation");
         MutableCall match = pendingById(calls, toolCallId, "tool transformation");
+        requireCurrentProviderAuthority(
+                match, providerAttempts, eventIndex, "tool transformation");
         if (match.approvalObserved) {
             throw new IllegalArgumentException(
                     "tool call transformation occurred after approval: " + toolCallId);
@@ -1078,11 +1608,70 @@ final class QualificationTraceEvidence {
             throw new IllegalArgumentException(
                     "tool transformation does not change exact call identity: " + toolCallId);
         }
+        if (match.executionAuthorityKind
+                    == ExecutionAuthorityKind.RUNTIME_DETERMINISTIC
+                && !runtimeReasonAllowsTool(
+                        match.runtimeAuthorityReason, tool, nextToolNameHash)) {
+            throw new IllegalArgumentException(
+                    "runtime execution authority reason does not permit transformed tool: "
+                            + toolCallId);
+        }
+        if ((match.executionAuthorityKind == ExecutionAuthorityKind.PROVIDER_NATIVE
+                    || match.executionAuthorityKind
+                            == ExecutionAuthorityKind.PROVIDER_TEXT_JSON)
+                && !providerAttemptAuthorizes(
+                        providerAttempts,
+                        match.providerGenerationId,
+                        match.providerAttemptId,
+                        nextToolNameHash)) {
+            throw new IllegalArgumentException(
+                    "provider tool transformation leaves the selected authority surface: "
+                            + toolCallId);
+        }
         match.toolName = tool;
         match.pathHint = pathHint;
         match.toolNameHash = nextToolNameHash;
         match.argumentsHash = nextArgumentsHash;
         match.runtimeTransformed = true;
+    }
+
+    private static boolean providerAttemptAuthorizes(
+            QualificationProviderAttemptLedger.Ledger providerAttempts,
+            String generationId,
+            String attemptId,
+            String toolNameHash
+    ) {
+        if (providerAttempts == null) return false;
+        QualificationProviderAttemptLedger.Generation generation =
+                providerAttempts.selectedGeneration(generationId, attemptId);
+        QualificationProviderAttemptLedger.Attempt attempt = generation == null
+                ? null
+                : generation.selectedAttempt();
+        return attempt != null
+                && attempt.authoritySurface().authorizes(toolNameHash);
+    }
+
+    private static void requireCurrentProviderAuthority(
+            MutableCall call,
+            QualificationProviderAttemptLedger.Ledger providerAttempts,
+            int eventIndex,
+            String label
+    ) {
+        if (call.executionAuthorityKind != ExecutionAuthorityKind.PROVIDER_NATIVE
+                && call.executionAuthorityKind
+                        != ExecutionAuthorityKind.PROVIDER_TEXT_JSON) {
+            return;
+        }
+        QualificationProviderAttemptLedger.Generation generation =
+                providerAttempts.selectedGeneration(
+                        call.providerGenerationId, call.providerAttemptId);
+        if (generation == null
+                || providerAttempts.latestNonBackgroundEventIndexBefore(eventIndex)
+                        != generation.terminalEventIndex()) {
+            throw new IllegalArgumentException(
+                    label + " uses stale provider execution authority: "
+                            + call.toolCallId);
+        }
     }
 
     private static MutableCall exactPending(
@@ -1135,7 +1724,9 @@ final class QualificationTraceEvidence {
             String pathHint,
             ApprovalDisposition disposition,
             boolean requiredEvent,
-            boolean exactToolLineage) {
+            boolean exactToolLineage,
+            QualificationProviderAttemptLedger.Ledger providerAttempts,
+            int eventIndex) {
         if (tool.isBlank()) {
             throw new IllegalArgumentException("tool approval event lacks toolName");
         }
@@ -1145,6 +1736,8 @@ final class QualificationTraceEvidence {
         if (match == null) {
             throw new IllegalArgumentException("tool approval lacks a unique parsed call: " + tool);
         }
+        requireCurrentProviderAuthority(
+                match, providerAttempts, eventIndex, "tool approval");
         if (requiredEvent) {
             if (match.approvalRequiredObserved) {
                 throw new IllegalArgumentException(
@@ -1186,6 +1779,47 @@ final class QualificationTraceEvidence {
         ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(tool);
         if (decision.accepted()) return decision.canonicalToolName();
         return tool.startsWith("talos.") ? tool : "talos." + tool;
+    }
+
+    private static boolean requiresCanonicalToolIdentity(String type) {
+        return "TOOL_CALL_PARSED".equals(type)
+                || "TOOL_CALL_TRANSFORMED".equals(type)
+                || "TOOL_CALL_BLOCKED".equals(type)
+                || "TOOL_EXECUTED".equals(type)
+                || "APPROVAL_REQUIRED".equals(type)
+                || "APPROVAL_GRANTED".equals(type)
+                || "APPROVAL_DENIED".equals(type);
+    }
+
+    private static boolean runtimeReasonAllowsTool(
+            LocalTurnTraceCapture.RuntimeToolAuthorityReason reason,
+            String toolName,
+            String toolNameHash
+    ) {
+        if (reason == null || toolName == null || toolName.isBlank()
+                || toolNameHash == null || toolNameHash.isBlank()) {
+            return false;
+        }
+        return switch (reason) {
+            case NONE -> false;
+            case DIRECT_RUNTIME_API -> true;
+            case READ_EVIDENCE_HANDOFF ->
+                    exactRuntimeToolIdentity(
+                            toolName, toolNameHash, "talos.read_file");
+            case EXPECTED_TARGET_SCOPE_REPAIR ->
+                    exactRuntimeToolIdentity(
+                            toolName, toolNameHash, "talos.edit_file");
+        };
+    }
+
+    private static boolean exactRuntimeToolIdentity(
+            String canonicalToolName,
+            String toolNameHash,
+            String requiredRawToolName
+    ) {
+        return requiredRawToolName.equals(canonicalToolName)
+                && ProviderResponseCapture.toolNameHash(requiredRawToolName)
+                        .equals(toolNameHash);
     }
 
     private static String normalizedPathHint(String value) {
@@ -1249,6 +1883,8 @@ final class QualificationTraceEvidence {
         private final String toolCallId;
         private String toolNameHash;
         private String argumentsHash;
+        private final ExecutionAuthorityKind executionAuthorityKind;
+        private final LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeAuthorityReason;
         private final java.util.LinkedHashSet<String> sourcePaths = new java.util.LinkedHashSet<>();
         private boolean settled;
         private boolean executed;
@@ -1266,7 +1902,9 @@ final class QualificationTraceEvidence {
                 boolean nativeProviderDecisionBound,
                 String toolCallId,
                 String toolNameHash,
-                String argumentsHash) {
+                String argumentsHash,
+                ExecutionAuthorityKind executionAuthorityKind,
+                LocalTurnTraceCapture.RuntimeToolAuthorityReason runtimeAuthorityReason) {
             this.toolName = toolName;
             this.pathHint = pathHint;
             this.decisionToolName = toolName;
@@ -1280,6 +1918,12 @@ final class QualificationTraceEvidence {
             this.toolCallId = toolCallId == null ? "" : toolCallId;
             this.toolNameHash = toolNameHash == null ? "" : toolNameHash;
             this.argumentsHash = argumentsHash == null ? "" : argumentsHash;
+            this.executionAuthorityKind = executionAuthorityKind == null
+                    ? ExecutionAuthorityKind.LEGACY
+                    : executionAuthorityKind;
+            this.runtimeAuthorityReason = runtimeAuthorityReason == null
+                    ? LocalTurnTraceCapture.RuntimeToolAuthorityReason.NONE
+                    : runtimeAuthorityReason;
         }
     }
 }

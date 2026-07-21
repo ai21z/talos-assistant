@@ -25,6 +25,41 @@ public final class ScriptedNativeLlmClient {
     private ScriptedNativeLlmClient() {}
 
     public static LlmClient of(List<LlmClient.StreamResult> responses) {
+        return scripted(responses, false);
+    }
+
+    /**
+     * Foreground provider fixture with an authoritative non-native tool
+     * capability, used to exercise the explicit JSON-text fallback surface.
+     */
+    public static LlmClient textToolFallbackOf(List<LlmClient.StreamResult> responses) {
+        return scripted(responses, true);
+    }
+
+    /**
+     * Foreground provider fixture for deterministic textual responses on the
+     * explicitly selected JSON-text tool surface.
+     */
+    public static LlmClient textToolFallbackStrings(List<String> responses) {
+        List<LlmClient.StreamResult> scriptedResponses =
+                responses == null || responses.isEmpty()
+                        ? List.of(new LlmClient.StreamResult("", List.of()))
+                        : responses.stream()
+                                .map(response -> new LlmClient.StreamResult(
+                                        response == null ? "" : response,
+                                        List.of()))
+                                .toList();
+        return scripted(scriptedResponses, true);
+    }
+
+    public static LlmClient textToolFallbackStrings(String response) {
+        return textToolFallbackStrings(List.of(response == null ? "" : response));
+    }
+
+    private static LlmClient scripted(
+            List<LlmClient.StreamResult> responses,
+            boolean authoritativeNonNative
+    ) {
         Config config = new Config();
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
@@ -32,7 +67,7 @@ public final class ScriptedNativeLlmClient {
             Map<String, Object> llm = (Map<String, Object>) map;
             llm.put("transport", "engine");
         }
-        return new LlmClient(config, new Resolver(responses));
+        return new LlmClient(config, new Resolver(responses, authoritativeNonNative));
     }
 
     public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
@@ -55,13 +90,31 @@ public final class ScriptedNativeLlmClient {
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens) {
         Config config = new Config();
-        return recordingWithContextWindow(config, responses, contextWindowTokens);
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, false);
+    }
+
+    public static RecordedClient recordingTextToolFallbackWithContextWindow(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens) {
+        Config config = new Config();
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, true);
     }
 
     public static RecordedClient recordingWithContextWindow(
             Config config,
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens) {
+        return recordingWithContextWindow(
+                config, responses, contextWindowTokens, false);
+    }
+
+    private static RecordedClient recordingWithContextWindow(
+            Config config,
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens,
+            boolean authoritativeNonNative) {
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
             @SuppressWarnings("unchecked")
@@ -69,7 +122,8 @@ public final class ScriptedNativeLlmClient {
             llm.put("transport", "engine");
             llm.put("default_backend", "llama_cpp");
         }
-        RecordingResolver resolver = new RecordingResolver(responses, contextWindowTokens);
+        RecordingResolver resolver = new RecordingResolver(
+                responses, contextWindowTokens, authoritativeNonNative);
         return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
     }
 
@@ -122,6 +176,20 @@ public final class ScriptedNativeLlmClient {
      * wrongly re-generates after the abort is observable.
      */
     public static LlmClient transientAfterPartialOutput(String partialText) {
+        return transientAfterPartialOutput(partialText, false);
+    }
+
+    /**
+     * Foreground provider fixture that selects the JSON-text tool surface,
+     * emits a partial provider response, and then fails before provider EOS.
+     */
+    public static LlmClient transientTextToolAfterPartialOutput(String partialText) {
+        return transientAfterPartialOutput(partialText, true);
+    }
+
+    private static LlmClient transientAfterPartialOutput(
+            String partialText,
+            boolean authoritativeNonNative) {
         Config config = new Config();
         Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
         if (llmBlock instanceof Map<?, ?> map) {
@@ -130,7 +198,11 @@ public final class ScriptedNativeLlmClient {
             llm.put("transport", "engine");
             llm.put("default_backend", "llama_cpp");
         }
-        return new LlmClient(config, new TransientAfterPartialResolver(partialText));
+        return new LlmClient(
+                config,
+                new TransientAfterPartialResolver(
+                        partialText,
+                        authoritativeNonNative));
     }
 
     public static BlockingClient blockingAfterFirstChunk(long configuredTimeoutMs) {
@@ -162,12 +234,17 @@ public final class ScriptedNativeLlmClient {
 
     private static final class Resolver implements LlmEngineResolver {
         private final List<LlmClient.StreamResult> responses;
+        private final boolean authoritativeNonNative;
         private final AtomicInteger cursor = new AtomicInteger();
 
-        private Resolver(List<LlmClient.StreamResult> responses) {
+        private Resolver(
+                List<LlmClient.StreamResult> responses,
+                boolean authoritativeNonNative
+        ) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
+            this.authoritativeNonNative = authoritativeNonNative;
         }
 
         @Override
@@ -177,6 +254,11 @@ public final class ScriptedNativeLlmClient {
         @Override
         public Capabilities capabilities() {
             return Capabilities.of(true, false, false, 0);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return authoritativeNonNative;
         }
 
         @Override
@@ -198,7 +280,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStream(request);
         }
 
@@ -211,13 +293,18 @@ public final class ScriptedNativeLlmClient {
         private final List<LlmClient.StreamResult> responses;
         private final AtomicInteger cursor = new AtomicInteger();
         private final int contextWindowTokens;
+        private final boolean authoritativeNonNative;
         private final List<ChatRequest> requests = Collections.synchronizedList(new ArrayList<>());
 
-        private RecordingResolver(List<LlmClient.StreamResult> responses, int contextWindowTokens) {
+        private RecordingResolver(
+                List<LlmClient.StreamResult> responses,
+                int contextWindowTokens,
+                boolean authoritativeNonNative) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
             this.contextWindowTokens = Math.max(256, contextWindowTokens);
+            this.authoritativeNonNative = authoritativeNonNative;
         }
 
         private List<ChatRequest> requests() {
@@ -232,8 +319,15 @@ public final class ScriptedNativeLlmClient {
         public Capabilities capabilities() {
             return Capabilities.of(
                     true, true, false, contextWindowTokens,
-                    true, true, true,
+                    !authoritativeNonNative,
+                    !authoritativeNonNative,
+                    !authoritativeNonNative,
                     false, false, false, true);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return authoritativeNonNative;
         }
 
         @Override
@@ -247,7 +341,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStream(request);
         }
 
@@ -319,7 +413,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStream(request);
         }
 
@@ -368,7 +462,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStream(request);
         }
 
@@ -381,7 +475,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStreamNonStreaming(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStreamNonStreaming(request);
         }
 
@@ -463,7 +557,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStream(request);
         }
 
@@ -474,10 +568,14 @@ public final class ScriptedNativeLlmClient {
 
     private static final class TransientAfterPartialResolver implements LlmEngineResolver {
         private final String partialText;
+        private final boolean authoritativeNonNative;
         private final AtomicInteger chatCalls = new AtomicInteger();
 
-        private TransientAfterPartialResolver(String partialText) {
+        private TransientAfterPartialResolver(
+                String partialText,
+                boolean authoritativeNonNative) {
             this.partialText = partialText == null ? "" : partialText;
+            this.authoritativeNonNative = authoritativeNonNative;
         }
 
         @Override
@@ -487,6 +585,11 @@ public final class ScriptedNativeLlmClient {
         @Override
         public Capabilities capabilities() {
             return Capabilities.of(true, false, false, 0);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return authoritativeNonNative;
         }
 
         @Override
@@ -519,7 +622,7 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(handoff);
+            markDispatch(request, handoff);
             return chatStream(request);
         }
 
@@ -543,5 +646,21 @@ public final class ScriptedNativeLlmClient {
             }
         };
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
+    }
+
+    private static void markDispatch(
+            ChatRequest request,
+            ProviderTransportHandoff handoff) {
+        String providerBody = String.join(
+                "\n",
+                request.backend,
+                request.model,
+                request.systemPrompt,
+                request.userPrompt,
+                request.snippets.toString(),
+                request.messages.toString(),
+                request.tools.toString(),
+                request.controls.toString());
+        ProviderTransportHandoff.mark(handoff, providerBody, request.tools);
     }
 }

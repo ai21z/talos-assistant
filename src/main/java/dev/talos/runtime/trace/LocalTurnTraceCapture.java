@@ -2,12 +2,14 @@ package dev.talos.runtime.trace;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.verification.VerificationReport;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ContextLedgerSnapshot;
+import dev.talos.core.tool.ToolProtocolText;
 import dev.talos.core.util.RuntimeArtifactIdentity;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolContentMetadata;
@@ -49,6 +51,12 @@ public final class LocalTurnTraceCapture {
         final Map<String, PendingProviderResponse> providerResponses = new LinkedHashMap<>();
         final Set<AnswerCandidateCheckpoint> answerCandidateCheckpoints =
                 Collections.newSetFromMap(new IdentityHashMap<>());
+        final Map<ProviderResponseCapture.Receipt, Set<Integer>> consumedNativeProposals =
+                new IdentityHashMap<>();
+        final Map<ProviderResponseCapture.Receipt, Set<Integer>> consumedTextProposals =
+                new IdentityHashMap<>();
+        String latestSelectableGenerationId = "";
+        long providerAuthorityEpoch;
         long nextToolCallOrdinal;
         ParsedToolCallPermit activeToolCall;
 
@@ -87,6 +95,62 @@ public final class LocalTurnTraceCapture {
         TASK_CONTRACT_BLOCKED_TOOL_CALLS
     }
 
+    public enum ToolCallSource {
+        PROVIDER_RESPONSE,
+        RUNTIME_DETERMINISTIC,
+        UNBOUND
+    }
+
+    public enum ToolCallParseFormat {
+        NATIVE,
+        JSON_TEXT,
+        XML_COMPAT,
+        UNBOUND
+    }
+
+    public enum ToolCallAuthorityKind {
+        PROVIDER_NATIVE,
+        PROVIDER_TEXT_JSON,
+        RUNTIME_DETERMINISTIC
+    }
+
+    public enum RuntimeToolAuthorityReason {
+        NONE,
+        DIRECT_RUNTIME_API,
+        READ_EVIDENCE_HANDOFF,
+        EXPECTED_TARGET_SCOPE_REPAIR
+    }
+
+    public enum ToolCallAuthorityRejectionReason {
+        TRACE_INACTIVE,
+        LINEAGE_MISSING,
+        LINEAGE_SCOPE_MISMATCH,
+        LINEAGE_CALL_MISMATCH,
+        PROVIDER_RECEIPT_MISSING,
+        PROVIDER_RECEIPT_NOT_CURRENT,
+        PROVIDER_GENERATION_STALE,
+        PROVIDER_SOURCE_INELIGIBLE,
+        PROVIDER_PURPOSE_INELIGIBLE,
+        PROVIDER_TOOL_MODE_MISMATCH,
+        PROVIDER_TOOL_SURFACE_UNBOUND,
+        PROVIDER_DISPATCH_SURFACE_MISMATCH,
+        PROVIDER_TOOL_SURFACE_MISMATCH,
+        PROVIDER_TOOL_INELIGIBLE,
+        PROVIDER_TERMINAL_INELIGIBLE,
+        PROVIDER_RESPONSE_MISSING,
+        PROVIDER_RESPONSE_MISMATCH,
+        PROVIDER_PROPOSAL_ORDINAL_INVALID,
+        PROVIDER_PROPOSAL_EVIDENCE_MISSING,
+        PROVIDER_PROPOSAL_MISMATCH,
+        PROVIDER_PROPOSAL_ALREADY_USED,
+        TEXT_PARSER_LINEAGE_REQUIRED,
+        TEXT_PROTOCOL_INELIGIBLE,
+        XML_COMPATIBILITY_NOT_AUTHORIZED,
+        RUNTIME_AUTHORITY_REASON_MISSING,
+        RUNTIME_AUTHORITY_SCOPE_INVALID,
+        ACTIVE_CALL_EXISTS
+    }
+
     public enum AnswerCandidateRestorationReason {
         SPECULATIVE_RETRY_REJECTED,
         SPECULATIVE_RETRY_FAILED,
@@ -122,19 +186,128 @@ public final class LocalTurnTraceCapture {
         private final Bag owner;
         private final Thread ownerThread;
         private final String toolCallId;
+        private final ToolCallAuthorityKind authorityKind;
+        private final RuntimeToolAuthorityReason runtimeReason;
+        private final ProviderResponseCapture.Receipt providerReceipt;
+        private final long providerAuthorityEpoch;
+        private final int sourceOrdinal;
         private ToolCall currentCall;
         private String toolNameHash;
         private String argumentsHash;
         private PermitState state = PermitState.MINTED;
         private boolean approvalObserved;
+        private boolean settlementRecorded;
 
-        private ParsedToolCallPermit(Bag owner, String toolCallId, ToolCall call) {
+        private ParsedToolCallPermit(
+                Bag owner,
+                String toolCallId,
+                ToolCall call,
+                ToolCallAuthorityKind authorityKind,
+                RuntimeToolAuthorityReason runtimeReason,
+                ProviderResponseCapture.Receipt providerReceipt,
+                long providerAuthorityEpoch,
+                int sourceOrdinal
+        ) {
             this.owner = owner;
             this.ownerThread = Thread.currentThread();
             this.toolCallId = toolCallId == null ? "" : toolCallId;
+            this.authorityKind = Objects.requireNonNull(
+                    authorityKind, "tool-call authority kind");
+            this.runtimeReason = runtimeReason == null
+                    ? RuntimeToolAuthorityReason.NONE
+                    : runtimeReason;
+            this.providerReceipt = providerReceipt;
+            this.providerAuthorityEpoch = providerAuthorityEpoch;
+            this.sourceOrdinal = Math.max(0, sourceOrdinal);
             this.currentCall = call;
             this.toolNameHash = toolNameHash(call);
             this.argumentsHash = argumentsHash(call);
+        }
+    }
+
+    /**
+     * Opaque parser lineage. It is a deterministic parse fact, never execution
+     * authority by itself.
+     */
+    public static final class ParsedToolCallLineage {
+        private final Bag owner;
+        private final Thread ownerThread;
+        private final ToolCallSource source;
+        private final ToolCallParseFormat format;
+        private final RuntimeToolAuthorityReason runtimeReason;
+        private final ProviderResponseCapture.Receipt providerReceipt;
+        private final ToolCall parsedCall;
+        private final ChatMessage.NativeToolCall rawNativeCall;
+        private final String providerText;
+        private final int sourceOrdinal;
+        private final long providerAuthorityEpoch;
+
+        private ParsedToolCallLineage(
+                Bag owner,
+                ToolCallSource source,
+                ToolCallParseFormat format,
+                RuntimeToolAuthorityReason runtimeReason,
+                ProviderResponseCapture.Receipt providerReceipt,
+                ToolCall parsedCall,
+                ChatMessage.NativeToolCall rawNativeCall,
+                String providerText,
+                int sourceOrdinal
+        ) {
+            this.owner = owner;
+            this.ownerThread = Thread.currentThread();
+            this.source = source == null ? ToolCallSource.UNBOUND : source;
+            this.format = format == null ? ToolCallParseFormat.UNBOUND : format;
+            this.runtimeReason = runtimeReason == null
+                    ? RuntimeToolAuthorityReason.NONE
+                    : runtimeReason;
+            this.providerReceipt = providerReceipt;
+            this.parsedCall = parsedCall;
+            this.rawNativeCall = rawNativeCall;
+            this.providerText = Objects.toString(providerText, "");
+            this.sourceOrdinal = Math.max(0, sourceOrdinal);
+            this.providerAuthorityEpoch = owner == null ? -1 : owner.providerAuthorityEpoch;
+        }
+    }
+
+    public record ParsedToolCallBatch(
+            List<ToolCall> calls,
+            List<ParsedToolCallLineage> lineages
+    ) {
+        public ParsedToolCallBatch {
+            calls = calls == null ? List.of() : List.copyOf(calls);
+            lineages = lineages == null ? List.of() : List.copyOf(lineages);
+            if (calls.size() != lineages.size()) {
+                throw new IllegalArgumentException(
+                        "every parsed call requires one trace-owned lineage");
+            }
+        }
+    }
+
+    public record ToolCallAuthorityDecision(
+            ParsedToolCallPermit permit,
+            ToolCallAuthorityRejectionReason rejectionReason
+    ) {
+        public ToolCallAuthorityDecision {
+            if ((permit == null) == (rejectionReason == null)) {
+                throw new IllegalArgumentException(
+                        "authority decision must contain exactly one outcome");
+            }
+        }
+
+        public boolean authorized() {
+            return permit != null;
+        }
+
+        private static ToolCallAuthorityDecision authorized(ParsedToolCallPermit permit) {
+            return new ToolCallAuthorityDecision(
+                    Objects.requireNonNull(permit, "authorized permit"), null);
+        }
+
+        private static ToolCallAuthorityDecision rejected(
+                ToolCallAuthorityRejectionReason reason
+        ) {
+            return new ToolCallAuthorityDecision(
+                    null, Objects.requireNonNull(reason, "authority rejection reason"));
         }
     }
 
@@ -432,6 +605,10 @@ public final class LocalTurnTraceCapture {
             ProviderResponseCapture.GenerationEvent event) {
         if (bag == null || event == null) return;
         synchronized (bag) {
+            if (event.source() != ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
+                bag.latestSelectableGenerationId = event.generationId();
+                invalidateSelectedToolAuthority(bag);
+            }
             ProviderResponseTraceRecorder.generationStarted(bag.builder, event);
         }
     }
@@ -443,8 +620,7 @@ public final class LocalTurnTraceCapture {
         synchronized (bag) {
             if (event.source() != ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
                 bag.answerCandidate = null;
-                bag.selectedResponseReceipt = null;
-                bag.selectedProviderResponse = null;
+                invalidateSelectedToolAuthority(bag);
             }
             ProviderResponseTraceRecorder.attemptStarted(bag.builder, event);
         }
@@ -496,6 +672,7 @@ public final class LocalTurnTraceCapture {
         synchronized (bag) {
             if (failure.attempt().source() != ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
                 bag.answerCandidate = null;
+                invalidateSelectedToolAuthority(bag);
             }
             ProviderResponseTraceRecorder.attemptFailed(bag.builder, failure);
         }
@@ -508,6 +685,7 @@ public final class LocalTurnTraceCapture {
         synchronized (bag) {
             if (abandonment.attempt().source() != ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
                 bag.answerCandidate = null;
+                invalidateSelectedToolAuthority(bag);
             }
             ProviderResponseTraceRecorder.attemptAbandoned(bag.builder, abandonment);
         }
@@ -520,8 +698,7 @@ public final class LocalTurnTraceCapture {
         synchronized (bag) {
             if (failure.generation().source() != ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
                 bag.answerCandidate = null;
-                bag.selectedResponseReceipt = null;
-                bag.selectedProviderResponse = null;
+                invalidateSelectedToolAuthority(bag);
             }
             removePendingGeneration(bag, failure.generation().generationId());
             ProviderResponseTraceRecorder.generationFailed(bag.builder, failure);
@@ -535,8 +712,7 @@ public final class LocalTurnTraceCapture {
         synchronized (bag) {
             if (abandonment.generation().source() != ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
                 bag.answerCandidate = null;
-                bag.selectedResponseReceipt = null;
-                bag.selectedProviderResponse = null;
+                invalidateSelectedToolAuthority(bag);
             }
             removePendingGeneration(bag, abandonment.generation().generationId());
             ProviderResponseTraceRecorder.generationAbandoned(bag.builder, abandonment);
@@ -555,12 +731,15 @@ public final class LocalTurnTraceCapture {
             removePendingGeneration(bag, receipt.generationId());
             if (pending == null
                     || !receipt.selected()
+                    || !Objects.equals(
+                            receipt.generationId(), bag.latestSelectableGenerationId)
                     || !receipt.assistantHash().equals(
                             TraceRedactor.hash(pending.response().assistantText()))
                     || pending.response().source() != receipt.source()
                     || receipt.source() == ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
                 return;
             }
+            invalidateSelectedToolAuthority(bag);
             bag.selectedResponseReceipt = receipt;
             bag.selectedProviderResponse = pending.response();
             ProviderResponseCapture.AnswerOrigin origin = answerOrigin(
@@ -739,7 +918,6 @@ public final class LocalTurnTraceCapture {
                     && receipt != null
                     && receipt.selected()
                     && receipt.providerTerminalEligible()
-                    && receipt.providerToolCallEligible()
                     && response.source() == ProviderResponseCapture.Source.FOREGROUND_PROVIDER
                     && response.toolCallPresent()
                     && receipt.assistantHash().equals(TraceRedactor.hash(
@@ -836,38 +1014,688 @@ public final class LocalTurnTraceCapture {
                 attemptId = "";
             }
             bag.builder.event(TurnTraceEvent.toolCallParsed(
-                    now(), phase, call, generationId, attemptId, proposal, toolCallId));
+                    now(), phase, call, generationId, attemptId, proposal, toolCallId, Map.of()));
         }
     }
 
-    /** Atomically installs and records the exact parsed-call lineage required by execution. */
-    public static ParsedToolCallPermit beginParsedToolCallForExecution(
+    private static void invalidateSelectedToolAuthority(Bag bag) {
+        if (bag == null) return;
+        bag.providerAuthorityEpoch++;
+        bag.selectedResponseReceipt = null;
+        bag.selectedProviderResponse = null;
+        ParsedToolCallPermit active = bag.activeToolCall;
+        if (active != null) {
+            synchronized (active) {
+                settlePermitAsAuthorityBlocked(
+                        active, "TOOL_AUTHORITY_REVOKED_BY_NEW_GENERATION");
+            }
+        }
+    }
+
+    /**
+     * Captures one deterministic parser result. The returned object is opaque
+     * parser lineage only; {@link #authorizeParsedToolCallForExecution} owns
+     * the separate executable-authority decision.
+     */
+    private static ParsedToolCallLineage captureParsedToolCallLineage(
+            ToolCallSource source,
+            ToolCallParseFormat format,
+            RuntimeToolAuthorityReason runtimeReason,
+            ProviderResponseCapture.Receipt receipt,
+            ToolCall parsedCall,
+            ChatMessage.NativeToolCall rawNativeCall,
+            String providerText,
+            int sourceOrdinal
+    ) {
+        return new ParsedToolCallLineage(
+                HOLDER.get(),
+                source,
+                format,
+                runtimeReason,
+                receipt,
+                parsedCall,
+                rawNativeCall,
+                providerText,
+                sourceOrdinal);
+    }
+
+    public static ParsedToolCallLineage captureProviderNativeToolCallLineage(
+            ProviderResponseCapture.Receipt receipt,
+            ToolCall parsedCall,
+            ChatMessage.NativeToolCall rawNativeCall,
+            int sourceOrdinal
+    ) {
+        return captureParsedToolCallLineage(
+                ToolCallSource.PROVIDER_RESPONSE,
+                ToolCallParseFormat.NATIVE,
+                RuntimeToolAuthorityReason.NONE,
+                receipt,
+                parsedCall,
+                rawNativeCall,
+                "",
+                sourceOrdinal);
+    }
+
+    /**
+     * Parses and classifies the exact selected provider text inside the trace
+     * owner. Callers cannot nominate a different call for the same text.
+     */
+    public static ParsedToolCallBatch captureProviderTextToolCallBatch(
+            ProviderResponseCapture.Receipt receipt,
+            String providerText
+    ) {
+        String text = Objects.toString(providerText, "");
+        List<ToolCall> calls = ToolCallParser.parse(text);
+        ToolCallParseFormat format =
+                ToolProtocolText.containsRecognizedXmlToolCall(text)
+                        ? ToolCallParseFormat.XML_COMPAT
+                        : ToolCallParseFormat.JSON_TEXT;
+        List<ParsedToolCallLineage> lineages = new java.util.ArrayList<>(calls.size());
+        for (int index = 0; index < calls.size(); index++) {
+            lineages.add(captureParsedToolCallLineage(
+                    ToolCallSource.PROVIDER_RESPONSE,
+                    format,
+                    RuntimeToolAuthorityReason.NONE,
+                    receipt,
+                    calls.get(index),
+                    null,
+                    text,
+                    index + 1));
+        }
+        return new ParsedToolCallBatch(calls, lineages);
+    }
+
+    public static ParsedToolCallLineage captureRuntimeToolCallLineage(
+            ToolCallParseFormat format,
+            RuntimeToolAuthorityReason reason,
+            ToolCall parsedCall,
+            String sourceText,
+            int sourceOrdinal
+    ) {
+        return captureParsedToolCallLineage(
+                ToolCallSource.RUNTIME_DETERMINISTIC,
+                format,
+                reason,
+                ProviderResponseCapture.Receipt.none(),
+                parsedCall,
+                null,
+                sourceText,
+                sourceOrdinal);
+    }
+
+    public static ParsedToolCallLineage captureUnboundToolCallLineage(
+            ToolCall parsedCall,
+            int sourceOrdinal
+    ) {
+        return captureParsedToolCallLineage(
+                ToolCallSource.UNBOUND,
+                ToolCallParseFormat.UNBOUND,
+                RuntimeToolAuthorityReason.NONE,
+                ProviderResponseCapture.Receipt.none(),
+                parsedCall,
+                null,
+                "",
+                sourceOrdinal);
+    }
+
+    /**
+     * Atomically validates, reserves, and records the exact source authority
+     * required before a parsed call may enter policy, approval, checkpoint, or
+     * tool execution.
+     */
+    public static ToolCallAuthorityDecision authorizeParsedToolCallForExecution(
             String phase,
             ToolCall call,
-            ProviderResponseCapture.Receipt receipt,
-            int proposalOrdinal) {
+            ParsedToolCallLineage lineage
+    ) {
         Bag bag = HOLDER.get();
-        if (bag == null) return null;
-        String toolCallId = "call-" + bag.turnNumber + "-" + (++bag.nextToolCallOrdinal);
-        ParsedToolCallPermit permit = new ParsedToolCallPermit(bag, toolCallId, call);
-        synchronized (permit) {
-            synchronized (bag) {
-                if (bag.activeToolCall != null) {
-                    throw new IllegalStateException(
-                            "A parsed tool-call lineage is already active");
-                }
-                bag.activeToolCall = permit;
+        if (bag == null) {
+            ToolCallAuthorityDecision detachedRuntime =
+                    authorizeDetachedRuntimeToolCall(call, lineage);
+            if (detachedRuntime != null) {
+                return detachedRuntime;
             }
-            permit.state = PermitState.ACTIVE;
-            try {
-                recordToolCallParsed(phase, call, receipt, proposalOrdinal, toolCallId);
-            } catch (RuntimeException appendFailure) {
-                permit.state = PermitState.SETTLED;
-                bag.activeToolCall = null;
-                throw appendFailure;
-            }
-            return permit;
+            return ToolCallAuthorityDecision.rejected(
+                    ToolCallAuthorityRejectionReason.TRACE_INACTIVE);
         }
+        synchronized (bag) {
+            ToolCallAuthorityRejectionReason common =
+                    commonLineageRejection(bag, call, lineage);
+            if (common != null) {
+                return rejectToolCallAuthority(bag, phase, call, lineage, common);
+            }
+            if (bag.activeToolCall != null) {
+                return rejectToolCallAuthority(
+                        bag,
+                        phase,
+                        call,
+                        lineage,
+                        ToolCallAuthorityRejectionReason.ACTIVE_CALL_EXISTS);
+            }
+            return switch (lineage.source) {
+                case PROVIDER_RESPONSE ->
+                        authorizeProviderToolCall(bag, phase, call, lineage);
+                case RUNTIME_DETERMINISTIC ->
+                        authorizeRuntimeToolCall(bag, phase, call, lineage);
+                case UNBOUND -> rejectToolCallAuthority(
+                        bag,
+                        phase,
+                        call,
+                        lineage,
+                        ToolCallAuthorityRejectionReason.LINEAGE_MISSING);
+            };
+        }
+    }
+
+    /**
+     * Preserves the explicit deterministic-runtime API outside a captured turn.
+     * Provider-derived and unbound lineages remain trace-required and fail
+     * closed. The detached permit still binds the current thread, exact call,
+     * one-use lifecycle, and a nonempty typed runtime reason.
+     */
+    private static ToolCallAuthorityDecision authorizeDetachedRuntimeToolCall(
+            ToolCall call,
+            ParsedToolCallLineage lineage
+    ) {
+        if (lineage == null
+                || lineage.owner != null
+                || lineage.ownerThread != Thread.currentThread()
+                || lineage.source != ToolCallSource.RUNTIME_DETERMINISTIC
+                || lineage.runtimeReason == RuntimeToolAuthorityReason.NONE
+                || call == null
+                || !Objects.equals(lineage.parsedCall, call)
+                || !toolNameHash(lineage.parsedCall).equals(toolNameHash(call))
+                || !argumentsHash(lineage.parsedCall).equals(argumentsHash(call))
+                || !runtimeReasonAllowsTool(lineage.runtimeReason, call)) {
+            return null;
+        }
+        ParsedToolCallPermit permit = new ParsedToolCallPermit(
+                null,
+                "",
+                call,
+                ToolCallAuthorityKind.RUNTIME_DETERMINISTIC,
+                lineage.runtimeReason,
+                null,
+                -1,
+                lineage.sourceOrdinal);
+        permit.state = PermitState.ACTIVE;
+        return ToolCallAuthorityDecision.authorized(permit);
+    }
+
+    /** Explicit authority path for deterministic runtime-owned actions. */
+    public static ToolCallAuthorityDecision beginRuntimeToolCallForExecution(
+            String phase,
+            ToolCall call,
+            RuntimeToolAuthorityReason reason
+    ) {
+        ParsedToolCallLineage lineage = captureRuntimeToolCallLineage(
+                ToolCallParseFormat.UNBOUND,
+                reason,
+                call,
+                "",
+                0);
+        return authorizeParsedToolCallForExecution(phase, call, lineage);
+    }
+
+    private static ToolCallAuthorityRejectionReason commonLineageRejection(
+            Bag bag,
+            ToolCall call,
+            ParsedToolCallLineage lineage
+    ) {
+        if (lineage == null) {
+            return ToolCallAuthorityRejectionReason.LINEAGE_MISSING;
+        }
+        if (lineage.owner != bag || lineage.ownerThread != Thread.currentThread()) {
+            return ToolCallAuthorityRejectionReason.LINEAGE_SCOPE_MISMATCH;
+        }
+        if (call == null
+                || lineage.parsedCall == null
+                || !Objects.equals(lineage.parsedCall, call)
+                || !toolNameHash(lineage.parsedCall).equals(toolNameHash(call))
+                || !argumentsHash(lineage.parsedCall).equals(argumentsHash(call))) {
+            return ToolCallAuthorityRejectionReason.LINEAGE_CALL_MISMATCH;
+        }
+        return null;
+    }
+
+    private static ToolCallAuthorityDecision authorizeRuntimeToolCall(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage
+    ) {
+        if (lineage.runtimeReason == RuntimeToolAuthorityReason.NONE) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.RUNTIME_AUTHORITY_REASON_MISSING);
+        }
+        if (!runtimeReasonAllowsTool(lineage.runtimeReason, call)) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.RUNTIME_AUTHORITY_SCOPE_INVALID);
+        }
+        return mintAuthorizedToolCall(
+                bag,
+                phase,
+                call,
+                lineage,
+                ToolCallAuthorityKind.RUNTIME_DETERMINISTIC,
+                null,
+                null);
+    }
+
+    private static ToolCallAuthorityDecision authorizeProviderToolCall(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage
+    ) {
+        ProviderResponseCapture.Receipt receipt = lineage.providerReceipt;
+        if (receipt == null) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_RECEIPT_MISSING);
+        }
+        if (bag.selectedResponseReceipt != receipt) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_RECEIPT_NOT_CURRENT);
+        }
+        if (lineage.providerAuthorityEpoch != bag.providerAuthorityEpoch
+                || !Objects.equals(
+                        receipt.generationId(), bag.latestSelectableGenerationId)) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_GENERATION_STALE);
+        }
+        if (!receipt.selected()
+                || receipt.source() != ProviderResponseCapture.Source.FOREGROUND_PROVIDER) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_SOURCE_INELIGIBLE);
+        }
+        if (receipt.purpose() != ProviderResponseCapture.Purpose.TURN_RESPONSE) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PURPOSE_INELIGIBLE);
+        }
+        ProviderResponseCapture.ToolAuthorityMode requiredMode = switch (lineage.format) {
+            case NATIVE -> ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE;
+            case JSON_TEXT -> ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON;
+            case XML_COMPAT, UNBOUND -> ProviderResponseCapture.ToolAuthorityMode.NONE;
+        };
+        if (requiredMode != ProviderResponseCapture.ToolAuthorityMode.NONE
+                && receipt.toolAuthorityMode() != requiredMode) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_TOOL_MODE_MISMATCH);
+        }
+        if (receipt.toolAuthorityBinding()
+                != ProviderResponseCapture.ToolAuthorityBinding.BOUND) {
+            ToolCallAuthorityRejectionReason bindingReason = switch (
+                    receipt.toolAuthorityBinding()) {
+                case SURFACE_UNBOUND, DISPATCH_UNBOUND ->
+                        ToolCallAuthorityRejectionReason.PROVIDER_TOOL_SURFACE_UNBOUND;
+                case DISPATCH_SURFACE_MISMATCH ->
+                        ToolCallAuthorityRejectionReason.PROVIDER_DISPATCH_SURFACE_MISMATCH;
+                case NOT_APPLICABLE, BOUND ->
+                        ToolCallAuthorityRejectionReason.PROVIDER_TOOL_SURFACE_UNBOUND;
+            };
+            return rejectToolCallAuthority(
+                    bag, phase, call, lineage, bindingReason);
+        }
+        if (!receipt.providerToolCallEligible()) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_TOOL_INELIGIBLE);
+        }
+        ProviderResponseCapture.Response response = bag.selectedProviderResponse;
+        if (response == null) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_RESPONSE_MISSING);
+        }
+        if (response.source() != receipt.source()
+                || !receipt.assistantHash().equals(
+                        TraceRedactor.hash(response.assistantText()))) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_RESPONSE_MISMATCH);
+        }
+        return switch (lineage.format) {
+            case NATIVE -> authorizeNativeProviderToolCall(
+                    bag, phase, call, lineage, receipt, response);
+            case JSON_TEXT -> authorizeJsonProviderToolCall(
+                    bag, phase, call, lineage, receipt, response);
+            case XML_COMPAT -> rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.XML_COMPATIBILITY_NOT_AUTHORIZED);
+            case UNBOUND -> rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.TEXT_PARSER_LINEAGE_REQUIRED);
+        };
+    }
+
+    private static ToolCallAuthorityDecision authorizeNativeProviderToolCall(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage,
+            ProviderResponseCapture.Receipt receipt,
+            ProviderResponseCapture.Response response
+    ) {
+        if (!receipt.providerTerminalEligible()
+                || receipt.completion() != ProviderResponseCapture.Completion.PROVIDER_EOS
+                || response.normalized()
+                || response.truncated()) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_TERMINAL_INELIGIBLE);
+        }
+        int ordinal = lineage.sourceOrdinal;
+        if (ordinal < 1
+                || ordinal > ProviderResponseCapture.MAX_TRACE_TOOL_PROPOSALS
+                || ordinal > response.nativeToolCalls().size()) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_ORDINAL_INVALID);
+        }
+        ProviderResponseCapture.ToolProposalReceipt proposal =
+                receipt.selectedToolProposal(ordinal).orElse(null);
+        if (proposal == null) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_EVIDENCE_MISSING);
+        }
+        ChatMessage.NativeToolCall raw = response.nativeToolCalls().get(ordinal - 1);
+        if (lineage.rawNativeCall == null
+                || !Objects.equals(raw, lineage.rawNativeCall)
+                || !exactNativeProposalMatch(response, call, ordinal, proposal)) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_MISMATCH);
+        }
+        if (!receipt.authorizesExactToolName(raw.name())) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_TOOL_SURFACE_MISMATCH);
+        }
+        if (!reserveProposal(bag.consumedNativeProposals, receipt, ordinal)) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_ALREADY_USED);
+        }
+        return mintAuthorizedToolCall(
+                bag,
+                phase,
+                call,
+                lineage,
+                ToolCallAuthorityKind.PROVIDER_NATIVE,
+                proposal,
+                raw);
+    }
+
+    private static ToolCallAuthorityDecision authorizeJsonProviderToolCall(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage,
+            ProviderResponseCapture.Receipt receipt,
+            ProviderResponseCapture.Response response
+    ) {
+        if (receipt.completion() != ProviderResponseCapture.Completion.PROVIDER_EOS
+                || !receipt.providerTerminalEligible()
+                || response.normalized()
+                || response.truncated()
+                || !response.textualToolCallPresent()
+                || response.nativeToolCallCount() != 0) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.TEXT_PROTOCOL_INELIGIBLE);
+        }
+        if (!Objects.equals(response.assistantText(), lineage.providerText)) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_RESPONSE_MISMATCH);
+        }
+        int ordinal = lineage.sourceOrdinal;
+        if (ordinal < 1
+                || ordinal > ProviderResponseCapture.MAX_TRACE_TOOL_PROPOSALS) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_ORDINAL_INVALID);
+        }
+        List<ToolCall> parsedCalls = ToolCallParser.parse(response.assistantText());
+        if (ordinal > parsedCalls.size()
+                || !Objects.equals(parsedCalls.get(ordinal - 1), call)
+                || !toolNameHash(parsedCalls.get(ordinal - 1)).equals(toolNameHash(call))
+                || !argumentsHash(parsedCalls.get(ordinal - 1)).equals(argumentsHash(call))) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_MISMATCH);
+        }
+        if (!receipt.authorizesExactToolName(call.toolName())) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_TOOL_SURFACE_MISMATCH);
+        }
+        if (!reserveProposal(bag.consumedTextProposals, receipt, ordinal)) {
+            return rejectToolCallAuthority(
+                    bag,
+                    phase,
+                    call,
+                    lineage,
+                    ToolCallAuthorityRejectionReason.PROVIDER_PROPOSAL_ALREADY_USED);
+        }
+        return mintAuthorizedToolCall(
+                bag,
+                phase,
+                call,
+                lineage,
+                ToolCallAuthorityKind.PROVIDER_TEXT_JSON,
+                null,
+                null);
+    }
+
+    private static boolean reserveProposal(
+            Map<ProviderResponseCapture.Receipt, Set<Integer>> consumed,
+            ProviderResponseCapture.Receipt receipt,
+            int ordinal
+    ) {
+        Set<Integer> ordinals = consumed.computeIfAbsent(
+                receipt, ignored -> new java.util.HashSet<>());
+        return ordinals.add(ordinal);
+    }
+
+    private static ToolCallAuthorityDecision mintAuthorizedToolCall(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage,
+            ToolCallAuthorityKind kind,
+            ProviderResponseCapture.ToolProposalReceipt proposal,
+            ChatMessage.NativeToolCall rawNativeCall
+    ) {
+        String toolCallId = "call-" + bag.turnNumber + "-" + (++bag.nextToolCallOrdinal);
+        ProviderResponseCapture.Receipt receipt =
+                kind == ToolCallAuthorityKind.RUNTIME_DETERMINISTIC
+                        ? null
+                        : lineage.providerReceipt;
+        ParsedToolCallPermit permit = new ParsedToolCallPermit(
+                bag,
+                toolCallId,
+                call,
+                kind,
+                lineage.runtimeReason,
+                receipt,
+                bag.providerAuthorityEpoch,
+                lineage.sourceOrdinal);
+        bag.activeToolCall = permit;
+        permit.state = PermitState.ACTIVE;
+        try {
+            String generationId = receipt == null ? "" : receipt.generationId();
+            String attemptId = receipt == null ? "" : receipt.attemptId();
+            bag.builder.event(TurnTraceEvent.toolCallParsed(
+                    now(),
+                    phase,
+                    call,
+                    generationId,
+                    attemptId,
+                    proposal,
+                    toolCallId,
+                    authorityEvidence(
+                            bag,
+                            permit,
+                            lineage,
+                            proposal,
+                            rawNativeCall)));
+            return ToolCallAuthorityDecision.authorized(permit);
+        } catch (RuntimeException appendFailure) {
+            permit.state = PermitState.SETTLED;
+            bag.activeToolCall = null;
+            throw appendFailure;
+        }
+    }
+
+    private static Map<String, Object> authorityEvidence(
+            Bag bag,
+            ParsedToolCallPermit permit,
+            ParsedToolCallLineage lineage,
+            ProviderResponseCapture.ToolProposalReceipt proposal,
+            ChatMessage.NativeToolCall rawNativeCall
+    ) {
+        Map<String, Object> authority = new LinkedHashMap<>();
+        authority.put("schemaVersion", 1);
+        authority.put("status", "AUTHORIZED");
+        authority.put("kind", permit.authorityKind.name());
+        authority.put("authorityId", TraceRedactor.hash(
+                bag.traceId + '\u0000' + permit.toolCallId + '\u0000'
+                        + permit.authorityKind.name()));
+        authority.put("toolNameHash", permit.toolNameHash);
+        authority.put("argumentsHash", permit.argumentsHash);
+        if (permit.authorityKind == ToolCallAuthorityKind.RUNTIME_DETERMINISTIC) {
+            authority.put("runtimeReason", permit.runtimeReason.name());
+            return Map.copyOf(authority);
+        }
+        ProviderResponseCapture.Receipt receipt = permit.providerReceipt;
+        authority.put("providerGenerationId", receipt.generationId());
+        authority.put("providerAttemptId", receipt.attemptId());
+        authority.put("sourceOrdinal", permit.sourceOrdinal);
+        if (permit.authorityKind == ToolCallAuthorityKind.PROVIDER_NATIVE) {
+            authority.put("parserFormat", ToolCallParseFormat.NATIVE.name());
+            authority.put("providerCallIdHash", TraceRedactor.hash(
+                    rawNativeCall == null ? "" : rawNativeCall.id()));
+            authority.put("providerToolNameHash", proposal.toolNameHash());
+            authority.put("providerArgumentsHash", proposal.argumentsHash());
+        } else {
+            authority.put("parserFormat", ToolCallParseFormat.JSON_TEXT.name());
+            authority.put("providerAssistantHash", receipt.assistantHash());
+        }
+        return Map.copyOf(authority);
+    }
+
+    private static ToolCallAuthorityDecision rejectToolCallAuthority(
+            Bag bag,
+            String phase,
+            ToolCall call,
+            ParsedToolCallLineage lineage,
+            ToolCallAuthorityRejectionReason reason
+    ) {
+        ToolCallAuthorityKind candidateKind = candidateAuthorityKind(lineage);
+        bag.builder.event(TurnTraceEvent.toolCallAuthorityRejected(
+                now(),
+                phase,
+                call,
+                candidateKind == null ? "UNBOUND" : candidateKind.name(),
+                reason.name()));
+        return ToolCallAuthorityDecision.rejected(reason);
+    }
+
+    private static ToolCallAuthorityKind candidateAuthorityKind(
+            ParsedToolCallLineage lineage
+    ) {
+        if (lineage == null) return null;
+        if (lineage.source == ToolCallSource.RUNTIME_DETERMINISTIC) {
+            return ToolCallAuthorityKind.RUNTIME_DETERMINISTIC;
+        }
+        if (lineage.source != ToolCallSource.PROVIDER_RESPONSE) return null;
+        return switch (lineage.format) {
+            case NATIVE -> ToolCallAuthorityKind.PROVIDER_NATIVE;
+            case JSON_TEXT -> ToolCallAuthorityKind.PROVIDER_TEXT_JSON;
+            case XML_COMPAT, UNBOUND -> null;
+        };
     }
 
     /** Enters execution only for the current terminal identity in the lineage. */
@@ -878,8 +1706,11 @@ public final class LocalTurnTraceCapture {
         synchronized (permit) {
             if (!permitScopeMatches(permit)
                     || permit.state != PermitState.ACTIVE
-                    || !permitMatches(permit, call)) {
-                if (permit.ownerThread == Thread.currentThread()) revokePermit(permit);
+                    || !permitMatches(permit, call)
+                    || !permitAuthorityStillCurrent(permit)) {
+                if (permit.ownerThread == Thread.currentThread()) {
+                    settlePermitAsAuthorityBlocked(permit, "TOOL_AUTHORITY_REVOKED");
+                }
                 return false;
             }
             permit.state = PermitState.EXECUTING;
@@ -898,11 +1729,40 @@ public final class LocalTurnTraceCapture {
             ToolCallTransformationReason reason) {
         if (permit == null || to == null || reason == null) return false;
         synchronized (permit) {
+            boolean providerNameChanged = permit.authorityKind
+                            != ToolCallAuthorityKind.RUNTIME_DETERMINISTIC
+                    && !Objects.equals(
+                            permit.currentCall.toolName(), to.toolName());
+            boolean providerTargetOutsideSelectedSurface = providerNameChanged
+                    && (permit.providerReceipt == null
+                        || !permit.providerReceipt.authorizesExactToolName(
+                                to.toolName()));
             if (!permitScopeMatches(permit)
                     || (permit.state != PermitState.ACTIVE
                         && permit.state != PermitState.EXECUTING)
-                    || permit.approvalObserved) {
-                if (permit.ownerThread == Thread.currentThread()) revokePermit(permit);
+                    || permit.approvalObserved
+                    || providerTargetOutsideSelectedSurface
+                    || (permit.authorityKind
+                            == ToolCallAuthorityKind.RUNTIME_DETERMINISTIC
+                        && !runtimeReasonAllowsTool(permit.runtimeReason, to))) {
+                if (permit.ownerThread == Thread.currentThread()) {
+                    if (providerTargetOutsideSelectedSurface && permit.owner != null) {
+                        permit.owner.builder.event(
+                                TurnTraceEvent.toolCallAuthorityRejected(
+                                        now(),
+                                        phase,
+                                        to,
+                                        permit.authorityKind.name(),
+                                        ToolCallAuthorityRejectionReason
+                                                .PROVIDER_TOOL_SURFACE_MISMATCH.name()));
+                    }
+                    settlePermitAsAuthorityBlocked(
+                            permit,
+                            providerTargetOutsideSelectedSurface
+                                    ? ToolCallAuthorityRejectionReason
+                                            .PROVIDER_TOOL_SURFACE_MISMATCH.name()
+                                    : "TOOL_TRANSFORMATION_AUTHORITY_INVALID");
+                }
                 return false;
             }
             ToolCall from = permit.currentCall;
@@ -935,11 +1795,73 @@ public final class LocalTurnTraceCapture {
                 && permit.argumentsHash.equals(argumentsHash(call));
     }
 
+    private static boolean permitAuthorityStillCurrent(ParsedToolCallPermit permit) {
+        if (permit.authorityKind == ToolCallAuthorityKind.RUNTIME_DETERMINISTIC) {
+            return runtimeReasonAllowsTool(
+                    permit.runtimeReason, permit.currentCall);
+        }
+        Bag bag = permit.owner;
+        ProviderResponseCapture.Receipt receipt = permit.providerReceipt;
+        return bag != null
+                && receipt != null
+                && bag.providerAuthorityEpoch == permit.providerAuthorityEpoch
+                && bag.selectedResponseReceipt == receipt
+                && Objects.equals(
+                        bag.latestSelectableGenerationId, receipt.generationId())
+                && receipt.selected()
+                && receipt.source() == ProviderResponseCapture.Source.FOREGROUND_PROVIDER
+                && receipt.purpose() == ProviderResponseCapture.Purpose.TURN_RESPONSE
+                && receipt.providerToolCallEligible()
+                && receipt.authorizesExactToolName(
+                        permit.currentCall.toolName())
+                && ((permit.authorityKind == ToolCallAuthorityKind.PROVIDER_NATIVE
+                        && receipt.toolAuthorityMode()
+                            == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE)
+                    || (permit.authorityKind == ToolCallAuthorityKind.PROVIDER_TEXT_JSON
+                        && receipt.toolAuthorityMode()
+                            == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON));
+    }
+
+    private static boolean runtimeReasonAllowsTool(
+            RuntimeToolAuthorityReason reason,
+            ToolCall call
+    ) {
+        if (reason == null || reason == RuntimeToolAuthorityReason.NONE || call == null) {
+            return false;
+        }
+        return switch (reason) {
+            case NONE -> false;
+            case DIRECT_RUNTIME_API -> true;
+            case READ_EVIDENCE_HANDOFF ->
+                    "talos.read_file".equals(call.toolName());
+            case EXPECTED_TARGET_SCOPE_REPAIR ->
+                    "talos.edit_file".equals(call.toolName());
+        };
+    }
+
     private static void revokePermit(ParsedToolCallPermit permit) {
         permit.state = PermitState.SETTLED;
         if (permit.owner != null && permit.owner.activeToolCall == permit) {
             permit.owner.activeToolCall = null;
         }
+    }
+
+    private static void settlePermitAsAuthorityBlocked(
+            ParsedToolCallPermit permit,
+            String reason
+    ) {
+        if (permit == null) return;
+        Bag owner = permit.owner;
+        if (!permit.settlementRecorded && owner != null) {
+            owner.builder.event(TurnTraceEvent.toolCallBlocked(
+                    now(),
+                    "tool_authority",
+                    permit.currentCall,
+                    reason,
+                    permit.toolCallId));
+            permit.settlementRecorded = true;
+        }
+        revokePermit(permit);
     }
 
     private static String toolNameHash(ToolCall call) {
@@ -1177,6 +2099,7 @@ public final class LocalTurnTraceCapture {
             bag.builder.event(eventFactory.apply(permit.toolCallId));
             if (approval) permit.approvalObserved = true;
             if (terminal) {
+                permit.settlementRecorded = true;
                 permit.state = PermitState.SETTLED;
                 bag.activeToolCall = null;
             }

@@ -21,6 +21,9 @@ class ChatRequestControlsTest {
         assertTrue(controls.debugTags().isEmpty());
         assertEquals(SamplingControls.none(), controls.sampling());
         assertEquals(0, controls.maxOutputTokens());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                controls.toolAuthorityMode());
     }
 
     @Test
@@ -66,6 +69,27 @@ class ChatRequestControlsTest {
         assertEquals(384, capped.withSampling(SamplingControls.NEAR_GREEDY).maxOutputTokens());
         assertEquals(0, capped.withMaxOutputTokens(0).maxOutputTokens());
         assertEquals(0, capped.withMaxOutputTokens(-1).maxOutputTokens());
+    }
+
+    @Test
+    void authorityModeIsExplicitAndPreservedByControlCopies() {
+        ChatRequestControls textAuthority = ChatRequestControls.defaults()
+                .withToolAuthorityMode(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON);
+
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                textAuthority.toolAuthorityMode());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                textAuthority.withSampling(SamplingControls.NEAR_GREEDY)
+                        .toolAuthorityMode());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.PROVIDER_TEXT_JSON,
+                textAuthority.withMaxOutputTokens(256).toolAuthorityMode());
+        assertEquals(
+                ProviderResponseCapture.ToolAuthorityMode.NONE,
+                textAuthority.withToolAuthorityMode(null).toolAuthorityMode());
     }
 
     @Test

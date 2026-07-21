@@ -7,13 +7,18 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.tools.ToolAliasPolicy;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -84,6 +89,295 @@ class QualificationTraceEvidenceTest {
         });
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationTraceEvidence.read(rawProposalSubstitution, scenario));
+
+        Path displayOnlySubstitution = writeAuthorityBoundTrace(
+                "provider-linked-display-only-substitution");
+        mutateParsedEvent(displayOnlySubstitution,
+                event -> event.put("toolName", "talos.write_file"));
+        mutateEvent(displayOnlySubstitution, "TOOL_EXECUTED",
+                event -> event.put("toolName", "talos.write_file"));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(displayOnlySubstitution, scenario));
+    }
+
+    @Test
+    void providerAuthorityRejectsWhitespaceCaseAndAliasOutsideExactSelectedSurface()
+            throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        int fixture = 0;
+        for (String rawToolName : List.of(
+                " talos.read_file ",
+                "TALOS.READ_FILE",
+                "read_file")) {
+            Path trace = writeAuthorityBoundTrace(
+                    "authority-v4-non-exact-tool-name-" + fixture++);
+            rewriteNativeRawToolIdentity(trace, rawToolName);
+
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> QualificationTraceEvidence.read(trace, scenario),
+                    rawToolName);
+        }
+    }
+
+    @Test
+    void schemaFourRequiresExactExecutableAuthorityForEveryExecutedCall() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path positive = writeAuthorityBoundTrace("authority-v4-positive");
+
+        QualificationTraceEvidence.Facts facts =
+                QualificationTraceEvidence.read(positive, scenario);
+
+        assertEquals(1, facts.calls().size());
+        assertEquals(QualificationTraceEvidence.CallSettlement.EXECUTED_SUCCESS,
+                facts.calls().getFirst().settlement());
+
+        Path missing = writeAuthorityBoundTrace("authority-v4-missing");
+        mutateParsedData(missing, data -> data.remove("executionAuthority"));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(missing, scenario));
+
+        Path coerced = writeAuthorityBoundTrace("authority-v4-coerced");
+        mutateParsedData(coerced, data ->
+                ((ObjectNode) data.path("executionAuthority"))
+                        .put("sourceOrdinal", "1"));
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(coerced, scenario));
+    }
+
+    @Test
+    void schemaFourRejectsProviderCallLifecycleAfterNewerGenerationStarts()
+            throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path trace = writeAuthorityBoundTrace(
+                "authority-v4-stale-after-newer-generation");
+        insertReplacementGenerationAfterParsed(trace);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(trace, scenario));
+    }
+
+    @Test
+    void schemaFourRejectsOverlappingForegroundGenerationOrders()
+            throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path lateCompletion = writeOlderGenerationCompletesAfterNewer(
+                "authority-v4-overlap-late-completion");
+        Path lateAttempt = writeOlderAttemptInvalidatesNewerBeforeExecution(
+                "authority-v4-overlap-late-attempt");
+
+        assertAll(
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> QualificationTraceEvidence.read(
+                                lateCompletion, scenario),
+                        lateCompletion.toString()),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> QualificationTraceEvidence.read(
+                                lateAttempt, scenario),
+                        lateAttempt.toString()));
+    }
+
+    @Test
+    void providerLedgerAllowsBackgroundGenerationOverlap() {
+        QualificationProviderAttemptLedger.Generation foreground =
+                generationInterval(
+                        "foreground-generation",
+                        ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.TURN_RESPONSE,
+                        0,
+                        10);
+        QualificationProviderAttemptLedger.Generation background =
+                generationInterval(
+                        "background-generation",
+                        ProviderResponseCapture.Source.BACKGROUND_PROVIDER,
+                        ProviderResponseCapture.Purpose.BACKGROUND_MAINTENANCE,
+                        2,
+                        5);
+
+        QualificationProviderAttemptLedger.Ledger ledger =
+                new QualificationProviderAttemptLedger.Ledger(
+                        List.of(foreground, background));
+
+        assertEquals(2, ledger.generations().size());
+    }
+
+    @Test
+    void schemaFourAcceptsExactJsonTextProviderAuthority() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path trace = writeTextAuthorityBoundTrace("authority-v4-text-positive");
+
+        QualificationTraceEvidence.Facts facts =
+                QualificationTraceEvidence.read(trace, scenario);
+
+        assertEquals(1, facts.calls().size());
+        assertEquals(
+                QualificationTraceEvidence.CallSettlement.EXECUTED_SUCCESS,
+                facts.calls().getFirst().settlement());
+        assertFalse(facts.calls().getFirst().nativeProviderDecisionBound());
+
+        Path outsideSelectedSurface = writeTextAuthorityBoundTrace(
+                "authority-v4-text-outside-selected-surface");
+        rewriteTextRawToolIdentity(outsideSelectedSurface, "talos.write_file");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(outsideSelectedSurface, scenario));
+    }
+
+    @Test
+    void schemaFourMirrorsRuntimeReasonScopeAndRejectionTyping() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+
+        Path read = writeRuntimeAuthorityTrace(
+                "runtime-read-positive",
+                "talos.read_file",
+                "READ_EVIDENCE_HANDOFF");
+        assertEquals(
+                QualificationTraceEvidence.CallSettlement.EXECUTED_SUCCESS,
+                QualificationTraceEvidence.read(read, scenario)
+                        .calls().getFirst().settlement());
+
+        Path write = writeRuntimeAuthorityTrace(
+                "runtime-read-write-invalid",
+                "talos.write_file",
+                "READ_EVIDENCE_HANDOFF");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(write, scenario));
+
+        for (String nonExactReadName : List.of(
+                "read_file",
+                " talos.read_file ")) {
+            Path nonExactRead = writeRuntimeAuthorityTrace(
+                    "runtime-read-non-exact-"
+                            + nonExactReadName.strip().replace('.', '-'),
+                    nonExactReadName,
+                    "READ_EVIDENCE_HANDOFF");
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> QualificationTraceEvidence.read(nonExactRead, scenario),
+                    nonExactReadName);
+        }
+
+        Path nonExactRepair = writeRuntimeAuthorityTrace(
+                "runtime-repair-non-exact",
+                "edit_file",
+                "EXPECTED_TARGET_SCOPE_REPAIR");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(nonExactRepair, scenario));
+
+        Path directAlias = writeRuntimeAuthorityTrace(
+                "runtime-direct-alias-positive",
+                "read_file",
+                "DIRECT_RUNTIME_API");
+        assertEquals(
+                QualificationTraceEvidence.CallSettlement.EXECUTED_SUCCESS,
+                QualificationTraceEvidence.read(directAlias, scenario)
+                        .calls().getFirst().settlement());
+
+        Path incompatibleRejection = writeRuntimeAuthorityTrace(
+                "runtime-rejection-kind-invalid",
+                "talos.read_file",
+                "DIRECT_RUNTIME_API");
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(incompatibleRejection);
+        ((ArrayNode) root.path("events")).add(MAPPER.valueToTree(event(
+                "TOOL_CALL_AUTHORITY_REJECTED",
+                "talos.read_file",
+                "README.md",
+                Map.of("executionAuthority", Map.of(
+                        "schemaVersion", 1,
+                        "status", "REJECTED",
+                        "kind", "PROVIDER_NATIVE",
+                        "reasonCode", "RUNTIME_AUTHORITY_REASON_MISSING")))));
+        QualificationJson.write(incompatibleRejection, root);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(incompatibleRejection, scenario));
+
+        Path xmlPrecheck = writeRuntimeAuthorityTrace(
+                "runtime-xml-generic-provider-precheck",
+                "talos.read_file",
+                "DIRECT_RUNTIME_API");
+        appendAuthorityRejection(
+                xmlPrecheck,
+                "UNBOUND",
+                "PROVIDER_RECEIPT_MISSING");
+        assertEquals(
+                QualificationTraceEvidence.CallSettlement.EXECUTED_SUCCESS,
+                QualificationTraceEvidence.read(xmlPrecheck, scenario)
+                        .calls().getFirst().settlement());
+
+        for (String impossibleReason : List.of(
+                "TRACE_INACTIVE",
+                "PROVIDER_TOOL_MODE_MISMATCH",
+                "PROVIDER_PROPOSAL_MISMATCH",
+                "PROVIDER_PROPOSAL_ALREADY_USED")) {
+            Path impossible = writeRuntimeAuthorityTrace(
+                    "runtime-impossible-rejection-"
+                            + impossibleReason.toLowerCase().replace('_', '-'),
+                    "talos.read_file",
+                    "DIRECT_RUNTIME_API");
+            appendAuthorityRejection(impossible, "UNBOUND", impossibleReason);
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> QualificationTraceEvidence.read(impossible, scenario),
+                    impossibleReason);
+        }
+    }
+
+    @Test
+    void terminalIneligibleNativeAuthorityIsRejected() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path trace = writeAuthorityBoundTrace("authority-v4-terminal-ineligible");
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        ObjectNode response = (ObjectNode) events.get(
+                eventIndex(events, "GENERATION_RESPONSE_CAPTURED")).path("data");
+        response.put("completedNormally", false);
+        response.put("normalized", true);
+        ObjectNode completed = (ObjectNode) events.get(
+                eventIndex(events, "GENERATION_COMPLETED")).path("data");
+        completed.put("providerTerminalEligible", false);
+        QualificationJson.write(trace, root);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(trace, scenario));
+    }
+
+    @Test
+    void oneSelectedProposalCannotAuthorizeTwoExecutedCallIds() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path trace = writeAuthorityBoundTrace("authority-v4-reused-proposal");
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        ObjectNode parsed = ((ObjectNode) events.get(
+                eventIndex(events, "TOOL_CALL_PARSED"))).deepCopy();
+        ObjectNode executed = ((ObjectNode) events.get(
+                eventIndex(events, "TOOL_EXECUTED"))).deepCopy();
+        ((ObjectNode) parsed.path("data")).put("toolCallId", "call-1-2");
+        ((ObjectNode) parsed.path("data").path("executionAuthority"))
+                .put("authorityId", authorityId(
+                        "authority-v4-reused-proposal",
+                        "call-1-2",
+                        "PROVIDER_NATIVE"));
+        ((ObjectNode) executed.path("data")).put("toolCallId", "call-1-2");
+        events.add(parsed);
+        events.add(executed);
+        QualificationJson.write(trace, root);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(trace, scenario));
     }
 
     @Test
@@ -240,6 +534,50 @@ class QualificationTraceEvidenceTest {
         QualificationJson.write(afterApproval, root);
         assertThrows(IllegalArgumentException.class,
                 () -> QualificationTraceEvidence.read(afterApproval, scenario));
+    }
+
+    @Test
+    void schemaFourProviderTransformationMustRemainInsideSelectedSurface() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("A05-simple-read-summary");
+        Path omitted = addProviderTransformation(
+                writeAuthorityBoundTrace("provider-transform-omitted-surface"),
+                "talos.edit_file",
+                "effective.txt",
+                true);
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(omitted, scenario));
+        assertTrue(failure.getMessage().contains(
+                "provider tool transformation leaves the selected authority surface"),
+                failure::getMessage);
+
+        Path selected = writeAuthorityBoundTrace(
+                "provider-transform-selected-surface");
+        ObjectNode selectedRoot = (ObjectNode) QualificationJson.readTree(selected);
+        List<String> selectedTools = List.of("talos.read_file", "talos.edit_file");
+        ((ObjectNode) selectedRoot.path("toolSurface")).set(
+                "nativeTools", MAPPER.valueToTree(selectedTools));
+        ((ObjectNode) selectedRoot.path("promptAudit")).set(
+                "nativeTools", MAPPER.valueToTree(selectedTools));
+        ArrayNode selectedEvents = (ArrayNode) selectedRoot.path("events");
+        ObjectNode selectedDispatch = (ObjectNode) selectedEvents.get(
+                eventIndex(selectedEvents, "GENERATION_REQUEST_DISPATCHED"))
+                .path("data");
+        selectedDispatch.set(
+                "dispatchedNativeTools", MAPPER.valueToTree(selectedTools));
+        selectedDispatch.set(
+                "toolAuthoritySurface",
+                MAPPER.valueToTree(boundToolAuthoritySurface(selectedTools)));
+        QualificationJson.write(selected, selectedRoot);
+        Path allowed = addProviderTransformation(
+                selected, "talos.edit_file", "effective.txt", true);
+
+        QualificationTraceEvidence.Call call = QualificationTraceEvidence
+                .read(allowed, scenario).calls().getFirst();
+        assertEquals("talos.edit_file", call.toolName());
+        assertTrue(call.runtimeTransformed());
     }
 
     @Test
@@ -833,12 +1171,371 @@ class QualificationTraceEvidenceTest {
         return trace;
     }
 
+    private Path writeAuthorityBoundTrace(String name) throws Exception {
+        Path trace = writeProviderLinkedTrace(name);
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        root.put("schemaVersion", QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION);
+        ArrayNode events = (ArrayNode) root.path("events");
+        events.forEach(event -> {
+            String type = event.path("type").textValue();
+            if (type != null && (type.startsWith("GENERATION_")
+                    || type.equals("PROVIDER_TOOL_PROPOSAL_CAPTURED"))) {
+                ((ObjectNode) event.path("data"))
+                        .put("toolAuthorityMode", "PROVIDER_NATIVE");
+            }
+        });
+        ObjectNode dispatched = (ObjectNode) events.get(
+                eventIndex(events, "GENERATION_REQUEST_DISPATCHED")).path("data");
+        dispatched.set(
+                "toolAuthoritySurface",
+                MAPPER.valueToTree(boundToolAuthoritySurface(
+                        List.of("talos.read_file"))));
+        ObjectNode parsed = (ObjectNode) events.get(
+                eventIndex(events, "TOOL_CALL_PARSED")).path("data");
+        Map<String, Object> authority = Map.ofEntries(
+                Map.entry("schemaVersion", 1),
+                Map.entry("status", "AUTHORIZED"),
+                Map.entry("kind", "PROVIDER_NATIVE"),
+                Map.entry("authorityId", authorityId(
+                        name, "call-1-1", "PROVIDER_NATIVE")),
+                Map.entry("toolNameHash", parsed.path("toolNameHash").textValue()),
+                Map.entry("argumentsHash", parsed.path("argumentsHash").textValue()),
+                Map.entry("providerGenerationId",
+                        parsed.path("providerGenerationId").textValue()),
+                Map.entry("providerAttemptId",
+                        parsed.path("providerAttemptId").textValue()),
+                Map.entry("sourceOrdinal", 1),
+                Map.entry("parserFormat", "NATIVE"),
+                Map.entry("providerCallIdHash", "sha256:" + "d".repeat(64)),
+                Map.entry("providerToolNameHash",
+                        parsed.path("providerToolNameHash").textValue()),
+                Map.entry("providerArgumentsHash",
+                        parsed.path("providerArgumentsHash").textValue()));
+        parsed.set("executionAuthority", MAPPER.valueToTree(authority));
+        QualificationJson.write(trace, root);
+        return trace;
+    }
+
+    private static void insertReplacementGenerationAfterParsed(Path trace)
+            throws Exception {
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        int parsedIndex = eventIndex(events, "TOOL_CALL_PARSED");
+        List<ObjectNode> replacementEvents = new java.util.ArrayList<>();
+        String generationId = "trace-provider-generation-2";
+        String attemptId = generationId + "-attempt-1";
+        for (int index = 0; index < parsedIndex; index++) {
+            ObjectNode replacement = ((ObjectNode) events.get(index)).deepCopy();
+            ObjectNode data = (ObjectNode) replacement.path("data");
+            if (data.has("generationId")) {
+                data.put("generationId", generationId);
+            }
+            if (data.has("attemptId")) {
+                data.put("attemptId", attemptId);
+            }
+            if (data.has("selectedAttemptId")) {
+                data.put("selectedAttemptId", attemptId);
+            }
+            if (data.has("ledgerSequence")) {
+                data.put("ledgerSequence", data.path("ledgerSequence").intValue() + 5);
+            }
+            if (data.has("providerBodyHash")) {
+                data.put("providerBodyHash", "sha256:" + "8".repeat(64));
+            }
+            if (data.has("assistantHash")) {
+                data.put("assistantHash", "sha256:" + "b".repeat(64));
+            }
+            if (data.has("providerCallIdHash")) {
+                data.put("providerCallIdHash", "sha256:" + "f".repeat(64));
+            }
+            replacementEvents.add(replacement);
+        }
+        int insertionIndex = parsedIndex + 1;
+        for (ObjectNode replacement : replacementEvents) {
+            events.insert(insertionIndex++, replacement);
+        }
+        QualificationJson.write(trace, root);
+    }
+
+    private Path writeOlderGenerationCompletesAfterNewer(String name)
+            throws Exception {
+        Path trace = writeAuthorityBoundTrace(name);
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        ObjectNode olderCompletion = (ObjectNode) events.remove(
+                eventIndex(events, "GENERATION_COMPLETED"));
+        List<ObjectNode> newerGeneration = new java.util.ArrayList<>();
+        int parsedIndex = eventIndex(events, "TOOL_CALL_PARSED");
+        for (int index = 0; index < parsedIndex; index++) {
+            newerGeneration.add(((ObjectNode) events.get(index)).deepCopy());
+        }
+        newerGeneration.add(olderCompletion.deepCopy());
+        for (ObjectNode event : newerGeneration) {
+            rewriteGenerationIdentity(
+                    event,
+                    "trace-provider-generation-1",
+                    "trace-provider-generation-2",
+                    4);
+        }
+        ((ObjectNode) olderCompletion.path("data")).put("ledgerSequence", 10);
+        int insertionIndex = eventIndex(events, "TOOL_CALL_PARSED");
+        for (ObjectNode event : newerGeneration) {
+            events.insert(insertionIndex++, event);
+        }
+        events.insert(insertionIndex, olderCompletion);
+        QualificationJson.write(trace, root);
+        return trace;
+    }
+
+    private Path writeOlderAttemptInvalidatesNewerBeforeExecution(String name)
+            throws Exception {
+        Path trace = writeAuthorityBoundTrace(name);
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        List<ObjectNode> olderGeneration = new java.util.ArrayList<>();
+        int parsedIndex = eventIndex(events, "TOOL_CALL_PARSED");
+        for (int index = 0; index < parsedIndex; index++) {
+            olderGeneration.add(((ObjectNode) events.get(index)).deepCopy());
+        }
+        for (JsonNode event : events) {
+            rewriteGenerationIdentity(
+                    (ObjectNode) event,
+                    "trace-provider-generation-1",
+                    "trace-provider-generation-2",
+                    event.path("data").has("ledgerSequence") ? 1 : 0);
+        }
+        ObjectNode olderStart = olderGeneration.getFirst();
+        events.insert(0, olderStart);
+        int insertionIndex = eventIndex(events, "TOOL_CALL_PARSED");
+        for (int index = 1; index < olderGeneration.size() - 1; index++) {
+            ObjectNode delayedAttemptEvent = olderGeneration.get(index);
+            if (delayedAttemptEvent.path("data").has("ledgerSequence")) {
+                ((ObjectNode) delayedAttemptEvent.path("data")).put(
+                        "ledgerSequence",
+                        delayedAttemptEvent.path("data").path("ledgerSequence").intValue() + 5);
+            }
+            events.insert(insertionIndex++, delayedAttemptEvent);
+        }
+        ObjectNode olderCompletion = olderGeneration.getLast();
+        ((ObjectNode) olderCompletion.path("data")).put("ledgerSequence", 10);
+        events.insert(eventIndex(events, "TOOL_EXECUTED") + 1, olderCompletion);
+        QualificationJson.write(trace, root);
+        return trace;
+    }
+
+    private static void rewriteGenerationIdentity(
+            ObjectNode event,
+            String oldGenerationId,
+            String newGenerationId,
+            int ledgerSequenceOffset
+    ) {
+        ObjectNode data = (ObjectNode) event.path("data");
+        String oldAttemptId = oldGenerationId + "-attempt-1";
+        String newAttemptId = newGenerationId + "-attempt-1";
+        replaceExactText(data, "generationId", oldGenerationId, newGenerationId);
+        replaceExactText(data, "attemptId", oldAttemptId, newAttemptId);
+        replaceExactText(data, "selectedAttemptId", oldAttemptId, newAttemptId);
+        replaceExactText(
+                data, "providerGenerationId", oldGenerationId, newGenerationId);
+        replaceExactText(data, "providerAttemptId", oldAttemptId, newAttemptId);
+        if (data.has("ledgerSequence") && ledgerSequenceOffset != 0) {
+            data.put(
+                    "ledgerSequence",
+                    data.path("ledgerSequence").intValue() + ledgerSequenceOffset);
+        }
+        if (data.path("executionAuthority").isObject()) {
+            ObjectNode authority = (ObjectNode) data.path("executionAuthority");
+            replaceExactText(
+                    authority,
+                    "providerGenerationId",
+                    oldGenerationId,
+                    newGenerationId);
+            replaceExactText(
+                    authority, "providerAttemptId", oldAttemptId, newAttemptId);
+        }
+    }
+
+    private static void replaceExactText(
+            ObjectNode object,
+            String field,
+            String expected,
+            String replacement
+    ) {
+        if (object.path(field).isTextual()
+                && expected.equals(object.path(field).textValue())) {
+            object.put(field, replacement);
+        }
+    }
+
+    private static QualificationProviderAttemptLedger.Generation generationInterval(
+            String generationId,
+            ProviderResponseCapture.Source source,
+            ProviderResponseCapture.Purpose purpose,
+            int startEventIndex,
+            int terminalEventIndex
+    ) {
+        return new QualificationProviderAttemptLedger.Generation(
+                generationId,
+                source,
+                purpose,
+                List.of(),
+                "GENERATION_ABANDONED",
+                "",
+                0,
+                false,
+                false,
+                null,
+                ProviderResponseCapture.Abandonment.SCOPE_CLOSED,
+                startEventIndex,
+                terminalEventIndex);
+    }
+
+    private Path writeTextAuthorityBoundTrace(String name) throws Exception {
+        Path trace = writeAuthorityBoundTrace(name);
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        for (JsonNode event : events) {
+            String type = event.path("type").textValue();
+            if (type != null && (type.startsWith("GENERATION_")
+                    || type.equals("PROVIDER_TOOL_PROPOSAL_CAPTURED"))) {
+                ((ObjectNode) event.path("data"))
+                        .put("toolAuthorityMode", "PROVIDER_TEXT_JSON");
+            }
+        }
+        ObjectNode dispatched = (ObjectNode) events.get(
+                eventIndex(events, "GENERATION_REQUEST_DISPATCHED")).path("data");
+        dispatched.set("dispatchedNativeTools", MAPPER.valueToTree(List.of()));
+        dispatched.set(
+                "toolAuthoritySurface",
+                MAPPER.valueToTree(boundToolAuthoritySurface(
+                        List.of("talos.read_file"))));
+        ObjectNode response = (ObjectNode) events.get(
+                eventIndex(events, "GENERATION_RESPONSE_CAPTURED")).path("data");
+        response.put("nativeToolCallCount", 0);
+        response.put("capturedNativeToolProposalCount", 0);
+        response.put("textualToolCallPresent", true);
+        events.remove(eventIndex(events, "PROVIDER_TOOL_PROPOSAL_CAPTURED"));
+
+        ObjectNode parsed = (ObjectNode) events.get(
+                eventIndex(events, "TOOL_CALL_PARSED")).path("data");
+        parsed.remove(List.of(
+                "providerProposalOrdinal",
+                "providerToolNameHash",
+                "providerArgumentsHash",
+                "providerParsedToolNameHash",
+                "providerParsedArgumentsHash"));
+        parsed.set("executionAuthority", MAPPER.valueToTree(Map.ofEntries(
+                Map.entry("schemaVersion", 1),
+                Map.entry("status", "AUTHORIZED"),
+                Map.entry("kind", "PROVIDER_TEXT_JSON"),
+                Map.entry("authorityId", authorityId(
+                        name, "call-1-1", "PROVIDER_TEXT_JSON")),
+                Map.entry("toolNameHash", parsed.path("toolNameHash").textValue()),
+                Map.entry("argumentsHash", parsed.path("argumentsHash").textValue()),
+                Map.entry("providerGenerationId",
+                        parsed.path("providerGenerationId").textValue()),
+                Map.entry("providerAttemptId",
+                        parsed.path("providerAttemptId").textValue()),
+                Map.entry("sourceOrdinal", 1),
+                Map.entry("parserFormat", "JSON_TEXT"),
+                Map.entry("providerAssistantHash", "sha256:" + "a".repeat(64)))));
+        QualificationJson.write(trace, root);
+        return trace;
+    }
+
+    private Path writeRuntimeAuthorityTrace(
+            String name,
+            String toolName,
+            String runtimeReason) throws Exception {
+        String path = "talos.read_file".equals(toolName) ? "README.md" : "output.txt";
+        String toolCallId = "call-1-1";
+        String toolNameHash = ProviderResponseCapture.toolNameHash(toolName);
+        ToolAliasPolicy.Decision toolDecision = ToolAliasPolicy.resolve(toolName);
+        String displayToolName = toolDecision.accepted()
+                ? toolDecision.canonicalToolName()
+                : "<unrecognized-tool>";
+        String argumentsHash = ProviderResponseCapture.canonicalArgumentsHash(
+                Map.of("path", path));
+        Map<String, Object> authority = Map.ofEntries(
+                Map.entry("schemaVersion", 1),
+                Map.entry("status", "AUTHORIZED"),
+                Map.entry("kind", "RUNTIME_DETERMINISTIC"),
+                Map.entry("authorityId", authorityId(
+                        name, toolCallId, "RUNTIME_DETERMINISTIC")),
+                Map.entry("toolNameHash", toolNameHash),
+                Map.entry("argumentsHash", argumentsHash),
+                Map.entry("runtimeReason", runtimeReason));
+        Path trace = writeTrace(List.of(
+                event("TOOL_CALL_PARSED", displayToolName, path, Map.ofEntries(
+                        Map.entry("toolCallId", toolCallId),
+                        Map.entry("toolNameHash", toolNameHash),
+                        Map.entry("argumentsHash", argumentsHash),
+                        Map.entry("executionAuthority", authority))),
+                event("TOOL_EXECUTED", displayToolName, path, Map.ofEntries(
+                        Map.entry("toolCallId", toolCallId),
+                        Map.entry("toolNameHash", toolNameHash),
+                        Map.entry("argumentsHash", argumentsHash),
+                        Map.entry("success", true)))));
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        root.put("schemaVersion", QualificationProviderAttemptLedger.TRACE_SCHEMA_VERSION);
+        root.put("traceId", name);
+        ObjectNode promptAudit = (ObjectNode) root.path("promptAudit");
+        promptAudit.set("nativeTools", MAPPER.valueToTree(List.of()));
+        promptAudit.set("promptTools", MAPPER.valueToTree(List.of()));
+        root.set("toolSurface", MAPPER.valueToTree(Map.of(
+                "nativeTools", List.of(),
+                "promptTools", List.of(),
+                "reason", "deterministic runtime fixture")));
+        QualificationJson.write(trace, root);
+        return trace;
+    }
+
+    private static String authorityId(
+            String traceId,
+            String toolCallId,
+            String kind) {
+        try {
+            String value = traceId + '\0' + toolCallId + '\0' + kind;
+            return "sha256:" + HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(
+                            value.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 unavailable", ex);
+        }
+    }
+
+    private static Map<String, Object> boundToolAuthoritySurface(
+            List<String> selectedToolNames) {
+        List<String> selectedHashes = selectedToolNames.stream()
+                .map(ProviderResponseCapture::toolNameHash)
+                .toList();
+        return Map.ofEntries(
+                Map.entry("schemaVersion", 1),
+                Map.entry("bound", true),
+                Map.entry("toolChoiceMode", "AUTO"),
+                Map.entry("namedToolNameHash",
+                        ProviderResponseCapture.toolNameHash("")),
+                Map.entry("selectedToolNameHashes", selectedHashes),
+                Map.entry("authorizedToolNameHashes", selectedHashes));
+    }
+
     private Path writeTransformedProviderTrace(
             String name,
             String effectiveTool,
             String effectivePath,
             boolean success) throws Exception {
-        Path trace = writeProviderLinkedTrace(name);
+        return addProviderTransformation(
+                writeProviderLinkedTrace(name),
+                effectiveTool,
+                effectivePath,
+                success);
+    }
+
+    private Path addProviderTransformation(
+            Path trace,
+            String effectiveTool,
+            String effectivePath,
+            boolean success) throws Exception {
         ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
         ArrayNode events = (ArrayNode) root.path("events");
         int parsedIndex = eventIndex(events, "TOOL_CALL_PARSED");
@@ -867,6 +1564,7 @@ class QualificationTraceEvidenceTest {
         ObjectNode executedData = (ObjectNode) executed.path("data");
         executedData.put("pathHint", effectivePath);
         executedData.put("toolNameHash", effectiveToolHash);
+        executedData.put("canonicalToolNameHash", effectiveToolHash);
         executedData.put("argumentsHash", effectiveArgumentsHash);
         executedData.put("success", success);
         QualificationJson.write(trace, root);
@@ -959,6 +1657,67 @@ class QualificationTraceEvidenceTest {
         QualificationJson.write(trace, root);
     }
 
+    private static void appendAuthorityRejection(
+            Path trace,
+            String kind,
+            String reasonCode) throws Exception {
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ((ArrayNode) root.path("events")).add(MAPPER.valueToTree(event(
+                "TOOL_CALL_AUTHORITY_REJECTED",
+                "talos.read_file",
+                "README.md",
+                Map.of("executionAuthority", Map.of(
+                        "schemaVersion", 1,
+                        "status", "REJECTED",
+                        "kind", kind,
+                        "reasonCode", reasonCode)))));
+        QualificationJson.write(trace, root);
+    }
+
+    private static void rewriteNativeRawToolIdentity(
+            Path trace,
+            String rawToolName) throws Exception {
+        String rawHash = ProviderResponseCapture.toolNameHash(rawToolName);
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        ObjectNode proposal = (ObjectNode) events.get(
+                eventIndex(events, "PROVIDER_TOOL_PROPOSAL_CAPTURED")).path("data");
+        proposal.put("toolNameHash", rawHash);
+        proposal.put("toolNameChars", rawToolName.length());
+        ObjectNode parsed = (ObjectNode) events.get(
+                eventIndex(events, "TOOL_CALL_PARSED")).path("data");
+        parsed.put("providerToolNameHash", rawHash);
+        parsed.put("providerParsedToolNameHash", rawHash);
+        parsed.put("toolNameHash", rawHash);
+        ObjectNode authority = (ObjectNode) parsed.path("executionAuthority");
+        authority.put("toolNameHash", rawHash);
+        authority.put("providerToolNameHash", rawHash);
+        ObjectNode executed = (ObjectNode) events.get(
+                eventIndex(events, "TOOL_EXECUTED")).path("data");
+        executed.put("toolNameHash", rawHash);
+        QualificationJson.write(trace, root);
+    }
+
+    private static void rewriteTextRawToolIdentity(
+            Path trace,
+            String rawToolName) throws Exception {
+        String rawHash = ProviderResponseCapture.toolNameHash(rawToolName);
+        ObjectNode root = (ObjectNode) QualificationJson.readTree(trace);
+        ArrayNode events = (ArrayNode) root.path("events");
+        ObjectNode parsedEvent = (ObjectNode) events.get(
+                eventIndex(events, "TOOL_CALL_PARSED"));
+        parsedEvent.put("toolName", rawToolName);
+        ObjectNode parsed = (ObjectNode) parsedEvent.path("data");
+        parsed.put("toolNameHash", rawHash);
+        ((ObjectNode) parsed.path("executionAuthority"))
+                .put("toolNameHash", rawHash);
+        ObjectNode executedEvent = (ObjectNode) events.get(
+                eventIndex(events, "TOOL_EXECUTED"));
+        executedEvent.put("toolName", rawToolName);
+        ((ObjectNode) executedEvent.path("data")).put("toolNameHash", rawHash);
+        QualificationJson.write(trace, root);
+    }
+
     private static int eventIndex(ArrayNode events, String eventType) {
         for (int index = 0; index < events.size(); index++) {
             JsonNode type = events.get(index).path("type");
@@ -1016,6 +1775,8 @@ class QualificationTraceEvidenceTest {
             Map<String, Object> extra) {
         java.util.LinkedHashMap<String, Object> data = new java.util.LinkedHashMap<>();
         data.put("pathHint", path);
+        data.put("canonicalToolNameHash",
+                ProviderResponseCapture.toolNameHash(tool));
         data.putAll(extra);
         return Map.of(
                 "type", type,

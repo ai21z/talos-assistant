@@ -896,7 +896,7 @@ final class LlmClientResolverSeamTest {
 
         @Override
         public Capabilities capabilities() {
-            return Capabilities.of(true, true, false, 32_768, false);
+            return Capabilities.of(true, true, false, 32_768, true);
         }
 
         @Override
@@ -968,10 +968,13 @@ final class LlmClientResolverSeamTest {
     private static ChatRequestControls cappedRequiredControls(int cap) {
         return new ChatRequestControls(
                 ToolChoiceMode.REQUIRED,
-                "talos.write_file",
+                "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of()).withMaxOutputTokens(cap);
+                List.of())
+                .withMaxOutputTokens(cap)
+                .withToolAuthorityMode(
+                        ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE);
     }
 
     private static Config engineConfig() {
