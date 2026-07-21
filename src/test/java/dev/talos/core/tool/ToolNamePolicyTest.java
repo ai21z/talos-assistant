@@ -64,6 +64,20 @@ class ToolNamePolicyTest {
     }
 
     @Test
+    void classifiesPotentialAcceptedPrefixesWithoutAcceptingForeignNamespaces() {
+        assertTrue(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("talos.write_"));
+        assertTrue(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("TALOS:CUSTOM_"));
+        assertTrue(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("write_"));
+        assertTrue(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("file_utils:edit_"));
+        assertTrue(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("tool_use:read_"));
+
+        assertFalse(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("foreign:write_"));
+        assertFalse(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("weather."));
+        assertFalse(ToolNamePolicy.isPotentialAcceptedToolNamePrefix("talosx"));
+        assertFalse(ToolNamePolicy.isPotentialAcceptedToolNamePrefix(""));
+    }
+
+    @Test
     void backendProfileNamesStayCompatibleWithToolsApi() {
         assertEquals(
                 Arrays.stream(BackendToolProfile.values()).map(Enum::name).toList(),

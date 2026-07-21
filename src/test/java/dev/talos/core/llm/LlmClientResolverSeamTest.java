@@ -1,13 +1,15 @@
 package dev.talos.core.llm;
 
 import dev.talos.core.Config;
+import dev.talos.runtime.ToolCallParser;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
-import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
@@ -111,8 +113,8 @@ final class LlmClientResolverSeamTest {
 
     @Test
     void external_stream_transient_after_visible_output_does_not_retry_or_duplicate() {
-        ExternalTransientAfterVisibleOutputResolver resolver =
-                new ExternalTransientAfterVisibleOutputResolver();
+        ExternalTransientAfterTextResolver resolver =
+                new ExternalTransientAfterTextResolver("prefix");
         LlmClient client = new LlmClient(engineConfig(), resolver);
         StringBuilder emitted = new StringBuilder();
 
@@ -131,6 +133,212 @@ final class LlmClientResolverSeamTest {
         assertTrue(result.text().contains("prefix"),
                 "the partial output must be preserved in the aborted result");
         assertFalse(result.text().contains("retry-output"), result.text());
+    }
+
+    @Test
+    void external_stream_transient_after_buffered_retained_output_does_not_retry() {
+        ExternalTransientAfterTextResolver resolver =
+                new ExternalTransientAfterTextResolver("buffered-prefix");
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("buffer then drop")),
+                5_000L,
+                List.of());
+
+        assertEquals(1, resolver.chatCalls.get(),
+                "retry must not replace a retained partial provider response");
+        assertTrue(result.aborted(),
+                "a transport abort after retained buffered output must remain an abort");
+        assertEquals(ProviderResponseCapture.Completion.RUNTIME_ABORT, result.completion());
+        assertEquals(
+                ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT,
+                result.abortOrigin());
+        assertTrue(result.text().contains("buffered-prefix"), result.text());
+        assertFalse(result.text().contains("retry-output"), result.text());
+        assertTrue(result.toolCalls().isEmpty());
+    }
+
+    @Test
+    void external_stream_transient_after_safe_prose_and_incomplete_protocol_aborts_without_authority() {
+        String partial = "Visible prefix.\n```json\n"
+                + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":\"";
+        ExternalTransientAfterTextResolver resolver =
+                new ExternalTransientAfterTextResolver(partial);
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("write the file")),
+                5_000L,
+                writeToolSpecs());
+
+        assertEquals(1, resolver.chatCalls.get());
+        assertTrue(result.aborted(), result.text());
+        assertTrue(result.text().contains("Visible prefix."), result.text());
+        assertFalse(result.text().contains("talos.write_file"), result.text());
+        assertFalse(result.text().contains("```json"), result.text());
+        assertFalse(result.text().contains("retry-output"), result.text());
+        assertTrue(result.toolCalls().isEmpty());
+        assertTrue(ToolCallParser.parse(result.text()).isEmpty(), result.text());
+    }
+
+    @Test
+    void external_stream_transient_after_complete_protocol_only_output_may_retry_without_authority() {
+        String protocolOnly = """
+                ```json
+                {"name":"talos.write_file","arguments":{"path":"a.txt","content":"x"}}
+                ```
+                """;
+        ExternalTransientAfterTextResolver resolver =
+                new ExternalTransientAfterTextResolver(protocolOnly);
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("write the file")),
+                5_000L,
+                writeToolSpecs());
+
+        assertEquals(2, resolver.chatCalls.get(),
+                "withheld non-authoritative protocol does not create a retry barrier");
+        assertEquals("retry-output", result.text());
+        assertTrue(ToolCallParser.parse(result.text()).isEmpty(), result.text());
+        assertFalse(result.text().contains("talos.write_file"), result.text());
+    }
+
+    @Test
+    void external_stream_transient_after_incomplete_protocol_only_output_may_retry_without_authority() {
+        String protocolOnly = "```json\n"
+                + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":\"";
+        ExternalTransientAfterTextResolver resolver =
+                new ExternalTransientAfterTextResolver(protocolOnly);
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("write the file")),
+                5_000L,
+                writeToolSpecs());
+
+        assertEquals(2, resolver.chatCalls.get(),
+                "withheld incomplete protocol does not create a retry barrier");
+        assertEquals("retry-output", result.text());
+        assertTrue(result.toolCalls().isEmpty());
+        assertTrue(ToolCallParser.parse(result.text()).isEmpty(), result.text());
+        assertFalse(result.text().contains("talos.write_file"), result.text());
+    }
+
+    @Test
+    void streaming_protocol_only_transient_retries_without_displaying_complete_or_incomplete_authority() {
+        List<String> protocolOnlyAttempts = List.of(
+                """
+                        ```json
+                        {"name":"talos.write_file","arguments":{"path":"a.txt","content":"x"}}
+                        ```
+                        """,
+                "```json\n"
+                        + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"a.txt\",\"content\":\"");
+
+        for (String protocolOnly : protocolOnlyAttempts) {
+            ExternalTransientAfterTextResolver resolver =
+                    new ExternalTransientAfterTextResolver(protocolOnly);
+            LlmClient client = new LlmClient(engineConfig(), resolver);
+            StringBuilder displayed = new StringBuilder();
+
+            LlmClient.StreamResult result = client.chatStreamFull(
+                    List.of(ChatMessage.user("write the file")),
+                    displayed::append,
+                    5_000L,
+                    writeToolSpecs());
+
+            assertEquals(2, resolver.chatCalls.get(), protocolOnly);
+            assertEquals("retry-output", result.text(), protocolOnly);
+            assertEquals("retry-output", displayed.toString(), protocolOnly);
+            assertTrue(result.toolCalls().isEmpty(), protocolOnly);
+            assertTrue(ToolCallParser.parse(result.text()).isEmpty(), result.text());
+            assertFalse(displayed.toString().contains("talos.write_file"), displayed.toString());
+        }
+    }
+
+    @Test
+    void deferred_capped_transient_discards_unselected_partial_before_retry() {
+        ExternalTransientAfterTextResolver resolver =
+                new ExternalTransientAfterTextResolver("discarded-first-attempt");
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        StringBuilder displayed = new StringBuilder();
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("write the file")),
+                displayed::append,
+                5_000L,
+                writeToolSpecs(),
+                cappedRequiredControls(1024));
+
+        assertEquals(2, resolver.chatCalls.get());
+        assertEquals("retry-output", result.text());
+        assertEquals("retry-output", displayed.toString());
+        assertFalse(displayed.toString().contains("discarded-first-attempt"), displayed.toString());
+    }
+
+    @Test
+    void native_tool_only_transient_discards_unsettled_call_before_retry() {
+        ExternalTransientAfterNativeToolResolver resolver =
+                new ExternalTransientAfterNativeToolResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        LlmClient.StreamResult result = client.chatFull(
+                List.of(ChatMessage.user("write the file")),
+                5_000L,
+                writeToolSpecs());
+
+        assertEquals(2, resolver.chatCalls.get());
+        assertEquals("retry-output", result.text());
+        assertTrue(result.toolCalls().isEmpty(),
+                "a native call without provider terminal settlement must not survive retry");
+    }
+
+    @Test
+    void whitespace_retry_barrier_distinguishes_delivered_buffered_and_deferred_output() {
+        String whitespace = " \r\n\t";
+
+        ExternalTransientAfterTextResolver streamingResolver =
+                new ExternalTransientAfterTextResolver(whitespace);
+        LlmClient streamingClient = new LlmClient(engineConfig(), streamingResolver);
+        StringBuilder displayed = new StringBuilder();
+        LlmClient.StreamResult streaming = streamingClient.chatStreamFull(
+                List.of(ChatMessage.user("stream whitespace")),
+                displayed::append,
+                5_000L,
+                List.of());
+        assertEquals(1, streamingResolver.chatCalls.get());
+        assertFalse(displayed.isEmpty(),
+                "at least one stable whitespace byte must reach the display retry barrier");
+        assertTrue(displayed.toString().isBlank(), displayed.toString());
+        assertTrue(whitespace.startsWith(displayed.toString()), displayed.toString());
+        assertTrue(streaming.aborted(), streaming.text());
+        assertFalse(streaming.text().contains("retry-output"), streaming.text());
+
+        ExternalTransientAfterTextResolver bufferedResolver =
+                new ExternalTransientAfterTextResolver(whitespace);
+        LlmClient bufferedClient = new LlmClient(engineConfig(), bufferedResolver);
+        LlmClient.StreamResult buffered = bufferedClient.chatFull(
+                List.of(ChatMessage.user("buffer whitespace")),
+                5_000L,
+                List.of());
+        assertEquals(2, bufferedResolver.chatCalls.get());
+        assertEquals("retry-output", buffered.text());
+
+        ExternalTransientAfterTextResolver deferredResolver =
+                new ExternalTransientAfterTextResolver(whitespace);
+        LlmClient deferredClient = new LlmClient(engineConfig(), deferredResolver);
+        StringBuilder deferredDisplay = new StringBuilder();
+        LlmClient.StreamResult deferred = deferredClient.chatStreamFull(
+                List.of(ChatMessage.user("write the file")),
+                deferredDisplay::append,
+                5_000L,
+                writeToolSpecs(),
+                cappedRequiredControls(1024));
+        assertEquals(2, deferredResolver.chatCalls.get());
+        assertEquals("retry-output", deferred.text());
+        assertEquals("retry-output", deferredDisplay.toString());
     }
 
     @Test
@@ -185,8 +393,67 @@ final class LlmClientResolverSeamTest {
     }
 
     @Test
-    void streaming_text_tool_call_closes_generation_before_trailing_ramble() {
-        TextToolCallThenRambleResolver resolver = new TextToolCallThenRambleResolver();
+    void deterministicCancellationKeepsLegacyCallbackAndReturnedPartialIdentical()
+            throws Exception {
+        for (String firstChunk : List.of(
+                "visible o",
+                "Before\n```json\n{\"name\":\"talos.write_file\",")) {
+            AtomicBoolean cancelled = new AtomicBoolean();
+            CancelAfterFirstChunkResolver resolver =
+                    new CancelAfterFirstChunkResolver(firstChunk, cancelled);
+            LlmClient client = new LlmClient(engineConfig(), resolver);
+            StringBuilder emitted = new StringBuilder();
+
+            String result = client.chatStream(
+                    List.of(ChatMessage.user("cancel deterministically")),
+                    emitted::append,
+                    Duration.ofSeconds(5),
+                    cancelled::get);
+
+            assertEquals(result, emitted.toString(), firstChunk);
+            assertTrue(ToolCallParser.parse(result).isEmpty(), result);
+            assertFalse(result.contains("talos.write_file"), result);
+        }
+    }
+
+    @Test
+    void deterministicCancellationFlushesOnlySafeProviderPartialBeforeAbortMarker() {
+        for (String firstChunk : List.of(
+                "visible o",
+                "Before\n```json\n{\"name\":\"talos.write_file\",")) {
+            AtomicBoolean cancelled = new AtomicBoolean();
+            CancelAfterFirstChunkResolver resolver =
+                    new CancelAfterFirstChunkResolver(firstChunk, cancelled);
+            LlmClient client = new LlmClient(engineConfig(), resolver);
+            client.setCancelSupplier(cancelled::get);
+            StringBuilder emitted = new StringBuilder();
+
+            LlmClient.StreamResult result = client.chatStreamFull(
+                    List.of(ChatMessage.user("cancel deterministically")),
+                    emitted::append,
+                    5_000L,
+                    List.of());
+
+            assertTrue(result.aborted(), result.text());
+            assertEquals(
+                    ProviderResponseCapture.Completion.RUNTIME_ABORT,
+                    result.completion());
+            assertEquals(
+                    ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL,
+                    result.abortOrigin());
+            assertTrue(
+                    result.text().startsWith(
+                            emitted + System.lineSeparator()),
+                    () -> "callback/partial mismatch: callback=" + emitted
+                            + " result=" + result.text());
+            assertTrue(ToolCallParser.parse(result.text()).isEmpty(), result.text());
+            assertFalse(result.text().contains("talos.write_file"), result.text());
+        }
+    }
+
+    @Test
+    void json_text_tool_call_requires_provider_eos_and_failsClosedWithoutIt() {
+        TextToolCallThenRambleResolver resolver = new TextToolCallThenRambleResolver(false);
         LlmClient client = new LlmClient(engineConfig(), resolver);
 
         LlmClient.StreamResult result = client.chatStreamFull(
@@ -195,11 +462,38 @@ final class LlmClientResolverSeamTest {
                 5_000L,
                 List.of());
 
-        assertEquals(2, resolver.chunksConsumed.get(),
-                "generation should stop after the complete text-form tool call");
-        assertTrue(resolver.streamClosed.get(), "breaking after the tool call should close the provider stream");
-        assertTrue(result.text().contains("\"name\":\"talos.write_file\""), result.text());
-        assertFalse(result.text().contains("trailing ramble"), result.text());
+        assertEquals(3, resolver.chunksConsumed.get(),
+                "JSON cannot acquire terminal authority before provider EOS");
+        assertTrue(resolver.streamClosed.get(), "natural exhaustion must close the provider stream");
+        assertEquals(
+                ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS,
+                result.completion());
+        assertFalse(result.text().contains("talos.write_file"), result.text());
+        assertTrue(result.text().contains("trailing provider text"), result.text());
+        assertTrue(result.normalized(), "non-authoritative protocol must be removed");
+    }
+
+    @Test
+    void jsonTextToolCallWaitsForProviderEosAndPreservesFollowingProviderText() {
+        TextToolCallThenRambleResolver resolver = new TextToolCallThenRambleResolver(true);
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+        StringBuilder streamed = new StringBuilder();
+
+        LlmClient.StreamResult result = client.chatStreamFull(
+                List.of(ChatMessage.user("create the file")),
+                streamed::append,
+                5_000L,
+                List.of());
+
+        assertEquals(4, resolver.chunksConsumed.get(),
+                "three text chunks and the provider terminal must be consumed");
+        assertEquals(
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                result.completion());
+        assertEquals(resolver.providerText, result.text());
+        assertEquals(result.text(), streamed.toString());
+        assertEquals(1, ToolCallParser.parse(result.text()).size(), result.text());
+        assertFalse(result.normalized());
     }
 
     @Test
@@ -321,7 +615,7 @@ final class LlmClientResolverSeamTest {
     }
 
     @Test
-    void capped_length_with_complete_text_tool_call_does_not_retry() {
+    void cappedLengthTextToolCallIsNonAuthoritativeAndRetriesOnceUncapped() {
         CompleteTextToolCallResolver resolver = new CompleteTextToolCallResolver();
         LlmClient client = new LlmClient(engineConfig(), resolver);
 
@@ -331,9 +625,15 @@ final class LlmClientResolverSeamTest {
                 writeToolSpecs(),
                 cappedRequiredControls(1024));
 
-        assertEquals(1, resolver.calls.get(),
-                "a complete text-form tool call must not trigger the uncapped retry");
+        assertEquals(2, resolver.calls.get(),
+                "provider length cannot authorize JSON; the bounded cap-lift retry must run once");
+        assertEquals(List.of(1024, 0), resolver.capsSeen);
+        assertEquals(1, ToolCallParser.parse(result.text()).size(), result.text());
         assertTrue(result.text().contains("talos.write_file"), result.text());
+        assertFalse(result.outputLimitReached());
+        assertEquals(
+                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                result.completion());
     }
 
     @Test
@@ -398,6 +698,73 @@ final class LlmClientResolverSeamTest {
         assertEquals("talos.read_file", result.toolCalls().getFirst().name());
     }
 
+    @Test
+    void bufferedJsonStillFeedsTheRepetitionBreakerWithoutReachingDisplay() {
+        String pattern = "0123456789abcdefghijklmnopqrstuvwxyzWXYZ!@#$%^&*";
+        assertEquals(48, pattern.length(), "fixture must match the default probe width");
+        List<String> chunks = new ArrayList<>();
+        chunks.add("```json\n{\"name\":\"talos.write_file\",\"arguments\":{"
+                + "\"path\":\"x\",\"content\":\"");
+        for (int i = 0; i < 6; i++) {
+            chunks.add(pattern);
+        }
+        BlockingTextChunksResolver resolver = new BlockingTextChunksResolver(chunks);
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                Duration.ofSeconds(5),
+                () -> {
+                    StringBuilder visible = new StringBuilder();
+                    try (LlmClient client = new LlmClient(engineConfig(), resolver)) {
+                        LlmClient.StreamResult result = client.chatStreamFull(
+                                List.of(ChatMessage.user("write the file")),
+                                visible::append,
+                                3_000L,
+                                List.of());
+
+                        assertTrue(result.aborted(), result.text());
+                        assertEquals("repetition loop", result.abortReason());
+                        assertEquals(
+                                ProviderResponseCapture.Completion.RUNTIME_ABORT,
+                                result.completion());
+                        assertEquals("", visible.toString(),
+                                "buffered protocol must never reach display");
+                        assertFalse(result.text().contains("talos.write_file"), result.text());
+                    }
+                    assertTrue(resolver.streamClosed.get(),
+                            "watchdog must close the blocked provider stream");
+                });
+    }
+
+    @Test
+    void deferredCappedDisplayDoesNotDoubleFeedDecodedBytesToRepetitionAccounting() {
+        String pattern = "0123456789abcdefghijklmnopqrstuvwxyzWXYZ!@#$%^&*";
+        assertEquals(48, pattern.length(), "fixture must match the default probe width");
+        String response = pattern.repeat(3);
+        DelayedTerminalTextResolver resolver =
+                new DelayedTerminalTextResolver(response, 800L);
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                Duration.ofSeconds(5),
+                () -> {
+                    StringBuilder visible = new StringBuilder();
+                    try (LlmClient client = new LlmClient(engineConfig(), resolver)) {
+                        LlmClient.StreamResult result = client.chatStreamFull(
+                                List.of(ChatMessage.user("write the file")),
+                                visible::append,
+                                3_000L,
+                                writeToolSpecs(),
+                                cappedRequiredControls(1_024));
+
+                        assertFalse(result.aborted(), result.text());
+                        assertEquals(
+                                ProviderResponseCapture.Completion.PROVIDER_EOS,
+                                result.completion());
+                        assertEquals(response, result.text());
+                        assertEquals(response, visible.toString());
+                    }
+                });
+    }
+
     private static final class BlockingNoChunkResolver implements LlmEngineResolver {
         private final CountDownLatch release = new CountDownLatch(1);
 
@@ -434,6 +801,160 @@ final class LlmClientResolverSeamTest {
         @Override
         public void close() {
             // no-op
+        }
+    }
+
+    private static final class BlockingTextChunksResolver implements LlmEngineResolver {
+        private final List<String> chunks;
+        private final AtomicBoolean streamClosed = new AtomicBoolean();
+
+        private BlockingTextChunksResolver(List<String> chunks) {
+            this.chunks = List.copyOf(chunks);
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, true, false, 32_768, false);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return true;
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private int index;
+
+                @Override
+                public boolean hasNext() {
+                    if (index < chunks.size()) return true;
+                    while (!streamClosed.get()) {
+                        try {
+                            Thread.sleep(10L);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            return false;
+                        }
+                    }
+                    return false;
+                }
+
+                @Override
+                public TokenChunk next() {
+                    if (index >= chunks.size()) {
+                        throw new NoSuchElementException();
+                    }
+                    return TokenChunk.of(chunks.get(index++));
+                }
+            };
+            return StreamSupport.stream(
+                            Spliterators.spliteratorUnknownSize(iterator, 0),
+                            false)
+                    .onClose(() -> streamClosed.set(true));
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStreamNonStreaming(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
+        public void close() {
+            streamClosed.set(true);
+        }
+    }
+
+    private static final class DelayedTerminalTextResolver implements LlmEngineResolver {
+        private final String text;
+        private final long terminalDelayMs;
+
+        private DelayedTerminalTextResolver(String text, long terminalDelayMs) {
+            this.text = text;
+            this.terminalDelayMs = terminalDelayMs;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(true, true, false, 32_768, false);
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return true;
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private int state;
+
+                @Override
+                public boolean hasNext() {
+                    return state < 2;
+                }
+
+                @Override
+                public TokenChunk next() {
+                    if (state == 0) {
+                        state = 1;
+                        return TokenChunk.of(text);
+                    }
+                    if (state == 1) {
+                        state = 2;
+                        try {
+                            Thread.sleep(terminalDelayMs);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return TokenChunk.eos("stop");
+                    }
+                    throw new NoSuchElementException();
+                }
+            };
+            return StreamSupport.stream(
+                    Spliterators.spliteratorUnknownSize(iterator, 0),
+                    false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStreamNonStreaming(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
+        public void close() {
         }
     }
 
@@ -715,8 +1236,13 @@ final class LlmClientResolverSeamTest {
         }
     }
 
-    private static final class ExternalTransientAfterVisibleOutputResolver implements LlmEngineResolver {
+    private static final class ExternalTransientAfterTextResolver implements LlmEngineResolver {
         private final AtomicInteger chatCalls = new AtomicInteger();
+        private final String firstText;
+
+        private ExternalTransientAfterTextResolver(String firstText) {
+            this.firstText = firstText;
+        }
 
         @Override
         public void select(String backend, String model) {
@@ -744,7 +1270,7 @@ final class LlmClientResolverSeamTest {
                 @Override
                 public TokenChunk next() {
                     emitted = true;
-                    return TokenChunk.of("prefix");
+                    return TokenChunk.of(firstText);
                 }
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
@@ -764,9 +1290,76 @@ final class LlmClientResolverSeamTest {
         }
     }
 
+    private static final class ExternalTransientAfterNativeToolResolver implements LlmEngineResolver {
+        private final AtomicInteger chatCalls = new AtomicInteger();
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            if (chatCalls.incrementAndGet() > 1) {
+                return Stream.of(TokenChunk.of("retry-output"), TokenChunk.eos());
+            }
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private boolean emitted;
+
+                @Override
+                public boolean hasNext() {
+                    if (!emitted) return true;
+                    throw new dev.talos.spi.EngineException.Transient(
+                            "external stream dropped after native tool proposal",
+                            new java.io.IOException("connection reset after native tool proposal"),
+                            408);
+                }
+
+                @Override
+                public TokenChunk next() {
+                    emitted = true;
+                    return TokenChunk.ofToolCalls(List.of(new ChatMessage.NativeToolCall(
+                            "unsettled-call",
+                            "talos.write_file",
+                            Map.of("path", "a.txt", "content", "x"))));
+                }
+            };
+            return StreamSupport.stream(
+                    Spliterators.spliteratorUnknownSize(iterator, 0),
+                    false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
     private static final class TextToolCallThenRambleResolver implements LlmEngineResolver {
         private final AtomicInteger chunksConsumed = new AtomicInteger();
         private final AtomicBoolean streamClosed = new AtomicBoolean();
+        private final boolean includeProviderEos;
+        private final List<String> textChunks = List.of(
+                "I will write it now.\n",
+                """
+                        ```json
+                        {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Hello</h1>"}}
+                        ```
+                        """,
+                "trailing provider text");
+        private final String providerText = String.join("", textChunks);
+
+        private TextToolCallThenRambleResolver(boolean includeProviderEos) {
+            this.includeProviderEos = includeProviderEos;
+        }
 
         @Override
         public void select(String backend, String model) {
@@ -776,14 +1369,11 @@ final class LlmClientResolverSeamTest {
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             Iterator<TokenChunk> iterator = new Iterator<>() {
-                private final List<String> chunks = List.of(
-                        "I will write it now.\n",
-                        """
-                                ```json
-                                {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Hello</h1>"}}
-                                ```
-                                """,
-                        "trailing ramble that should not be consumed");
+                private final List<TokenChunk> chunks = includeProviderEos
+                        ? Stream.concat(
+                                textChunks.stream().map(TokenChunk::of),
+                                Stream.of(TokenChunk.eos("stop"))).toList()
+                        : textChunks.stream().map(TokenChunk::of).toList();
                 private int index;
 
                 @Override
@@ -795,11 +1385,64 @@ final class LlmClientResolverSeamTest {
                 public TokenChunk next() {
                     if (!hasNext()) throw new java.util.NoSuchElementException();
                     chunksConsumed.incrementAndGet();
-                    return TokenChunk.of(chunks.get(index++));
+                    return chunks.get(index++);
                 }
             };
             return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false)
                     .onClose(() -> streamClosed.set(true));
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class CancelAfterFirstChunkResolver implements LlmEngineResolver {
+        private final String firstChunk;
+        private final AtomicBoolean cancelled;
+
+        private CancelAfterFirstChunkResolver(
+                String firstChunk,
+                AtomicBoolean cancelled) {
+            this.firstChunk = firstChunk;
+            this.cancelled = cancelled;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            Iterator<TokenChunk> iterator = new Iterator<>() {
+                private int index;
+
+                @Override
+                public boolean hasNext() {
+                    if (index > 0) {
+                        cancelled.set(true);
+                    }
+                    return index < 2;
+                }
+
+                @Override
+                public TokenChunk next() {
+                    if (!hasNext()) throw new NoSuchElementException();
+                    return TokenChunk.of(index++ == 0 ? firstChunk : "must not assemble");
+                }
+            };
+            return StreamSupport.stream(
+                    Spliterators.spliteratorUnknownSize(iterator, 0), false);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(
+                ChatRequest request,
+                ProviderTransportHandoff handoff) {
+            ProviderTransportHandoff.mark(handoff);
+            return chatStream(request);
         }
 
         @Override
@@ -955,6 +1598,7 @@ final class LlmClientResolverSeamTest {
 
     private static final class CompleteTextToolCallResolver implements LlmEngineResolver {
         final AtomicInteger calls = new AtomicInteger();
+        final List<Integer> capsSeen = new ArrayList<>();
 
         @Override
         public void select(String backend, String model) {
@@ -964,13 +1608,15 @@ final class LlmClientResolverSeamTest {
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             calls.incrementAndGet();
+            int cap = request.controls == null ? -1 : request.controls.maxOutputTokens();
+            capsSeen.add(cap);
             return Stream.of(
                     TokenChunk.of("""
                             ```json
                             {"name":"talos.write_file","arguments":{"path":"a.txt","content":"x"}}
                             ```
                             """),
-                    TokenChunk.eos("length"));
+                    TokenChunk.eos(cap > 0 ? "length" : "stop"));
         }
 
         @Override

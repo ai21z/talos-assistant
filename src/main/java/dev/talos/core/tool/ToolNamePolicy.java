@@ -48,6 +48,7 @@ public final class ToolNamePolicy {
     );
 
     private static final Map<String, AliasTarget> ALIASES = aliases();
+    private static final Set<String> ACCEPTED_TOOL_NAMES = buildAcceptedToolNames();
 
     private ToolNamePolicy() {}
 
@@ -152,6 +153,47 @@ public final class ToolNamePolicy {
         return resolve(rawName).mutating();
     }
 
+    /**
+     * Returns whether a decoded, possibly truncated name could still become an
+     * accepted tool identity.
+     *
+     * <p>This is a conservative display-suppression predicate only. It never
+     * authorizes, parses, approves, or executes a tool. Registry ownership
+     * remains here so streaming code does not duplicate canonical or alias
+     * spellings.
+     */
+    public static boolean isPotentialAcceptedToolNamePrefix(String rawPrefix) {
+        String raw = rawPrefix == null ? "" : rawPrefix.strip();
+        if (raw.isBlank()) return false;
+
+        String normalized = normalizeTalosSeparator(
+                raw.toLowerCase(Locale.ROOT));
+        if ("talos.".startsWith(normalized) || normalized.startsWith("talos.")) {
+            return true;
+        }
+        for (String canonical : CANONICAL_TOOL_NAMES) {
+            if (canonical.startsWith(normalized)) {
+                return true;
+            }
+        }
+        for (String alias : ALIASES.keySet()) {
+            if (alias.startsWith(normalized)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Immutable finite registry of canonical names and configured aliases.
+     *
+     * <p>Custom {@code talos.*} names remain policy-accepted but are not a
+     * finite registry entry and therefore are intentionally absent.
+     */
+    public static Set<String> acceptedToolNames() {
+        return ACCEPTED_TOOL_NAMES;
+    }
+
     public static String localCanonicalName(String rawName) {
         return resolve(rawName).localCanonicalName();
     }
@@ -228,6 +270,13 @@ public final class ToolNamePolicy {
         addBackendAliases(out, BackendProfile.TOOL_USE, "tool_use");
         addBackendAliases(out, BackendProfile.FILE_UTILS, "file_utils");
         return Map.copyOf(out);
+    }
+
+    private static Set<String> buildAcceptedToolNames() {
+        java.util.LinkedHashSet<String> names =
+                new java.util.LinkedHashSet<>(CANONICAL_TOOL_NAMES);
+        names.addAll(ALIASES.keySet());
+        return Set.copyOf(names);
     }
 
     private static void addBackendAliases(Map<String, AliasTarget> out, BackendProfile profile, String namespace) {

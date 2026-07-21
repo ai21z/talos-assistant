@@ -5,6 +5,7 @@ import dev.talos.runtime.ApprovalPolicy;
 import dev.talos.runtime.JsonTurnLogAppender;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.SessionApprovalPolicy;
+import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
 import org.junit.jupiter.api.Test;
 
@@ -122,6 +123,9 @@ class TalosBootstrapWiringTest {
         // path a live streaming turn would exercise, but without depending
         // on mode/placeholder/turn-executor internals.
         router.context().streamSink().accept("CHUNK-PROBE");
+        assertInstanceOf(
+                ToolCallStreamFilter.class,
+                router.context().streamSink()).flush();
         term.flush();
 
         String termOut = terminalSink.toString(java.nio.charset.StandardCharsets.UTF_8);
@@ -149,6 +153,9 @@ class TalosBootstrapWiringTest {
                 WS); // no LineReader
 
         router.context().streamSink().accept("CHUNK-PROBE");
+        assertInstanceOf(
+                ToolCallStreamFilter.class,
+                router.context().streamSink()).flush();
         String stdOut = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(stdOut.contains("CHUNK-PROBE"),
                 "with no LineReader, sink must fall back to the passed PrintStream");

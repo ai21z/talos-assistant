@@ -7,7 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,6 +19,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("JSON deterministic scenario pack")
 class JsonScenarioPackTest {
+    private static final String BMI_SCRIPT_SHA256 =
+            "519151e2ea63cbdfc28f213528b9e1bd6e89e749a52d00f825cc7df56be79d2e";
+    private static final String RETRY_BMI_SCRIPT_SHA256 =
+            "f74cd167d482cfcebcba74282b736f20259048ced3350c7b7e5ef53812521484";
 
     @Test
     @DisplayName("[json-scenario:scenarios/01-read-only-repo-question.json] 01: read-only repo question stays read-only and answers from fixture facts")
@@ -888,6 +895,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertFileContains("scripts.js", "Your BMI is");
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
         }
     }
 
@@ -956,6 +964,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertFileContains("scripts.js", "Your BMI is");
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
@@ -985,6 +994,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertLocalTraceRecorded();
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
@@ -1013,6 +1023,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertLocalTraceRecorded();
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("PLANNED", result.localTrace().repair().status());
             assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
@@ -1034,6 +1045,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertLocalTraceRecorded();
+            assertUtf8Sha256(result, "scripts.js", BMI_SCRIPT_SHA256);
             assertEquals("COMPLETE", result.localTrace().outcome().status());
             assertEquals("COMPLETED_VERIFIED", result.localTrace().outcome().classification());
         }
@@ -1406,6 +1418,7 @@ class JsonScenarioPackTest {
                     .assertFileContains("index.html", "bmiForm")
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')");
+            assertUtf8Sha256(result, "scripts.js", RETRY_BMI_SCRIPT_SHA256);
             assertTrue(result.localTrace().events().stream()
                     .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
                             && "UNSATISFIED".equals(event.data().get("status"))));
@@ -1822,6 +1835,22 @@ class JsonScenarioPackTest {
                         .anyMatch(target -> path.equals(target.path()) && role.equals(target.role())),
                 "unexpected trace roleful target " + path + " = " + role
                         + ", actual: " + result.localTrace().taskContract().rolefulTargets());
+    }
+
+    private static void assertUtf8Sha256(
+            ExecutorScenarioResult result,
+            String relativePath,
+            String expectedSha256) {
+        try {
+            byte[] bytes = result.workspace().read(relativePath)
+                    .getBytes(StandardCharsets.UTF_8);
+            String observed = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(bytes));
+            assertEquals(expectedSha256, observed,
+                    relativePath + " UTF-8 SHA-256");
+        } catch (Exception e) {
+            throw new AssertionError("Unable to hash scenario file " + relativePath, e);
+        }
     }
 
     private static void assertTraceOutcome(

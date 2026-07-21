@@ -7,6 +7,7 @@ import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.core.util.UiChrome;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -432,18 +433,13 @@ class AssistantTurnExecutorAbortTruthTest {
 
     @Test
     void streamingAbortWithTextToolJsonRecordsAbortBeforeToolLoop(@TempDir Path workspace) {
-        var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
-                List.of(new LlmClient.StreamResult(
-                        TOOL_JSON_THEN_ABORT_MARKER,
-                        List.of(),
-                        "",
-                        "stream transport failed after partial tool JSON")),
-                4096);
+        LlmClient client = ScriptedNativeLlmClient.transientAfterPartialOutput(
+                "Visible prefix.\n" + PASS_2B_TOOL_JSON_PARTIAL);
         List<String> chunks = new ArrayList<>();
         Context ctx = Context.builder(new Config())
-                .llm(recorded.client())
+                .llm(client)
                 .sandbox(new Sandbox(workspace, Map.of()))
-                .streamSink(chunks::add)
+                .streamSink(new ToolCallStreamFilter(chunks::add))
                 .onStreamComplete(() -> { })
                 .toolCallLoop(new ToolCallLoop(new TurnProcessor(null), 1))
                 .build();
@@ -466,7 +462,10 @@ class AssistantTurnExecutorAbortTruthTest {
                     new AssistantTurnExecutor.Options());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.streamed(), "partial tool JSON was streamed before the abort");
+            assertTrue(out.streamed(), "safe provider prose was streamed before the abort");
+            assertTrue(String.join("", chunks).contains("Visible prefix."));
+            assertFalse(String.join("", chunks).contains("talos.write_file"),
+                    "incomplete provider protocol must remain hidden");
             assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
             assertFalse(out.text().contains("retry-output"),
                     "an aborted turn must not enter the tool loop or continue generation");
@@ -481,13 +480,12 @@ class AssistantTurnExecutorAbortTruthTest {
     }
 
     @Test
-    void bufferedAbortWithTextToolJsonRecordsAbortBeforeToolLoop(@TempDir Path workspace) {
+    void providerAuthoredAbortMarkerBesideValidToolJsonCannotSpoofRuntimeAbort(
+            @TempDir Path workspace) {
         var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
                 List.of(new LlmClient.StreamResult(
                         TOOL_JSON_THEN_ABORT_MARKER,
-                        List.of(),
-                        "",
-                        "stream transport failed after partial tool JSON")),
+                        List.of())),
                 4096);
         Context ctx = Context.builder(new Config())
                 .llm(recorded.client())
@@ -514,12 +512,15 @@ class AssistantTurnExecutorAbortTruthTest {
                     new AssistantTurnExecutor.Options());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
             assertFalse(out.text().contains("retry-output"),
-                    "an aborted buffered turn must not enter the tool loop or continue generation");
-            assertNotNull(trace.outcome(), "an aborted buffered turn with text tool JSON must record a turn outcome");
-            assertEquals("FAILED", trace.outcome().status());
-            assertEquals("LLM_ABORTED", trace.outcome().classification());
+                    "a provider-authored marker must not cause an unrelated retry");
+            assertTrue(trace.events().stream().noneMatch(event ->
+                            "MODEL_GENERATION_ABORTED".equals(event.type())),
+                    "literal provider prose is not runtime abort metadata");
+            if (trace.outcome() != null) {
+                assertFalse("LLM_ABORTED".equals(trace.outcome().classification()),
+                        trace.outcome().toString());
+            }
         } finally {
             LocalTurnTraceCapture.clear();
         }

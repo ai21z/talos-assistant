@@ -1085,26 +1085,24 @@ public final class LlmClient implements AutoCloseable {
                 if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
                 return recordSyntheticStreamResult(syntheticStreamResult(full), source, generation);
             }
-            // P2 - track the time of the last visible chunk; the watchdog (set up
-            // inside withWallClockBudget) abort()s the worker if no chunk arrives
-            // for {@link #defaultIdleMs} ms. The cancel supplier OR-combines the
-            // engine-level cancel and the externally-set cancel hook so a Ctrl-C
-            // future patch can plug in without touching this method.
+            // P2 - track the time of the last decoded-provider progress callback;
+            // the watchdog (set up inside withWallClockBudget) abort()s the worker
+            // if no decoded chunk arrives for {@link #defaultIdleMs} ms. This is
+            // not evidence about transport settlement. The cancel supplier
+            // OR-combines the engine-level cancel and the externally-set cancel
+            // hook so a Ctrl-C future patch can plug in without touching this
+            // method.
             AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
             RepetitionBreaker breaker = new RepetitionBreaker();
-            Consumer<String> progressSink = chunk -> {
+            Consumer<String> decodedProgressSink = chunk -> {
                 lastChunkAt.set(System.currentTimeMillis());
                 breaker.onChunk(chunk);
-            };
-            Consumer<String> trackingSink = chunk -> {
-                progressSink.accept(chunk);
-                if (onChunk != null) onChunk.accept(chunk);
             };
             Supplier<Boolean> cancel = this.externalCancel;
             Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
             return callBudget.run(
                     activeStream -> engineAssembledWithMessagesFullTracked(
-                            messages, trackingSink, progressSink, engineRequestTimeout, cancel,
+                            messages, onChunk, decodedProgressSink, engineRequestTimeout, cancel,
                              lastChunkAt, activeStream, requestToolSpecs, controls, true, generation),
                     wallClockMs,
                     lastChunkAt,
@@ -1171,7 +1169,7 @@ public final class LlmClient implements AutoCloseable {
             // P2 - same idle-watchdog + cancel-hook plumbing as chatStreamFull.
             AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
             RepetitionBreaker breaker = new RepetitionBreaker();
-            Consumer<String> trackingSink = chunk -> {
+            Consumer<String> decodedProgressSink = chunk -> {
                 lastChunkAt.set(System.currentTimeMillis());
                 breaker.onChunk(chunk);
             };
@@ -1179,7 +1177,7 @@ public final class LlmClient implements AutoCloseable {
             Duration engineRequestTimeout = engineRequestTimeout(wallClockMs);
             return callBudget.run(
                     activeStream -> engineAssembledWithMessagesFullTracked(
-                            messages, trackingSink, trackingSink, engineRequestTimeout, cancel,
+                            messages, null, decodedProgressSink, engineRequestTimeout, cancel,
                              lastChunkAt, activeStream, requestToolSpecs, controls, false, generation),
                     wallClockMs,
                     lastChunkAt,
@@ -1520,13 +1518,14 @@ public final class LlmClient implements AutoCloseable {
     }
 
     /**
-     * P2 - variant of {@link #engineAssembledWithMessagesFull} that calls
-     * the tracking sink on every text chunk (so the idle watchdog sees
-     * activity). Behavior is otherwise identical.
+     * P2 - variant of {@link #engineAssembledWithMessagesFull} that keeps
+     * visible output separate from decoded-provider progress. The latter
+     * owns idle-watchdog and repetition accounting even while protocol text
+     * remains buffered and invisible. Behavior is otherwise identical.
      */
     private StreamResult engineAssembledWithMessagesFullTracked(List<ChatMessage> messages,
-                                                                Consumer<String> trackingSink,
-                                                                Consumer<String> progressOnlySink,
+                                                                Consumer<String> displaySink,
+                                                                Consumer<String> decodedProgressSink,
                                                                 Duration timeout,
                                                                 Supplier<Boolean> cancelled,
                                                                 AtomicLong lastChunkAt,
@@ -1544,7 +1543,7 @@ public final class LlmClient implements AutoCloseable {
         // read as first-token progress (T988). Priming here on the worker
         // thread would race that capture.
         return engineAssembledWithMessagesFull(
-                messages, trackingSink, progressOnlySink, timeout, cancelled, activeStream,
+                messages, displaySink, decodedProgressSink, timeout, cancelled, activeStream,
                 requestToolSpecs, controls, streamRequest, generation);
     }
 
@@ -1590,7 +1589,7 @@ public final class LlmClient implements AutoCloseable {
             try {
                 boolean deferVisibleChunks = shouldDeferVisibleChunksForCapRetry(req);
                 Consumer<String> firstAttemptSink = deferVisibleChunks
-                        ? progressOnlySink
+                        ? null
                         : onChunk;
                 StreamResult first = invokePhysicalStreamAttempt(
                         generation,
@@ -1679,7 +1678,7 @@ public final class LlmClient implements AutoCloseable {
             Supplier<Boolean> cancelled,
             Consumer<String> onChunk,
             Consumer<String> progressOnlySink,
-            boolean chunksAreVisible,
+            boolean partialOutputCommitsAttempt,
             boolean nonStreamingCompat) {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(attemptKind, retryReason);
         AtomicBoolean transportDispatched = new AtomicBoolean();
@@ -1715,7 +1714,12 @@ public final class LlmClient implements AutoCloseable {
                     ? engineResolver.chatStreamNonStreaming(request, handoff)
                     : engineResolver.chatStream(request, handoff);
             StreamResult result = consumeEngineStream(
-                    stream, activeStream, cancelled, onChunk, progressOnlySink, chunksAreVisible);
+                    stream,
+                    activeStream,
+                    cancelled,
+                    onChunk,
+                    progressOnlySink,
+                    partialOutputCommitsAttempt);
             if (result != null && result.aborted()) {
                 if (result.abortOrigin() == ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
                     ProviderResponseCapture.Failure classified = transportUnobserved.get()
@@ -1804,31 +1808,33 @@ public final class LlmClient implements AutoCloseable {
                                              Supplier<Boolean> cancelled,
                                              Consumer<String> onChunk,
                                              Consumer<String> progressOnlySink,
-                                             boolean chunksAreVisible) {
+                                             boolean partialOutputCommitsAttempt) {
         // Try-with-resources ensures the token stream's onClose hook fires on
         // every exit path (break, exception, normal return). Registering the
         // stream before iteration gives the watchdog a handle it can close if
         // the worker blocks in a synchronous socket read.
         try (stream) {
             if (activeStream != null) activeStream.set(stream);
-            StringBuilder acc = new StringBuilder();
+            ProviderTextAssembly assembly = new ProviderTextAssembly(safeCap());
             List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
-            int alreadyEmittedLen = 0;
-            boolean visibleOutputEmitted = false;
-            boolean normalized = false;
-            boolean truncated = false;
+            boolean displayOutputDelivered = false;
             String finishReason = "";
             ProviderResponseCapture.Completion completion =
                     ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS;
             try {
                 ProviderResponseCapture.AbortOrigin initialAbort = abortOrigin(cancelled);
                 if (initialAbort != ProviderResponseCapture.AbortOrigin.NONE) {
-                    return abortedStreamResult("", "interrupted", initialAbort);
+                    return abortedStreamResult(
+                            assembly, onChunk, "interrupted", initialAbort);
                 }
                 for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
                     ProviderResponseCapture.AbortOrigin loopAbort = abortOrigin(cancelled);
                     if (loopAbort != ProviderResponseCapture.AbortOrigin.NONE) {
-                        return abortedStreamResult(acc.toString(), "interrupted", loopAbort);
+                        return abortedStreamResult(
+                                assembly,
+                                onChunk,
+                                "interrupted",
+                                loopAbort);
                     }
                     if (ch == null) {
                         completion = ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS;
@@ -1849,55 +1855,52 @@ public final class LlmClient implements AutoCloseable {
                     }
 
                     String deltaRaw = Objects.toString(ch.text(), "");
-                    acc.append(deltaRaw);
-                    String raw = acc.toString();
-                    String noThink = Sanitize.stripThinkTags(raw);
-                    String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
-                    normalized |= !raw.equals(cleaned);
-                    truncated |= cleaned.length() > safeCap();
-                    cleaned = Sanitize.hardTruncate(cleaned, safeCap());
-
-                    int already = Math.min(alreadyEmittedLen, cleaned.length());
-                    String emit = cleaned.substring(already);
-
-                    acc.setLength(0);
-                    acc.append(cleaned);
-                    alreadyEmittedLen = cleaned.length();
-
-                    if (onChunk != null && !emit.isEmpty()) {
-                        onChunk.accept(emit);
-                        if (chunksAreVisible) {
-                            visibleOutputEmitted = true;
-                        }
+                    reportDecodedProviderProgress(deltaRaw, progressOnlySink);
+                    boolean capReached = assembly.append(deltaRaw);
+                    if (assembly.emitStable(onChunk) > 0) {
+                        displayOutputDelivered = true;
                     }
-                    if (toolCalls.isEmpty() && ToolProtocolText.containsToolCalls(acc.toString())) {
+                    if (toolCalls.isEmpty()
+                            && assembly.containsSettledLegacyXmlToolCall()) {
                         completion = ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP;
                         break;
                     }
-                    if (acc.length() >= safeCap()) {
+                    if (capReached) {
                         completion = ProviderResponseCapture.Completion.RUNTIME_SAFE_CAP;
-                        truncated = true;
                         break;
                     }
                 }
+                String terminalText = providerTextCanRetainProtocol(completion)
+                        ? assembly.finalText()
+                        : assembly.nonAuthoritativeText();
+                assembly.emitTerminal(terminalText, onChunk);
                 return new StreamResult(
-                        acc.toString(),
+                        terminalText,
                         toolCalls,
                         finishReason,
                         "",
                         completion,
-                        normalized,
-                        truncated);
+                        assembly.normalized(terminalText),
+                        assembly.truncated());
             } catch (EngineException.Transient transientFailure) {
                 if (streamWasLocallyClosed(activeStream, stream)) {
                     return abortedStreamResult(
-                            acc.toString(),
+                            assembly,
+                            onChunk,
                             "local stream closed before generation completed",
                             ProviderResponseCapture.AbortOrigin.RUNTIME_STREAM_CLOSE);
                 }
-                if (visibleOutputEmitted) {
+                String retainedPartial = assembly.nonAuthoritativeText();
+                // Decoded progress alone is not a retry barrier. A retry is
+                // unsafe only after display received bytes, or when this
+                // attempt was not deliberately deferred and its fail-closed
+                // projection retains meaningful partial model output.
+                if (displayOutputDelivered
+                        || (partialOutputCommitsAttempt && !retainedPartial.isBlank())) {
                     return abortedStreamResult(
-                            acc.toString(),
+                            assembly,
+                            onChunk,
+                            retainedPartial,
                             "stream transport failed after partial output, retry skipped to avoid duplicate output",
                             ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT);
                 }
@@ -1906,6 +1909,29 @@ public final class LlmClient implements AutoCloseable {
                 if (activeStream != null) activeStream.compareAndSet(stream, null);
             }
         }
+    }
+
+    private static boolean providerTextCanRetainProtocol(
+            ProviderResponseCapture.Completion completion) {
+        return completion == ProviderResponseCapture.Completion.PROVIDER_EOS
+                || completion
+                        == ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP;
+    }
+
+    static void reportDecodedProviderProgress(
+            String decodedChunk,
+            Consumer<String> progressOnlySink) {
+        if (progressOnlySink == null
+                || Objects.toString(decodedChunk, "").isEmpty()) {
+            return;
+        }
+        // Decoded-provider progress is distinct from visible sanitized output
+        // and does not establish transport settlement. An unresolved
+        // JSON/think/HTML envelope may buffer display through provider EOS,
+        // but every decoded byte must still feed both idle and repetition
+        // accounting exactly once. This sink is internal and never renders
+        // provider protocol to the user.
+        progressOnlySink.accept(decodedChunk);
     }
 
     static StreamResult abortedStreamResult(String partialText, String reason) {
@@ -1917,11 +1943,56 @@ public final class LlmClient implements AutoCloseable {
             String partialText,
             String reason,
             ProviderResponseCapture.AbortOrigin abortOrigin) {
+        return abortedStreamResult(
+                partialText, reason, abortOrigin, false, false);
+    }
+
+    private static StreamResult abortedStreamResult(
+            String partialText,
+            String reason,
+            ProviderResponseCapture.AbortOrigin abortOrigin,
+            boolean normalized,
+            boolean truncated) {
         String abortReason = Objects.toString(reason, "generation aborted");
         String marker = UiChrome.TURN_ABORTED_PREFIX + ": " + abortReason + "]";
         String partial = Objects.toString(partialText, "");
         String text = partial.isBlank() ? marker : partial + System.lineSeparator() + marker;
-        return new StreamResult(text, List.of(), "", abortReason, abortOrigin);
+        return new StreamResult(
+                text,
+                List.of(),
+                "",
+                abortReason,
+                abortOrigin,
+                ProviderResponseCapture.Completion.RUNTIME_ABORT,
+                normalized,
+                truncated,
+                ProviderResponseCapture.Receipt.none());
+    }
+
+    private static StreamResult abortedStreamResult(
+            ProviderTextAssembly assembly,
+            Consumer<String> onChunk,
+            String reason,
+            ProviderResponseCapture.AbortOrigin abortOrigin) {
+        String partial = assembly == null ? "" : assembly.nonAuthoritativeText();
+        return abortedStreamResult(assembly, onChunk, partial, reason, abortOrigin);
+    }
+
+    private static StreamResult abortedStreamResult(
+            ProviderTextAssembly assembly,
+            Consumer<String> onChunk,
+            String partial,
+            String reason,
+            ProviderResponseCapture.AbortOrigin abortOrigin) {
+        if (assembly != null) {
+            assembly.emitTerminal(partial, onChunk);
+        }
+        return abortedStreamResult(
+                partial,
+                reason,
+                abortOrigin,
+                assembly != null && assembly.normalized(partial),
+                assembly != null && assembly.truncated());
     }
 
     private static boolean isCancelled(Supplier<Boolean> cancelled) {
@@ -2239,10 +2310,7 @@ public final class LlmClient implements AutoCloseable {
         // into a dead consumer" leak that kept a hung repetition-loop stream
         // alive after the tool-call loop had moved on.
         try (stream) {
-            StringBuilder acc = new StringBuilder();
-            int alreadyEmittedLen = 0;
-            boolean normalized = false;
-            boolean truncated = false;
+            ProviderTextAssembly assembly = new ProviderTextAssembly(safeCap());
             ProviderResponseCapture.Completion completion =
                     ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS;
             ProviderResponseCapture.AbortOrigin abortOrigin =
@@ -2268,30 +2336,22 @@ public final class LlmClient implements AutoCloseable {
                 }
 
                 String deltaRaw = Objects.toString(ch.text(), "");
-                acc.append(deltaRaw);
-                String raw = acc.toString();
-                String noThink = Sanitize.stripThinkTags(raw);
-                String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
-                normalized |= !raw.equals(cleaned);
-                truncated |= cleaned.length() > safeCap();
-                cleaned = Sanitize.hardTruncate(cleaned, safeCap());
-
-                int already = Math.min(alreadyEmittedLen, cleaned.length());
-                String emit = cleaned.substring(already);
-
-                acc.setLength(0);
-                acc.append(cleaned);
-                alreadyEmittedLen = cleaned.length();
-
-                if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
-                if (acc.length() >= safeCap()) {
+                boolean capReached = assembly.append(deltaRaw);
+                assembly.emitStable(onChunk);
+                if (capReached) {
                     completion = ProviderResponseCapture.Completion.RUNTIME_SAFE_CAP;
-                    truncated = true;
                     break;
                 }
             }
+            String terminalText = providerTextCanRetainProtocol(completion)
+                    ? assembly.finalText()
+                    : assembly.nonAuthoritativeText();
+            assembly.emitTerminal(terminalText, onChunk);
             return new TextGeneration(
-                    acc.toString(), completion, normalized, truncated,
+                    terminalText,
+                    completion,
+                    assembly.normalized(terminalText),
+                    assembly.truncated(),
                     abortOrigin, ProviderResponseCapture.Receipt.none());
         }
     }

@@ -816,7 +816,7 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
-    void blockedTextualToolWithProviderProseDoesNotClaimIneligibleProviderLineage(
+    void blockedTextualToolWithProviderProseRetainsLineageThroughNamedTransformation(
             @TempDir Path workspace) {
         BlockedSmallTalkCapture captured = blockedSmallTalkCapture(
                 workspace,
@@ -836,12 +836,26 @@ class AssistantTurnExecutorTest {
                 .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
                 .findFirst()
                 .orElseThrow();
-        assertEquals("NONE", terminal.data().get("origin"),
+        assertEquals("MODEL_PROVIDER", terminal.data().get("origin"),
                 captured.trace().events().toString());
-        assertFalse(terminal.data().containsKey("sourceGenerationId"));
-        assertFalse(terminal.data().containsKey("sourceAttemptId"));
-        assertTrue(captured.trace().events().stream().noneMatch(event ->
-                "PROVIDER_TOOL_CALLS_SUPPRESSED".equals(event.type())));
+        assertTrue(terminal.data().containsKey("sourceGenerationId"));
+        assertTrue(terminal.data().containsKey("sourceAttemptId"));
+        assertTrue(captured.trace().events().stream().anyMatch(event ->
+                "ANSWER_TRANSFORMED".equals(event.type())
+                        && "TASK_CONTRACT_TOOL_CALL_SUPPRESSION".equals(
+                                event.data().get("reasonCode"))));
+        var suppression = captured.trace().events().stream()
+                .filter(event -> "PROVIDER_TOOL_CALLS_SUPPRESSED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(terminal.data().get("sourceGenerationId"),
+                suppression.data().get("sourceGenerationId"));
+        assertEquals(terminal.data().get("sourceAttemptId"),
+                suppression.data().get("sourceAttemptId"));
+        assertEquals("TASK_CONTRACT_BLOCKED_TOOL_CALLS",
+                suppression.data().get("reasonCode"));
+        assertEquals(0, suppression.data().get("nativeToolCallCount"));
+        assertEquals(true, suppression.data().get("textualToolCallPresent"));
         assertTrue(captured.trace().events().stream().noneMatch(event ->
                 "TOOL_CALL_PARSED".equals(event.type())
                         || "TOOL_EXECUTED".equals(event.type())));

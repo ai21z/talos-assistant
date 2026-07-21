@@ -85,6 +85,14 @@ class LlmClientProviderProvenanceTest {
                         ```
                         """), TokenChunk.of("unconsumed tail")),
                 1_000,
+                ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS,
+                false);
+        assertCompletion(
+                List.of(
+                        TokenChunk.of("<tool_call>{\"name\":\"talos.read_file\","
+                                + "\"arguments\":{\"path\":\"README.md\"}}</tool_call>"),
+                        TokenChunk.of("unconsumed XML tail")),
+                1_000,
                 ProviderResponseCapture.Completion.RUNTIME_LEGACY_TEXT_STOP,
                 false);
         assertCompletion(

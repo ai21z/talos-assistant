@@ -247,7 +247,7 @@ class DeterministicAnswerTraceRecorderTest {
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
         TurnTraceEvent generation = event(trace, "GENERATION_RESPONSE_CAPTURED");
         TurnTraceEvent parsed = event(trace, "TOOL_CALL_PARSED");
-        assertEquals("RUNTIME_LEGACY_TEXT_STOP", generation.data().get("completion"));
+        assertEquals("PROVIDER_EOS", generation.data().get("completion"));
         assertEquals(true, generation.data().get("textualToolCallPresent"));
         assertEquals(generation.data().get("generationId"), parsed.data().get("providerGenerationId"));
     }
