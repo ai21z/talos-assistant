@@ -41,11 +41,7 @@ class ModelQualificationMainTest {
     void preflightAcceptsFrozenMetadataBeforeAnyRun() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
-        try (var paths = java.nio.file.Files.walk(packet.root().resolve("runs"))) {
-            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                java.nio.file.Files.delete(path);
-            }
-        }
+        packet.removeRunEvidenceForTest();
 
         Capture capture = run("preflight", "--root", packet.root().toString());
 
@@ -216,7 +212,8 @@ class ModelQualificationMainTest {
         for (int protocol = 1; protocol <= 5; protocol++) {
             for (String command : List.of(
                     "assert-writable-campaign",
-                    "requirements", "approvals", "provider-evidence", "score")) {
+                    "requirements", "approvals", "provider-evidence", "score",
+                    "complete-campaign", "reconcile-run-publication")) {
                 QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.load(protocol);
                 QualificationTestPacket packet = QualificationTestPacket.create(
                         temp.resolve("legacy-" + protocol + "-" + command), catalog);
@@ -250,6 +247,16 @@ class ModelQualificationMainTest {
                             command,
                             "--root", packet.root().toString(),
                             "--bank", "admission");
+                    case "complete-campaign" -> run(
+                            command,
+                            "--root", packet.root().toString(),
+                            "--bank", "admission");
+                    case "reconcile-run-publication" -> run(
+                            command,
+                            "--root", packet.root().toString(),
+                            "--scenario", scenario,
+                            "--run", packet.runRoot().toString(),
+                            "--server-port", "18161");
                     default -> throw new AssertionError(command);
                 };
 
@@ -269,7 +276,8 @@ class ModelQualificationMainTest {
 
         for (String command : List.of(
                 "assert-writable-campaign",
-                "requirements", "approvals", "provider-evidence", "score")) {
+                "requirements", "approvals", "provider-evidence", "score",
+                "complete-campaign", "reconcile-run-publication")) {
             Capture capture = switch (command) {
                 case "assert-writable-campaign" -> run(
                         command,
@@ -289,6 +297,16 @@ class ModelQualificationMainTest {
                         command,
                         "--root", root.toString(),
                         "--bank", "admission");
+                case "complete-campaign" -> run(
+                        command,
+                        "--root", root.toString(),
+                        "--bank", "admission");
+                case "reconcile-run-publication" -> run(
+                        command,
+                        "--root", root.toString(),
+                        "--scenario", "A01-simple-direct-answer",
+                        "--run", root.resolve("run").toString(),
+                        "--server-port", "18161");
                 default -> throw new AssertionError(command);
             };
 
@@ -354,9 +372,17 @@ class ModelQualificationMainTest {
                 "work-cycle-docs/templates/finalize-model-qualification-result-v6.ps1"),
                 StandardCharsets.UTF_8);
         int guard = script.indexOf("assertWritableModelQualificationCampaign");
+        int reconcile = script.indexOf("reconcileModelQualificationRunPublication");
+        int finalize = script.indexOf("finalizeModelQualificationResult");
 
         assertTrue(guard >= 0, "tracked finalizer template has no canonical writable guard");
-        assertTrue(guard < script.indexOf("finalizeModelQualificationResult"));
+        assertTrue(reconcile > guard, "tracked finalizer does not reconcile after its guard");
+        assertTrue(finalize > reconcile, "tracked finalizer publishes before reconciliation");
+        assertEquals(reconcile,
+                script.lastIndexOf("reconcileModelQualificationRunPublication"));
+        assertTrue(script.contains("-PqualificationServerPort="));
+        assertTrue(script.contains(
+                "Qualification publication reconciliation failed with exit code"));
     }
 
     @Test
@@ -402,7 +428,7 @@ class ModelQualificationMainTest {
     }
 
     @Test
-    void scoreCommandPublishesNothingWhileProtocolV6CausalEvidenceIsIncomplete() throws Exception {
+    void scoreCommandPublishesNothingBeforeCampaignCompletion() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(
                 temp.resolve("score-blocked"), catalog);
@@ -415,9 +441,76 @@ class ModelQualificationMainTest {
                 "--bank", "admission");
 
         assertEquals(1, capture.exit(), capture.err());
-        assertTrue(capture.err().contains("CAUSAL_OWNER_UNKNOWN"),
+        assertTrue(capture.err().contains("campaign completion is not committed"),
                 capture.err());
         assertFalse(Files.exists(scorecard));
+    }
+
+    @Test
+    void completeCampaignCommandRefusesABankRepetitionMismatchWithoutRewritingCampaignIdentity()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.createFullCampaign(
+                temp.resolve("completion-incomplete"), catalog,
+                catalog.admission().scenarios().getFirst());
+        Path campaign = packet.root().resolve("campaign.json");
+        byte[] campaignBytes = Files.readAllBytes(campaign);
+        var campaignModified = Files.getLastModifiedTime(campaign);
+
+        Capture capture = run(
+                "complete-campaign",
+                "--root", packet.root().toString(),
+                "--bank", "admission");
+
+        assertEquals(1, capture.exit(), capture.err());
+        assertFalse(capture.err().contains("Unknown command"), capture.err());
+        assertTrue(capture.err().contains(
+                "campaign repetition identities do not match the selected bank"), capture.err());
+        assertFalse(Files.exists(packet.root().resolve("campaign-completion.json")));
+        assertTrue(java.util.Arrays.equals(campaignBytes, Files.readAllBytes(campaign)));
+        assertEquals(campaignModified, Files.getLastModifiedTime(campaign));
+    }
+
+    @Test
+    void writableGuardRejectsACommittedCampaignCompletion() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationTestPacket packet = QualificationTestPacket.createHardStopCampaign(
+                temp.resolve("completed-writable-guard"),
+                catalog,
+                catalog.admission().scenarios().getFirst());
+        QualificationCampaignCompletion.complete(
+                packet.root(), QualificationProtocol.BankKind.ADMISSION, catalog);
+
+        Capture capture = run(
+                "assert-writable-campaign",
+                "--root", packet.root().toString());
+
+        assertTrue(capture.exit() != 0, capture.out());
+        assertTrue(capture.err().contains("campaign completion has started or committed"),
+                capture.err());
+        assertFalse(capture.out().contains("is writable"), capture.out());
+    }
+
+    @Test
+    void reconcileRunPublicationReportsASettledCommittedResultWithoutMutation()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("reconcile-committed"), catalog, scenario);
+        Map<String, FileState> before = treeState(packet.root());
+
+        Capture capture = run(
+                "reconcile-run-publication",
+                "--root", packet.root().toString(),
+                "--scenario", scenario.id(),
+                "--run", packet.runRoot().toString(),
+                "--server-port", "18161");
+
+        assertEquals(0, capture.exit(), capture.err());
+        assertEquals("{\"state\":\"COMMITTED\",\"publicationKind\":\"RUN_FINALIZATION\"}",
+                capture.out().strip());
+        assertEquals(before, treeState(packet.root()));
     }
 
     @Test
@@ -444,11 +537,66 @@ class ModelQualificationMainTest {
     }
 
     @Test
+    void publicationFailureIsMachineTypedBeforeTheHumanDiagnostic() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("typed-publication-failure"), catalog, scenario);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                List.of(
+                        packet.runRoot().resolve("llama.log"),
+                        packet.runRoot().resolve("prompt-debug.txt")));
+        Map<String, FileState> before = treeState(packet.root());
+
+        Capture capture = run(
+                "requirements",
+                "--root", packet.root().toString(),
+                "--scenario", scenario.id(),
+                "--run", packet.runRoot().toString());
+
+        assertEquals(3, capture.exit(), capture.err());
+        assertEquals(
+                "{\"schemaName\":\"talos.modelQualification.publicationFailure\""
+                        + ",\"schemaVersion\":1,\"reason\":\"INVALID_REQUEST\""
+                        + ",\"commitState\":\"NOT_COMMITTED\"}",
+                capture.err().lines().findFirst().orElseThrow());
+        assertTrue(capture.err().contains("committed predecessor"), capture.err());
+        assertEquals(before, treeState(packet.root()));
+    }
+
+    @Test
     void approvalsCommandWritesEveryOrderedPtyDecisionImmutably() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp.resolve("approvals"), catalog);
         Path output = packet.runRoot().resolve("approvals.json");
-        Files.delete(output);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                java.util.List.of(output));
         Path capturePath = packet.runRoot().resolve("transcript.raw.json");
         var capture = (com.fasterxml.jackson.databind.node.ObjectNode)
                 QualificationJson.readTree(capturePath);
@@ -471,6 +619,9 @@ class ModelQualificationMainTest {
                 .put("type", "input")
                 .put("data", "approval-unexpected-deny-2");
         QualificationJson.write(capturePath, capture);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                java.util.List.of(capturePath));
         String[] args = {
                 "approvals",
                 "--root", packet.root().toString(),
@@ -499,10 +650,29 @@ class ModelQualificationMainTest {
         QualificationTestPacket packet = QualificationTestPacket.create(
                 temp.resolve("provider-evidence"), catalog);
         String scenario = catalog.admission().scenarios().getFirst().id();
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
         Files.writeString(packet.runRoot().resolve("prompt-debug.txt"),
                 QualificationProviderEvidence.promptNotApplicableText(), StandardCharsets.UTF_8);
         Files.writeString(packet.runRoot().resolve("llama.log"),
                 QualificationProviderEvidence.modelRuntimeNotApplicableText(), StandardCharsets.UTF_8);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                java.util.List.of(
+                        packet.runRoot().resolve("prompt-debug.txt"),
+                        packet.runRoot().resolve("llama.log")));
         Path source = packet.root().resolve("home/.talos/logs/llama_cpp-18161.log");
         Files.createDirectories(source.getParent());
         Files.writeString(source, "model loaded\nlistening\nstopped\n", StandardCharsets.UTF_8);

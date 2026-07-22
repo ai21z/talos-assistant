@@ -149,8 +149,16 @@ final class QualificationExecutionIdentity {
             throw invalid("provided campaign differs from the canonical packet manifest");
         }
 
-        byte[] runtimeBytes = requiredFile(root, root.resolve(RUNTIME_FILE));
-        byte[] harnessBytes = requiredFile(root, root.resolve(HARNESS_FILE));
+        Path ledgerPath = root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE);
+        Path harnessPath = root.resolve(HARNESS_FILE);
+        Path runtimePath = root.resolve(RUNTIME_FILE);
+        QualificationPacketPublisher.CommittedSet identity =
+                QualificationPacketPublisher.requireCommitted(
+                        root,
+                        QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                        java.util.List.of(ledgerPath, harnessPath, runtimePath));
+        byte[] runtimeBytes = identity.bytes(root, runtimePath);
+        byte[] harnessBytes = identity.bytes(root, harnessPath);
         byte[] candidateBytes = requiredFile(root, root.resolve("candidates")
                 .resolve(safeSegment(campaign.candidateAlias(), "candidate alias"))
                 .resolve("candidate.json"));

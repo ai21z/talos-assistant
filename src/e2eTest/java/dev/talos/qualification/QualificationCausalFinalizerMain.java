@@ -31,6 +31,7 @@ public final class QualificationCausalFinalizerMain {
             out.println(output.toAbsolutePath().normalize());
             return 0;
         } catch (Exception failure) {
+            QualificationPacketPublisher.printTypedFailure(err, failure);
             String message = failure.getMessage();
             err.println("Qualification run finalization failed: "
                     + (message == null || message.isBlank()

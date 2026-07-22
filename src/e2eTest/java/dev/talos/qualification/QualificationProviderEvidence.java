@@ -14,27 +14,38 @@ final class QualificationProviderEvidence {
 
     private QualificationProviderEvidence() {}
 
-    static void capture(Path runRoot, String commandOutput, int protocolVersion) throws IOException {
+    static void capture(
+            Path packetRoot,
+            Path runRoot,
+            String commandOutput,
+            int protocolVersion) throws IOException {
         QualificationArtifactPublication.requireWritableProtocol(protocolVersion);
-        NoFollowPathPolicy.GuardedRoot runFiles =
-                NoFollowPathPolicy.bindExistingDirectory(runRoot);
-        if (hasProviderRender(runFiles, runRoot)) return;
-        if (commandOutput == null || !commandOutput.contains(NO_PROVIDER_PROMPT)) {
-            throw new IllegalStateException(
-                    "prompt-debug produced neither a provider render nor verified no-provider output");
-        }
-        Path promptDebug = runRoot.resolve("prompt-debug.txt");
-        Path modelLog = runRoot.resolve("llama.log");
-        byte[] promptBytes = promptNotApplicableText().getBytes(StandardCharsets.UTF_8);
-        byte[] modelBytes = modelRuntimeNotApplicableText().getBytes(StandardCharsets.UTF_8);
-        // A published immutable member is never rolled back: another publisher may
-        // already have observed it. T1192 owns atomic visibility of the complete pair.
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                runFiles,
-                promptDebug, promptBytes, "provider NOT_APPLICABLE prompt evidence");
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                runFiles,
-                modelLog, modelBytes, "provider NOT_APPLICABLE runtime evidence");
+        QualificationPacketPublisher.withLease(packetRoot, lease -> {
+            NoFollowPathPolicy.GuardedRoot packetFiles =
+                    NoFollowPathPolicy.bindExistingDirectory(lease.packetRoot());
+            Path containedRunRoot = packetFiles.requireDirectory(runRoot);
+            NoFollowPathPolicy.GuardedRoot runFiles =
+                    NoFollowPathPolicy.bindExistingDirectory(containedRunRoot);
+            if (hasProviderRender(runFiles, containedRunRoot)) return null;
+            if (commandOutput == null || !commandOutput.contains(NO_PROVIDER_PROMPT)) {
+                throw new IllegalStateException(
+                        "prompt-debug produced neither a provider render nor verified no-provider output");
+            }
+            Path promptDebug = containedRunRoot.resolve("prompt-debug.txt");
+            Path modelLog = containedRunRoot.resolve("llama.log");
+            byte[] promptBytes = promptNotApplicableText().getBytes(StandardCharsets.UTF_8);
+            byte[] modelBytes = modelRuntimeNotApplicableText().getBytes(StandardCharsets.UTF_8);
+            if (hasProviderRender(runFiles, containedRunRoot)) {
+                throw new IllegalStateException(
+                        "provider render appeared while deriving no-provider evidence");
+            }
+            lease.publish(
+                    QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                    java.util.List.of(
+                            new QualificationPacketPublisher.Member(promptDebug, promptBytes),
+                            new QualificationPacketPublisher.Member(modelLog, modelBytes)));
+            return null;
+        });
     }
 
     static String promptNotApplicableText() {

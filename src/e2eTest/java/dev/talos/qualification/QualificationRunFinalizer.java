@@ -1,13 +1,9 @@
 package dev.talos.qualification;
 
-import dev.talos.core.security.NoFollowPathPolicy;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 
 import java.io.IOException;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Objects;
 
@@ -217,50 +213,55 @@ final class QualificationRunFinalizer {
                     "run finalization writes exactly protocol v"
                             + QualificationProtocol.VERSION);
         }
+        return QualificationPacketPublisher.withLease(
+                packetRoot,
+                lease -> finalizeUnderLease(
+                        lease, requestedRunRoot, scenarioId, catalog, observer));
+    }
+
+    static Path finalizeUnderLease(
+            QualificationPacketPublisher.Lease lease,
+            Path requestedRunRoot,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog,
+            PublicationObserver observer) throws IOException {
         QualificationArtifactPublication.DeclaredRun declaredRun =
                 QualificationArtifactPublication.requireWritableDeclaredRun(
-                        packetRoot, requestedRunRoot, scenarioId, catalog);
+                        lease.packetRoot(), requestedRunRoot, scenarioId, catalog);
         Path runRoot = declaredRun.runRoot();
-        NoFollowPathPolicy.GuardedRoot runFiles = declaredRun.runFiles();
         Path resultPath = runRoot.resolve(RESULT_FILE);
-        if (runFiles.inspect(resultPath) != NoFollowPathPolicy.EntryType.MISSING) {
-            throw new IllegalStateException(
-                    "refusing to alter a published run result: " + resultPath);
-        }
 
         QualificationPreResultEvidence.Snapshot initial =
-                QualificationPreResultEvidence.capture(packetRoot, runRoot, scenarioId, catalog);
+                QualificationPreResultEvidence.capture(
+                        lease.packetRoot(), runRoot, scenarioId, catalog);
         observer.afterInitialCapture(initial);
         QualificationPreResultEvidence.Snapshot stable =
-                QualificationPreResultEvidence.capture(packetRoot, runRoot, scenarioId, catalog);
+                QualificationPreResultEvidence.capture(
+                        lease.packetRoot(), runRoot, scenarioId, catalog);
         requireSameCapturedInputs(initial, stable);
         Publication publication = derive(stable);
 
         Path causalPath = runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE);
         Path canaryPath = runRoot.resolve(CANARY_FILE);
-        writeOrVerifyCompanion(
-                runFiles, causalPath, QualificationJson.bytes(publication.causal()));
-        writeOrVerifyCompanion(
-                runFiles, canaryPath, QualificationJson.bytes(publication.canary()));
-
         observer.beforeResultPublication(stable);
         QualificationPreResultEvidence.Snapshot beforeResult =
-                QualificationPreResultEvidence.capture(packetRoot, runRoot, scenarioId, catalog);
+                QualificationPreResultEvidence.capture(
+                        lease.packetRoot(), runRoot, scenarioId, catalog);
         requireSameCapturedInputs(stable, beforeResult);
         Publication confirmed = derive(beforeResult);
         if (!publication.equals(confirmed)) {
             throw new IllegalStateException(
                     "qualification evidence changed before result publication");
         }
-        requireCanonicalAuthority(
-                causalPath,
-                runFiles.readAllBytes(causalPath),
-                QualificationJson.bytes(publication.causal()));
-        requireCanonicalAuthority(
-                canaryPath,
-                runFiles.readAllBytes(canaryPath),
-                QualificationJson.bytes(publication.canary()));
-        writeCreateNew(runFiles, resultPath, QualificationJson.bytes(publication.result()));
+        lease.publish(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        new QualificationPacketPublisher.Member(
+                                causalPath, QualificationJson.bytes(publication.causal())),
+                        new QualificationPacketPublisher.Member(
+                                canaryPath, QualificationJson.bytes(publication.canary())),
+                        new QualificationPacketPublisher.Member(
+                                resultPath, QualificationJson.bytes(publication.result()))));
         return resultPath;
     }
 
@@ -279,16 +280,53 @@ final class QualificationRunFinalizer {
             throw new IllegalArgumentException("expected a result.json path");
         }
         Path runRoot = normalizedResult.getParent();
-        NoFollowPathPolicy.GuardedRoot packetFiles =
-                NoFollowPathPolicy.bindExistingDirectory(packetRoot);
-        packetFiles.requireRegularFile(normalizedResult);
-        NoFollowPathPolicy.GuardedRoot runFiles =
-                NoFollowPathPolicy.bindExistingDirectory(runRoot);
         Path causalPath = runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE);
         Path canaryPath = runRoot.resolve(CANARY_FILE);
-        byte[] resultBytes = runFiles.readAllBytes(normalizedResult);
-        byte[] causalBytes = runFiles.readAllBytes(causalPath);
-        byte[] canaryBytes = runFiles.readAllBytes(canaryPath);
+        QualificationPacketPublisher.CommittedSet committed =
+                QualificationPacketPublisher.requireCommitted(
+                        packetRoot,
+                        QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                        List.of(causalPath, canaryPath, normalizedResult));
+        return verifyCommittedPublication(
+                packetRoot, normalizedResult, catalog, committed);
+    }
+
+    static Publication verifyPublished(
+            QualificationPacketPublisher.Lease lease,
+            Path resultPath,
+            QualificationScenarioBank.Catalog catalog) throws IOException {
+        Objects.requireNonNull(lease, "publication lease");
+        Objects.requireNonNull(catalog, "catalog");
+        if (catalog.protocolVersion() != QualificationProtocol.VERSION) {
+            throw new IllegalArgumentException(
+                    "published schema-v2 verification requires protocol v"
+                            + QualificationProtocol.VERSION);
+        }
+        Path normalizedResult = resultPath.toAbsolutePath().normalize();
+        if (!RESULT_FILE.equals(normalizedResult.getFileName().toString())) {
+            throw new IllegalArgumentException("expected a result.json path");
+        }
+        Path runRoot = normalizedResult.getParent();
+        Path causalPath = runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE);
+        Path canaryPath = runRoot.resolve(CANARY_FILE);
+        QualificationPacketPublisher.CommittedSet committed = lease.requireCommittedSet(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(causalPath, canaryPath, normalizedResult));
+        return verifyCommittedPublication(
+                lease.packetRoot(), normalizedResult, catalog, committed);
+    }
+
+    private static Publication verifyCommittedPublication(
+            Path packetRoot,
+            Path normalizedResult,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationPacketPublisher.CommittedSet committed) throws IOException {
+        Path runRoot = normalizedResult.getParent();
+        Path causalPath = runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE);
+        Path canaryPath = runRoot.resolve(CANARY_FILE);
+        byte[] resultBytes = committed.bytes(packetRoot, normalizedResult);
+        byte[] causalBytes = committed.bytes(packetRoot, causalPath);
+        byte[] canaryBytes = committed.bytes(packetRoot, canaryPath);
         QualificationRecords.RunResult result = QualificationJson.read(
                 resultBytes, QualificationRecords.RunResult.class);
         QualificationJson.requireRunSchemaForProtocol(
@@ -376,44 +414,6 @@ final class QualificationRunFinalizer {
             throw new IllegalStateException(
                     "qualification evidence bytes changed during finalization");
         }
-    }
-
-    private static void writeOrVerifyCompanion(
-            NoFollowPathPolicy.GuardedRoot runFiles,
-            Path path,
-            byte[] expected
-    ) throws IOException {
-        NoFollowPathPolicy.EntryType type = runFiles.inspect(path);
-        if (type != NoFollowPathPolicy.EntryType.MISSING) {
-            if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE
-                    || !java.util.Arrays.equals(runFiles.readAllBytes(path), expected)) {
-                throw new IllegalStateException(
-                        "conflicting qualification finalization orphan");
-            }
-            return;
-        }
-        writeCreateNew(runFiles, path, expected);
-    }
-
-    private static void writeCreateNew(
-            NoFollowPathPolicy.GuardedRoot runFiles,
-            Path path,
-            byte[] bytes
-    ) throws IOException {
-        runFiles.requireRegularFileTarget(path);
-        try {
-            try (var output = Files.newOutputStream(
-                    path,
-                    StandardOpenOption.CREATE_NEW,
-                    StandardOpenOption.WRITE,
-                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                output.write(bytes);
-            }
-        } catch (FileAlreadyExistsException race) {
-            throw new IllegalStateException(
-                    "refusing concurrent qualification artifact publication", race);
-        }
-        runFiles.requireRegularFile(path);
     }
 
     private static void requireCanonicalAuthority(

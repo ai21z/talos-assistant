@@ -242,7 +242,7 @@ public final class AtomicFileWriter {
                 AtomicFileWriter::validateContent,
                 SYSTEM_METADATA,
                 AtomicFileWriter.atomicMover(Files::move),
-                AtomicFileWriter::syncDirectory,
+                AtomicFileWriter::synchronizeDirectory,
                 AtomicFileWriter.tempCleaner(Files::deleteIfExists));
 
         private final ContentWriter contentWriter;
@@ -852,7 +852,12 @@ public final class AtomicFileWriter {
                 deleteTemp(temp, creationMetadata, deleteCall);
     }
 
-    private static DirectorySyncStatus syncDirectory(Path directory) throws IOException {
+    /**
+     * Flushes directory-entry changes where the current platform exposes a supported channel.
+     * Callers retain ownership of containment and of the meaning of an unsupported result.
+     */
+    public static DirectorySyncStatus synchronizeDirectory(Path directory) throws IOException {
+        Objects.requireNonNull(directory, "directory");
         if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
             return DirectorySyncStatus.UNSUPPORTED;
         }

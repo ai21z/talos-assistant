@@ -84,17 +84,54 @@ final class QualificationEvidenceValidator {
     }
 
     static Validation validate(Path root, QualificationScenarioBank.Catalog catalog) {
-        return validate(root, catalog, true);
+        return validateSerialized(root, catalog, true, null);
     }
 
     static Validation validateCalibrationPreflight(Path root, QualificationScenarioBank.Catalog catalog) {
-        return validate(root, catalog, false);
+        return validateSerialized(root, catalog, false, null);
     }
 
-    private static Validation validate(
+    static Validation validateForTransactionRecovery(
             Path root,
             QualificationScenarioBank.Catalog catalog,
-            boolean requireRuns) {
+            String transactionId) {
+        return validateSerialized(root, catalog, true, transactionId);
+    }
+
+    static Validation validateForTransactionRecovery(
+            QualificationPacketPublisher.Lease lease,
+            QualificationScenarioBank.Catalog catalog,
+            String transactionId) {
+        Objects.requireNonNull(lease, "qualification publication lease");
+        return validateSnapshot(lease.packetRoot(), catalog, true, transactionId);
+    }
+
+    private static Validation validateSerialized(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            boolean requireRuns,
+            String recoveryTransactionId) {
+        if (root == null) {
+            return empty("Qualification packet root is missing or not a directory");
+        }
+        if (catalog.protocolVersion() != QualificationProtocol.VERSION) {
+            return validateSnapshot(root, catalog, requireRuns, recoveryTransactionId);
+        }
+        try {
+            return QualificationPacketPublisher.withLease(
+                    root,
+                    lease -> validateSnapshot(
+                            lease.packetRoot(), catalog, requireRuns, recoveryTransactionId));
+        } catch (IOException | RuntimeException invalid) {
+            return empty("Protocol-v6 publication lease is invalid: " + message(invalid));
+        }
+    }
+
+    private static Validation validateSnapshot(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            boolean requireRuns,
+            String recoveryTransactionId) {
         List<String> findings = new ArrayList<>();
         List<QualificationRecords.RunResult> runs = new ArrayList<>();
         Path packetRoot = root == null ? null : root.toAbsolutePath().normalize();
@@ -114,6 +151,10 @@ final class QualificationEvidenceValidator {
                 findings, "campaign.json");
         if (campaign == null) return result(findings, runs, null, null, null, null, null);
         validateCampaign(campaign, catalog, findings);
+        if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+            validatePublicationControlState(
+                    packetRoot, recoveryTransactionId, findings);
+        }
 
         Path candidateRoot = contained(packetRoot,
                 packetRoot.resolve("candidates").resolve(safeSegment(campaign.candidateAlias(),
@@ -163,14 +204,67 @@ final class QualificationEvidenceValidator {
             } else if (!WorkspaceContainment.contains(packetRoot, runsRoot)) {
             findings.add("Runs directory escapes packet root: " + runsRoot);
             } else {
-                List<Path> results = packetFiles.walk(runsRoot).stream()
-                        .filter(entry ->
-                                entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE)
-                        .map(NoFollowPathPolicy.TreeEntry::path)
-                        .filter(path -> path.getFileName() != null
-                                 && path.getFileName().toString().equals("result.json"))
-                        .sorted()
-                        .toList();
+                List<NoFollowPathPolicy.TreeEntry> runEntries = packetFiles.walk(runsRoot);
+                List<Path> declaredRunRoots = catalog.protocolVersion()
+                        == QualificationProtocol.VERSION
+                        ? declaredRunRoots(packetRoot, campaign, catalog, findings)
+                        : List.of();
+                if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+                    Set<Path> declaredRunRootSet = Set.copyOf(declaredRunRoots);
+                    java.util.Set<Path> authorityRoots = runEntries.stream()
+                            .filter(entry -> entry.type()
+                                    == NoFollowPathPolicy.EntryType.REGULAR_FILE)
+                            .map(NoFollowPathPolicy.TreeEntry::path)
+                            .filter(path -> java.util.Set.of(
+                                            QualificationCausalFinalizer.OUTPUT_FILE,
+                                            QualificationRunFinalizer.CANARY_FILE,
+                                            QualificationRunFinalizer.RESULT_FILE)
+                                    .contains(path.getFileName().toString()))
+                            .map(Path::getParent)
+                            .filter(declaredRunRootSet::contains)
+                            .collect(java.util.stream.Collectors.toCollection(
+                                    java.util.TreeSet::new));
+                    for (Path runRoot : authorityRoots) {
+                        try {
+                            QualificationPacketPublisher.requireCommitted(
+                                    packetRoot,
+                                    QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                                    List.of(
+                                            runRoot.resolve(
+                                                    QualificationCausalFinalizer.OUTPUT_FILE),
+                                            runRoot.resolve(QualificationRunFinalizer.CANARY_FILE),
+                                            runRoot.resolve(QualificationRunFinalizer.RESULT_FILE)));
+                        } catch (IOException | RuntimeException incomplete) {
+                            findings.add("Protocol-v6 run publication is incomplete: "
+                                    + message(incomplete));
+                        }
+                    }
+                }
+                List<Path> results;
+                if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+                    results = declaredRunRoots.stream()
+                            .map(path -> path.resolve(QualificationRunFinalizer.RESULT_FILE))
+                            .filter(path -> {
+                                try {
+                                    return packetFiles.inspect(path)
+                                            == NoFollowPathPolicy.EntryType.REGULAR_FILE;
+                                } catch (IOException failure) {
+                                    findings.add("Unable to inspect declared run result: "
+                                            + message(failure));
+                                    return false;
+                                }
+                            })
+                            .toList();
+                } else {
+                    results = runEntries.stream()
+                            .filter(entry ->
+                                    entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE)
+                            .map(NoFollowPathPolicy.TreeEntry::path)
+                            .filter(path -> path.getFileName() != null
+                                     && path.getFileName().toString().equals("result.json"))
+                            .sorted()
+                            .toList();
+                }
                 if (requireRuns && results.isEmpty()) findings.add("No run result.json files found");
                 if (!requireRuns && !results.isEmpty()) {
                     findings.add("Calibration preflight requires zero run results");
@@ -185,7 +279,202 @@ final class QualificationEvidenceValidator {
         } catch (IOException e) {
             findings.add("Unable to enumerate runs: " + message(e));
         }
+        if (requireRuns
+                && catalog.protocolVersion() == QualificationProtocol.VERSION
+                && campaign != null
+                && engine != null) {
+            QualificationRecords.CampaignCompletion completion = validateCampaignCompletion(
+                    packetRoot, catalog, recoveryTransactionId, findings);
+            validateScorecards(
+                    packetRoot,
+                    catalog,
+                    campaign,
+                    engine,
+                    runs,
+                    completion,
+                    recoveryTransactionId,
+                    findings);
+        }
         return result(findings, runs, campaign, candidate, machine, engine, calibration);
+    }
+
+    private static QualificationRecords.CampaignCompletion validateCampaignCompletion(
+            Path packetRoot,
+            QualificationScenarioBank.Catalog catalog,
+            String recoveryTransactionId,
+            List<String> findings) {
+        Path completion = packetRoot.resolve(QualificationCampaignCompletion.OUTPUT_FILE);
+        Path scorecards = packetRoot.resolve("scorecards");
+        try {
+            NoFollowPathPolicy.GuardedRoot packetFiles =
+                    NoFollowPathPolicy.bindExistingDirectory(packetRoot);
+            NoFollowPathPolicy.EntryType completionType = packetFiles.inspect(completion);
+            if (completionType == NoFollowPathPolicy.EntryType.MISSING) {
+                findings.add(
+                        "Qualification protocol-v6 campaign requires a committed campaign completion");
+                if (packetFiles.inspect(scorecards)
+                        != NoFollowPathPolicy.EntryType.MISSING) {
+                    findings.add(
+                            "Qualification scorecards require a committed campaign completion");
+                }
+                return null;
+            }
+            if (completionType != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
+                findings.add("Qualification campaign completion path is invalid");
+                return null;
+            }
+            QualificationRecords.CampaignCompletion declared =
+                    QualificationCampaignCompletion.readCommitted(packetRoot, catalog);
+            QualificationRecords.CampaignCompletion verified =
+                    QualificationCampaignCompletion.requireCommitted(
+                            packetRoot, declared.bank(), catalog);
+            if (!declared.equals(verified)) {
+                findings.add(
+                        "Qualification campaign completion differs from committed run authority");
+                return null;
+            }
+            return verified;
+        } catch (IOException | RuntimeException invalid) {
+            findings.add("Qualification campaign completion is invalid: "
+                    + message(invalid));
+            return null;
+        }
+    }
+
+    private static void validateScorecards(
+            Path packetRoot,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationRecords.CampaignManifest campaign,
+            QualificationRecords.EngineFacts engine,
+            List<QualificationRecords.RunResult> runs,
+            QualificationRecords.CampaignCompletion completion,
+            String recoveryTransactionId,
+            List<String> findings) {
+        Path scorecards = packetRoot.resolve("scorecards");
+        try {
+            NoFollowPathPolicy.GuardedRoot packetFiles =
+                    NoFollowPathPolicy.bindExistingDirectory(packetRoot);
+            NoFollowPathPolicy.EntryType type = packetFiles.inspect(scorecards);
+            if (type == NoFollowPathPolicy.EntryType.MISSING) return;
+            if (type != NoFollowPathPolicy.EntryType.DIRECTORY) {
+                findings.add("Qualification scorecard directory is invalid");
+                return;
+            }
+            String prefix = campaign.candidateAlias() + "-" + campaign.configId() + "-";
+            for (NoFollowPathPolicy.TreeEntry entry : packetFiles.walk(scorecards)) {
+                if (entry.path().equals(scorecards)) continue;
+                if (entry.type() != NoFollowPathPolicy.EntryType.REGULAR_FILE
+                        || !entry.path().getParent().equals(scorecards)) {
+                    findings.add("Qualification scorecard inventory is invalid");
+                    continue;
+                }
+                String name = entry.path().getFileName().toString();
+                QualificationProtocol.BankKind bank;
+                if (name.equals(prefix + "admission.json")) {
+                    bank = QualificationProtocol.BankKind.ADMISSION;
+                } else if (name.equals(prefix + "full.json")) {
+                    bank = QualificationProtocol.BankKind.FULL;
+                } else {
+                    findings.add("Qualification scorecard filename is not campaign-owned: " + name);
+                    continue;
+                }
+                if (completion == null) {
+                    findings.add("Qualification scorecard requires a valid campaign completion: "
+                            + name);
+                    continue;
+                }
+                boolean lifecycleMismatch = false;
+                if (completion.bank() != bank) {
+                    findings.add("Qualification scorecard bank differs from campaign completion: "
+                            + name);
+                    lifecycleMismatch = true;
+                }
+                if (completion.completionReason()
+                        != QualificationRecords.CampaignCompletionReason.COMPLETE_GRID) {
+                    findings.add("Qualification hard-stop completion is not scoreable: " + name);
+                    lifecycleMismatch = true;
+                }
+                if (lifecycleMismatch) {
+                    continue;
+                }
+                String transactionId = QualificationPacketPublisher.transactionIdFor(
+                        packetRoot,
+                        QualificationPacketPublisher.PublicationKind.SCORECARD,
+                        List.of(entry.path()));
+                if (transactionId.equals(recoveryTransactionId)) continue;
+                QualificationPacketPublisher.CommittedSet committed =
+                        QualificationPacketPublisher.requireCommitted(
+                                packetRoot,
+                                QualificationPacketPublisher.PublicationKind.SCORECARD,
+                                List.of(entry.path()));
+                byte[] bytes = committed.bytes(packetRoot, entry.path());
+                QualificationRecords.Scorecard declared = QualificationJson.read(
+                        bytes, QualificationRecords.Scorecard.class);
+                if (!java.util.Arrays.equals(bytes, QualificationJson.bytes(declared))) {
+                    findings.add("Qualification scorecard is not canonical: " + name);
+                    continue;
+                }
+                QualificationRecords.Scorecard expected = QualificationScorer.score(
+                        catalog,
+                        bank,
+                        runs,
+                        new QualificationScorer.PerformanceEnvelope(
+                                engine.doctorProjectionSeconds(),
+                                engine.configuredTimeoutSeconds()));
+                if (!declared.equals(expected)) {
+                    findings.add("Qualification scorecard differs from canonical evidence: " + name);
+                }
+            }
+        } catch (IOException | RuntimeException invalid) {
+            findings.add("Qualification scorecard publication is invalid: " + message(invalid));
+        }
+    }
+
+    private static void validatePublicationControlState(
+            Path packetRoot,
+            String recoveryTransactionId,
+            List<String> findings) {
+        try {
+            if (recoveryTransactionId == null) {
+                QualificationPacketPublisher.requireSettledControlState(packetRoot);
+            } else {
+                QualificationPacketPublisher.requireControlStateForRecovery(
+                        packetRoot, recoveryTransactionId);
+            }
+        } catch (IOException | RuntimeException invalid) {
+            findings.add("Protocol-v6 publication control state is invalid: "
+                    + message(invalid));
+        }
+    }
+
+    private static List<Path> declaredRunRoots(
+            Path packetRoot,
+            QualificationRecords.CampaignManifest campaign,
+            QualificationScenarioBank.Catalog catalog,
+            List<String> findings) {
+        QualificationProtocol.BankKind bank;
+        if (campaign.repetitions().size() == 1) {
+            bank = QualificationProtocol.BankKind.ADMISSION;
+        } else if (campaign.repetitions().size() == 3) {
+            bank = QualificationProtocol.BankKind.FULL;
+        } else {
+            findings.add(
+                    "Protocol-v6 campaign repetition count does not identify a qualification bank");
+            return List.of();
+        }
+        List<Path> roots = new ArrayList<>();
+        for (int repetition = 1; repetition <= campaign.repetitions().size(); repetition++) {
+            for (QualificationProtocol.Scenario scenario : catalog.bank(bank).scenarios()) {
+                roots.add(packetRoot.resolve("runs")
+                        .resolve(campaign.candidateAlias())
+                        .resolve(campaign.machineId())
+                        .resolve(campaign.configId())
+                        .resolve(scenario.id())
+                        .resolve("trial-%02d".formatted(repetition))
+                        .toAbsolutePath().normalize());
+            }
+        }
+        return List.copyOf(roots);
     }
 
     private static void validateRun(
@@ -235,6 +524,10 @@ final class QualificationEvidenceValidator {
                 QualificationRecords.RunResult.class, findings, runRoot + "/result.json");
         QualificationRecords.RequestRecord request = read(runRoot.resolve("request.json"),
                 QualificationRecords.RequestRecord.class, findings, runRoot + "/request.json");
+        if (request != null) {
+            validateSchema(request.schemaName(), request.schemaVersion(), QualificationRecords.REQUEST_SCHEMA,
+                    "request " + runRoot, findings);
+        }
         if (run == null) return;
         validateRunSchema(run.schemaName(), run.schemaVersion(),
                 catalog.protocolVersion(), "run " + runRoot, findings);
@@ -264,13 +557,12 @@ final class QualificationEvidenceValidator {
         }
         QualificationRunFinalizer.Publication verifiedPublication =
                 verifyProtocolV6Publication(packetRoot, runRoot, catalog, findings);
-        if (verifiedPublication != null) {
+        if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+            if (verifiedPublication == null) return;
             run = verifiedPublication.result();
         }
         runs.add(run);
         if (request != null) {
-            validateSchema(request.schemaName(), request.schemaVersion(), QualificationRecords.REQUEST_SCHEMA,
-                    "request " + runRoot, findings);
             if (!equal(request.scenarioId(), run.scenarioId())) findings.add("Request scenarioId mismatch: " + runRoot);
             if (!equal(request.repetitionId(), run.repetitionId())) findings.add("Request repetitionId mismatch: " + runRoot);
             if (!equal(request.prompt(), scenario.prompt())) findings.add("Request prompt differs from frozen bank: " + runRoot);
@@ -967,7 +1259,12 @@ final class QualificationEvidenceValidator {
         requireText(campaign.startedAt(), "startedAt", findings);
         validateInstant(campaign.startedAt(), "startedAt", findings);
         if (campaign.endedAt() != null && !campaign.endedAt().isBlank()) {
-            validateInstant(campaign.endedAt(), "endedAt", findings);
+            if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+                findings.add(
+                        "Protocol-v6 campaign endedAt must remain blank; completion is separate");
+            } else {
+                validateInstant(campaign.endedAt(), "endedAt", findings);
+            }
         }
         if (campaign.protocolVersion() != catalog.protocolVersion()) {
             findings.add("Campaign protocolVersion differs from selected qualification catalog");

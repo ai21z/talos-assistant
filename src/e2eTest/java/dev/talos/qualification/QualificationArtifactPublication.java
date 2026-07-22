@@ -1,14 +1,11 @@
 package dev.talos.qualification;
 
+import dev.talos.core.io.AtomicFileWriter;
 import dev.talos.core.security.NoFollowPathPolicy;
 
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -147,10 +144,10 @@ final class QualificationArtifactPublication {
         Path target = requestedTarget.toAbsolutePath().normalize();
         Path parent = target.getParent();
         if (parent == null) throw invalid(safeLabel + " has no parent directory");
-        // A CREATE_NEW target becomes visible before Files.write has closed it. Serialize
-        // same-process publishers so an exact follower cannot inspect that transient state.
-        // Cross-process qualification serialization and the multi-file transaction remain
-        // T1192 scope; T1172 may supply the single-file atomic-promotion primitive.
+        // T1172 keeps this legacy leaf publication off the live destination until one-file
+        // promotion. The monitor preserves its existing same-process exact-retry contract.
+        // Protocol-v6 authority sets do not use this leaf: QualificationPacketPublisher owns
+        // their packet lease, declared members, commit record, and crash recovery.
         synchronized (publicationLock(target)) {
             owner.createDirectories(parent);
 
@@ -159,18 +156,10 @@ final class QualificationArtifactPublication {
                 return false;
             }
             owner.requireRegularFileTarget(target);
-            try {
-                try (OutputStream output = Files.newOutputStream(
-                        target,
-                        StandardOpenOption.CREATE_NEW,
-                        StandardOpenOption.WRITE,
-                        LinkOption.NOFOLLOW_LINKS)) {
-                    output.write(canonicalBytes);
-                }
-            } catch (FileAlreadyExistsException raced) {
-                verifyExactOrdinaryFile(owner, target, canonicalBytes, safeLabel);
-                return false;
-            }
+            new AtomicFileWriter().replace(
+                    target,
+                    canonicalBytes,
+                    AtomicFileWriter.Preimage.absent());
             verifyExactOrdinaryFile(owner, target, canonicalBytes, safeLabel);
             return true;
         }

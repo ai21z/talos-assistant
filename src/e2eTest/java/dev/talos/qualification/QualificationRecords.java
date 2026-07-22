@@ -10,7 +10,10 @@ final class QualificationRecords {
     static final int RUN_SCHEMA_VERSION = 2;
     static final int CAUSAL_SCHEMA_VERSION = 2;
     static final int SCORECARD_SCHEMA_VERSION = 2;
+    static final int CAMPAIGN_COMPLETION_SCHEMA_VERSION = 1;
     static final String CAMPAIGN_SCHEMA = "talos.modelQualification.campaign";
+    static final String CAMPAIGN_COMPLETION_SCHEMA =
+            "talos.modelQualification.campaignCompletion";
     static final String CALIBRATION_SCHEMA = "talos.modelQualification.calibrationRules";
     static final String CANDIDATE_SCHEMA = "talos.modelQualification.candidate";
     static final String MACHINE_SCHEMA = "talos.modelQualification.machine";
@@ -154,6 +157,11 @@ final class QualificationRecords {
         REJECTED
     }
 
+    enum CampaignCompletionReason {
+        COMPLETE_GRID,
+        HARD_STOP
+    }
+
     record CampaignManifest(
             String schemaName,
             int schemaVersion,
@@ -174,6 +182,34 @@ final class QualificationRecords {
             String endedAt) {
         CampaignManifest {
             repetitions = immutable(repetitions);
+        }
+    }
+
+    record CampaignRunCommitRef(
+            String scenarioId,
+            int repetition,
+            String repetitionId,
+            String transactionId,
+            String setSha256) {}
+
+    record CampaignCompletion(
+            String schemaName,
+            int schemaVersion,
+            int protocolVersion,
+            String campaignId,
+            String scenarioBankSha256,
+            QualificationProtocol.BankKind bank,
+            String campaignManifestSha256,
+            String endedAt,
+            CampaignCompletionReason completionReason,
+            int expectedTrialCount,
+            int committedRunCount,
+            String committedRunSetSha256,
+            List<CampaignRunCommitRef> committedRuns,
+            List<String> stopReasons) {
+        CampaignCompletion {
+            committedRuns = immutable(committedRuns);
+            stopReasons = immutable(stopReasons);
         }
     }
 

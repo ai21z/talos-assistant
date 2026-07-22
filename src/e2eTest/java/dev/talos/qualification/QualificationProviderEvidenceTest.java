@@ -17,25 +17,31 @@ class QualificationProviderEvidenceTest {
 
     @Test
     void providerRenderRemainsAuthoritativeWithoutFallbacks() throws Exception {
-        Files.writeString(temp.resolve("prompt-debug-20260711.md"), "provider request\n",
+        QualificationTestPacket packet = packet("provider-render");
+        Files.writeString(packet.runRoot().resolve("prompt-debug-20260711.md"), "provider request\n",
                 StandardCharsets.UTF_8);
 
         QualificationProviderEvidence.capture(
-                temp, "ordinary command output", QualificationProtocol.VERSION);
+                packet.root(), packet.runRoot(), "ordinary command output",
+                QualificationProtocol.VERSION);
 
-        assertFalse(Files.exists(temp.resolve("prompt-debug.txt")));
-        assertFalse(Files.exists(temp.resolve("llama.log")));
+        assertFalse(Files.exists(packet.runRoot().resolve("prompt-debug.txt")));
+        assertFalse(Files.exists(packet.runRoot().resolve("llama.log")));
     }
 
     @Test
     void exactNoProviderOutputCreatesPairedBoundedNotApplicableEvidence() throws Exception {
+        QualificationTestPacket packet = packet("not-applicable");
         QualificationProviderEvidence.capture(
-                temp,
+                packet.root(),
+                packet.runRoot(),
                 "i " + QualificationProviderEvidence.NO_PROVIDER_PROMPT + " More detail.",
                 QualificationProtocol.VERSION);
 
-        String prompt = Files.readString(temp.resolve("prompt-debug.txt"), StandardCharsets.UTF_8);
-        String runtime = Files.readString(temp.resolve("llama.log"), StandardCharsets.UTF_8);
+        String prompt = Files.readString(
+                packet.runRoot().resolve("prompt-debug.txt"), StandardCharsets.UTF_8);
+        String runtime = Files.readString(
+                packet.runRoot().resolve("llama.log"), StandardCharsets.UTF_8);
         assertTrue(prompt.equals(QualificationProviderEvidence.promptNotApplicableText()));
         assertTrue(runtime.equals(QualificationProviderEvidence.modelRuntimeNotApplicableText()));
         assertTrue(prompt.length() < 512);
@@ -43,29 +49,63 @@ class QualificationProviderEvidenceTest {
     }
 
     @Test
-    void missingOrPartialNoProviderOutputFailsClosedWithoutFallbacks() {
+    void missingOrPartialNoProviderOutputFailsClosedWithoutFallbacks() throws Exception {
+        QualificationTestPacket packet = packet("missing-output");
         assertThrows(IllegalStateException.class,
                 () -> QualificationProviderEvidence.capture(
-                        temp,
+                        packet.root(),
+                        packet.runRoot(),
                         "No provider prompt may have been sent.",
                         QualificationProtocol.VERSION));
-        assertFalse(Files.exists(temp.resolve("prompt-debug.txt")));
-        assertFalse(Files.exists(temp.resolve("llama.log")));
+        assertFalse(Files.exists(packet.runRoot().resolve("prompt-debug.txt")));
+        assertFalse(Files.exists(packet.runRoot().resolve("llama.log")));
     }
 
     @Test
-    void secondMemberConflictNeverRollsBackThePublishedFirstMember() throws Exception {
-        Files.writeString(temp.resolve("llama.log"), "frozen conflict\n", StandardCharsets.UTF_8);
+    void secondMemberConflictIsFoundBeforeTheMissingFirstMemberIsPublished() throws Exception {
+        QualificationTestPacket packet = packet("member-conflict");
+        Files.writeString(
+                packet.runRoot().resolve("llama.log"),
+                "frozen conflict\n",
+                StandardCharsets.UTF_8);
 
-        assertThrows(IllegalArgumentException.class,
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
                 () -> QualificationProviderEvidence.capture(
-                        temp,
+                        packet.root(),
+                        packet.runRoot(),
                         QualificationProviderEvidence.NO_PROVIDER_PROMPT,
                         QualificationProtocol.VERSION));
 
-        assertTrue(Files.readString(temp.resolve("prompt-debug.txt"), StandardCharsets.UTF_8)
-                .equals(QualificationProviderEvidence.promptNotApplicableText()));
-        assertTrue(Files.readString(temp.resolve("llama.log"), StandardCharsets.UTF_8)
+        assertTrue(failure.reason() == QualificationPacketPublisher.FailureReason.CONFLICT);
+        assertFalse(Files.exists(packet.runRoot().resolve("prompt-debug.txt")));
+        assertTrue(Files.readString(
+                        packet.runRoot().resolve("llama.log"), StandardCharsets.UTF_8)
                 .equals("frozen conflict\n"));
+    }
+
+    private QualificationTestPacket packet(String name) throws Exception {
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve(name), QualificationTestPacket.protocol6Catalog());
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                java.util.List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                java.util.List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                java.util.List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                java.util.List.of(
+                        packet.runRoot().resolve("prompt-debug.txt"),
+                        packet.runRoot().resolve("llama.log")));
+        return packet;
     }
 }

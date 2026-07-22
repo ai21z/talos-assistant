@@ -99,6 +99,16 @@ class ModelLifecycleDocumentationTest {
         assertContains(runbook, "12 admission trials");
         assertContains(runbook, "72 full trials");
         assertContains(runbook, "Stop the campaign");
+        assertContains(runbook, "canonical order is repetition-major");
+        assertContains(runbook, "finalizeModelQualificationProviderEvidence");
+        assertContains(runbook, "finalizeModelQualificationApprovals");
+        assertContains(runbook, "finalizeModelQualificationRequirements");
+        assertContains(runbook, "finalizeModelQualificationResult");
+        assertContains(runbook, "Validate only after completion");
+        assertContains(runbook, "exact `COMPLETE_GRID` completion");
+        assertContains(runbook, "`HARD_STOP` completion is final evidence but is never scoreable");
+        assertContains(runbook, "Invoke the typed reconciler before retrying");
+        assertContains(runbook, "Recovery of one phase is not permission");
         assertContains(calibration, "Configuration identity");
         assertContains(calibration, "Permitted deviations");
         assertContains(scorecard, "Trust verdict");

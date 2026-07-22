@@ -6,6 +6,7 @@ import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -159,15 +160,26 @@ class QualificationRunFinalizerTest {
                 packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));
         byte[] result = Files.readAllBytes(
                 packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE));
+        var causalMtime = Files.getLastModifiedTime(
+                packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE));
+        var canaryMtime = Files.getLastModifiedTime(
+                packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));
+        var resultMtime = Files.getLastModifiedTime(
+                packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE));
 
-        assertThrows(IllegalStateException.class,
-                () -> QualificationRunFinalizer.finalizeRun(
-                        packet.root(), packet.runRoot(), scenarioId(catalog), catalog));
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId(catalog), catalog);
         assertArrayEquals(causal, Files.readAllBytes(
                 packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE)));
         assertArrayEquals(canary, Files.readAllBytes(
                 packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE)));
         assertArrayEquals(result, Files.readAllBytes(
+                packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        assertEquals(causalMtime, Files.getLastModifiedTime(
+                packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE)));
+        assertEquals(canaryMtime, Files.getLastModifiedTime(
+                packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE)));
+        assertEquals(resultMtime, Files.getLastModifiedTime(
                 packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
     }
 
@@ -188,11 +200,14 @@ class QualificationRunFinalizerTest {
                     StandardCharsets.UTF_8,
                     StandardOpenOption.APPEND);
 
-            IllegalStateException rejection = assertThrows(
-                    IllegalStateException.class,
+            QualificationPacketPublisher.PublicationException rejection = assertThrows(
+                    QualificationPacketPublisher.PublicationException.class,
                     () -> QualificationRunFinalizer.verifyPublished(
                             packet.root(), resultPath, catalog));
-            assertTrue(rejection.getMessage().contains("not canonical"), authority);
+            assertEquals(
+                    QualificationPacketPublisher.FailureReason.INVALID_COMMIT,
+                    rejection.reason(),
+                    authority);
         }
     }
 
@@ -204,9 +219,13 @@ class QualificationRunFinalizerTest {
                 orphan.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
                 "{}\n",
                 StandardCharsets.UTF_8);
-        assertThrows(IllegalStateException.class,
+        QualificationPacketPublisher.PublicationException orphanFailure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
                 () -> QualificationRunFinalizer.finalizeRun(
                         orphan.root(), orphan.runRoot(), scenarioId(catalog), catalog));
+        assertEquals(
+                QualificationPacketPublisher.FailureReason.CONFLICT,
+                orphanFailure.reason());
         assertFalse(Files.exists(orphan.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
 
         QualificationTestPacket mutated = unfinalizedPacket(temp.resolve("mutated"), catalog);
@@ -247,12 +266,86 @@ class QualificationRunFinalizerTest {
                                         java.nio.file.StandardOpenOption.APPEND);
                             }
                         }));
-        assertTrue(Files.exists(
-                packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE)));
-        assertTrue(Files.exists(
-                packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE)));
-        assertFalse(Files.exists(
-                packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        assertNoAuthorityArtifacts(packet.runRoot());
+    }
+
+    @Test
+    void canonicalRetryRecoversRunPublicationAcrossEveryMemberStageBoundary()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        for (QualificationPacketPublisher.FaultStage stage : java.util.List.of(
+                QualificationPacketPublisher.FaultStage.AFTER_MEMBER_PARTIAL_WRITE,
+                QualificationPacketPublisher.FaultStage.AFTER_MEMBER_FINAL_WRITE,
+                QualificationPacketPublisher.FaultStage.AFTER_MEMBER_FLUSH,
+                QualificationPacketPublisher.FaultStage.AFTER_MEMBER_PROMOTION)) {
+            QualificationTestPacket packet = unfinalizedPacket(
+                    temp.resolve("run-recovery-" + stage.name().toLowerCase()), catalog);
+            QualificationPreResultEvidence.Snapshot snapshot =
+                    QualificationPreResultEvidence.capture(
+                            packet.root(), packet.runRoot(), scenarioId(catalog), catalog);
+            QualificationRunFinalizer.Publication publication =
+                    QualificationRunFinalizer.derive(snapshot);
+
+            assertThrows(IOException.class, () -> QualificationPacketPublisher.withLease(
+                    packet.root(),
+                    java.time.Duration.ofSeconds(5),
+                    (actual, ordinal) -> {
+                        if (actual == stage && ordinal == 0) {
+                            throw new IOException("injected run publication fault");
+                        }
+                    },
+                    lease -> lease.publish(
+                            QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                            java.util.List.of(
+                                    new QualificationPacketPublisher.Member(
+                                            packet.runRoot().resolve(
+                                                    QualificationCausalFinalizer.OUTPUT_FILE),
+                                            QualificationJson.bytes(publication.causal())),
+                                    new QualificationPacketPublisher.Member(
+                                            packet.runRoot().resolve(
+                                                    QualificationRunFinalizer.CANARY_FILE),
+                                            QualificationJson.bytes(publication.canary())),
+                                    new QualificationPacketPublisher.Member(
+                                            packet.runRoot().resolve(
+                                                    QualificationRunFinalizer.RESULT_FILE),
+                                            QualificationJson.bytes(publication.result()))))));
+
+            Path result = QualificationRunFinalizer.finalizeRun(
+                    packet.root(), packet.runRoot(), scenarioId(catalog), catalog);
+
+            assertEquals(
+                    publication,
+                    QualificationRunFinalizer.verifyPublished(packet.root(), result, catalog),
+                    stage.name());
+            QualificationPacketPublisher.requireSettledControlState(packet.root());
+            try (var runEntries = Files.list(packet.runRoot())) {
+                assertTrue(runEntries.noneMatch(path ->
+                        path.getFileName().toString().endsWith(".stage")), stage.name());
+            }
+        }
+    }
+
+    @Test
+    void protocolV6ReaderRejectsACompleteSetWithoutItsCommitRecord() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationTestPacket packet = unfinalizedPacket(
+                temp.resolve("missing-commit-record"), catalog);
+        Path result = QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId(catalog), catalog);
+        Path commit = QualificationPacketPublisher.commitPathForTest(
+                packet.root(),
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                java.util.List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        result));
+        Files.delete(commit);
+
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
+                () -> QualificationRunFinalizer.verifyPublished(
+                        packet.root(), result, catalog));
+        assertEquals(QualificationPacketPublisher.FailureReason.INCOMPLETE, failure.reason());
     }
 
     @Test
@@ -263,25 +356,18 @@ class QualificationRunFinalizerTest {
                 QualificationRunFinalizer.CANARY_FILE)) {
             QualificationTestPacket packet = unfinalizedPacket(
                     temp.resolve("changed-companion-" + companion), catalog);
+            Path conflict = packet.runRoot().resolve(companion);
+            Files.writeString(conflict, "conflicting orphan\n", StandardCharsets.UTF_8);
 
-            assertThrows(IllegalStateException.class,
+            QualificationPacketPublisher.PublicationException failure = assertThrows(
+                    QualificationPacketPublisher.PublicationException.class,
                     () -> QualificationRunFinalizer.finalizeRun(
-                            packet.root(), packet.runRoot(), scenarioId(catalog), catalog,
-                            new QualificationRunFinalizer.PublicationObserver() {
-                                @Override
-                                public void beforeResultPublication(
-                                        QualificationPreResultEvidence.Snapshot ignored)
-                                        throws java.io.IOException {
-                                    Files.writeString(
-                                            packet.runRoot().resolve(companion),
-                                            "\n",
-                                            StandardCharsets.UTF_8,
-                                            StandardOpenOption.APPEND);
-                                }
-                            }));
+                            packet.root(), packet.runRoot(), scenarioId(catalog), catalog));
+            assertEquals(QualificationPacketPublisher.FailureReason.CONFLICT, failure.reason());
             assertFalse(Files.exists(
                     packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)),
                     companion);
+            assertEquals("conflicting orphan\n", Files.readString(conflict));
         }
     }
 
@@ -297,10 +383,20 @@ class QualificationRunFinalizerTest {
         assertTrue(script.contains("-PqualificationRoot="));
         assertTrue(script.contains("-PqualificationRunRoot="));
         assertTrue(script.contains("-PqualificationScenario="));
+        assertTrue(script.contains("reconcileModelQualificationRunPublication"));
+        assertEquals(script.indexOf("reconcileModelQualificationRunPublication"),
+                script.lastIndexOf("reconcileModelQualificationRunPublication"));
+        assertTrue(script.indexOf("assertWritableModelQualificationCampaign")
+                < script.indexOf("reconcileModelQualificationRunPublication"));
+        assertTrue(script.indexOf("reconcileModelQualificationRunPublication")
+                < script.indexOf("finalizeModelQualificationResult"));
+        assertTrue(script.contains("-PqualificationServerPort="));
+        assertTrue(script.contains(
+                "Qualification publication reconciliation failed with exit code"));
         assertTrue(script.contains("$GradleExitCode = $LASTEXITCODE"));
         assertTrue(script.contains("if ($GradleExitCode -ne 0)"));
         assertTrue(script.contains("throw \"Java qualification result finalization failed"));
-        assertEquals("890638f98a39ee9f0ea16192156d67e63a3e94320efb7470f8f1873e6ff9bacd",
+        assertEquals("048545b159177ae6833babc3fcc2386b88cc2c354c95fb462756387d70b40778",
                 QualificationScenarioBank.sha256(canonical.getBytes(StandardCharsets.UTF_8)));
         for (String forbidden : Arrays.asList(
                 "result.json", "causal-finalization.json", "canary.json",
@@ -317,6 +413,16 @@ class QualificationRunFinalizerTest {
             Path root,
             QualificationScenarioBank.Catalog catalog) throws Exception {
         QualificationTestPacket packet = QualificationTestPacket.create(root, catalog);
+        if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+            Path commit = QualificationPacketPublisher.commitPathForTest(
+                    packet.root(),
+                    QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                    java.util.List.of(
+                            packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                            packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                            packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+            Files.deleteIfExists(commit);
+        }
         Files.deleteIfExists(packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE));
         Files.deleteIfExists(packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE));
         Files.deleteIfExists(packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));

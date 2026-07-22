@@ -251,12 +251,17 @@ public final class QualificationPtyCaptureMain {
             drainOutput();
             writePacket(started, captureFailure);
             if (captureFailure != null) {
-                QualificationArtifactPublication.publishNewOrVerifyExact(
-                        runFiles,
-                        runRoot.resolve("transcript.failed.txt"),
+                Path failureTranscript = runRoot.resolve("transcript.failed.txt");
+                byte[] failureBytes =
                         (capture.text() + System.lineSeparator() + captureFailure)
-                                .getBytes(StandardCharsets.UTF_8),
-                        "PTY capture failure transcript");
+                                .getBytes(StandardCharsets.UTF_8);
+                QualificationPacketPublisher.withLease(campaignRoot, lease -> {
+                    lease.publish(
+                            QualificationPacketPublisher.PublicationKind.PTY_FAILURE,
+                            List.of(new QualificationPacketPublisher.Member(
+                                    failureTranscript, failureBytes)));
+                    return null;
+                });
             }
         }
         if (captureFailure != null) throw captureFailure;
@@ -333,7 +338,10 @@ public final class QualificationPtyCaptureMain {
         waitForSettledIdlePrompt(cursor, SLASH_WAIT);
         drainOutput();
         QualificationProviderEvidence.capture(
-                runRoot, capture.slice(promptDebugAnchor, cursor), protocolVersion);
+                campaignRoot,
+                runRoot,
+                capture.slice(promptDebugAnchor, cursor),
+                protocolVersion);
 
         addInput("last-trace");
         writeLine("/last trace");
@@ -526,11 +534,13 @@ public final class QualificationPtyCaptureMain {
                     capture.text());
             byte[] canonicalBytes = QualificationJson.bytes(packet);
             QualificationPtyEvidence.parse(canonicalBytes, protocolVersion);
-            QualificationArtifactPublication.publishNewOrVerifyExact(
-                    runFiles,
-                    transcriptPath,
-                    canonicalBytes,
-                    "PTY capture packet");
+            QualificationPacketPublisher.withLease(campaignRoot, lease -> {
+                lease.publish(
+                        QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                        List.of(new QualificationPacketPublisher.Member(
+                                transcriptPath, canonicalBytes)));
+                return null;
+            });
         } catch (Exception writeFailure) {
             if (failure != null) failure.addSuppressed(writeFailure);
             else throw new IllegalStateException("failed to write PTY capture packet", writeFailure);

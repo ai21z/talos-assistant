@@ -4,6 +4,7 @@ import dev.talos.core.security.NoFollowPathPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,8 +29,13 @@ class QualificationProviderEvidenceFinalizerTest {
                 .getBytes(StandardCharsets.UTF_8);
         byte[] runtime = QualificationProviderEvidence.modelRuntimeNotApplicableText()
                 .getBytes(StandardCharsets.UTF_8);
-        Files.write(fixture.runRoot().resolve("prompt-debug.txt"), prompt);
-        Files.write(fixture.runRoot().resolve("llama.log"), runtime);
+        fixture.packet().publishForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                java.util.List.of(
+                        new QualificationPacketPublisher.Member(
+                                fixture.runRoot().resolve("prompt-debug.txt"), prompt),
+                        new QualificationPacketPublisher.Member(
+                                fixture.runRoot().resolve("llama.log"), runtime)));
         Files.writeString(fixture.sourceLog(), "model loaded\nlistening\nstopped\n",
                 StandardCharsets.UTF_8);
 
@@ -69,8 +75,10 @@ class QualificationProviderEvidenceFinalizerTest {
                 QualificationProviderEvidence.promptNotApplicableText(), StandardCharsets.UTF_8);
         Files.writeString(fixture.sourceLog(), "model loaded\n", StandardCharsets.UTF_8);
 
-        assertThrows(IllegalStateException.class,
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
                 () -> finalizeEvidence(fixture));
+        assertEquals(QualificationPacketPublisher.FailureReason.INCOMPLETE, failure.reason());
     }
 
     @Test
@@ -82,8 +90,10 @@ class QualificationProviderEvidenceFinalizerTest {
                 QualificationProviderEvidence.modelRuntimeNotApplicableText() + "forged\n",
                 StandardCharsets.UTF_8);
 
-        assertThrows(IllegalStateException.class,
+        QualificationPacketPublisher.PublicationException mixed = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
                 () -> finalizeEvidence(fixture));
+        assertEquals(QualificationPacketPublisher.FailureReason.INCOMPLETE, mixed.reason());
     }
 
     @Test
@@ -96,8 +106,10 @@ class QualificationProviderEvidenceFinalizerTest {
         Files.writeString(fixture.runRoot().resolve("prompt-debug-20260713.md"),
                 "# Provider request\n", StandardCharsets.UTF_8);
 
-        assertThrows(IllegalStateException.class,
+        QualificationPacketPublisher.PublicationException mixed = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
                 () -> finalizeEvidence(fixture));
+        assertEquals(QualificationPacketPublisher.FailureReason.INCOMPLETE, mixed.reason());
     }
 
     @Test
@@ -158,20 +170,96 @@ class QualificationProviderEvidenceFinalizerTest {
 
     @Test
     void secondMemberConflictNeverDeletesThePublishedProviderPrompt() throws Exception {
-        Path prompt = temp.resolve("prompt-debug.txt");
-        Path model = temp.resolve("llama.log");
+        Fixture fixture = fixture("preserved-first-member");
+        Path prompt = fixture.runRoot().resolve("prompt-debug.txt");
+        Path model = fixture.runRoot().resolve("llama.log");
         byte[] promptBytes = "# Provider request\n".getBytes(StandardCharsets.UTF_8);
         byte[] modelBytes = "prompt eval time\n".getBytes(StandardCharsets.UTF_8);
+        Files.write(prompt, promptBytes);
         Files.writeString(model, "frozen conflict\n", StandardCharsets.UTF_8);
 
-        assertThrows(IllegalArgumentException.class,
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
                 () -> QualificationProviderEvidenceFinalizer.writePair(
-                        dev.talos.core.security.NoFollowPathPolicy.bindExistingDirectory(temp),
+                        fixture.packetRoot(),
                         prompt, promptBytes, model, modelBytes));
+        assertEquals(QualificationPacketPublisher.FailureReason.CONFLICT, failure.reason());
 
         assertArrayEquals(promptBytes, Files.readAllBytes(prompt));
         assertTrue(Files.readString(model, StandardCharsets.UTF_8)
                 .equals("frozen conflict\n"));
+    }
+
+    @Test
+    void secondMemberConflictIsDetectedBeforePublishingAMissingFirstMember() throws Exception {
+        Fixture fixture = fixture("preflight-member-conflict");
+        Path prompt = fixture.runRoot().resolve("prompt-debug.txt");
+        Path model = fixture.runRoot().resolve("llama.log");
+        byte[] promptBytes = "# Provider request\n".getBytes(StandardCharsets.UTF_8);
+        byte[] modelBytes = "prompt eval time\n".getBytes(StandardCharsets.UTF_8);
+        Files.writeString(model, "frozen conflict\n", StandardCharsets.UTF_8);
+
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
+                () -> QualificationProviderEvidenceFinalizer.writePair(
+                        fixture.packetRoot(),
+                        prompt, promptBytes, model, modelBytes));
+        assertEquals(QualificationPacketPublisher.FailureReason.CONFLICT, failure.reason());
+
+        assertFalse(Files.exists(prompt),
+                "a known set conflict must be found before any missing member is published");
+        assertEquals("frozen conflict\n", Files.readString(model, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void canonicalProviderRetryRecoversPrecommitAndPostcommitInterruptions()
+            throws Exception {
+        for (QualificationPacketPublisher.FaultStage stage : java.util.List.of(
+                QualificationPacketPublisher.FaultStage.AFTER_MEMBER_PROMOTION,
+                QualificationPacketPublisher.FaultStage.AFTER_COMMIT_VERIFICATION)) {
+            Fixture fixture = fixture("provider-recovery-" + stage.name().toLowerCase());
+            Path render = fixture.runRoot().resolve("prompt-debug-recovery.md");
+            byte[] prompt = "# Provider recovery request\n".getBytes(StandardCharsets.UTF_8);
+            byte[] model = "prompt eval time\neval time\n".getBytes(StandardCharsets.UTF_8);
+            Files.write(render, prompt);
+            Files.write(fixture.sourceLog(), model);
+            int ordinal = stage == QualificationPacketPublisher.FaultStage.AFTER_MEMBER_PROMOTION
+                    ? 0 : -1;
+
+            IOException failure = assertThrows(
+                    IOException.class,
+                    () -> QualificationPacketPublisher.withLease(
+                            fixture.packetRoot(),
+                            java.time.Duration.ofSeconds(5),
+                            (actual, member) -> {
+                                if (actual == stage && member == ordinal) {
+                                    throw new IOException("injected provider publication fault");
+                                }
+                            },
+                            lease -> lease.publish(
+                                    QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                                    java.util.List.of(
+                                            new QualificationPacketPublisher.Member(
+                                                    fixture.runRoot().resolve("prompt-debug.txt"),
+                                                    prompt),
+                                            new QualificationPacketPublisher.Member(
+                                                    fixture.runRoot().resolve("llama.log"),
+                                                    model)))));
+            if (stage == QualificationPacketPublisher.FaultStage.AFTER_COMMIT_VERIFICATION) {
+                QualificationPacketPublisher.PublicationException publicationFailure =
+                        (QualificationPacketPublisher.PublicationException) failure;
+                assertEquals(
+                        QualificationPacketPublisher.CommitState.COMMITTED,
+                        publicationFailure.commitState());
+            }
+
+            QualificationProviderEvidenceFinalizer.Result recovered = finalizeEvidence(fixture);
+
+            assertTrue(recovered.providerPromptSent());
+            assertArrayEquals(prompt, Files.readAllBytes(recovered.promptDebug()));
+            assertArrayEquals(model, Files.readAllBytes(recovered.modelLog()));
+            QualificationPacketPublisher.requireSettledControlState(fixture.packetRoot());
+        }
     }
 
     @Test
@@ -215,9 +303,26 @@ class QualificationProviderEvidenceFinalizerTest {
                 root, catalog, catalog.scenario(SCENARIO));
         Path source = root.resolve("home/.talos/logs/llama_cpp-" + PORT + ".log");
         Files.createDirectories(source.getParent());
-        Files.deleteIfExists(packet.runRoot().resolve("prompt-debug.txt"));
-        Files.deleteIfExists(packet.runRoot().resolve("llama.log"));
-        return new Fixture(root, packet.runRoot(), source, catalog);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                java.util.List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                java.util.List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                java.util.List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                java.util.List.of(
+                        packet.runRoot().resolve("prompt-debug.txt"),
+                        packet.runRoot().resolve("llama.log")));
+        return new Fixture(packet, root, packet.runRoot(), source, catalog);
     }
 
     private static QualificationProviderEvidenceFinalizer.Result finalizeEvidence(Fixture fixture)
@@ -238,6 +343,7 @@ class QualificationProviderEvidenceFinalizerTest {
     }
 
     private record Fixture(
+            QualificationTestPacket packet,
             Path packetRoot,
             Path runRoot,
             Path sourceLog,

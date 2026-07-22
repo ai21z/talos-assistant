@@ -71,7 +71,7 @@ class QualificationPtyCapturePacingContractTest {
         int canonicalBytes = writePacket.indexOf("QualificationJson.bytes(packet)");
         int validateBytes = writePacket.indexOf(
                 "QualificationPtyEvidence.parse(canonicalBytes, protocolVersion)");
-        int publishBytes = writePacket.indexOf("publishNewOrVerifyExact(");
+        int publishBytes = writePacket.indexOf("PublicationKind.PTY_CAPTURE");
         assertTrue(typedCapture >= 0, writePacket);
         assertTrue(typedCapture < canonicalBytes, writePacket);
         assertTrue(canonicalBytes < validateBytes, writePacket);

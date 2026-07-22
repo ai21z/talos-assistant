@@ -5,7 +5,6 @@ import dev.talos.core.security.NoFollowPathPolicy;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -29,71 +28,126 @@ final class QualificationProviderEvidenceFinalizer {
         if (serverPort < 1 || serverPort > 65_535) {
             throw new IllegalArgumentException("server port must be between 1 and 65535");
         }
+        return QualificationPacketPublisher.withLease(
+                packetRoot,
+                lease -> finalizeUnderLease(
+                        lease, requestedRunRoot, scenarioId, serverPort, catalog));
+    }
+
+    static Result finalizeUnderLease(
+            QualificationPacketPublisher.Lease lease,
+            Path requestedRunRoot,
+            String scenarioId,
+            int serverPort,
+            QualificationScenarioBank.Catalog catalog) throws IOException {
         QualificationArtifactPublication.DeclaredRun declared =
                 QualificationArtifactPublication.requireWritableDeclaredRun(
-                        packetRoot, requestedRunRoot, scenarioId, catalog);
+                        lease.packetRoot(), requestedRunRoot, scenarioId, catalog);
         NoFollowPathPolicy.GuardedRoot packetFiles = declared.packetFiles();
         NoFollowPathPolicy.GuardedRoot runFiles = declared.runFiles();
         Path runRoot = declared.runRoot();
         Path root = declared.packetRoot();
+        int frozenServerPort = frozenServerPort(lease, declared);
+        if (serverPort != frozenServerPort) {
+            throw new IllegalArgumentException(
+                    "server port differs from the frozen qualification calibration: expected "
+                            + frozenServerPort);
+        }
         Path promptOutput = runRoot.resolve(PROMPT_OUTPUT);
         Path modelOutput = runRoot.resolve(MODEL_OUTPUT);
+        lease.requireTransactionProvenance(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                List.of(promptOutput, modelOutput));
         List<Path> renders = providerRenders(runFiles, runRoot);
-        boolean promptExists =
-                runFiles.inspect(promptOutput) != NoFollowPathPolicy.EntryType.MISSING;
-        boolean modelExists =
-                runFiles.inspect(modelOutput) != NoFollowPathPolicy.EntryType.MISSING;
-
-        if (promptExists || modelExists) {
-            if (!promptExists || !modelExists) {
-                throw new IllegalStateException("provider NOT_APPLICABLE evidence must be paired");
-            }
-            runFiles.requireRegularFile(promptOutput);
-            runFiles.requireRegularFile(modelOutput);
-            if (renders.isEmpty()) {
-                String prompt = boundedText(
-                        runFiles, promptOutput, MAX_PROMPT_BYTES, "prompt evidence");
-                String model = boundedText(
-                        runFiles, modelOutput, MAX_MODEL_LOG_BYTES, "model runtime evidence");
-                if (!prompt.equals(QualificationProviderEvidence.promptNotApplicableText())
-                        || !model.equals(QualificationProviderEvidence.modelRuntimeNotApplicableText())) {
-                    throw new IllegalStateException(
-                            "pre-existing provider evidence is not the canonical NOT_APPLICABLE pair");
-                }
-                return new Result(promptOutput, modelOutput, false);
-            }
-            if (renders.size() != 1) {
-                throw new IllegalStateException(
-                        "expected exactly one provider prompt render, found " + renders.size());
-            }
-            Path sourceLog = root.resolve(
-                    Path.of("home", ".talos", "logs", "llama_cpp-" + serverPort + ".log"));
-            sourceLog = requiredSourceLog(packetFiles, sourceLog);
-            byte[] promptBytes = boundedBytes(
-                    runFiles, renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
-            byte[] modelBytes = boundedBytes(
-                    packetFiles, sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
-            if (!java.util.Arrays.equals(runFiles.readAllBytes(promptOutput), promptBytes)
-                    || !java.util.Arrays.equals(runFiles.readAllBytes(modelOutput), modelBytes)) {
-                throw new IllegalStateException(
-                        "pre-existing provider evidence conflicts with the canonical source pair");
-            }
-            return new Result(promptOutput, modelOutput, true);
-        }
-
-        if (renders.size() != 1) {
+        if (renders.size() > 1) {
             throw new IllegalStateException(
                     "expected exactly one provider prompt render, found " + renders.size());
         }
-        Path sourceLog = root.resolve(
-                Path.of("home", ".talos", "logs", "llama_cpp-" + serverPort + ".log"));
-        sourceLog = requiredSourceLog(packetFiles, sourceLog);
-        byte[] promptBytes = boundedBytes(
-                runFiles, renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
-        byte[] modelBytes = boundedBytes(
-                packetFiles, sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
-        writePair(runFiles, promptOutput, promptBytes, modelOutput, modelBytes);
-        return new Result(promptOutput, modelOutput, true);
+        boolean providerPromptSent = !renders.isEmpty();
+        byte[] promptBytes;
+        byte[] modelBytes;
+        if (providerPromptSent) {
+            Path sourceLog = root.resolve(
+                    Path.of("home", ".talos", "logs", "llama_cpp-" + serverPort + ".log"));
+            sourceLog = requiredSourceLog(packetFiles, sourceLog);
+            promptBytes = boundedBytes(
+                    runFiles, renders.getFirst(), MAX_PROMPT_BYTES, "provider prompt render");
+            modelBytes = boundedBytes(
+                    packetFiles, sourceLog, MAX_MODEL_LOG_BYTES, "llama.cpp source log");
+        } else {
+            promptBytes = QualificationProviderEvidence.promptNotApplicableText()
+                    .getBytes(StandardCharsets.UTF_8);
+            modelBytes = QualificationProviderEvidence.modelRuntimeNotApplicableText()
+                    .getBytes(StandardCharsets.UTF_8);
+        }
+        lease.publish(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                List.of(
+                        new QualificationPacketPublisher.Member(promptOutput, promptBytes),
+                        new QualificationPacketPublisher.Member(modelOutput, modelBytes)));
+        return new Result(promptOutput, modelOutput, providerPromptSent);
+    }
+
+    private static int frozenServerPort(
+            QualificationPacketPublisher.Lease lease,
+            QualificationArtifactPublication.DeclaredRun declared) throws IOException {
+        Path root = declared.packetRoot();
+        Path ledgerPath = root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE);
+        Path harnessPath = root.resolve(QualificationExecutionIdentity.HARNESS_FILE);
+        Path runtimePath = root.resolve(QualificationExecutionIdentity.RUNTIME_FILE);
+        QualificationPacketPublisher.CommittedSet identity = lease.requireCommittedSet(
+                QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                List.of(ledgerPath, harnessPath, runtimePath));
+        byte[] runtimeBytes = identity.bytes(root, runtimePath);
+        QualificationExecutionIdentity.RuntimeManifest runtime = QualificationJson.read(
+                runtimeBytes, QualificationExecutionIdentity.RuntimeManifest.class);
+        if (!java.util.Arrays.equals(runtimeBytes, QualificationJson.bytes(runtime))
+                || !QualificationExecutionIdentity.RUNTIME_SCHEMA.equals(runtime.schemaName())
+                || runtime.schemaVersion() != QualificationExecutionIdentity.RUNTIME_SCHEMA_VERSION
+                || runtime.protocolVersion() != QualificationProtocol.VERSION
+                || !runtime.campaignId().equals(declared.campaign().campaignId())) {
+            throw new IOException("committed runtime identity is not canonical for this campaign");
+        }
+
+        Path calibrationPath = root.resolve("candidates")
+                .resolve(declared.campaign().candidateAlias())
+                .resolve("calibration-rules.json");
+        byte[] calibrationBytes = declared.packetFiles().readAllBytes(calibrationPath);
+        QualificationRecords.CalibrationRules calibration = QualificationJson.read(
+                calibrationBytes, QualificationRecords.CalibrationRules.class);
+        String calibrationSha256 = QualificationScenarioBank.sha256(calibrationBytes);
+        if (!java.util.Arrays.equals(calibrationBytes, QualificationJson.bytes(calibration))
+                || !QualificationRecords.CALIBRATION_SCHEMA.equals(calibration.schemaName())
+                || calibration.schemaVersion() != QualificationRecords.SCHEMA_VERSION
+                || calibration.protocolVersion() != QualificationProtocol.VERSION
+                || !calibration.candidateAlias().equals(declared.campaign().candidateAlias())
+                || !calibration.configurationId().equals(declared.campaign().configId())
+                || !calibration.talosCommit().equals(declared.campaign().talosCommit())
+                || !calibrationSha256.equals(declared.campaign().calibrationRulesSha256())
+                || !calibrationSha256.equals(runtime.calibrationRulesSha256())) {
+            throw new IOException("frozen qualification calibration identity is invalid");
+        }
+        return exactServerPort(calibration.launchArguments());
+    }
+
+    private static int exactServerPort(List<String> arguments) throws IOException {
+        Integer port = null;
+        for (int index = 0; index < arguments.size(); index++) {
+            if (!"--port".equals(arguments.get(index))) continue;
+            if (port != null || index + 1 >= arguments.size()) {
+                throw new IOException("frozen calibration must declare exactly one server port");
+            }
+            String value = arguments.get(++index);
+            try {
+                port = Integer.parseInt(value);
+            } catch (NumberFormatException invalid) {
+                throw new IOException("frozen calibration server port is invalid", invalid);
+            }
+        }
+        if (port == null || port < 1 || port > 65_535) {
+            throw new IOException("frozen calibration server port is missing or invalid");
+        }
+        return port;
     }
 
     private static List<Path> providerRenders(
@@ -124,15 +178,6 @@ final class QualificationProviderEvidenceFinalizer {
         return packetFiles.requireRegularFile(sourceLog);
     }
 
-    private static String boundedText(
-            NoFollowPathPolicy.GuardedRoot root,
-            Path path,
-            long maxBytes,
-            String label
-    ) throws IOException {
-        return new String(boundedBytes(root, path, maxBytes, label), StandardCharsets.UTF_8);
-    }
-
     private static byte[] boundedBytes(
             NoFollowPathPolicy.GuardedRoot root,
             Path path,
@@ -148,18 +193,18 @@ final class QualificationProviderEvidenceFinalizer {
     }
 
     static void writePair(
-            NoFollowPathPolicy.GuardedRoot runFiles,
+            Path packetRoot,
             Path promptOutput,
             byte[] promptBytes,
             Path modelOutput,
             byte[] modelBytes) throws IOException {
-        // Never delete an already-published first member when the second fails;
-        // exact retry is safe, while transactional pair visibility remains T1192.
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                runFiles,
-                promptOutput, promptBytes, "provider prompt evidence");
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                runFiles,
-                modelOutput, modelBytes, "provider model evidence");
+        QualificationPacketPublisher.withLease(packetRoot, lease -> {
+            lease.publish(
+                    QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                    List.of(
+                            new QualificationPacketPublisher.Member(promptOutput, promptBytes),
+                            new QualificationPacketPublisher.Member(modelOutput, modelBytes)));
+            return null;
+        });
     }
 }

@@ -7,7 +7,10 @@ param(
     [string]$QualificationRunRoot,
 
     [Parameter(Mandatory = $true)]
-    [string]$QualificationScenario
+    [string]$QualificationScenario,
+
+    [Parameter(Mandatory = $false)]
+    [string]$QualificationServerPort = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +27,20 @@ try {
         '--no-daemon'
     if ($LASTEXITCODE -ne 0) {
         throw "Qualification campaign writable guard failed with exit code $LASTEXITCODE"
+    }
+    $ReconcileArguments = @(
+        'reconcileModelQualificationRunPublication',
+        "-PqualificationRoot=$ResolvedQualificationRoot",
+        "-PqualificationRunRoot=$ResolvedQualificationRunRoot",
+        "-PqualificationScenario=$QualificationScenario",
+        '--no-daemon'
+    )
+    if (-not [string]::IsNullOrWhiteSpace($QualificationServerPort)) {
+        $ReconcileArguments += "-PqualificationServerPort=$QualificationServerPort"
+    }
+    & $Gradle @ReconcileArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Qualification publication reconciliation failed with exit code $LASTEXITCODE"
     }
     & $Gradle 'finalizeModelQualificationResult' `
         "-PqualificationRoot=$ResolvedQualificationRoot" `

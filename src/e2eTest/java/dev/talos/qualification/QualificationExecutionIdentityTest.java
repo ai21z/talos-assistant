@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,6 +40,7 @@ class QualificationExecutionIdentityTest {
         runtime.put("harnessManifestSha256",
                 QualificationScenarioBank.sha256(Files.readAllBytes(harnessPath)));
         QualificationJson.write(runtimePath, runtime);
+        packet.refreshExecutionIdentityPublicationForTest();
 
         IllegalStateException failure = assertThrows(IllegalStateException.class, () ->
                 QualificationRunFinalizer.finalizeRun(
@@ -72,6 +74,7 @@ class QualificationExecutionIdentityTest {
         runtime.put("harnessManifestSha256",
                 QualificationScenarioBank.sha256(Files.readAllBytes(harnessPath)));
         QualificationJson.write(runtimePath, runtime);
+        packet.refreshExecutionIdentityPublicationForTest();
 
         IllegalStateException failure = assertThrows(IllegalStateException.class, () ->
                 QualificationRunFinalizer.finalizeRun(
@@ -194,9 +197,10 @@ class QualificationExecutionIdentityTest {
                     QualificationEvidenceValidator.validate(packet.root(), catalog);
 
             assertFalse(validation.valid(), name);
-            assertTrue(validation.findings().stream().anyMatch(finding ->
-                            finding.contains("publication verification failed")),
-                    () -> name + "\n" + String.join("\n", validation.findings()));
+            assertEquals(java.util.List.of(
+                    "Protocol-v6 publication lease is invalid: "
+                            + "qualification committed member bytes are invalid"),
+                    validation.findings(), name);
         }
     }
 
@@ -236,9 +240,12 @@ class QualificationExecutionIdentityTest {
     }
 
     private static void removeAuthority(QualificationTestPacket packet) throws Exception {
-        Files.delete(packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE));
-        Files.delete(packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE));
-        Files.delete(packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                java.util.List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
     }
 
     private static void mutateTraceStarted(

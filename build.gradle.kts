@@ -850,6 +850,62 @@ tasks.register<JavaExec>("finalizeModelQualificationProviderEvidence") {
     })
 }
 
+tasks.register<JavaExec>("completeModelQualificationCampaign") {
+    description = "Commits immutable protocol-v6 campaign completion authority."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val bank = providers.gradleProperty("qualificationBank").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (bank.lowercase() !in setOf("admission", "full")) {
+            throw GradleException("-PqualificationBank=admission|full is required")
+        }
+        listOf("complete-campaign", "--root", root, "--bank", bank)
+    })
+}
+
+tasks.register<JavaExec>("reconcileModelQualificationRunPublication") {
+    description = "Verifies or recovers the mechanically selected protocol-v6 run transaction."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.qualification.ModelQualificationMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val root = providers.gradleProperty("qualificationRoot").orElse("").get()
+        val scenario = providers.gradleProperty("qualificationScenario").orElse("").get()
+        val runRoot = providers.gradleProperty("qualificationRunRoot").orElse("").get()
+        val serverPort = providers.gradleProperty("qualificationServerPort").orElse("").get()
+        if (root.isBlank()) {
+            throw GradleException("-PqualificationRoot=<local packet directory> is required")
+        }
+        if (scenario.isBlank()) {
+            throw GradleException("-PqualificationScenario=<scenario id> is required")
+        }
+        if (runRoot.isBlank()) {
+            throw GradleException("-PqualificationRunRoot=<local run directory> is required")
+        }
+        val base = listOf(
+            "reconcile-run-publication",
+            "--root", root,
+            "--scenario", scenario,
+            "--run", runRoot,
+        )
+        if (serverPort.isBlank()) {
+            base
+        } else {
+            if (serverPort.toIntOrNull() !in 1..65535) {
+                throw GradleException("-PqualificationServerPort must be 1..65535 when supplied")
+            }
+            base + listOf("--server-port", serverPort)
+        }
+    })
+}
+
 tasks.register<JavaExec>("scoreModelQualificationEvidence") {
     description = "Validates and mechanically scores a local admission or full qualification packet."
     group = "verification"

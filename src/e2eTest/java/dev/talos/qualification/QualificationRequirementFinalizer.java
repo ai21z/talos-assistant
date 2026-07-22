@@ -43,20 +43,30 @@ final class QualificationRequirementFinalizer {
             Path requestedRunRoot,
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
+        return QualificationPacketPublisher.withLease(
+                packetRoot,
+                lease -> evaluateAndWriteUnderLease(
+                        lease, requestedRunRoot, scenarioId, catalog));
+    }
+
+    static Path evaluateAndWriteUnderLease(
+            QualificationPacketPublisher.Lease lease,
+            Path requestedRunRoot,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog) throws IOException {
         QualificationArtifactPublication.DeclaredRun declared =
                 QualificationArtifactPublication.requireWritableDeclaredRun(
-                        packetRoot, requestedRunRoot, scenarioId, catalog);
+                        lease.packetRoot(), requestedRunRoot, scenarioId, catalog);
         Path runRoot = declared.runRoot();
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         Document document = evaluate(
                 catalog.protocolVersion(), catalog.sha256(), scenario,
                 declared.runFiles(), runRoot);
         Path output = runRoot.resolve(OUTPUT_FILE);
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                declared.runFiles(),
-                output,
-                QualificationJson.bytes(document),
-                "mechanical requirements");
+        lease.publish(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(new QualificationPacketPublisher.Member(
+                        output, QualificationJson.bytes(document))));
         return output;
     }
 

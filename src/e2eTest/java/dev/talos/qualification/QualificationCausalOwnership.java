@@ -252,6 +252,11 @@ final class QualificationCausalOwnership {
             int protocolVersion = result.schemaVersion()
                     == QualificationRecords.LEGACY_RUN_SCHEMA_VERSION
                     ? 5 : QualificationProtocol.VERSION;
+            if (protocolVersion == QualificationProtocol.VERSION) {
+                result = QualificationJson.read(
+                        committedResultBytes(absolute),
+                        QualificationRecords.RunResult.class);
+            }
             return matchedAnswerOriginForRun(absolute.getParent(), protocolVersion)
                     == QualificationRecords.AnswerOrigin.MODEL_PROVIDER;
         } catch (IOException | RuntimeException failure) {
@@ -285,6 +290,11 @@ final class QualificationCausalOwnership {
             int protocolVersion = result.schemaVersion()
                     == QualificationRecords.LEGACY_RUN_SCHEMA_VERSION
                     ? 5 : QualificationProtocol.VERSION;
+            if (protocolVersion == QualificationProtocol.VERSION) {
+                QualificationJson.read(
+                        committedResultBytes(resultPath),
+                        QualificationRecords.RunResult.class);
+            }
             return matchedAnswerOriginForRun(runRoot, protocolVersion);
         } catch (IOException | RuntimeException failure) {
             return QualificationRecords.AnswerOrigin.NONE;
@@ -314,6 +324,29 @@ final class QualificationCausalOwnership {
         } catch (IOException | RuntimeException failure) {
             return QualificationRecords.AnswerOrigin.NONE;
         }
+    }
+
+    private static byte[] committedResultBytes(Path requestedResult) throws IOException {
+        Path result = requestedResult.toAbsolutePath().normalize();
+        Path runRoot = result.getParent();
+        Path packetRoot = runRoot;
+        for (int level = 0; level < 6; level++) {
+            packetRoot = packetRoot == null ? null : packetRoot.getParent();
+        }
+        if (packetRoot == null
+                || !"runs".equals(runRoot.getParent().getParent().getParent()
+                        .getParent().getParent().getFileName().toString())) {
+            throw new IllegalArgumentException("result path is not in a qualification run");
+        }
+        QualificationPacketPublisher.CommittedSet committed =
+                QualificationPacketPublisher.requireCommitted(
+                        packetRoot,
+                        QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                        java.util.List.of(
+                                runRoot.resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                                runRoot.resolve(QualificationRunFinalizer.CANARY_FILE),
+                                result));
+        return committed.bytes(packetRoot, result);
     }
 
     static QualificationRecords.AnswerOrigin matchedAnswerOrigin(

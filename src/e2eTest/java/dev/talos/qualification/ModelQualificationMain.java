@@ -2,6 +2,7 @@ package dev.talos.qualification;
 
 import dev.talos.core.security.NoFollowPathPolicy;
 
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,11 @@ public final class ModelQualificationMain {
                 case "assert-writable-campaign" -> assertWritableCampaign(
                         parsed.root(), catalogForMutation(parsed.root()), out);
                 case "score" -> score(parsed.root(), parsed.bank(), catalogForMutation(parsed.root()), out, err);
+                case "complete-campaign" -> completeCampaign(
+                        parsed.root(), parsed.bank(), catalogForMutation(parsed.root()), out, err);
+                case "reconcile-run-publication" -> reconcileRunPublication(
+                        parsed.root(), parsed.runRoot(), parsed.scenarioId(),
+                        parsed.serverPort(), catalogForMutation(parsed.root()), out, err);
                 case "requirements" -> requirements(
                         parsed.root(), parsed.runRoot(), parsed.scenarioId(),
                         catalogForMutation(parsed.root()), out);
@@ -47,6 +53,7 @@ public final class ModelQualificationMain {
             err.println(Arguments.usage());
             return 2;
         } catch (Exception e) {
+            QualificationPacketPublisher.printTypedFailure(err, e);
             err.println("Qualification command failed: " + e.getMessage());
             return 3;
         }
@@ -104,10 +111,21 @@ public final class ModelQualificationMain {
     private static int assertWritableCampaign(
             Path root,
             QualificationScenarioBank.Catalog catalog,
-            PrintStream out) {
-        out.println("Qualification campaign is writable under protocol v"
-                + catalog.protocolVersion() + ": " + root.toAbsolutePath().normalize());
-        return 0;
+            PrintStream out) throws IOException {
+        return QualificationPacketPublisher.withLease(root, lease -> {
+            Path completion = lease.packetRoot().resolve(
+                    QualificationCampaignCompletion.OUTPUT_FILE);
+            QualificationPacketPublisher.PublicationStatus lifecycle =
+                    lease.publicationStatus(
+                            QualificationPacketPublisher.PublicationKind.CAMPAIGN_COMPLETION,
+                            List.of(completion));
+            if (lifecycle != QualificationPacketPublisher.PublicationStatus.ABSENT) {
+                throw new IOException("campaign completion has started or committed");
+            }
+            out.println("Qualification campaign is writable under protocol v"
+                    + catalog.protocolVersion() + ": " + lease.packetRoot());
+            return 0;
+        });
     }
 
     private static int validate(
@@ -131,18 +149,50 @@ public final class ModelQualificationMain {
             QualificationProtocol.BankKind bank,
             QualificationScenarioBank.Catalog catalog,
             PrintStream out,
-            PrintStream err) throws Exception {
+            PrintStream err) throws java.io.IOException {
+        return QualificationPacketPublisher.withLease(
+                root,
+                lease -> scoreUnderLease(lease, bank, catalog, out, err));
+    }
+
+    private static int scoreUnderLease(
+            QualificationPacketPublisher.Lease lease,
+            QualificationProtocol.BankKind bank,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out,
+            PrintStream err) throws java.io.IOException {
+        Path root = lease.packetRoot();
+        QualificationRecords.CampaignManifest lockedCampaign = lease.campaign();
+        QualificationRecords.CampaignCompletion completion;
+        try {
+            completion = QualificationCampaignCompletion.requireCommitted(
+                    lease, bank, catalog);
+        } catch (IOException | RuntimeException incomplete) {
+            QualificationPacketPublisher.printTypedFailure(err, incomplete);
+            err.println("FAIL campaign completion is not committed: "
+                    + incomplete.getMessage());
+            return 1;
+        }
+        if (completion.completionReason()
+                != QualificationRecords.CampaignCompletionReason.COMPLETE_GRID) {
+            err.println("FAIL hard-stop campaign completion is not scoreable");
+            return 1;
+        }
+        String name = lockedCampaign.candidateAlias() + "-" + lockedCampaign.configId() + "-"
+                + bank.name().toLowerCase(Locale.ROOT) + ".json";
+        Path target = root.resolve("scorecards").resolve(name);
+        String transactionId = QualificationPacketPublisher.transactionIdFor(
+                root,
+                QualificationPacketPublisher.PublicationKind.SCORECARD,
+                List.of(target));
         QualificationEvidenceValidator.Validation validation =
-                QualificationEvidenceValidator.validate(root, catalog);
+                QualificationEvidenceValidator.validateForTransactionRecovery(
+                        lease, catalog, transactionId);
         if (!validation.valid()) {
             validation.findings().forEach(finding -> err.println("FAIL " + finding));
             return 1;
         }
         QualificationRecords.EngineFacts engine = validation.engine();
-        if (validation.campaign().endedAt() == null || validation.campaign().endedAt().isBlank()) {
-            err.println("FAIL campaign endedAt must be recorded before scoring");
-            return 1;
-        }
         QualificationRecords.Scorecard scorecard = QualificationScorer.score(
                 catalog,
                 bank,
@@ -150,18 +200,66 @@ public final class ModelQualificationMain {
                 new QualificationScorer.PerformanceEnvelope(
                         engine.doctorProjectionSeconds(), engine.configuredTimeoutSeconds()));
         QualificationRecords.CampaignManifest campaign = validation.campaign();
-        String name = campaign.candidateAlias() + "-" + campaign.configId() + "-"
-                + bank.name().toLowerCase(Locale.ROOT) + ".json";
-        Path target = root.resolve("scorecards").resolve(name);
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                dev.talos.core.security.NoFollowPathPolicy.bindExistingDirectory(root),
-                target, QualificationJson.bytes(scorecard), "qualification scorecard");
+        if (!campaign.equals(lockedCampaign)) {
+            throw new IOException("qualification campaign changed while scoring");
+        }
+        lease.publish(
+                QualificationPacketPublisher.PublicationKind.SCORECARD,
+                List.of(new QualificationPacketPublisher.Member(
+                        target, QualificationJson.bytes(scorecard))));
         out.println("Qualification scorecard: " + target.toAbsolutePath().normalize());
         out.println("Disposition: " + scorecard.disposition());
         return switch (scorecard.disposition()) {
             case ADMISSION_PASSED, ACCEPTED_BETA, EXPERIMENTAL_SELECTABLE -> 0;
             case ADMISSION_FAILED, BLOCKED_TRUST, BLOCKED_INCOMPLETE, REJECTED -> 1;
         };
+    }
+
+    private static int completeCampaign(
+            Path root,
+            QualificationProtocol.BankKind bank,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out,
+            PrintStream err) {
+        try {
+            QualificationCampaignCompletion.Publication publication =
+                    QualificationCampaignCompletion.complete(root, bank, catalog);
+            out.println("Qualification campaign completion: "
+                    + publication.path().toAbsolutePath().normalize());
+            out.println("Completion reason: "
+                    + publication.completion().completionReason());
+            return 0;
+        } catch (IOException | RuntimeException incomplete) {
+            QualificationPacketPublisher.printTypedFailure(err, incomplete);
+            err.println("FAIL campaign completion refused: " + incomplete.getMessage());
+            return 1;
+        }
+    }
+
+    private static int reconcileRunPublication(
+            Path root,
+            Path runRoot,
+            String scenarioId,
+            int serverPort,
+            QualificationScenarioBank.Catalog catalog,
+            PrintStream out,
+            PrintStream err) {
+        try {
+            QualificationRunPublicationReconciler.Result result =
+                    QualificationRunPublicationReconciler.reconcile(
+                            root, runRoot, scenarioId, serverPort, catalog);
+            String kind = result.publicationKind() == null
+                    ? "null"
+                    : "\"" + result.publicationKind().name() + "\"";
+            out.println("{\"state\":\"" + result.state().name()
+                    + "\",\"publicationKind\":" + kind + "}");
+            return 0;
+        } catch (IOException | RuntimeException failure) {
+            QualificationPacketPublisher.printTypedFailure(err, failure);
+            err.println("FAIL run publication reconciliation refused: "
+                    + failure.getMessage());
+            return 1;
+        }
     }
 
     private static int requirements(
@@ -250,12 +348,15 @@ public final class ModelQualificationMain {
                 }
             }
             if (root == null) throw new IllegalArgumentException("--root is required");
-            if (command.equals("score") && bank == null) {
-                throw new IllegalArgumentException("--bank admission|full is required for score");
+            if ((command.equals("score") || command.equals("complete-campaign"))
+                    && bank == null) {
+                throw new IllegalArgumentException(
+                        "--bank admission|full is required for " + command);
             }
             if ((command.equals("requirements")
                     || command.equals("approvals")
-                    || command.equals("provider-evidence"))
+                    || command.equals("provider-evidence")
+                    || command.equals("reconcile-run-publication"))
                     && (scenarioId.isBlank() || runRoot == null)) {
                 throw new IllegalArgumentException(
                         "--scenario and --run are required for " + command);
@@ -268,6 +369,8 @@ public final class ModelQualificationMain {
                     && !command.equals("validate")
                     && !command.equals("assert-writable-campaign")
                     && !command.equals("score")
+                    && !command.equals("complete-campaign")
+                    && !command.equals("reconcile-run-publication")
                     && !command.equals("requirements")
                     && !command.equals("approvals")
                     && !command.equals("provider-evidence")) {
@@ -279,6 +382,9 @@ public final class ModelQualificationMain {
         static String usage() {
             return "Usage: bank-hash | preflight --root <packet> | validate --root <packet> | "
                     + "assert-writable-campaign --root <packet> | "
+                     + "complete-campaign --root <packet> --bank admission|full | "
+                     + "reconcile-run-publication --root <packet> --scenario <id> "
+                    + "--run <run-root> [--server-port <port>] | "
                     + "score --root <packet> --bank admission|full | requirements --root <packet> "
                     + "--scenario <id> --run <run-root> | approvals --root <packet> "
                     + "--scenario <id> --run <run-root> | provider-evidence --root <packet> "

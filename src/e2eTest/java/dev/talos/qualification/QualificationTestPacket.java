@@ -27,6 +27,109 @@ final class QualificationTestPacket {
         return runRoot;
     }
 
+    void removePublicationForTest(
+            QualificationPacketPublisher.PublicationKind kind,
+            List<Path> members) throws IOException {
+        Path commit = QualificationPacketPublisher.commitPathForTest(root, kind, members);
+        Files.deleteIfExists(commit);
+        for (Path member : members) Files.deleteIfExists(member);
+    }
+
+    void removeRunEvidenceForTest() throws IOException {
+        Path commits = root.resolve(QualificationPacketPublisher.CONTROL_DIRECTORY)
+                .resolve("commits");
+        if (Files.isDirectory(commits)) {
+            try (var entries = Files.list(commits)) {
+                for (Path entry : entries.toList()) {
+                    QualificationPacketPublisher.CommitRecord commit = QualificationJson.read(
+                            entry, QualificationPacketPublisher.CommitRecord.class);
+                    if (commit.members().stream().anyMatch(member ->
+                            member.relativePath().startsWith("runs/"))) {
+                        Files.delete(entry);
+                    }
+                }
+            }
+        }
+        deleteTreeForTest(root.resolve("runs"));
+    }
+
+    void removeEmptyPublicationControlForTest() throws IOException {
+        Path control = root.resolve(QualificationPacketPublisher.CONTROL_DIRECTORY);
+        if (!Files.isDirectory(control)) return;
+        for (String directory : List.of("commits", "intents", "stages")) {
+            Path child = control.resolve(directory);
+            try (var entries = Files.list(child)) {
+                if (entries.findAny().isPresent()) {
+                    throw new IllegalStateException(
+                            "test publication control is not empty: " + directory);
+                }
+            }
+        }
+        deleteTreeForTest(control);
+    }
+
+    void publishForTest(
+            QualificationPacketPublisher.PublicationKind kind,
+            List<QualificationPacketPublisher.Member> members) throws IOException {
+        publishFixtureMembers(root, kind, members);
+    }
+
+    void refreshExecutionIdentityPublicationForTest() throws IOException {
+        refreshFixtureCommit(
+                root,
+                QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                List.of(
+                        root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE),
+                        root.resolve(QualificationExecutionIdentity.HARNESS_FILE),
+                        root.resolve(QualificationExecutionIdentity.RUNTIME_FILE)));
+    }
+
+    void refreshPublicationForTest(
+            QualificationPacketPublisher.PublicationKind kind,
+            List<Path> members) throws IOException {
+        refreshFixtureCommit(root, kind, members);
+    }
+
+    static byte[] campaignCompletionFixtureBytes(Path packetRoot) throws IOException {
+        return campaignCompletionFixtureBytes(packetRoot, "fixed");
+    }
+
+    static byte[] campaignCompletionFixtureBytes(Path packetRoot, String value)
+            throws IOException {
+        Path campaignPath = packetRoot.resolve("campaign.json");
+        byte[] campaignBytes = Files.readAllBytes(campaignPath);
+        QualificationRecords.CampaignManifest campaign = QualificationJson.read(
+                campaignBytes, QualificationRecords.CampaignManifest.class);
+        QualificationScenarioBank.Catalog catalog = protocol6Catalog();
+        QualificationProtocol.BankKind bank = QualificationProtocol.BankKind.ADMISSION;
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationRecords.CampaignRunCommitRef ref =
+                new QualificationRecords.CampaignRunCommitRef(
+                        scenario.id(),
+                        1,
+                        campaign.repetitions().getFirst(),
+                        "a".repeat(64),
+                        "b".repeat(64));
+        List<QualificationRecords.CampaignRunCommitRef> refs = List.of(ref);
+        QualificationRecords.CampaignCompletion completion =
+                new QualificationRecords.CampaignCompletion(
+                        QualificationRecords.CAMPAIGN_COMPLETION_SCHEMA,
+                        QualificationRecords.CAMPAIGN_COMPLETION_SCHEMA_VERSION,
+                        QualificationProtocol.VERSION,
+                        campaign.campaignId(),
+                        campaign.scenarioBankSha256(),
+                        bank,
+                        QualificationScenarioBank.sha256(campaignBytes),
+                        "2026-07-10T00:00:02Z",
+                        QualificationRecords.CampaignCompletionReason.HARD_STOP,
+                        catalog.admission().scenarios().size(),
+                        1,
+                        QualificationScenarioBank.sha256(QualificationJson.bytes(refs)),
+                        refs,
+                        List.of("publisher-lifecycle-fixture-" + value));
+        return QualificationJson.bytes(completion);
+    }
+
     static QualificationTestPacket create(Path root, QualificationScenarioBank.Catalog catalog) throws IOException {
         return create(root, catalog, catalog.admission().scenarios().getFirst());
     }
@@ -35,6 +138,31 @@ final class QualificationTestPacket {
             Path root,
             QualificationScenarioBank.Catalog catalog,
             QualificationProtocol.Scenario scenario) throws IOException {
+        boolean admissionLifecycle = catalog.admission().scenarios().stream()
+                .anyMatch(candidate -> candidate.id().equals(scenario.id()));
+        return create(root, catalog, scenario, admissionLifecycle, false);
+    }
+
+    static QualificationTestPacket createFullCampaign(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationProtocol.Scenario scenario) throws IOException {
+        return create(root, catalog, scenario, false, false);
+    }
+
+    static QualificationTestPacket createHardStopCampaign(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationProtocol.Scenario scenario) throws IOException {
+        return create(root, catalog, scenario, true, true);
+    }
+
+    private static QualificationTestPacket create(
+            Path root,
+            QualificationScenarioBank.Catalog catalog,
+            QualificationProtocol.Scenario scenario,
+            boolean admissionLifecycle,
+            boolean omitMandatoryResourceSamples) throws IOException {
         Path candidateDir = root.resolve("candidates/qwen14");
         Path machineDir = root.resolve("machines");
         Path engineDir = root.resolve("engines");
@@ -78,7 +206,8 @@ final class QualificationTestPacket {
                 QualificationRecords.CAMPAIGN_SCHEMA, QualificationRecords.SCHEMA_VERSION,
                 "test-campaign", "0.10.8", "a".repeat(40), catalog.protocolVersion(),
                 catalog.sha256(), "qwen14", "reference", "cuda", "standard",
-                List.of("r1", "r2", "r3"), "uncontrolled-repetitions",
+                admissionLifecycle ? List.of("r1") : List.of("r1", "r2", "r3"),
+                "uncontrolled-repetitions",
                 QualificationScenarioBank.sha256(Files.readAllBytes(rules)),
                 QualificationScenarioBank.sha256(Files.readAllBytes(guide)),
                 Instant.parse("2026-07-10T00:00:00Z").toString(), "");
@@ -96,8 +225,8 @@ final class QualificationTestPacket {
         QualificationRecords.EngineFacts engine = new QualificationRecords.EngineFacts(
                 QualificationRecords.ENGINE_SCHEMA, QualificationRecords.SCHEMA_VERSION,
                 "cuda", "b9918", "asset.zip", executablePath.toString(), executableSha256,
-                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime"),
-                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "-lv", "4"), "cuda", true,
+                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161"),
+                List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161", "-lv", "4"), "cuda", true,
                 "49/49 layers offloaded", 45.0, 300.0);
         QualificationRecords.RunResult result = runResult(catalog, scenario, 1, true, true);
 
@@ -192,9 +321,9 @@ final class QualificationTestPacket {
                         ledgerClasspath,
                         QualificationExecutionIdentityWriter.requiredHarnessRoles());
         Path ledgerPath = root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE);
-        QualificationJson.write(ledgerPath, ledger);
+        byte[] ledgerBytes = QualificationJson.bytes(ledger);
         harnessFiles.put(QualificationExecutionIdentityWriter.LEDGER_FILE,
-                QualificationScenarioBank.sha256(Files.readAllBytes(ledgerPath)));
+                QualificationScenarioBank.sha256(ledgerBytes));
         QualificationExecutionIdentity.HarnessManifest harnessManifest =
                 new QualificationExecutionIdentity.HarnessManifest(
                         QualificationExecutionIdentity.HARNESS_SCHEMA,
@@ -207,9 +336,9 @@ final class QualificationTestPacket {
                         java.util.Map.of(),
                         java.util.Map.of());
         Path harnessManifestPath = root.resolve(QualificationExecutionIdentity.HARNESS_FILE);
-        QualificationJson.write(harnessManifestPath, harnessManifest);
-        QualificationJson.write(
-                root.resolve(QualificationExecutionIdentity.RUNTIME_FILE),
+        byte[] harnessManifestBytes = QualificationJson.bytes(harnessManifest);
+        Path runtimeManifestPath = root.resolve(QualificationExecutionIdentity.RUNTIME_FILE);
+        QualificationExecutionIdentity.RuntimeManifest runtimeManifest =
                 new QualificationExecutionIdentity.RuntimeManifest(
                         QualificationExecutionIdentity.RUNTIME_SCHEMA,
                         QualificationExecutionIdentity.RUNTIME_SCHEMA_VERSION,
@@ -228,10 +357,26 @@ final class QualificationTestPacket {
                         calibrationHash,
                         engineJsonHash,
                         machineJsonHash,
-                        QualificationScenarioBank.sha256(Files.readAllBytes(harnessManifestPath)),
+                        QualificationScenarioBank.sha256(harnessManifestBytes),
                         "",
                         executableSha256,
-                        modelSha256));
+                        modelSha256);
+        byte[] runtimeManifestBytes = QualificationJson.bytes(runtimeManifest);
+        if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+            publishFixtureMembers(
+                    root,
+                    QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                    List.of(
+                            new QualificationPacketPublisher.Member(ledgerPath, ledgerBytes),
+                            new QualificationPacketPublisher.Member(
+                                    harnessManifestPath, harnessManifestBytes),
+                            new QualificationPacketPublisher.Member(
+                                    runtimeManifestPath, runtimeManifestBytes)));
+        } else {
+            Files.write(ledgerPath, ledgerBytes);
+            Files.write(harnessManifestPath, harnessManifestBytes);
+            Files.write(runtimeManifestPath, runtimeManifestBytes);
+        }
         QualificationJson.write(runDir.resolve("request.json"), new QualificationRecords.RequestRecord(
                 QualificationRecords.REQUEST_SCHEMA, QualificationRecords.SCHEMA_VERSION,
                 scenario.id(), scenario.prompt(), "r1", "TRUE_PTY", "talos"));
@@ -294,9 +439,12 @@ final class QualificationTestPacket {
                         "verificationStatus", "NOT_RUN",
                         "approvalStatus", "NONE", "mutationStatus", "NOT_REQUESTED",
                         "classification", scenario.expectedTerminalStates().getFirst())));
-        QualificationJson.write(
-                runDir.resolve("approvals.json"),
+        Path approvalsPath = runDir.resolve("approvals.json");
+        byte[] approvalsBytes = QualificationJson.bytes(
                 new QualificationApprovalFinalizer.Document(List.of()));
+        if (!protocolV6) {
+            Files.write(approvalsPath, approvalsBytes);
+        }
         List<QualificationPtyEvidence.Event> captureEvents = new java.util.ArrayList<>();
         captureEvents.add(new QualificationPtyEvidence.Event(
                 "2026-07-10T00:00:00Z", "input", "scenario-prompt"));
@@ -347,7 +495,17 @@ final class QualificationTestPacket {
                 processCleanup,
                 captureEvents,
                 "Outcome: " + scenario.expectedTerminalStates().getFirst());
-        QualificationJson.write(runDir.resolve("transcript.raw.json"), capture);
+        Path transcriptRawPath = runDir.resolve("transcript.raw.json");
+        byte[] transcriptRawBytes = QualificationJson.bytes(capture);
+        if (protocolV6) {
+            publishFixtureMembers(
+                    root,
+                    QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                    List.of(new QualificationPacketPublisher.Member(
+                            transcriptRawPath, transcriptRawBytes)));
+        } else {
+            Files.write(transcriptRawPath, transcriptRawBytes);
+        }
         QualificationScenarioBank.FixtureResource fixture = catalog.fixtures().get(scenario.fixture());
         writeEvidenceFiles(runDir.resolve("before-files"), fixture.manifest().files());
         writeEvidenceFiles(runDir.resolve("after-files"), fixture.manifest().files());
@@ -387,21 +545,45 @@ final class QualificationTestPacket {
                 java.util.Map.entry("gpuVramUsedBytes", 0),
                 java.util.Map.entry("gpuVramBytes", 16L << 30),
                 java.util.Map.entry("measurementSource", "test fixture")));
-        Files.writeString(
-                runDir.resolve("resource-samples.csv"),
-                QualificationResourceSamples.HEADER + "\n"
-                        + "2026-07-10T00:00:01Z," + (32L << 30)
-                        + ",0,0," + (8L << 30) + ",0\n",
-                StandardCharsets.UTF_8);
+        if (!omitMandatoryResourceSamples) {
+            Files.writeString(
+                    runDir.resolve("resource-samples.csv"),
+                    QualificationResourceSamples.HEADER + "\n"
+                            + "2026-07-10T00:00:01Z," + (32L << 30)
+                            + ",0,0," + (8L << 30) + ",0\n",
+                    StandardCharsets.UTF_8);
+        }
         Files.writeString(runDir.resolve("answer.txt"), answerText, StandardCharsets.UTF_8);
         Files.writeString(runDir.resolve("transcript.txt"),
                 "talos test transcript\nOutcome: "
                         + scenario.expectedTerminalStates().getFirst() + "\n",
                 StandardCharsets.UTF_8);
-        Files.writeString(runDir.resolve("prompt-debug.txt"), "redacted prompt debug\n", StandardCharsets.UTF_8);
-        Files.writeString(runDir.resolve("llama.log"), "prompt eval time\n", StandardCharsets.UTF_8);
+        Path promptDebugPath = runDir.resolve("prompt-debug.txt");
+        Path llamaLogPath = runDir.resolve("llama.log");
+        byte[] promptDebugBytes = "redacted prompt debug\n".getBytes(StandardCharsets.UTF_8);
+        byte[] llamaLogBytes = "prompt eval time\n".getBytes(StandardCharsets.UTF_8);
+        if (protocolV6) {
+            publishFixtureMembers(
+                    root,
+                    QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                    List.of(
+                            new QualificationPacketPublisher.Member(
+                                    promptDebugPath, promptDebugBytes),
+                            new QualificationPacketPublisher.Member(
+                                    llamaLogPath, llamaLogBytes)));
+            publishFixtureMembers(
+                    root,
+                    QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                    List.of(new QualificationPacketPublisher.Member(
+                            approvalsPath, approvalsBytes)));
+        } else {
+            Files.write(promptDebugPath, promptDebugBytes);
+            Files.write(llamaLogPath, llamaLogBytes);
+        }
 
         if (catalog.protocolVersion() == QualificationCausalFinalizer.WRITABLE_PROTOCOL_VERSION) {
+            QualificationRequirementFinalizer.evaluateAndWrite(
+                    root, runDir, scenario.id(), catalog);
             QualificationRunFinalizer.finalizeRun(root, runDir, scenario.id(), catalog);
         } else {
             QualificationJson.write(
@@ -543,6 +725,55 @@ final class QualificationTestPacket {
         runtime.put("harnessManifestSha256",
                 QualificationScenarioBank.sha256(Files.readAllBytes(harnessPath)));
         QualificationJson.write(runtimePath, runtime);
+        refreshFixtureCommit(
+                packet.root(),
+                QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                List.of(ledgerPath, harnessPath, runtimePath));
+    }
+
+    private static void publishFixtureMembers(
+            Path packetRoot,
+            QualificationPacketPublisher.PublicationKind kind,
+            List<QualificationPacketPublisher.Member> members) throws IOException {
+        QualificationPacketPublisher.LeaseAction<Void> publish = lease -> {
+            lease.publish(kind, members);
+            return null;
+        };
+        if (kind == QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY) {
+            QualificationPacketPublisher.withBootstrapLease(packetRoot, publish);
+        } else {
+            QualificationPacketPublisher.withLease(packetRoot, publish);
+        }
+    }
+
+    private static void refreshFixtureCommit(
+            Path packetRoot,
+            QualificationPacketPublisher.PublicationKind kind,
+            List<Path> members) throws IOException {
+        Path commit = QualificationPacketPublisher.commitPathForTest(
+                packetRoot, kind, members);
+        List<QualificationPacketPublisher.Member> snapshots = members.stream()
+                .map(path -> {
+                    try {
+                        return new QualificationPacketPublisher.Member(
+                                path, Files.readAllBytes(path));
+                    } catch (IOException failure) {
+                        throw new java.io.UncheckedIOException(failure);
+                    }
+                })
+                .toList();
+        Files.deleteIfExists(commit);
+        for (Path member : members) Files.delete(member);
+        publishFixtureMembers(packetRoot, kind, snapshots);
+    }
+
+    private static void deleteTreeForTest(Path path) throws IOException {
+        if (!Files.exists(path)) return;
+        try (var paths = Files.walk(path)) {
+            for (Path entry : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(entry);
+            }
+        }
     }
 
     private static List<java.util.Map<String, Object>> protocolV6TraceEvents(
@@ -807,8 +1038,8 @@ final class QualificationTestPacket {
                 size(modelPath), modelSha256, "Apache-2.0", "official",
                 "qwen2-dense", 14_700_000_000L, 14_700_000_000L,
                  "a".repeat(40), protocolVersion, "b9918", executableSha256,
-                 "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime"),
-                 List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "-lv", "4"),
+                 "cuda", List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161"),
+                 List.of("-m", modelPath.toString(), "--jinja", "-c", "16384", "--alias", "qwen14-runtime", "--port", "18161", "-lv", "4"),
                  List.of(), "PRESERVE_AS_WRITTEN", "", "native",
                  "embedded-jinja", "standard-instruct", 16384,
                 new QualificationRecords.SamplingPolicy(

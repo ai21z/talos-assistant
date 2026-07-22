@@ -6,12 +6,9 @@ import dev.talos.core.util.RuntimeArtifactIdentity;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.text.Normalizer;
 import java.security.DigestInputStream;
@@ -374,36 +371,158 @@ final class QualificationExecutionIdentityWriter {
         ensureNoCaseVariant(packetRoot, ledgerPath);
         ensureNoCaseVariant(packetRoot, harnessPath);
         ensureNoCaseVariant(packetRoot, runtimePath);
-        Existing ledgerExisting = inspectExisting(
-                ledgerPath, ledgerBytes, "execution input ledger");
-        Existing harnessExisting = inspectExisting(harnessPath, harnessBytes, "harness manifest");
-        Existing runtimeExisting = inspectExisting(runtimePath, runtimeBytes, "runtime identity");
-        List<Created> created = new ArrayList<>();
-        try {
-            if (ledgerExisting == Existing.MISSING) {
-                createExact(ledgerPath, ledgerBytes, "execution input ledger");
-                created.add(new Created(ledgerPath, ledgerBytes));
+        return QualificationPacketPublisher.withBootstrapLease(packetRoot, lease -> {
+            QualificationRecords.CampaignManifest lockedCampaign = readPacket(
+                    packetRoot,
+                    campaignPath,
+                    QualificationRecords.CampaignManifest.class,
+                    "campaign");
+            requireCampaign(lockedCampaign, currentCommit, currentVersion);
+            if (!lockedCampaign.equals(campaign)) {
+                throw invalid("campaign identity changed during execution identity derivation");
             }
-            if (harnessExisting == Existing.MISSING) {
-                createExact(harnessPath, harnessBytes, "harness manifest");
-                created.add(new Created(harnessPath, harnessBytes));
+            if (containsHistoricalEvidence(packetRoot, lockedCampaign)) {
+                throw invalid(
+                        "refusing execution identity generation for a historical or started packet");
             }
-            if (runtimeExisting == Existing.MISSING) {
-                createExact(runtimePath, runtimeBytes, "runtime identity");
-                created.add(new Created(runtimePath, runtimeBytes));
+            byte[] lockedCandidateBytes = requiredPacketBytes(
+                    packetRoot, candidatePath, "candidate manifest");
+            byte[] lockedCalibrationBytes = requiredPacketBytes(
+                    packetRoot, calibrationPath, "calibration rules");
+            byte[] lockedEngineBytes = requiredPacketBytes(
+                    packetRoot, enginePath, "engine manifest");
+            byte[] lockedMachineBytes = requiredPacketBytes(
+                    packetRoot, machinePath, "machine manifest");
+            byte[] lockedGuideBytes = requiredPacketBytes(
+                    packetRoot, guidePath, "calibration guide");
+            requireUnchanged(candidateBytes, lockedCandidateBytes, "candidate manifest");
+            requireUnchanged(calibrationBytes, lockedCalibrationBytes, "calibration rules");
+            requireUnchanged(engineBytes, lockedEngineBytes, "engine manifest");
+            requireUnchanged(machineBytes, lockedMachineBytes, "machine manifest");
+            requireUnchanged(guideBytes, lockedGuideBytes, "calibration guide");
+
+            QualificationRecords.CandidateManifest lockedCandidate = strict(
+                    lockedCandidateBytes,
+                    QualificationRecords.CandidateManifest.class,
+                    "candidate manifest");
+            QualificationRecords.CalibrationRules lockedCalibration = strict(
+                    lockedCalibrationBytes,
+                    QualificationRecords.CalibrationRules.class,
+                    "calibration rules");
+            QualificationRecords.EngineFacts lockedEngine = strict(
+                    lockedEngineBytes,
+                    QualificationRecords.EngineFacts.class,
+                    "engine manifest");
+            QualificationRecords.MachineFacts lockedMachine = strict(
+                    lockedMachineBytes,
+                    QualificationRecords.MachineFacts.class,
+                    "machine manifest");
+            if (!lockedCandidate.equals(candidate)
+                    || !lockedCalibration.equals(calibration)
+                    || !lockedEngine.equals(engine)
+                    || !lockedMachine.equals(machine)) {
+                throw invalid("qualification identity source changed during derivation");
             }
+            validatePacketIdentities(
+                    lockedCampaign,
+                    lockedCandidate,
+                    lockedCalibration,
+                    lockedEngine,
+                    lockedMachine,
+                    lockedCandidateBytes,
+                    lockedCalibrationBytes,
+                    lockedGuideBytes,
+                    lockedEngineBytes,
+                    lockedMachineBytes,
+                    modelArtifact,
+                    modelHash,
+                    engineExecutable,
+                    engineHash,
+                    currentCommit);
+            verifyExternalArtifactReceipt(
+                    modelReceipt,
+                    modelArtifact,
+                    modelHash,
+                    lockedCandidate.sizeBytes(),
+                    "MODEL_GGUF");
+            verifyExternalArtifactReceipt(
+                    engineReceipt,
+                    engineExecutable,
+                    engineHash,
+                    -1L,
+                    "ENGINE_EXECUTABLE");
+
+            JarIdentity lockedBuiltJar = jarIdentity(
+                    builtTalos, currentCommit, currentVersion, "built Talos");
+            JarIdentity lockedInstalledJar = jarIdentity(
+                    installedTalos, currentCommit, currentVersion, "installed Talos");
+            if (!lockedBuiltJar.equals(builtJar) || !lockedInstalledJar.equals(installedJar)) {
+                throw invalid("Talos artifact identity changed during derivation");
+            }
+            HarnessInputSpecification lockedInputs = readInputSpecification(inputPath);
+            if (!lockedInputs.equals(inputs)) {
+                throw invalid("harness input specification changed during derivation");
+            }
+            String lockedFinalizerHash =
+                    QualificationExecutionIdentity.currentFinalizerImplementationSha256();
+            RuntimeArtifactIdentity.ClasspathSnapshot lockedFinalizerClasspath =
+                    QualificationExecutionIdentity.executingFinalizerClasspathSnapshot();
+            if (!lockedFinalizerHash.equals(finalizerHash)
+                    || !lockedFinalizerClasspath.equals(finalizerClasspath)) {
+                throw invalid("executing finalizer identity changed during derivation");
+            }
+            validateInputSpecification(
+                    lockedInputs,
+                    packetRoot,
+                    repositoryRoot,
+                    lockedCampaign,
+                    currentCommit,
+                    lockedFinalizerHash,
+                    lockedFinalizerClasspath,
+                    lockedBuiltJar,
+                    lockedInstalledJar,
+                    candidateHash,
+                    calibrationHash,
+                    engineManifestHash,
+                    machineHash,
+                    modelHash,
+                    engineHash);
+            InstalledRuntimeIdentity lockedInstalledRuntime =
+                    validateInstalledRuntimeClasspath(
+                            installedTalos, lockedInputs.installedRuntimeClasspath());
+            if (!lockedInstalledRuntime.equals(installedRuntime)) {
+                throw invalid("installed runtime identity changed during derivation");
+            }
+            String lockedPreflightHash = QualificationExecutionIdentity.verifyPreflight(
+                    packetRoot,
+                    lockedCampaign,
+                    lockedCandidate,
+                    lockedCalibration,
+                    lockedEngine,
+                    safe(lockedCalibration.directPreflightEvidenceManifestSha256()));
+            if (!lockedPreflightHash.equals(preflightHash)) {
+                throw invalid("direct preflight evidence changed during derivation");
+            }
+            QualificationPacketPublisher.CommittedSet committed = lease.publish(
+                    QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                    List.of(
+                            new QualificationPacketPublisher.Member(ledgerPath, ledgerBytes),
+                            new QualificationPacketPublisher.Member(harnessPath, harnessBytes),
+                            new QualificationPacketPublisher.Member(runtimePath, runtimeBytes)));
             QualificationExecutionIdentity.verify(
                     packetRoot, campaign, candidate, calibration, machine, engine,
                     new byte[0], false);
-        } catch (Throwable failure) {
-            rollbackCreated(created, failure);
-            throw failure;
-        }
+            return new Result(
+                    ledgerPath, ledgerHash, committed.created(),
+                    harnessPath, harnessHash, committed.created(),
+                    runtimePath, sha256(runtimeBytes), committed.created());
+        });
+    }
 
-        return new Result(
-                ledgerPath, ledgerHash, ledgerExisting == Existing.MISSING,
-                harnessPath, harnessHash, harnessExisting == Existing.MISSING,
-                runtimePath, sha256(runtimeBytes), runtimeExisting == Existing.MISSING);
+    private static void requireUnchanged(byte[] expected, byte[] actual, String label) {
+        if (!java.util.Arrays.equals(expected, actual)) {
+            throw invalid(label + " changed during execution identity derivation");
+        }
     }
 
     /**
@@ -1325,23 +1444,6 @@ final class QualificationExecutionIdentityWriter {
         return new JarIdentity(hash, size);
     }
 
-    private static Existing inspectExisting(Path path, byte[] expected, String label)
-            throws IOException {
-        Path parent = path.toAbsolutePath().normalize().getParent();
-        if (parent == null) throw invalid("existing " + label + " has no parent");
-        NoFollowPathPolicy.GuardedRoot owner =
-                NoFollowPathPolicy.bindExistingDirectory(parent);
-        NoFollowPathPolicy.EntryType type = owner.inspect(path);
-        if (type == NoFollowPathPolicy.EntryType.MISSING) return Existing.MISSING;
-        if (type != NoFollowPathPolicy.EntryType.REGULAR_FILE) {
-            throw invalid("existing " + label + " is linked or not a regular file");
-        }
-        if (!java.util.Arrays.equals(owner.readAllBytes(path), expected)) {
-            throw invalid("existing " + label + " conflicts with derived exact bytes");
-        }
-        return Existing.IDENTICAL;
-    }
-
     private static boolean containsHistoricalEvidence(
             Path packetRoot,
             QualificationRecords.CampaignManifest campaign) throws IOException {
@@ -1356,49 +1458,6 @@ final class QualificationExecutionIdentityWriter {
         }
         return packetFiles.walk(runs).stream().skip(1).anyMatch(entry ->
                 entry.type() == NoFollowPathPolicy.EntryType.REGULAR_FILE);
-    }
-
-    private static void createExact(Path path, byte[] bytes, String label) throws IOException {
-        Path parent = path.toAbsolutePath().normalize().getParent();
-        if (parent == null) throw invalid(label + " has no parent");
-        NoFollowPathPolicy.GuardedRoot owner =
-                NoFollowPathPolicy.bindExistingDirectory(parent);
-        owner.requireRegularFileTarget(path);
-        try {
-            try (var output = Files.newOutputStream(
-                    path,
-                    StandardOpenOption.CREATE_NEW,
-                    StandardOpenOption.WRITE,
-                    LinkOption.NOFOLLOW_LINKS)) {
-                output.write(bytes);
-            }
-        } catch (FileAlreadyExistsException race) {
-            throw invalid("refusing concurrent or pre-existing " + label + " creation", race);
-        }
-        if (!java.util.Arrays.equals(owner.readAllBytes(path), bytes)) {
-            throw invalid("created " + label + " bytes do not match the derived representation");
-        }
-    }
-
-    private static void rollbackCreated(List<Created> created, Throwable failure) {
-        for (int i = created.size() - 1; i >= 0; i--) {
-            Created item = created.get(i);
-            try {
-                Path parent = item.path().toAbsolutePath().normalize().getParent();
-                NoFollowPathPolicy.GuardedRoot owner =
-                        NoFollowPathPolicy.bindExistingDirectory(parent);
-                if (owner.inspect(item.path()) == NoFollowPathPolicy.EntryType.REGULAR_FILE
-                        && java.util.Arrays.equals(
-                                owner.readAllBytes(item.path()), item.bytes())) {
-                    Files.delete(item.path());
-                } else {
-                    failure.addSuppressed(new IllegalStateException(
-                            "created identity file changed before rollback: " + item.path()));
-                }
-            } catch (Throwable cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
-            }
-        }
     }
 
     private static void ensureNoCaseVariant(Path root, Path expected) throws IOException {
@@ -1696,8 +1755,6 @@ final class QualificationExecutionIdentityWriter {
         return new IllegalStateException(message, cause);
     }
 
-    private enum Existing { MISSING, IDENTICAL }
-
     private record JarIdentity(String sha256, long sizeBytes) {}
 
     private record InstalledRuntimeIdentity(
@@ -1710,14 +1767,4 @@ final class QualificationExecutionIdentityWriter {
         }
     }
 
-    private record Created(Path path, byte[] bytes) {
-        Created {
-            bytes = bytes.clone();
-        }
-
-        @Override
-        public byte[] bytes() {
-            return bytes.clone();
-        }
-    }
 }

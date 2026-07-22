@@ -143,7 +143,43 @@ final class QualificationPreResultEvidence {
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
         List<String> findings = new ArrayList<>();
 
-        Map<Path, byte[]> runArtifacts = captureTree(runFiles, runRoot);
+        Map<Path, byte[]> runArtifacts = new java.util.HashMap<>(
+                captureTree(runFiles, runRoot));
+        if (catalog.protocolVersion() == QualificationProtocol.VERSION) {
+            requireCommittedSet(
+                    root,
+                    runArtifacts,
+                    QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                    List.of(runRoot.resolve("transcript.raw.json")));
+            requireCommittedSet(
+                    root,
+                    runArtifacts,
+                    QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                    List.of(runRoot.resolve(QualificationApprovalFinalizer.OUTPUT_FILE)));
+            requireCommittedSet(
+                    root,
+                    runArtifacts,
+                    QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                    List.of(
+                            runRoot.resolve("prompt-debug.txt"),
+                            runRoot.resolve("llama.log")));
+            Path requirements = runRoot.resolve(QualificationRequirementFinalizer.OUTPUT_FILE);
+            if (runArtifacts.containsKey(requirements)) {
+                requireCommittedSet(
+                        root,
+                        runArtifacts,
+                        QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                        List.of(requirements));
+            }
+            Path failedTranscript = runRoot.resolve("transcript.failed.txt");
+            if (runArtifacts.containsKey(failedTranscript)) {
+                requireCommittedSet(
+                        root,
+                        runArtifacts,
+                        QualificationPacketPublisher.PublicationKind.PTY_FAILURE,
+                        List.of(failedTranscript));
+            }
+        }
         Map<String, String> artifactHashes = new TreeMap<>();
         runArtifacts.forEach((path, bytes) -> {
             String relative = runRoot.relativize(path).toString().replace('\\', '/');
@@ -436,6 +472,18 @@ final class QualificationPreResultEvidence {
                 requirements, canaryScan,
                 complete ? matchedOrigin : QualificationRecords.AnswerOrigin.NONE,
                 operatorInterrupted, harnessFailureProven, trust, findings);
+    }
+
+    private static void requireCommittedSet(
+            Path packetRoot,
+            Map<Path, byte[]> captured,
+            QualificationPacketPublisher.PublicationKind kind,
+            List<Path> members) throws IOException {
+        QualificationPacketPublisher.CommittedSet committed =
+                QualificationPacketPublisher.requireCommitted(packetRoot, kind, members);
+        for (Path member : members) {
+            captured.put(member.toAbsolutePath().normalize(), committed.bytes(packetRoot, member));
+        }
     }
 
     private static boolean explicitPtyHarnessFailure(

@@ -1,6 +1,7 @@
 package dev.talos.qualification;
 
 import java.io.PrintStream;
+import java.io.IOException;
 import java.nio.file.Path;
 
 /** CLI guard for a campaign runner after it finalizes one declared trial. */
@@ -24,9 +25,37 @@ public final class QualificationCampaignContinuationMain {
             Path packetRoot = Path.of(args[0]).toAbsolutePath().normalize();
             String scenarioId = safeSegment(args[1], "scenario id");
             int repetition = positiveRepetition(args[2]);
-            QualificationRecords.CampaignManifest campaign =
-                    QualificationArtifactPublication.requireWritableCampaign(
-                            packetRoot, QualificationScenarioBank.loadDefault());
+            QualificationArtifactPublication.requireWritableCampaign(
+                    packetRoot, QualificationScenarioBank.loadDefault());
+            return QualificationPacketPublisher.withLease(
+                    packetRoot,
+                    lease -> evaluateUnderLease(
+                            lease, scenarioId, repetition, out, err));
+        } catch (Exception failure) {
+            QualificationPacketPublisher.printTypedFailure(err, failure);
+            err.println("STOP unable-to-evaluate-result: " + failure.getMessage());
+            return 1;
+        }
+    }
+
+    private static int evaluateUnderLease(
+            QualificationPacketPublisher.Lease lease,
+            String scenarioId,
+            int repetition,
+            PrintStream out,
+            PrintStream err) throws IOException {
+            Path packetRoot = lease.packetRoot();
+            QualificationRecords.CampaignManifest campaign = lease.campaign();
+            Path completionPath = packetRoot.resolve(
+                    QualificationCampaignCompletion.OUTPUT_FILE);
+            QualificationPacketPublisher.PublicationStatus lifecycle =
+                    lease.publicationStatus(
+                            QualificationPacketPublisher.PublicationKind.CAMPAIGN_COMPLETION,
+                            java.util.List.of(completionPath));
+            if (lifecycle != QualificationPacketPublisher.PublicationStatus.ABSENT) {
+                throw new IllegalStateException(
+                        "campaign completion has started or committed");
+            }
             if (repetition > campaign.repetitions().size()) {
                 throw new IllegalArgumentException(
                         "repetition is not declared by the campaign: " + repetition);
@@ -54,7 +83,8 @@ public final class QualificationCampaignContinuationMain {
             QualificationScenarioBank.Catalog catalog =
                     QualificationScenarioBank.load(QualificationProtocol.VERSION);
             QualificationRunFinalizer.Publication publication =
-                    QualificationRunFinalizer.verifyPublished(packetRoot, resultPath, catalog);
+                    QualificationRunFinalizer.verifyPublished(
+                            lease, resultPath, catalog);
             QualificationRecords.RunResult result = publication.result();
             if (!scenarioId.equals(result.scenarioId())
                     || repetition != result.repetition()
@@ -74,10 +104,6 @@ public final class QualificationCampaignContinuationMain {
             }
             out.println("CONTINUE " + result.scenarioId() + "/" + result.repetitionId());
             return 0;
-        } catch (Exception failure) {
-            err.println("STOP unable-to-evaluate-result: " + failure.getMessage());
-            return 1;
-        }
     }
 
     private static int positiveRepetition(String value) {

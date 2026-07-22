@@ -267,6 +267,7 @@ class QualificationExecutionIdentityWriterTest {
             replaceIntegralWithWrongScalarType(
                     scalarOwner, testCase.field(), testCase.textual());
             rebindExecutionLedgerIdentity(written, ledger);
+            seed.packet().refreshExecutionIdentityPublicationForTest();
 
             byte[] ledgerBefore = Files.readAllBytes(written.executionInputLedger());
             byte[] harnessBefore = Files.readAllBytes(written.harnessManifest());
@@ -386,17 +387,19 @@ class QualificationExecutionIdentityWriterTest {
         byte[] conflict = "historical conflict\n".getBytes(StandardCharsets.UTF_8);
         Files.write(harness, conflict);
 
-        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> write(seed));
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
+                () -> write(seed));
 
-        assertTrue(failure.getMessage().contains("conflicts with derived exact bytes"),
-                failure::getMessage);
+        assertEquals(QualificationPacketPublisher.FailureReason.INVALID_REQUEST, failure.reason());
         assertArrayEquals(conflict, Files.readAllBytes(harness));
         assertFalse(Files.exists(seed.packet().root().resolve(
                 QualificationExecutionIdentity.RUNTIME_FILE)));
     }
 
     @Test
-    void laterExecutionLedgerMutationBreaksTheHarnessVerificationEdge() throws Exception {
+    void laterExecutionLedgerMutationInvalidatesPublicationLeaseBeforeHarnessVerification()
+            throws Exception {
         Seed seed = seed("ledger-mutation", false);
         QualificationExecutionIdentityWriter.Result result = write(seed);
         Files.writeString(result.executionInputLedger(), "{}\n", StandardCharsets.UTF_8);
@@ -406,10 +409,10 @@ class QualificationExecutionIdentityWriterTest {
                         seed.packet().root(), QualificationTestPacket.protocol6Catalog());
 
         assertFalse(validation.valid());
-        assertTrue(validation.findings().stream().anyMatch(finding ->
-                        finding.contains("execution identity is invalid")
-                                && finding.contains("execution-input-ledger.json")),
-                () -> String.join("\n", validation.findings()));
+        assertEquals(List.of(
+                "Protocol-v6 publication lease is invalid: "
+                        + "qualification committed member bytes are invalid"),
+                validation.findings());
     }
 
     @Test
@@ -445,6 +448,43 @@ class QualificationExecutionIdentityWriterTest {
 
         assertTrue(failure.getMessage().contains("historical or started packet"),
                 failure::getMessage);
+    }
+
+    @Test
+    void sourceMutationBeforeThePublicationLeaseCannotCommitDerivedIdentity() throws Exception {
+        Seed seed = seed("pre-lease-source-mutation", false);
+        Path candidate = seed.packet().root().resolve("candidates/qwen14/candidate.json");
+        byte[] original = Files.readAllBytes(candidate);
+        java.util.concurrent.atomic.AtomicBoolean mutated =
+                new java.util.concurrent.atomic.AtomicBoolean();
+
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> QualificationExecutionIdentityWriter.write(
+                        request(seed, COMMIT),
+                        path -> {
+                            if (mutated.compareAndSet(false, true)) {
+                                ObjectNode json = (ObjectNode) QualificationJson.readTree(original);
+                                json.put("displayName", "changed before publication lease");
+                                Files.write(candidate, QualificationJson.bytes(json));
+                            }
+                            return hash(path);
+                        }));
+
+        assertTrue(mutated.get());
+        assertTrue(failure.getMessage().contains(
+                "candidate manifest changed during execution identity derivation"),
+                failure::getMessage);
+        assertOutputsAbsent(seed.packet().root());
+        Path control = seed.packet().root().resolve(
+                QualificationPacketPublisher.CONTROL_DIRECTORY);
+        try (var commits = Files.list(control.resolve("commits"));
+             var intents = Files.list(control.resolve("intents"));
+             var stages = Files.list(control.resolve("stages"))) {
+            assertTrue(commits.findAny().isEmpty());
+            assertTrue(intents.findAny().isEmpty());
+            assertTrue(stages.findAny().isEmpty());
+        }
     }
 
     @Test
@@ -789,10 +829,14 @@ class QualificationExecutionIdentityWriterTest {
         QualificationTestPacket packet = QualificationTestPacket.create(
                 root, QualificationTestPacket.protocol6Catalog());
         if (adapted) QualificationTestPacket.enableSingleLeadingSystemPreflight(packet);
-        deleteTree(root.resolve("runs"));
-        Files.delete(root.resolve(QualificationExecutionIdentity.HARNESS_FILE));
-        Files.delete(root.resolve(QualificationExecutionIdentity.RUNTIME_FILE));
-        Files.delete(root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE));
+        packet.removeRunEvidenceForTest();
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                List.of(
+                        root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE),
+                        root.resolve(QualificationExecutionIdentity.HARNESS_FILE),
+                        root.resolve(QualificationExecutionIdentity.RUNTIME_FILE)));
+        packet.removeEmptyPublicationControlForTest();
 
         Path built = temp.resolve(name).resolve("built/talos.jar");
         Path installed = temp.resolve(name).resolve("installed/lib/talos.jar");
@@ -962,15 +1006,6 @@ class QualificationExecutionIdentityWriterTest {
         assertFalse(Files.exists(root.resolve(QualificationExecutionIdentity.HARNESS_FILE)));
         assertFalse(Files.exists(root.resolve(QualificationExecutionIdentity.RUNTIME_FILE)));
         assertFalse(Files.exists(root.resolve(QualificationExecutionIdentityWriter.LEDGER_FILE)));
-    }
-
-    private static void deleteTree(Path root) throws IOException {
-        if (!Files.exists(root)) return;
-        try (var paths = Files.walk(root)) {
-            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                Files.delete(path);
-            }
-        }
     }
 
     private static void createSymbolicLinkOrAbort(Path link, Path target) throws IOException {

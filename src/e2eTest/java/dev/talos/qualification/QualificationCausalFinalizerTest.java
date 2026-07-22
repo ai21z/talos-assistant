@@ -1612,7 +1612,7 @@ class QualificationCausalFinalizerTest {
     }
 
     @Test
-    void runFinalizerRefusesForgedPublishedOwnershipAndWritesOnlyFromEvidence() throws Exception {
+    void runFinalizerRejectsForgedCommittedOwnershipAndExactRetryIsANoOp() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Path resultPath = packet.runRoot().resolve("result.json");
@@ -1620,22 +1620,50 @@ class QualificationCausalFinalizerTest {
         forged.put("causalOwner", QualificationRecords.CausalOwner.RUNTIME_POLICY.name());
         forged.put("causalReasonCode", "FORGED_RUNTIME_OWNER");
         QualificationJson.write(resultPath, forged);
-        assertThrows(IllegalStateException.class, () -> QualificationRunFinalizer.finalizeRun(
-                packet.root(), packet.runRoot(), catalog.admission().scenarios().getFirst().id(), catalog));
+        QualificationPacketPublisher.PublicationException forgedFailure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
+                () -> QualificationRunFinalizer.finalizeRun(
+                        packet.root(), packet.runRoot(),
+                        catalog.admission().scenarios().getFirst().id(), catalog));
+        assertEquals(QualificationPacketPublisher.FailureReason.INVALID_COMMIT,
+                forgedFailure.reason());
 
-        Files.delete(resultPath);
-        Files.delete(packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE));
-        Files.delete(packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));
+        QualificationTestPacket clean = QualificationTestPacket.create(
+                temp.resolve("clean-finalization"), catalog);
+        List<Path> authority = List.of(
+                clean.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                clean.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                clean.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE));
+        clean.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION, authority);
         Path writtenResult = QualificationRunFinalizer.finalizeRun(
-                packet.root(), packet.runRoot(), catalog.admission().scenarios().getFirst().id(), catalog);
+                clean.root(), clean.runRoot(), catalog.admission().scenarios().getFirst().id(), catalog);
         QualificationCausalFinalizer.Document document = QualificationJson.read(
-                packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                clean.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
                 QualificationCausalFinalizer.Document.class);
+        List<byte[]> before = authority.stream().map(path -> {
+            try {
+                return Files.readAllBytes(path);
+            } catch (java.io.IOException failure) {
+                throw new java.io.UncheckedIOException(failure);
+            }
+        }).toList();
+        List<java.nio.file.attribute.FileTime> modified = authority.stream().map(path -> {
+            try {
+                return Files.getLastModifiedTime(path);
+            } catch (java.io.IOException failure) {
+                throw new java.io.UncheckedIOException(failure);
+            }
+        }).toList();
 
         assertLaunchReceiptBlocked(document);
         assertTrue(Files.isRegularFile(writtenResult));
-        assertThrows(IllegalStateException.class, () -> QualificationRunFinalizer.finalizeRun(
-                packet.root(), packet.runRoot(), catalog.admission().scenarios().getFirst().id(), catalog));
+        assertEquals(writtenResult, QualificationRunFinalizer.finalizeRun(
+                clean.root(), clean.runRoot(), catalog.admission().scenarios().getFirst().id(), catalog));
+        for (int index = 0; index < authority.size(); index++) {
+            assertTrue(java.util.Arrays.equals(before.get(index), Files.readAllBytes(authority.get(index))));
+            assertEquals(modified.get(index), Files.getLastModifiedTime(authority.get(index)));
+        }
     }
 
     @Test
@@ -1647,6 +1675,12 @@ class QualificationCausalFinalizerTest {
         result.put("causalOwner", QualificationRecords.CausalOwner.RUNTIME_POLICY.name());
         result.put("causalReasonCode", "OUTCOME_SATISFIED");
         QualificationJson.write(resultPath, result);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        resultPath));
 
         QualificationEvidenceValidator.Validation validation =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -1757,10 +1791,11 @@ class QualificationCausalFinalizerTest {
 
         QualificationTestPacket harness = packet("harness", catalog);
         Files.delete(harness.runRoot().resolve("approvals.json"));
-        assertTrue(evidence(harness, catalog, scenario).findings().stream()
-                .anyMatch(finding -> finding.equals(
-                        "MISSING_OR_EMPTY_JSON:approvals.json")));
-        assertLaunchReceiptBlocked(derive(harness, catalog, scenario));
+        QualificationPacketPublisher.PublicationException missingApproval = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
+                () -> evidence(harness, catalog, scenario));
+        assertEquals(QualificationPacketPublisher.FailureReason.INCOMPLETE,
+                missingApproval.reason());
 
         QualificationTestPacket hardware = packet("hardware", catalog);
         replaceGenerationWithFailure(hardware, "PROVIDER_RESOURCE_EXHAUSTED");
@@ -2066,6 +2101,9 @@ class QualificationCausalFinalizerTest {
         ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
         capture.put("tty", false);
         QualificationJson.write(capturePath, capture);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                List.of(capturePath));
 
         QualificationCausalFinalizer.Document document = derive(packet, catalog, scenario);
 
@@ -2123,7 +2161,11 @@ class QualificationCausalFinalizerTest {
                 events.remove(index);
             }
         }
-        QualificationJson.write(packet.runRoot().resolve("transcript.raw.json"), capture);
+        Path capturePath = packet.runRoot().resolve("transcript.raw.json");
+        QualificationJson.write(capturePath, capture);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                List.of(capturePath));
 
         QualificationCausalFinalizer.Document unproven = derive(packet, catalog, f18);
         assertFalse(unproven.causalOwner() == QualificationRecords.CausalOwner.OPERATOR);

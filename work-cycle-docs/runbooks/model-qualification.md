@@ -277,7 +277,11 @@ Admission is a filter. Do not project a profile from admission alone.
 
 Start a new immutable campaign after admission passes. Do not copy admission runs.
 
-Full qualification contains 72 full trials, 24 scenarios with three repetitions each. Use the declared repetition order. Do not rerun only failed responses and do not replace an interrupted trial without invalidating the packet.
+Full qualification contains 72 full trials, 24 scenarios with three repetitions each. The
+canonical order is repetition-major: every declared scenario for repetition one, then every
+declared scenario for repetition two, then every declared scenario for repetition three. Do not
+rerun only failed responses and do not replace an interrupted trial without invalidating the
+packet.
 
 Review evidence as it is captured. A late discovery that invalidates the shared configuration invalidates the complete campaign.
 
@@ -285,13 +289,21 @@ Review evidence as it is captured. A late discovery that invalidates the shared 
 
 Run the maintained provider evidence, approval, and requirement finalizers. For protocol v6,
 publish the causal ledger, canary verdict, and schema-v2 result through the tracked Java
-finalizer. Then validate and score the packet.
+finalizer. Every protocol-v6 evidence set is authoritative only after the qualification
+publisher has committed its complete hash-bound member inventory. After the final permitted run,
+commit the separate immutable campaign completion. Validate only after completion; score only an
+exact `COMPLETE_GRID` completion whose bank matches the requested scorecard. A mechanically
+committed `HARD_STOP` completion is final evidence but is never scoreable.
 
 ```powershell
 .\gradlew.bat finalizeModelQualificationProviderEvidence --no-daemon
-.\gradlew.bat finalizeModelQualificationRequirements --no-daemon
 .\gradlew.bat finalizeModelQualificationApprovals --no-daemon
+.\gradlew.bat finalizeModelQualificationRequirements --no-daemon
 .\gradlew.bat finalizeModelQualificationResult --no-daemon
+.\gradlew.bat completeModelQualificationCampaign `
+  -PqualificationRoot=<absolute-packet-root> `
+  -PqualificationBank=<admission-or-full> `
+  --no-daemon
 .\gradlew.bat validateModelQualificationEvidence --no-daemon
 .\gradlew.bat scoreModelQualificationEvidence --no-daemon
 ```
@@ -299,11 +311,45 @@ finalizer. Then validate and score the packet.
 Use the task arguments required by the current Gradle help output. Preserve commands and outputs in the packet.
 
 For protocol v6, Java is the sole authority for `causal-finalization.json`, `canary.json`,
-and `result.json`; `result.json` is published last. PowerShell may capture raw evidence and
-measurement inputs and invoke the Java task, but it must not calculate or serialize trust,
-utility, canary, failure, answer-origin, causal-owner, score-eligibility, or ledger fields.
+and `result.json`. `result.json` is the last run member, but physical presence is not the
+publication boundary. The final authority point is the canonical transaction commit under
+`.qualification-publication-v1/commits/`, promoted only after every declared member is flushed,
+hash-verified, and present. Readers must reject missing or conflicting commits, open intents,
+staged bytes, partial member sets, and transaction records from another campaign or scenario
+bank. An exact retry may complete or clean only its own canonical intent; it must not adopt,
+replace, or delete unowned bytes. PowerShell may capture raw evidence and measurement inputs and
+invoke the Java task, but it must not calculate or serialize trust, utility, canary, failure,
+answer-origin, causal-owner, score-eligibility, ledger, or transaction-commit fields.
 The maintained thin invocation template is
 `work-cycle-docs/templates/finalize-model-qualification-result-v6.ps1`.
+
+Protocol-v6 `campaign.json` remains byte-immutable and keeps `endedAt` blank. The transaction-owned
+`campaign-completion.json` binds the original campaign hash, selected bank, exact ordered run
+commit identities, completion reason, and final timestamp. Java derives that timestamp from the
+last run in canonical repetition-major order and rejects overlapping or nonmonotonic PTY capture
+intervals. It never accepts an operator clock value or rewrites `campaign.json`.
+
+If a finalizer process exits during publication, do not infer state from a physically present
+member. Invoke the typed reconciler before retrying:
+
+```powershell
+.\gradlew.bat reconcileModelQualificationRunPublication `
+  -PqualificationRoot=<absolute-packet-root> `
+  -PqualificationScenario=<scenario-id> `
+  -PqualificationRunRoot=<absolute-run-root> `
+  -PqualificationServerPort=<required-only-when-provider-recovery-is-selected> `
+  --no-daemon
+```
+
+Under one packet lease, Java selects at most one supported provider, approval, mechanical-
+requirements, or run-finalization transaction from canonical intent/stage identity. It returns
+`ABSENT`, `RECOVERED`, or `COMMITTED` with the exact publication kind. Unsupported, ambiguous,
+wrong-run, changed-input, or out-of-sequence state fails closed. Provider recovery requires the
+server port pinned by the frozen calibration. The reconciliation command emits publication failures
+as a one-line typed reason and commit state; automation invoking that command must branch on those
+fields rather than prose. Other qualification entrypoints retain their documented error contracts
+until their real-process publication coverage is completed. Recovery of one phase is not permission
+to skip a later required phase.
 
 The schema-v2 `canary.json` records captured-scan policy
 `talos.capturedArtifactCanaryBytes` version 1. That policy scans the already-captured bytes of

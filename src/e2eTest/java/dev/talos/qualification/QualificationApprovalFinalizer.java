@@ -33,21 +33,38 @@ final class QualificationApprovalFinalizer {
             Path requestedRunRoot,
             String scenarioId,
             QualificationScenarioBank.Catalog catalog) throws IOException {
+        return QualificationPacketPublisher.withLease(
+                packetRoot,
+                lease -> deriveAndWriteUnderLease(
+                        lease, requestedRunRoot, scenarioId, catalog));
+    }
+
+    static Path deriveAndWriteUnderLease(
+            QualificationPacketPublisher.Lease lease,
+            Path requestedRunRoot,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog) throws IOException {
         QualificationArtifactPublication.DeclaredRun declared =
                 QualificationArtifactPublication.requireWritableDeclaredRun(
-                        packetRoot, requestedRunRoot, scenarioId, catalog);
+                        lease.packetRoot(), requestedRunRoot, scenarioId, catalog);
         Path runRoot = declared.runRoot();
         QualificationProtocol.Scenario scenario = catalog.scenario(scenarioId);
+        Path transcript = runRoot.resolve("transcript.raw.json");
+        QualificationPacketPublisher.CommittedSet capture =
+                QualificationPacketPublisher.requireCommitted(
+                        lease.packetRoot(),
+                        QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                        List.of(transcript));
         Document document = derive(
                 QualificationPtyEvidence.parse(
-                        runRoot.resolve("transcript.raw.json"), catalog.protocolVersion()),
+                        capture.bytes(lease.packetRoot(), transcript),
+                        catalog.protocolVersion()),
                 scenario.approvalBehavior());
         Path output = runRoot.resolve(OUTPUT_FILE);
-        QualificationArtifactPublication.publishNewOrVerifyExact(
-                declared.runFiles(),
-                output,
-                QualificationJson.bytes(document),
-                "approval evidence");
+        lease.publish(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(new QualificationPacketPublisher.Member(
+                        output, QualificationJson.bytes(document))));
         return output;
     }
 

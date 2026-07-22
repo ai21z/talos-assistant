@@ -63,6 +63,9 @@ class QualificationPreResultEvidenceTest {
                     temp.resolve("pty-scalar-" + testCase.id()), catalog, scenario);
             mutateJson(packet.runRoot().resolve("transcript.raw.json"),
                     testCase.mutation());
+            packet.refreshPublicationForTest(
+                    QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                    List.of(packet.runRoot().resolve("transcript.raw.json")));
 
             QualificationPreResultEvidence.Snapshot snapshot =
                     QualificationPreResultEvidence.capture(
@@ -186,13 +189,21 @@ class QualificationPreResultEvidenceTest {
                             QualificationFixtureMaterializer.snapshot(
                                     packet.runRoot().resolve("after-files")).sha256());
                 }),
-                new Case("approval-pty", (packet) -> QualificationJson.write(
-                        packet.runRoot().resolve("approvals.json"),
-                        java.util.Map.of("events", List.of(
-                                java.util.Map.of("response", "DENIED"))))),
-                new Case("invalid-pty", (packet) -> mutateJson(
-                        packet.runRoot().resolve("transcript.raw.json"), json ->
-                                json.put("tty", false))),
+                new Case("approval-pty", (packet) -> {
+                    Path approvals = packet.runRoot().resolve("approvals.json");
+                    QualificationJson.write(
+                            approvals,
+                            java.util.Map.of("events", List.of(
+                                    java.util.Map.of("response", "DENIED"))));
+                    rebindApprovalAndDownstream(packet, scenario.id(), catalog);
+                }),
+                new Case("invalid-pty", (packet) -> {
+                    Path transcript = packet.runRoot().resolve("transcript.raw.json");
+                    mutateJson(transcript, json -> json.put("tty", false));
+                    packet.refreshPublicationForTest(
+                            QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                            List.of(transcript));
+                }),
                 new Case("timing-schema", (packet) -> mutateJson(
                         packet.runRoot().resolve("timings.json"), json ->
                                 json.put("schemaName", "forged.timing"))),
@@ -206,6 +217,7 @@ class QualificationPreResultEvidenceTest {
                     Files.writeString(packet.runRoot().resolve("llama.log"),
                             QualificationProviderEvidence.modelRuntimeNotApplicableText(),
                             StandardCharsets.UTF_8);
+                    rebindProviderAndDownstream(packet, scenario.id(), catalog);
                 }),
                 new Case("mechanical-requirements", (packet) -> {
                     Path output = QualificationRequirementFinalizer.evaluateAndWrite(
@@ -214,6 +226,7 @@ class QualificationPreResultEvidenceTest {
                     ArrayNode requirements = (ArrayNode) json.path("requirements");
                     ((ObjectNode) requirements.get(0)).put("passed", false);
                     QualificationJson.write(output, json);
+                    rebindRequirementsAndRun(packet, scenario.id(), catalog);
                 }));
 
         for (Case testCase : cases) {
@@ -259,6 +272,30 @@ class QualificationPreResultEvidenceTest {
                 IllegalArgumentException.class,
                 () -> QualificationPreResultEvidence.capture(
                         packet.root(), packet.runRoot(), scenario.id(), catalog));
+    }
+
+    @Test
+    void executionIdentityMembersWithoutTheirCommitCannotEnterPreResultEvidence()
+            throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("missing-identity-commit"), catalog, scenario);
+        Path commit = QualificationPacketPublisher.commitPathForTest(
+                packet.root(),
+                QualificationPacketPublisher.PublicationKind.EXECUTION_IDENTITY,
+                List.of(
+                        packet.root().resolve(QualificationExecutionIdentityWriter.LEDGER_FILE),
+                        packet.root().resolve(QualificationExecutionIdentity.HARNESS_FILE),
+                        packet.root().resolve(QualificationExecutionIdentity.RUNTIME_FILE)));
+        Files.delete(commit);
+
+        QualificationPacketPublisher.PublicationException failure = assertThrows(
+                QualificationPacketPublisher.PublicationException.class,
+                () -> QualificationPreResultEvidence.capture(
+                        packet.root(), packet.runRoot(), scenario.id(), catalog));
+
+        assertEquals(QualificationPacketPublisher.FailureReason.INCOMPLETE, failure.reason());
     }
 
     @Test
@@ -526,6 +563,8 @@ class QualificationPreResultEvidenceTest {
         assertTrue(validation.findings().stream().anyMatch(finding ->
                         finding.contains("Schema mismatch for request")),
                 () -> String.join("\n", validation.findings()));
+        assertTrue(validation.runs().isEmpty(),
+                "transaction-invalid protocol-v6 runs must not enter score inputs");
     }
 
     private static void mutateJson(Path path, JsonMutation mutation) throws Exception {
@@ -635,6 +674,80 @@ class QualificationPreResultEvidenceTest {
                 "providerLedgerVersion", "ledgerSequence", "generationId", "source",
                 "purpose", "toolAuthorityMode");
         data.properties().removeIf(entry -> !keys.contains(entry.getKey()));
+    }
+
+    private static void rebindProviderAndDownstream(
+            QualificationTestPacket packet,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog) throws Exception {
+        removeApprovalAndDownstream(packet);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                List.of(
+                        packet.runRoot().resolve("prompt-debug.txt"),
+                        packet.runRoot().resolve("llama.log")));
+        QualificationApprovalFinalizer.deriveAndWrite(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+        QualificationRequirementFinalizer.evaluateAndWrite(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+    }
+
+    private static void rebindApprovalAndDownstream(
+            QualificationTestPacket packet,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog) throws Exception {
+        removeRequirementsAndRun(packet);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+        QualificationRequirementFinalizer.evaluateAndWrite(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+    }
+
+    private static void rebindRequirementsAndRun(
+            QualificationTestPacket packet,
+            String scenarioId,
+            QualificationScenarioBank.Catalog catalog) throws Exception {
+        removeRunFinalization(packet);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+    }
+
+    private static void removeApprovalAndDownstream(
+            QualificationTestPacket packet) throws IOException {
+        removeRequirementsAndRun(packet);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+    }
+
+    private static void removeRequirementsAndRun(
+            QualificationTestPacket packet) throws IOException {
+        removeRunFinalization(packet);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+    }
+
+    private static void removeRunFinalization(
+            QualificationTestPacket packet) throws IOException {
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
     }
 
     private static void removeEvents(ObjectNode trace, String type) {

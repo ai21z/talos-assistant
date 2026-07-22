@@ -9,7 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -37,6 +36,24 @@ class QualificationEvidenceValidatorTest {
         assertTrue(result.findings().stream().noneMatch(finding ->
                         finding.contains("differs from evidence")),
                 () -> String.join("\n", result.findings()));
+    }
+
+    @Test
+    void protocolSixRunValidationRequiresCommittedCampaignCompletion() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
+        QualificationTestPacket packet = QualificationTestPacket.create(
+                temp.resolve("missing-campaign-completion"), catalog);
+
+        QualificationEvidenceValidator.Validation result =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertFalse(result.valid());
+        assertTrue(result.findings().stream().anyMatch(finding -> finding.equals(
+                        "Qualification protocol-v6 campaign requires a committed "
+                                + "campaign completion")),
+                () -> String.join("\n", result.findings()));
+        assertFalse(Files.exists(packet.root().resolve(
+                QualificationCampaignCompletion.OUTPUT_FILE)));
     }
 
     @Test
@@ -171,6 +188,7 @@ class QualificationEvidenceValidatorTest {
         String tampered = Files.readString(output, StandardCharsets.UTF_8)
                 .replace("\"passed\" : true", "\"passed\" : false");
         Files.writeString(output, tampered, StandardCharsets.UTF_8);
+        rebindRequirementsAndRun(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -291,6 +309,7 @@ class QualificationEvidenceValidatorTest {
         ObjectNode runtime = (ObjectNode) QualificationJson.readTree(runtimePath);
         runtime.put("preflightManifestSha256", "d".repeat(64));
         QualificationJson.write(runtimePath, runtime);
+        packet.refreshExecutionIdentityPublicationForTest();
         removeRuns(packet);
 
         QualificationEvidenceValidator.Validation result =
@@ -395,7 +414,8 @@ class QualificationEvidenceValidatorTest {
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("candidateAlias")),
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                        finding.contains("candidate alias")),
                 () -> String.join("\n", result.findings()));
     }
 
@@ -441,6 +461,7 @@ class QualificationEvidenceValidatorTest {
         String content = Files.readString(request, StandardCharsets.UTF_8)
                 .replace("\"transport\" : \"TRUE_PTY\"", "\"transport\" : \"REDIRECTED_PROCESS\"");
         Files.writeString(request, content, StandardCharsets.UTF_8);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -456,6 +477,7 @@ class QualificationEvidenceValidatorTest {
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Files.writeString(packet.runRoot().resolve("final-files/README.md"),
                 "tampered after capture\n", StandardCharsets.UTF_8);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -469,14 +491,15 @@ class QualificationEvidenceValidatorTest {
     void failedCanaryCannotBeScored() throws Exception {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
-        QualificationJson.write(packet.runRoot().resolve("canary.json"), java.util.Map.of("passed", false));
+        mutateJson(
+                packet.runRoot().resolve("canary.json"),
+                canary -> canary.put("passed", false));
+        refreshRunFinalizationPublication(packet);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
-        assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("canary")),
-                () -> String.join("\n", result.findings()));
+        assertPublicationVerificationFailed(result);
     }
 
     @Test
@@ -485,13 +508,15 @@ class QualificationEvidenceValidatorTest {
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Files.writeString(packet.runRoot().resolve("transcript.txt"),
                 "leaked TALOS_CANARY_MODEL_QUALIFICATION_PRIVATE\n", StandardCharsets.UTF_8);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("canary")),
-                () -> String.join("\n", result.findings()));
+        assertEqualsOne(result.runs().size());
+        assertFalse(result.runs().getFirst().trustGates().protectedContentSafety());
+        assertFalse(result.runs().getFirst().comparativeScoreEligible());
     }
 
     @Test
@@ -499,9 +524,12 @@ class QualificationEvidenceValidatorTest {
         QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
         QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog, scenario);
-        Files.delete(packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE));
-        Files.delete(packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE));
-        Files.delete(packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
         for (String directory : List.of("after-files", "final-files")) {
             Files.writeString(
                     packet.runRoot().resolve(directory).resolve("leak.txt"),
@@ -546,13 +574,15 @@ class QualificationEvidenceValidatorTest {
                 packet.runRoot().resolve("transcript.txt"),
                 "leaked TALOS_CANARY_MODEL_QUALIFICATION_PRIVATE\n",
                 StandardCharsets.UTF_8);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("canary")),
-                () -> String.join("\n", result.findings()));
+        assertEqualsOne(result.runs().size());
+        assertFalse(result.runs().getFirst().trustGates().protectedContentSafety());
+        assertFalse(result.runs().getFirst().comparativeScoreEligible());
     }
 
     @Test
@@ -621,13 +651,13 @@ class QualificationEvidenceValidatorTest {
         String content = Files.readString(resultPath, StandardCharsets.UTF_8)
                 .replace("\"correct\" : true", "\"correct\" : false");
         Files.writeString(resultPath, content, StandardCharsets.UTF_8);
+        refreshRunFinalizationPublication(packet);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("decision")),
-                () -> String.join("\n", result.findings()));
+        assertPublicationVerificationFailed(result);
     }
 
     @Test
@@ -980,6 +1010,7 @@ class QualificationEvidenceValidatorTest {
                 .replace("\"actionObligation\" : \"DIRECT_ANSWER_ONLY\"",
                         "\"actionObligation\" : \"MUTATING_TOOL_REQUIRED\"");
         Files.writeString(trace, content, StandardCharsets.UTF_8);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -1019,13 +1050,14 @@ class QualificationEvidenceValidatorTest {
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         Files.writeString(packet.runRoot().resolve("transcript.raw.json"), "{\"tty\":false}",
                 StandardCharsets.UTF_8);
+        refreshPtyPublication(packet);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("PTY")),
-                () -> String.join("\n", result.findings()));
+        assertRunInvalidReasonContains(result, "PTY");
     }
 
     @Test
@@ -1037,13 +1069,14 @@ class QualificationEvidenceValidatorTest {
                 .replace("\"rawOutput\" : \"Outcome: READ_ONLY_ANSWERED\"",
                         "\"rawOutput\" : \"fabricated output\"");
         Files.writeString(capture, content, StandardCharsets.UTF_8);
+        refreshPtyPublication(packet);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("PTY")),
-                () -> String.join("\n", result.findings()));
+        assertRunInvalidReasonContains(result, "PTY");
     }
 
     @Test
@@ -1084,13 +1117,17 @@ class QualificationEvidenceValidatorTest {
             ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
             testCase.mutation().apply(capture);
             QualificationJson.write(capturePath, capture);
+            refreshPtyPublication(packet);
+            refinalizeCausality(packet, catalog);
 
             QualificationEvidenceValidator.Validation validation =
                     QualificationEvidenceValidator.validate(packet.root(), catalog);
 
             assertFalse(validation.valid(), testCase.id());
             boolean rejectedByPtyAuthority = validation.findings().stream().anyMatch(finding ->
-                    finding.contains("Qualification PTY capture is missing or invalid"));
+                            finding.contains("Qualification PTY capture is missing or invalid"))
+                    || validation.runs().stream().anyMatch(run -> run.invalidReason().contains(
+                            "Qualification PTY capture is missing or invalid"));
             if (!rejectedByPtyAuthority) {
                 missingTypeRejections.add(testCase.id());
             }
@@ -1129,13 +1166,22 @@ class QualificationEvidenceValidatorTest {
             QualificationTestPacket packet = QualificationTestPacket.create(
                     temp.resolve("post-identity-scalar-" + testCase.id()), catalog);
             testCase.mutation().apply(packet);
-
+            switch (testCase.id()) {
+                case "textual-canary-verdict" -> refreshRunFinalizationPublication(packet);
+                case "numeric-approval-response" ->
+                        rebindApprovalAndDownstream(packet, catalog);
+                case "numeric-declared-hash" -> refinalizeCausality(packet, catalog);
+                default -> throw new IllegalStateException(
+                        "unhandled scalar evidence fixture " + testCase.id());
+            }
             QualificationEvidenceValidator.Validation validation =
                     QualificationEvidenceValidator.validate(packet.root(), catalog);
 
             assertFalse(validation.valid(), testCase.id());
             assertTrue(validation.findings().stream()
-                            .anyMatch(finding -> finding.contains(testCase.requiredFinding())),
+                            .anyMatch(finding -> finding.contains(testCase.requiredFinding()))
+                            || validation.runs().stream().anyMatch(run ->
+                                    run.invalidReason().contains(testCase.requiredFinding())),
                     () -> testCase.id() + ":\n" + String.join("\n", validation.findings()));
             assertTrue(validation.runs().stream()
                             .noneMatch(QualificationRecords.RunResult::comparativeScoreEligible),
@@ -1204,8 +1250,10 @@ class QualificationEvidenceValidatorTest {
         events.addObject().put("timestamp", "2026-07-10T00:00:02Z")
                 .put("type", "input").put("data", "last-trace");
         QualificationJson.write(capturePath, capture);
+        refreshPtyPublication(packet);
         QualificationJson.write(packet.runRoot().resolve("approvals.json"), java.util.Map.of(
                 "events", List.of(java.util.Map.of("response", "DENIED"))));
+        rebindApprovalAndDownstream(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -1251,6 +1299,7 @@ class QualificationEvidenceValidatorTest {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         writeNotApplicableProviderEvidence(packet, true, true, false);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -1266,6 +1315,7 @@ class QualificationEvidenceValidatorTest {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         writeNotApplicableProviderEvidence(packet, true, false, true);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -1281,6 +1331,7 @@ class QualificationEvidenceValidatorTest {
         QualificationScenarioBank.Catalog catalog = QualificationScenarioBank.loadDefault();
         QualificationTestPacket packet = QualificationTestPacket.create(temp, catalog);
         writeNotApplicableProviderEvidence(packet, true, true, true);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
@@ -1333,6 +1384,8 @@ class QualificationEvidenceValidatorTest {
             terminal.remove(List.of("sourceGenerationId", "sourceAttemptId"));
             QualificationJson.write(tracePath, trace);
             refinalizeCausality(packet, QualificationScenarioBank.loadDefault());
+        } else {
+            refinalizeCausality(packet, QualificationScenarioBank.loadDefault());
         }
     }
 
@@ -1341,6 +1394,20 @@ class QualificationEvidenceValidatorTest {
             boolean bindToCapture,
             boolean promptNotApplicable,
             boolean runtimeNotApplicable) throws Exception {
+        if (bindToCapture) {
+            Path capturePath = packet.runRoot().resolve("transcript.raw.json");
+            ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
+            ArrayNode events = (ArrayNode) capture.path("events");
+            ObjectNode output = (ObjectNode) events.get(1);
+            String changed = output.path("data").asText() + "\n"
+                    + QualificationProviderEvidence.NO_PROVIDER_PROMPT;
+            output.put("data", changed);
+            capture.put("rawOutput", changed);
+            QualificationJson.write(capturePath, capture);
+            packet.refreshPublicationForTest(
+                    QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                    List.of(capturePath));
+        }
         if (promptNotApplicable) {
             Files.writeString(packet.runRoot().resolve("prompt-debug.txt"),
                     QualificationProviderEvidence.promptNotApplicableText(), StandardCharsets.UTF_8);
@@ -1349,17 +1416,8 @@ class QualificationEvidenceValidatorTest {
             Files.writeString(packet.runRoot().resolve("llama.log"),
                     QualificationProviderEvidence.modelRuntimeNotApplicableText(), StandardCharsets.UTF_8);
         }
-        if (!bindToCapture) return;
-
-        Path capturePath = packet.runRoot().resolve("transcript.raw.json");
-        ObjectNode capture = (ObjectNode) QualificationJson.readTree(capturePath);
-        ArrayNode events = (ArrayNode) capture.path("events");
-        ObjectNode output = (ObjectNode) events.get(1);
-        String changed = output.path("data").asText() + "\n"
-                + QualificationProviderEvidence.NO_PROVIDER_PROMPT;
-        output.put("data", changed);
-        capture.put("rawOutput", changed);
-        QualificationJson.write(capturePath, capture);
+        rebindProviderAndDownstream(
+                packet, QualificationScenarioBank.loadDefault());
     }
 
     private static void zeroModelTiming(QualificationTestPacket packet) throws Exception {
@@ -1385,11 +1443,90 @@ class QualificationEvidenceValidatorTest {
         Path resultPath = packet.runRoot().resolve("result.json");
         QualificationRecords.RunResult result = QualificationJson.read(
                 resultPath, QualificationRecords.RunResult.class);
-        Files.delete(resultPath);
-        Files.deleteIfExists(packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE));
-        Files.deleteIfExists(packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE));
+        removeRunFinalization(packet);
         QualificationRunFinalizer.finalizeRun(
                 packet.root(), packet.runRoot(), result.scenarioId(), catalog);
+    }
+
+    private static void rebindProviderAndDownstream(
+            QualificationTestPacket packet,
+            QualificationScenarioBank.Catalog catalog) throws Exception {
+        String scenarioId = currentScenarioId(packet);
+        removeApprovalAndDownstream(packet);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PROVIDER_EVIDENCE,
+                List.of(
+                        packet.runRoot().resolve("prompt-debug.txt"),
+                        packet.runRoot().resolve("llama.log")));
+        QualificationApprovalFinalizer.deriveAndWrite(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+        QualificationRequirementFinalizer.evaluateAndWrite(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+    }
+
+    private static void rebindApprovalAndDownstream(
+            QualificationTestPacket packet,
+            QualificationScenarioBank.Catalog catalog) throws Exception {
+        String scenarioId = currentScenarioId(packet);
+        removeRequirementsAndRun(packet);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+        QualificationRequirementFinalizer.evaluateAndWrite(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+    }
+
+    private static void rebindRequirementsAndRun(
+            QualificationTestPacket packet,
+            QualificationScenarioBank.Catalog catalog) throws Exception {
+        String scenarioId = currentScenarioId(packet);
+        removeRunFinalization(packet);
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+        QualificationRunFinalizer.finalizeRun(
+                packet.root(), packet.runRoot(), scenarioId, catalog);
+    }
+
+    private static void removeApprovalAndDownstream(
+            QualificationTestPacket packet) throws IOException {
+        removeRequirementsAndRun(packet);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.APPROVAL_EVIDENCE,
+                List.of(packet.runRoot().resolve(
+                        QualificationApprovalFinalizer.OUTPUT_FILE)));
+    }
+
+    private static void removeRequirementsAndRun(
+            QualificationTestPacket packet) throws IOException {
+        removeRunFinalization(packet);
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.MECHANICAL_REQUIREMENTS,
+                List.of(packet.runRoot().resolve(
+                        QualificationRequirementFinalizer.OUTPUT_FILE)));
+    }
+
+    private static void removeRunFinalization(
+            QualificationTestPacket packet) throws IOException {
+        packet.removePublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+    }
+
+    private static String currentScenarioId(QualificationTestPacket packet)
+            throws IOException {
+        return QualificationJson.read(
+                packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE),
+                QualificationRecords.RunResult.class).scenarioId();
     }
 
     private static void replaceArgument(ArrayNode arguments, String name, String value) {
@@ -1435,11 +1572,7 @@ class QualificationEvidenceValidatorTest {
     }
 
     private static void removeRuns(QualificationTestPacket packet) throws IOException {
-        try (var paths = Files.walk(packet.root().resolve("runs"))) {
-            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(path);
-            }
-        }
+        packet.removeRunEvidenceForTest();
         Files.createDirectories(packet.root().resolve("runs"));
     }
 
@@ -1564,8 +1697,7 @@ class QualificationEvidenceValidatorTest {
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("timing evidence")),
-                () -> String.join("\n", result.findings()));
+        assertPublicationVerificationFailed(result);
     }
 
     @Test
@@ -1576,17 +1708,66 @@ class QualificationEvidenceValidatorTest {
         String content = Files.readString(resources, StandardCharsets.UTF_8)
                 .replace("\"processWorkingSetBytes\" : 8589934592", "\"processWorkingSetBytes\" : 1");
         Files.writeString(resources, content, StandardCharsets.UTF_8);
+        refinalizeCausality(packet, catalog);
 
         QualificationEvidenceValidator.Validation result =
                 QualificationEvidenceValidator.validate(packet.root(), catalog);
 
         assertFalse(result.valid());
-        assertTrue(result.findings().stream().anyMatch(finding -> finding.contains("resource evidence")),
-                () -> String.join("\n", result.findings()));
+        assertRunInvalidReasonContains(result, "RESOURCE_SUMMARY_MISMATCH");
     }
 
     private static void assertEqualsOne(int actual) {
         assertTrue(actual == 1, "expected one run but was " + actual);
+    }
+
+    @Test
+    void hardStopCompletionCannotValidateACommittedScorecard() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationTestPacket packet = QualificationTestPacket.createHardStopCampaign(
+                temp.resolve("hard-stop-scorecard"),
+                catalog,
+                catalog.admission().scenarios().getFirst());
+        QualificationCampaignCompletion.complete(
+                packet.root(), QualificationProtocol.BankKind.ADMISSION, catalog);
+        Path scorecard = packet.root().resolve(
+                "scorecards/qwen14-standard-admission.json");
+        packet.publishForTest(
+                QualificationPacketPublisher.PublicationKind.SCORECARD,
+                List.of(new QualificationPacketPublisher.Member(
+                        scorecard, "{}\n".getBytes(StandardCharsets.UTF_8))));
+
+        QualificationEvidenceValidator.Validation validation =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertTrue(validation.findings().stream().anyMatch(
+                        finding -> finding.contains("hard-stop completion is not scoreable")),
+                validation.findings()::toString);
+    }
+
+    @Test
+    void scorecardBankMustEqualTheCommittedCompletionBank() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationTestPacket packet = QualificationTestPacket.createHardStopCampaign(
+                temp.resolve("completion-bank-mismatch"),
+                catalog,
+                catalog.admission().scenarios().getFirst());
+        QualificationCampaignCompletion.complete(
+                packet.root(), QualificationProtocol.BankKind.ADMISSION, catalog);
+        Path scorecard = packet.root().resolve(
+                "scorecards/qwen14-standard-full.json");
+        packet.publishForTest(
+                QualificationPacketPublisher.PublicationKind.SCORECARD,
+                List.of(new QualificationPacketPublisher.Member(
+                        scorecard, "{}\n".getBytes(StandardCharsets.UTF_8))));
+
+        QualificationEvidenceValidator.Validation validation =
+                QualificationEvidenceValidator.validate(packet.root(), catalog);
+
+        assertTrue(validation.findings().stream().anyMatch(
+                        finding -> finding.contains(
+                                "scorecard bank differs from campaign completion")),
+                validation.findings()::toString);
     }
 
     private record PtyScalarCase(String id, PtyJsonMutation mutation) {}
@@ -1608,6 +1789,23 @@ class QualificationEvidenceValidatorTest {
         QualificationJson.write(path, json);
     }
 
+    private static void refreshPtyPublication(QualificationTestPacket packet)
+            throws IOException {
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.PTY_CAPTURE,
+                List.of(packet.runRoot().resolve("transcript.raw.json")));
+    }
+
+    private static void refreshRunFinalizationPublication(QualificationTestPacket packet)
+            throws IOException {
+        packet.refreshPublicationForTest(
+                QualificationPacketPublisher.PublicationKind.RUN_FINALIZATION,
+                List.of(
+                        packet.runRoot().resolve(QualificationCausalFinalizer.OUTPUT_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.CANARY_FILE),
+                        packet.runRoot().resolve(QualificationRunFinalizer.RESULT_FILE)));
+    }
+
     private static QualificationRecords.RunResult assertActiveProcessBindingBlocked(
             QualificationEvidenceValidator.Validation validation) {
         assertFalse(validation.valid());
@@ -1626,12 +1824,29 @@ class QualificationEvidenceValidatorTest {
         return run;
     }
 
+    private static QualificationRecords.RunResult assertRunInvalidReasonContains(
+            QualificationEvidenceValidator.Validation validation,
+            String expected) {
+        assertFalse(validation.valid());
+        assertEqualsOne(validation.runs().size());
+        QualificationRecords.RunResult run = validation.runs().getFirst();
+        assertFalse(run.evidenceComplete());
+        assertTrue(run.invalidReason().contains(expected),
+                () -> "expected run invalidReason to contain '" + expected + "' but was:\n"
+                        + run.invalidReason() + "\nvalidator findings:\n"
+                        + String.join("\n", validation.findings()));
+        assertFalse(run.comparativeScoreEligible());
+        return run;
+    }
+
     private static void assertPublicationVerificationFailed(
             QualificationEvidenceValidator.Validation validation) {
         assertFalse(validation.valid());
         assertTrue(validation.findings().stream().anyMatch(finding ->
                         finding.contains("Protocol-v6 publication verification failed")),
                 () -> String.join("\n", validation.findings()));
+        assertTrue(validation.runs().isEmpty(),
+                "transaction-invalid v6 runs must not contribute score inputs");
     }
 
 }
