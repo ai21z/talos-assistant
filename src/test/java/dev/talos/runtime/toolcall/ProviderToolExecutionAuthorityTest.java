@@ -19,6 +19,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -437,7 +438,8 @@ class ProviderToolExecutionAuthorityTest {
         ProviderResponseCapture.Attempt first = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        first.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                first, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt stale = first.respond(
                 providerResponse("", List.of(staleProposal),
                         ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
@@ -446,7 +448,8 @@ class ProviderToolExecutionAuthorityTest {
         ProviderResponseCapture.Attempt retry = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.TRANSIENT_RETRY,
                 ProviderResponseCapture.RetryReason.TRANSIENT_ENGINE_FAILURE);
-        retry.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                retry, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt selected = retry.respond(
                 providerResponse("", List.of(proposal("selected-attempt.txt")),
                         ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
@@ -473,7 +476,8 @@ class ProviderToolExecutionAuthorityTest {
             ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                     ProviderResponseCapture.AttemptKind.PRIMARY,
                     ProviderResponseCapture.RetryReason.NONE);
-            attempt.requestDispatched();
+            ObservedProviderTransportFixture.completeTerminal(
+                    attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
             ProviderResponseCapture.Receipt receipt = attempt.respond(
                     providerResponse("", List.of(proposal),
                             ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
@@ -1093,11 +1097,20 @@ class ProviderToolExecutionAuthorityTest {
                 ProviderResponseCapture.RetryReason.NONE);
         if (source == ProviderResponseCapture.Source.FOREGROUND_PROVIDER
                 || source == ProviderResponseCapture.Source.BACKGROUND_PROVIDER) {
-            attempt.requestDispatched(new ProviderTransportHandoff.DispatchEvidence(
+            ProviderTransportHandoff.DispatchEvidence evidence =
+                    new ProviderTransportHandoff.DispatchEvidence(
                             "sha256:" + "a".repeat(64),
                             mode == ProviderResponseCapture.ToolAuthorityMode.PROVIDER_NATIVE
                                     ? List.of(TOOL)
-                                    : List.of()));
+                                    : List.of());
+            if (completion == ProviderResponseCapture.Completion.PROVIDER_EOS
+                    || completion == ProviderResponseCapture.Completion.PROVIDER_LENGTH
+                    || completion
+                            == ProviderResponseCapture.Completion.UNRECOGNIZED_PROVIDER_STOP) {
+                ObservedProviderTransportFixture.completeTerminal(attempt, evidence);
+            } else {
+                ObservedProviderTransportFixture.completeBodyEof(attempt, evidence);
+            }
         }
         ProviderResponseCapture.Receipt receipt = attempt.respond(providerResponse(
                 assistantText,
@@ -1126,8 +1139,10 @@ class ProviderToolExecutionAuthorityTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched(new ProviderTransportHandoff.DispatchEvidence(
-                "sha256:" + "b".repeat(64), selectedToolNames));
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt,
+                new ProviderTransportHandoff.DispatchEvidence(
+                        "sha256:" + "b".repeat(64), selectedToolNames));
         ProviderResponseCapture.Receipt receipt = attempt.respond(providerResponse(
                 "",
                 proposals,

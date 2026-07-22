@@ -94,6 +94,15 @@ public interface ProviderTransportHandoff {
     }
 
     /**
+     * Admits one exact transport lifecycle. Legacy implementations retain the
+     * bounded dispatch callback but receive an explicitly unobserved handle.
+     */
+    default ProviderTransportAttempt admitTransport(DispatchEvidence evidence) {
+        requestDispatched(evidence);
+        return ProviderTransportAttempt.unobservedAttempt();
+    }
+
+    /**
      * Signals that a legacy engine path cannot expose its physical send boundary.
      * This preserves runtime compatibility without manufacturing a dispatch fact.
      */
@@ -114,6 +123,14 @@ public interface ProviderTransportHandoff {
             List<ToolSpec> nativeTools) {
         Objects.requireNonNull(handoff, "provider transport handoff")
                 .requestDispatched(DispatchEvidence.fromProviderBody(providerBody, nativeTools));
+    }
+
+    static ProviderTransportAttempt admit(
+            ProviderTransportHandoff handoff,
+            String providerBody,
+            List<ToolSpec> nativeTools) {
+        return Objects.requireNonNull(handoff, "provider transport handoff")
+                .admitTransport(DispatchEvidence.fromProviderBody(providerBody, nativeTools));
     }
 
     static void markUnobserved(ProviderTransportHandoff handoff) {

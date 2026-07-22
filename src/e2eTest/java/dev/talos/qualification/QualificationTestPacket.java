@@ -616,6 +616,28 @@ final class QualificationTestPacket {
         requestDispatched.put(
                 "toolAuthoritySurface",
                 toolAuthoritySurface(toolAuthorityMode, dispatchedNativeTools));
+        String transportOperationId = attemptId + "-transport-1";
+        java.util.Map<String, Object> transportHandoff = transportEvent(
+                1, generationId, attemptId, transportOperationId,
+                "HANDOFF_ADMITTED", "NONE");
+        java.util.Map<String, Object> transportSend = transportEvent(
+                2, generationId, attemptId, transportOperationId,
+                "SEND_API_ENTERED", "NONE");
+        java.util.Map<String, Object> transportHeaders = transportEvent(
+                3, generationId, attemptId, transportOperationId,
+                "RESPONSE_HEADERS_OBSERVED", "NONE");
+        java.util.Map<String, Object> transportBodyOpened = transportEvent(
+                4, generationId, attemptId, transportOperationId,
+                "RESPONSE_BODY_OPENED", "NONE");
+        java.util.Map<String, Object> transportTerminal = transportEvent(
+                5, generationId, attemptId, transportOperationId,
+                "PROVIDER_TERMINAL_OBSERVED", "NONE");
+        java.util.Map<String, Object> transportBodyCompleted = transportEvent(
+                6, generationId, attemptId, transportOperationId,
+                "RESPONSE_BODY_COMPLETED", "NONE");
+        java.util.Map<String, Object> transportSettled = transportEvent(
+                7, generationId, attemptId, transportOperationId,
+                "SETTLED", "COMPLETED_PROVIDER_TERMINAL");
         java.util.Map<String, Object> response = new java.util.LinkedHashMap<>(
                 attemptData(4, generationId, attemptId, true));
         response.put("toolAuthorityMode", toolAuthorityMode);
@@ -631,6 +653,7 @@ final class QualificationTestPacket {
         response.put("completedNormally", true);
         response.put("normalized", false);
         response.put("truncated", false);
+        response.put("transportOperationId", transportOperationId);
         java.util.Map<String, Object> completed = new java.util.LinkedHashMap<>(generation);
         completed.put("ledgerSequence", 5);
         completed.put("selectedAttemptId", attemptId);
@@ -639,11 +662,19 @@ final class QualificationTestPacket {
         completed.put("assistantHash", answerHash);
         completed.put("providerTerminalEligible", true);
         completed.put("providerToolCallEligible", false);
+        completed.put("transportOperationId", transportOperationId);
         return List.of(
                 traceStarted,
                 traceEvent("GENERATION_STARTED", generation),
                 traceEvent("GENERATION_ATTEMPT_STARTED", attemptStarted),
                 traceEvent("GENERATION_REQUEST_DISPATCHED", requestDispatched),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportHandoff),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportSend),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportHeaders),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportBodyOpened),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportTerminal),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportBodyCompleted),
+                traceEvent("PROVIDER_TRANSPORT_LIFECYCLE", transportSettled),
                 traceEvent("GENERATION_RESPONSE_CAPTURED", response),
                 traceEvent("GENERATION_COMPLETED", completed),
                 traceEvent("TERMINAL_ANSWER_SELECTED", java.util.Map.of(
@@ -659,6 +690,35 @@ final class QualificationTestPacket {
                         "status", status,
                         "classification", classification)),
                 traceEvent("TRACE_COMPLETED", java.util.Map.of()));
+    }
+
+    private static java.util.Map<String, Object> transportEvent(
+            long sequence,
+            String generationId,
+            String attemptId,
+            String transportOperationId,
+            String transition,
+            String settlement
+    ) {
+        java.util.Map<String, Object> event = new java.util.LinkedHashMap<>();
+        event.put("transportLedgerVersion", 1);
+        event.put("transportSequence", sequence);
+        event.put("generationId", generationId);
+        event.put("attemptId", attemptId);
+        event.put("attemptOrdinal", 1);
+        event.put("transportOperationId", transportOperationId);
+        event.put("transition", transition);
+        event.put("observationMode", "OBSERVED");
+        event.put("settlement", settlement);
+        event.put("transportFailure", "NONE");
+        event.put("cancellationState", "NOT_REQUESTED");
+        event.put("cancellationReason", "NONE");
+        event.put("wireDisposition", "HANDOFF_ADMITTED".equals(transition)
+                ? "SEND_API_NOT_ENTERED" : "UNKNOWN");
+        event.put("quarantineRequired", false);
+        event.put("lateAfterGenerationTerminal", false);
+        event.put("processBinding", "UNAVAILABLE");
+        return event;
     }
 
     private static java.util.Map<String, Object> toolAuthoritySurface(

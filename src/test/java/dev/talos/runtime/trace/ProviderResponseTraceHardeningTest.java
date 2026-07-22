@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolSpec;
@@ -120,7 +121,7 @@ class ProviderResponseTraceHardeningTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched(evidence);
+        ObservedProviderTransportFixture.completeTerminal(attempt, evidence);
         ProviderResponseCapture.Receipt receipt = attempt.respond(
                 new ProviderResponseCapture.Response(
                         "answer",
@@ -299,7 +300,8 @@ class ProviderResponseTraceHardeningTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched(
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt,
                 ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
                         "provider-response-trace-hardening-body",
                         List.of(new ToolSpec(

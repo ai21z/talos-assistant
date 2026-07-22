@@ -33,6 +33,8 @@ final class QualificationProviderAttemptLedger {
             "capturedNativeToolProposalCount", "nativeToolProposalsTruncated",
             "textualToolCallPresent", "completion", "providerBacked", "foreground",
             "completedNormally", "normalized", "truncated"));
+    private static final Set<String> TRANSPORT_BOUND_RESPONSE_KEYS =
+            union(RESPONSE_KEYS, Set.of("transportOperationId"));
     private static final Set<String> ATTEMPT_FAILURE_KEYS = union(ATTEMPT_KEYS, Set.of("failure"));
     private static final Set<String> ATTEMPT_ABANDONMENT_KEYS =
             union(ATTEMPT_KEYS, Set.of("abandonment"));
@@ -42,6 +44,8 @@ final class QualificationProviderAttemptLedger {
     private static final Set<String> GENERATION_COMPLETION_KEYS = union(GENERATION_KEYS, Set.of(
             "selectedAttemptId", "selectedAttemptOrdinal", "completion", "assistantHash",
             "providerTerminalEligible", "providerToolCallEligible"));
+    private static final Set<String> TRANSPORT_BOUND_GENERATION_COMPLETION_KEYS =
+            union(GENERATION_COMPLETION_KEYS, Set.of("transportOperationId"));
     private static final Set<String> TOOL_PROPOSAL_KEYS = union(ATTEMPT_KEYS, Set.of(
             "proposalOrdinal", "providerCallIdHash", "toolNameClassification",
             "toolNameHash", "toolNameChars", "argumentNameHashes",
@@ -83,7 +87,43 @@ final class QualificationProviderAttemptLedger {
             boolean foreground,
             boolean completedNormally,
             boolean normalized,
-            boolean truncated) {
+            boolean truncated,
+            String transportOperationId) {
+        Response {
+            transportOperationId = transportOperationId == null
+                    ? ""
+                    : transportOperationId;
+        }
+
+        Response(
+                int eventIndex,
+                long ledgerSequence,
+                String generationId,
+                String attemptId,
+                int attemptOrdinal,
+                ProviderResponseCapture.Source source,
+                ProviderResponseCapture.Purpose purpose,
+                ProviderResponseCapture.AttemptKind attemptKind,
+                ProviderResponseCapture.RetryReason retryReason,
+                String assistantHash,
+                int assistantChars,
+                int nativeToolCallCount,
+                int capturedNativeToolProposalCount,
+                boolean nativeToolProposalsTruncated,
+                boolean textualToolCallPresent,
+                ProviderResponseCapture.Completion completion,
+                boolean providerBacked,
+                boolean foreground,
+                boolean completedNormally,
+                boolean normalized,
+                boolean truncated) {
+            this(eventIndex, ledgerSequence, generationId, attemptId, attemptOrdinal,
+                    source, purpose, attemptKind, retryReason, assistantHash,
+                    assistantChars, nativeToolCallCount, capturedNativeToolProposalCount,
+                    nativeToolProposalsTruncated, textualToolCallPresent, completion,
+                    providerBacked, foreground, completedNormally, normalized, truncated, "");
+        }
+
         boolean toolCallPresent() {
             return nativeToolCallCount > 0 || textualToolCallPresent;
         }
@@ -118,6 +158,7 @@ final class QualificationProviderAttemptLedger {
             ProviderResponseCapture.Failure failure,
             ProviderResponseCapture.Abandonment abandonment,
             int startEventIndex,
+            int dispatchEventIndex,
             int closeEventIndex) {
         Attempt {
             proposals = List.copyOf(proposals);
@@ -147,7 +188,7 @@ final class QualificationProviderAttemptLedger {
                     requestDispatched, transportUnobserved, "", List.of(),
                     AuthoritySurface.unbound(),
                     response, proposals, failure, abandonment,
-                    startEventIndex, closeEventIndex);
+                    startEventIndex, -1, closeEventIndex);
         }
 
         Attempt(
@@ -171,9 +212,9 @@ final class QualificationProviderAttemptLedger {
                     dispatchedNativeTools == null
                             ? List.of()
                             : List.copyOf(dispatchedNativeTools),
-                    AuthoritySurface.fromNativeTools(dispatchedNativeTools),
-                    response, proposals, failure, abandonment,
-                    startEventIndex, closeEventIndex);
+                     AuthoritySurface.fromNativeTools(dispatchedNativeTools),
+                     response, proposals, failure, abandonment,
+                    startEventIndex, -1, closeEventIndex);
         }
     }
 
@@ -301,18 +342,51 @@ final class QualificationProviderAttemptLedger {
         }
     }
 
-    record Ledger(List<Generation> generations) {
+    record Ledger(
+            List<Generation> generations,
+            QualificationProviderTransportLedger.Ledger transports) {
         Ledger {
             generations = List.copyOf(generations);
+            transports = transports == null
+                    ? QualificationProviderTransportLedger.Ledger.empty()
+                    : transports;
             requireSerializedNonBackgroundGenerations(generations);
         }
 
+        Ledger(List<Generation> generations) {
+            this(generations, QualificationProviderTransportLedger.Ledger.empty());
+        }
+
         static Ledger empty() {
-            return new Ledger(List.of());
+            return new Ledger(List.of(), QualificationProviderTransportLedger.Ledger.empty());
         }
 
         boolean present() {
             return !generations.isEmpty();
+        }
+
+        boolean transportLifecycleComplete() {
+            return transports.completeForDispatchedAttempts(generations);
+        }
+
+        boolean dispatchedAttemptPresent() {
+            return generations.stream().flatMap(generation -> generation.attempts().stream())
+                    .anyMatch(Attempt::requestDispatched);
+        }
+
+        boolean transportQuarantinePresent() {
+            return transports.quarantinePresent();
+        }
+
+        boolean transportUnobservedPresent() {
+            return transports.unobservedPresent()
+                    || generations.stream()
+                            .flatMap(generation -> generation.attempts().stream())
+                            .anyMatch(Attempt::transportUnobserved);
+        }
+
+        boolean activeProcessBindingComplete() {
+            return transports.activeProcessBindingComplete();
         }
 
         Response selectedResponse(String generationId, String attemptId) {
@@ -564,6 +638,18 @@ final class QualificationProviderAttemptLedger {
                 // body receipt. They remain readable but cannot prove a model
                 // tool opportunity.
                 exactKeys(data, ATTEMPT_KEYS, type);
+            } else if ("GENERATION_RESPONSE_CAPTURED".equals(type)) {
+                exactKeysOneOf(
+                        data,
+                        keys(RESPONSE_KEYS, schemaVersion),
+                        keys(TRANSPORT_BOUND_RESPONSE_KEYS, schemaVersion),
+                        type);
+            } else if ("GENERATION_COMPLETED".equals(type)) {
+                exactKeysOneOf(
+                        data,
+                        keys(GENERATION_COMPLETION_KEYS, schemaVersion),
+                        keys(TRANSPORT_BOUND_GENERATION_COMPLETION_KEYS, schemaVersion),
+                        type);
             } else {
                 exactKeys(data, keys(type, schemaVersion), type);
             }
@@ -574,7 +660,7 @@ final class QualificationProviderAttemptLedger {
                 case "GENERATION_ATTEMPT_STARTED" -> attemptStarted(
                         data, generations, attemptIds, index);
                 case "GENERATION_REQUEST_DISPATCHED" -> requestDispatched(
-                        data, generations, schemaVersion);
+                        data, generations, schemaVersion, index);
                 case "GENERATION_TRANSPORT_UNOBSERVED" -> transportUnobserved(
                         data, generations);
                 case "GENERATION_RESPONSE_CAPTURED" -> responseCaptured(
@@ -616,7 +702,10 @@ final class QualificationProviderAttemptLedger {
             }
             frozen.add(generation.freeze(attempts));
         }
-        return new Ledger(frozen);
+        QualificationProviderTransportLedger.Ledger transports =
+                QualificationProviderTransportLedger.parse(traceRoot);
+        QualificationProviderTransportLedger.validateAgainst(transports, frozen);
+        return new Ledger(frozen, transports);
     }
 
     private static void generationStarted(
@@ -674,7 +763,8 @@ final class QualificationProviderAttemptLedger {
     private static void requestDispatched(
             JsonNode data,
             Map<String, MutableGeneration> generations,
-            int traceSchemaVersion) {
+            int traceSchemaVersion,
+            int eventIndex) {
         MutableAttempt attempt = openAttempt(data, generations);
         AttemptFields fields = attemptFields(data, attempt.generation);
         attempt.requireSame(fields);
@@ -718,6 +808,7 @@ final class QualificationProviderAttemptLedger {
         attempt.dispatchedNativeTools = dispatch.nativeTools();
         attempt.authoritySurface = dispatch.authoritySurface();
         attempt.requestDispatched = true;
+        attempt.dispatchEventIndex = eventIndex;
     }
 
     private static void validateAuthoritySurface(
@@ -829,6 +920,14 @@ final class QualificationProviderAttemptLedger {
             throw new IllegalArgumentException(
                     "provider response derived flags contradict typed source/completion");
         }
+        String transportOperationId = data.has("transportOperationId")
+                ? requiredId(data, "transportOperationId")
+                : "";
+        if (!transportOperationId.isBlank()
+                && !transportOperationId.equals(fields.attemptId() + "-transport-1")) {
+            throw new IllegalArgumentException(
+                    "provider response transport identity does not match its attempt");
+        }
         attempt.response = new Response(
                 eventIndex,
                 requiredLong(data, "ledgerSequence"),
@@ -836,7 +935,8 @@ final class QualificationProviderAttemptLedger {
                 fields.source(), fields.purpose(), fields.attemptKind(), fields.retryReason(),
                 hash, chars, nativeCalls, capturedNativeCalls, nativeProposalsTruncated,
                 textualCall, completion,
-                providerBacked, foreground, completedNormally, normalized, truncated);
+                providerBacked, foreground, completedNormally, normalized, truncated,
+                transportOperationId);
         attempt.closeEventIndex = eventIndex;
     }
 
@@ -929,7 +1029,9 @@ final class QualificationProviderAttemptLedger {
             throw new IllegalArgumentException(
                     "transport-unobserved generation failure lacks an attempt");
         }
-        if (finalAttempt != null && finalAttempt.failure != failure) {
+        if (finalAttempt != null
+                && finalAttempt.failure != null
+                && finalAttempt.failure != failure) {
             throw new IllegalArgumentException(
                     "generation and final attempt failure disagree");
         }
@@ -994,7 +1096,12 @@ final class QualificationProviderAttemptLedger {
                 ProviderResponseCapture.Abandonment.class, data, "abandonment");
         if (!generation.attempts.isEmpty()) {
             MutableAttempt last = new ArrayList<>(generation.attempts.values()).getLast();
-            if (last.abandonment != generation.abandonment) {
+            // The attempt can settle with a response or failure immediately
+            // before the generation-level abort arbiter wins. In that race
+            // there is no attempt abandonment to compare; the closed attempt
+            // remains authoritative and only the generation is abandoned.
+            if (last.abandonment != null
+                    && last.abandonment != generation.abandonment) {
                 throw new IllegalArgumentException(
                         "generation and final attempt abandonment disagree");
             }
@@ -1022,10 +1129,13 @@ final class QualificationProviderAttemptLedger {
         String hash = requiredHash(data, "assistantHash");
         boolean terminalEligible = requiredBoolean(data, "providerTerminalEligible");
         boolean toolEligible = requiredBoolean(data, "providerToolCallEligible");
-        boolean expectedTerminal = selected.response.completedNormally();
-        boolean expectedTool;
+        String transportOperationId = data.has("transportOperationId")
+                ? requiredId(data, "transportOperationId")
+                : "";
+        boolean structurallyTerminalEligible = selected.response.completedNormally();
+        boolean structurallyToolEligible;
         if (!generation.authorityModeRecorded) {
-            expectedTool = selected.requestDispatched
+            structurallyToolEligible = selected.requestDispatched
                     && selected.response.foreground()
                     && selected.response.toolCallPresent()
                     && (selected.response.completion()
@@ -1040,17 +1150,26 @@ final class QualificationProviderAttemptLedger {
                         selected.response.nativeToolCallCount() == 0
                                 && selected.response.textualToolCallPresent();
             };
-            expectedTool = selected.requestDispatched
+            structurallyToolEligible = selected.requestDispatched
                     && selected.response.foreground()
                     && selected.response.completion()
                             == ProviderResponseCapture.Completion.PROVIDER_EOS
                     && selected.authoritySurface.bound()
                     && expectedToolShape;
         }
+        boolean transportProofDeferred = !transportOperationId.isBlank();
+        boolean eligibilityConsistent = transportProofDeferred
+                ? (!terminalEligible || structurallyTerminalEligible)
+                        && (!toolEligible || structurallyToolEligible)
+                : selected.transportUnobserved
+                        ? !terminalEligible && !toolEligible
+                        : terminalEligible == structurallyTerminalEligible
+                                && toolEligible == structurallyToolEligible;
         if (completion != selected.response.completion()
                 || !hash.equals(selected.response.assistantHash())
-                || terminalEligible != expectedTerminal
-                || toolEligible != expectedTool) {
+                || !eligibilityConsistent
+                || !transportOperationId.equals(
+                        selected.response.transportOperationId())) {
             throw new IllegalArgumentException(
                     "generation completion contradicts its selected response");
         }
@@ -1327,6 +1446,19 @@ final class QualificationProviderAttemptLedger {
         }
     }
 
+    private static void exactKeysOneOf(
+            JsonNode object,
+            Set<String> legacy,
+            Set<String> transportBound,
+            String label) {
+        Set<String> actual = fields(object);
+        if (!actual.equals(legacy) && !actual.equals(transportBound)) {
+            throw new IllegalArgumentException(
+                    label + " data keys differ; expected " + legacy + " or "
+                            + transportBound + ", found " + actual);
+        }
+    }
+
     private static Set<String> fields(JsonNode object) {
         Set<String> actual = new LinkedHashSet<>();
         object.fieldNames().forEachRemaining(actual::add);
@@ -1593,6 +1725,7 @@ final class QualificationProviderAttemptLedger {
         private Response response;
         private ProviderResponseCapture.Failure failure;
         private ProviderResponseCapture.Abandonment abandonment;
+        private int dispatchEventIndex = -1;
         private int closeEventIndex = -1;
         private final List<Proposal> proposals = new ArrayList<>();
 
@@ -1631,7 +1764,7 @@ final class QualificationProviderAttemptLedger {
                     transportUnobserved, providerBodyHash, dispatchedNativeTools,
                     authoritySurface,
                     response, List.copyOf(proposals), failure, abandonment,
-                    startEventIndex, closeEventIndex);
+                    startEventIndex, dispatchEventIndex, closeEventIndex);
         }
     }
 

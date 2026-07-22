@@ -4961,7 +4961,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void malformedStreamedToolArgumentsRecoverWithNonStreamingToolCallAndExecuteMutation(
+        void malformedStreamedToolArgumentsQuarantineSameProcessFallbackBeforeMutation(
                 @TempDir Path workspace) throws Exception {
             Path script = workspace.resolve("scripts.js");
             Files.writeString(script, "console.log('old');");
@@ -4991,13 +4991,14 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("Overwrite scripts.js with exactly console.log('new');"));
 
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            EngineException.ResponseError failure = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> AssistantTurnExecutor.execute(
+                            messages, workspace, ctx, new AssistantTurnExecutor.Options()));
 
-            assertEquals("console.log('new');", Files.readString(script));
-            assertTrue(out.text().contains("Updated scripts.js"), out.text());
-            assertFalse(out.text().contains("Malformed engine response"), out.text());
-            assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"), out.text());
+            assertTrue(failure.getCause() instanceof IllegalStateException,
+                    "the unsettled malformed stream must quarantine its same-process retry");
+            assertEquals("console.log('old');", Files.readString(script));
         }
 
         @Test

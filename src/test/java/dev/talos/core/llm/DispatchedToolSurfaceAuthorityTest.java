@@ -15,6 +15,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -330,11 +331,8 @@ final class DispatchedToolSurfaceAuthorityTest {
                 ChatRequest request,
                 ProviderTransportHandoff handoff
         ) {
-            ProviderTransportHandoff.mark(
-                    handoff,
-                    "{\"probe\":\"" + requests.size() + "\"}",
-                    request.tools);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
         }
 
         private ChatRequest firstRequest() {
@@ -377,11 +375,8 @@ final class DispatchedToolSurfaceAuthorityTest {
                 ChatRequest request,
                 ProviderTransportHandoff handoff
         ) {
-            ProviderTransportHandoff.mark(
-                    handoff,
-                    "{\"probe\":\"" + requests.size() + "\"}",
-                    request.tools);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
         }
 
         private ChatRequest firstRequest() {

@@ -17,7 +17,9 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
@@ -356,7 +358,8 @@ class ReadOnlyInspectionRetryTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        ObservedProviderTransportFixture.completeBodyEof(
+                attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
                 text,
                 0,
@@ -379,7 +382,8 @@ class ReadOnlyInspectionRetryTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
                 text,
                 List.of(),

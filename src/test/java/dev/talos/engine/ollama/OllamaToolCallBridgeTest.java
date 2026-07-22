@@ -2,6 +2,7 @@ package dev.talos.engine.ollama;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -101,20 +102,19 @@ class OllamaToolCallBridgeTest {
         }
 
         @Test
-        void missingMessageNode_returnsRawJson() {
+        void missingMessageNodeIsTypedAsMalformed() {
             String json = """
                     {"some_other_format":"value"}
                     """;
-            String result = engine.extractChatContentOrToolCalls(json);
-            assertEquals(json.strip(), result.strip());
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> engine.extractChatContentOrToolCalls(json));
         }
 
         @Test
-        void malformedJson_fallsBackToRegex() {
-            // Invalid JSON but contains "content":"..." pattern
+        void malformedJsonCannotFallBackToRegexDerivedContent() {
             String json = "not-json {\"content\":\"fallback text\"} end";
-            String result = engine.extractChatContentOrToolCalls(json);
-            assertEquals("fallback text", result);
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> engine.extractChatContentOrToolCalls(json));
         }
     }
 

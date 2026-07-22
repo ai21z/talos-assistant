@@ -361,6 +361,10 @@ final class LlmCallBudget implements AutoCloseable {
                     && !generation.tryAbandon(abandonment)) {
                 return false;
             }
+            if (generation != null && generation.attached()) {
+                generation.awaitOrQuarantineTransport(
+                        ProviderResponseCapture.TRANSPORT_SETTLEMENT_GRACE_MS);
+            }
             decision = Decision.ABORT;
             outcome.complete(result);
             // Closing can block or be ignored by provider code. Publication

@@ -17,6 +17,7 @@ import dev.talos.spi.types.ModelIdentitySnapshot;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.SamplingControls;
@@ -1471,6 +1472,14 @@ public final class LlmClient implements AutoCloseable {
             }
 
             @Override
+            public ProviderTransportAttempt admitTransport(
+                    ProviderTransportHandoff.DispatchEvidence evidence) {
+                ProviderTransportAttempt transport = attempt.admitTransport(evidence);
+                transportDispatched.set(true);
+                return transport;
+            }
+
+            @Override
             public void transportUnobserved() {
                 attempt.transportUnobserved();
                 transportUnobserved.set(true);
@@ -1485,9 +1494,11 @@ public final class LlmClient implements AutoCloseable {
         }
         try {
             TextGeneration result = assembleFromStream(
-                    engineResolver.chatStream(request, handoff), onChunk, cancelled);
+                    engineResolver.chatStream(request, handoff),
+                    onChunk,
+                    cancelled,
+                    origin -> abandonGenerationForAbort(generation, origin));
             if (result.completion() == ProviderResponseCapture.Completion.RUNTIME_ABORT) {
-                abandonGenerationForAbort(generation, result.abortOrigin());
                 return result;
             }
             ProviderResponseCapture.Receipt receipt = attempt.respond(
@@ -1797,6 +1808,14 @@ public final class LlmClient implements AutoCloseable {
             }
 
             @Override
+            public ProviderTransportAttempt admitTransport(
+                    ProviderTransportHandoff.DispatchEvidence evidence) {
+                ProviderTransportAttempt transport = attempt.admitTransport(evidence);
+                transportDispatched.set(true);
+                return transport;
+            }
+
+            @Override
             public void transportUnobserved() {
                 attempt.transportUnobserved();
                 transportUnobserved.set(true);
@@ -1819,7 +1838,12 @@ public final class LlmClient implements AutoCloseable {
                     cancelled,
                     onChunk,
                     progressOnlySink,
-                    partialOutputCommitsAttempt);
+                    partialOutputCommitsAttempt,
+                    origin -> {
+                        if (origin != ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
+                            abandonGenerationForAbort(generation, origin);
+                        }
+                    });
             if (result != null && result.aborted()) {
                 if (result.abortOrigin() == ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
                     ProviderResponseCapture.Failure classified = transportUnobserved.get()
@@ -1829,8 +1853,6 @@ public final class LlmClient implements AutoCloseable {
                                     : ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH;
                     attempt.fail(classified);
                     generation.fail(classified);
-                } else {
-                    abandonGenerationForAbort(generation, result.abortOrigin());
                 }
                 return result;
             }
@@ -1909,7 +1931,9 @@ public final class LlmClient implements AutoCloseable {
                                              Supplier<Boolean> cancelled,
                                              Consumer<String> onChunk,
                                              Consumer<String> progressOnlySink,
-                                             boolean partialOutputCommitsAttempt) {
+                                             boolean partialOutputCommitsAttempt,
+                                             Consumer<ProviderResponseCapture.AbortOrigin>
+                                                     abortBeforeStreamClose) {
         // Try-with-resources ensures the token stream's onClose hook fires on
         // every exit path (break, exception, normal return). Registering the
         // stream before iteration gives the watchdog a handle it can close if
@@ -1925,12 +1949,14 @@ public final class LlmClient implements AutoCloseable {
             try {
                 ProviderResponseCapture.AbortOrigin initialAbort = abortOrigin(cancelled);
                 if (initialAbort != ProviderResponseCapture.AbortOrigin.NONE) {
+                    recordAbortBeforeStreamClose(initialAbort, abortBeforeStreamClose);
                     return abortedStreamResult(
                             assembly, onChunk, "interrupted", initialAbort);
                 }
                 for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
                     ProviderResponseCapture.AbortOrigin loopAbort = abortOrigin(cancelled);
                     if (loopAbort != ProviderResponseCapture.AbortOrigin.NONE) {
+                        recordAbortBeforeStreamClose(loopAbort, abortBeforeStreamClose);
                         return abortedStreamResult(
                                 assembly,
                                 onChunk,
@@ -1985,6 +2011,9 @@ public final class LlmClient implements AutoCloseable {
                         assembly.truncated());
             } catch (EngineException.Transient transientFailure) {
                 if (streamWasLocallyClosed(activeStream, stream)) {
+                    recordAbortBeforeStreamClose(
+                            ProviderResponseCapture.AbortOrigin.RUNTIME_STREAM_CLOSE,
+                            abortBeforeStreamClose);
                     return abortedStreamResult(
                             assembly,
                             onChunk,
@@ -2433,7 +2462,9 @@ public final class LlmClient implements AutoCloseable {
      */
     private TextGeneration assembleFromStream(java.util.stream.Stream<TokenChunk> stream,
                                               Consumer<String> onChunk,
-                                              Supplier<Boolean> cancelled) {
+                                              Supplier<Boolean> cancelled,
+                                              Consumer<ProviderResponseCapture.AbortOrigin>
+                                                      abortBeforeStreamClose) {
         // Try-with-resources: closes the engine's token stream on every exit
         // path (cancel break, cap-reached break, exception, normal return).
         // For the Ollama transport this propagates to the HTTP body/socket
@@ -2447,31 +2478,38 @@ public final class LlmClient implements AutoCloseable {
             ProviderResponseCapture.AbortOrigin abortOrigin =
                     ProviderResponseCapture.AbortOrigin.NONE;
 
-            for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
-                ProviderResponseCapture.AbortOrigin observedAbort = isCancelled(cancelled)
-                        ? ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL
-                        : ProviderResponseCapture.AbortOrigin.NONE;
-                if (observedAbort != ProviderResponseCapture.AbortOrigin.NONE) {
-                    completion = ProviderResponseCapture.Completion.RUNTIME_ABORT;
-                    abortOrigin = observedAbort;
-                    break;
-                }
-                if (ch == null) {
-                    completion = ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS;
-                    break;
-                }
-                if (Boolean.TRUE.equals(ch.done())) {
-                    String finishReason = Objects.toString(ch.finishReason(), "").strip();
-                    completion = completionForTerminalChunk(ch);
-                    break;
-                }
+            if (isCancelled(cancelled)) {
+                completion = ProviderResponseCapture.Completion.RUNTIME_ABORT;
+                abortOrigin = ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL;
+                recordAbortBeforeStreamClose(abortOrigin, abortBeforeStreamClose);
+            } else {
+                for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
+                    ProviderResponseCapture.AbortOrigin observedAbort = isCancelled(cancelled)
+                            ? ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL
+                            : ProviderResponseCapture.AbortOrigin.NONE;
+                    if (observedAbort != ProviderResponseCapture.AbortOrigin.NONE) {
+                        completion = ProviderResponseCapture.Completion.RUNTIME_ABORT;
+                        abortOrigin = observedAbort;
+                        recordAbortBeforeStreamClose(observedAbort, abortBeforeStreamClose);
+                        break;
+                    }
+                    if (ch == null) {
+                        completion = ProviderResponseCapture.Completion.STREAM_WITHOUT_EOS;
+                        break;
+                    }
+                    if (Boolean.TRUE.equals(ch.done())) {
+                        String finishReason = Objects.toString(ch.finishReason(), "").strip();
+                        completion = completionForTerminalChunk(ch);
+                        break;
+                    }
 
-                String deltaRaw = Objects.toString(ch.text(), "");
-                boolean capReached = assembly.append(deltaRaw);
-                assembly.emitStable(onChunk);
-                if (capReached) {
-                    completion = ProviderResponseCapture.Completion.RUNTIME_SAFE_CAP;
-                    break;
+                    String deltaRaw = Objects.toString(ch.text(), "");
+                    boolean capReached = assembly.append(deltaRaw);
+                    assembly.emitStable(onChunk);
+                    if (capReached) {
+                        completion = ProviderResponseCapture.Completion.RUNTIME_SAFE_CAP;
+                        break;
+                    }
                 }
             }
             String terminalText = providerTextCanRetainProtocol(completion)
@@ -2485,6 +2523,18 @@ public final class LlmClient implements AutoCloseable {
                     assembly.truncated(),
                     abortOrigin, ProviderResponseCapture.Receipt.none());
         }
+    }
+
+    private static void recordAbortBeforeStreamClose(
+            ProviderResponseCapture.AbortOrigin origin,
+            Consumer<ProviderResponseCapture.AbortOrigin> recorder) {
+        if (recorder == null
+                || origin == null
+                || origin == ProviderResponseCapture.AbortOrigin.NONE
+                || origin == ProviderResponseCapture.AbortOrigin.PROVIDER_TRANSPORT) {
+            return;
+        }
+        recorder.accept(origin);
     }
 
     private static ProviderResponseCapture.Completion completionForTerminalChunk(

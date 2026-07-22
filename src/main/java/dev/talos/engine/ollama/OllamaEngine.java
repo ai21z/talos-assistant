@@ -101,7 +101,12 @@ final class OllamaEngine implements ModelEngine {
     public Stream<TokenChunk> chatStreamNonStreaming(
             ChatRequest req,
             ProviderTransportHandoff handoff) throws Exception {
-        return Stream.of(TokenChunk.of(chat(req, handoff)), TokenChunk.eos());
+        OllamaChatClient.NonStreamingResult result = chatClient.chatResult(req, handoff);
+        return Stream.of(
+                TokenChunk.of(result.content()),
+                result.providerTerminal()
+                        ? TokenChunk.eos(result.finishReason())
+                        : TokenChunk.transportEof(result.finishReason()));
     }
 
     // ── Tool spec conversion ─────────────────────────────────────────────

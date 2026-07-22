@@ -5,7 +5,9 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -233,7 +235,8 @@ class PostToolSynthesisRetryTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
                 text,
                 List.of(),

@@ -12,8 +12,11 @@ import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileWriteTool;
@@ -274,7 +277,8 @@ class AssistantTurnExecutorAbortTruthTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(
                 new ProviderResponseCapture.Response(
                         answer,
@@ -571,23 +575,29 @@ class AssistantTurnExecutorAbortTruthTest {
                 "test-model",
                 "Explain briefly.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Explain briefly."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options());
+            EngineException.ResponseError failure = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> AssistantTurnExecutor.execute(
+                            messages("Explain briefly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options()));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.streamed(), "the read-only request should use the streaming path");
-            assertTrue(out.text().contains("retry-output"),
-                    "a safely buffered failed attempt may be replaced by a later provider answer");
-            assertFalse(out.text().contains("talos.read_file"), out.text());
+            assertTrue(failure.getCause() instanceof IllegalStateException,
+                    "quarantine must reject the same-process retry");
             assertFalse(String.join("", chunks).contains("talos.read_file"),
                     "raw tool protocol must not reach the streamed surface: " + chunks);
             assertEquals(0, approvals.get(), "unsettled provider output must not request approval");
             assertTrue(trace.events().stream().noneMatch(event ->
                     "TOOL_EXECUTED".equals(event.type())));
-            assertTrue(String.join("", chunks).contains("retry-output"), chunks.toString());
+            assertEquals(1, trace.events().stream()
+                    .filter(event -> "GENERATION_REQUEST_DISPATCHED".equals(event.type()))
+                    .count(), "quarantine must prevent a second provider dispatch");
+            assertTrue(trace.events().stream().anyMatch(event ->
+                    "PROVIDER_TRANSPORT_LIFECYCLE".equals(event.type())
+                            && "FAILED_DURING_BODY".equals(
+                                    event.data().get("settlement"))));
         } finally {
             LocalTurnTraceCapture.clear();
         }
@@ -625,19 +635,25 @@ class AssistantTurnExecutorAbortTruthTest {
                 "test-model",
                 "Create the files.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Create the files."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options());
+            EngineException.ResponseError failure = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> AssistantTurnExecutor.execute(
+                            messages("Create the files."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options()));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertFalse(out.text().contains("talos.write_file"), out.text());
+            assertTrue(failure.getCause() instanceof IllegalStateException,
+                    "quarantine must reject the same-process retry");
             assertEquals(0, approvals.get(), "unsettled provider output must not request approval");
             assertFalse(Files.exists(workspace.resolve("index.html")));
             assertFalse(Files.exists(workspace.resolve("style.css")));
             assertTrue(trace.events().stream().noneMatch(event ->
                     "TOOL_EXECUTED".equals(event.type())));
+            assertEquals(1, trace.events().stream()
+                    .filter(event -> "GENERATION_REQUEST_DISPATCHED".equals(event.type()))
+                    .count(), "quarantine must prevent a second provider dispatch");
         } finally {
             LocalTurnTraceCapture.clear();
         }

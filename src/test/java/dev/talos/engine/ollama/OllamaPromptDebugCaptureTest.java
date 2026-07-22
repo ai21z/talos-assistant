@@ -6,6 +6,8 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +23,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,6 +37,7 @@ class OllamaPromptDebugCaptureTest {
     @AfterEach
     void clearCapture() {
         PromptDebugCapture.clear();
+        ProviderResponseCapture.clear();
     }
 
     @Test
@@ -295,27 +299,164 @@ class OllamaPromptDebugCaptureTest {
             ChatRequest request = new ChatRequest(
                     "ollama", "qwen2.5-coder:14b", "system", "user",
                     List.of(), Duration.ofSeconds(5), List.of(), List.of());
-            AtomicInteger dispatches = new AtomicInteger();
-            AtomicInteger unobserved = new AtomicInteger();
+            List<ProviderResponseCapture.TransportLifecycleEvent> lifecycle =
+                    new CopyOnWriteArrayList<>();
+            ProviderResponseCapture.Scope scope = ProviderResponseCapture.begin(
+                    new ProviderResponseCapture.Listener() {
+                        @Override
+                        public void transportLifecycle(
+                                ProviderResponseCapture.TransportLifecycleEvent event) {
+                            lifecycle.add(event);
+                        }
+                    },
+                    "ollama-nonstream-transport");
+            ProviderResponseCapture.Generation generation = scope.openGeneration(
+                    ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                    ProviderResponseCapture.Purpose.TURN_RESPONSE);
+            ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                    ProviderResponseCapture.AttemptKind.PRIMARY,
+                    ProviderResponseCapture.RetryReason.NONE);
             ProviderTransportHandoff handoff = new ProviderTransportHandoff() {
                 @Override
-                public void requestDispatched() {
-                    dispatches.incrementAndGet();
-                }
+                public void requestDispatched() { }
 
                 @Override
-                public void transportUnobserved() {
-                    unobserved.incrementAndGet();
+                public ProviderTransportAttempt admitTransport(DispatchEvidence evidence) {
+                    return attempt.admitTransport(evidence);
                 }
             };
 
             engine.chatStreamNonStreaming(request, handoff).toList();
 
-            assertEquals(1, dispatches.get());
-            assertEquals(0, unobserved.get());
+            assertEquals(List.of(
+                            ProviderTransportAttempt.Transition.HANDOFF_ADMITTED,
+                            ProviderTransportAttempt.Transition.SEND_API_ENTERED,
+                            ProviderTransportAttempt.Transition.RESPONSE_HEADERS_OBSERVED,
+                            ProviderTransportAttempt.Transition.RESPONSE_BODY_OPENED,
+                            ProviderTransportAttempt.Transition.PROVIDER_TERMINAL_OBSERVED,
+                            ProviderTransportAttempt.Transition.RESPONSE_BODY_COMPLETED,
+                            ProviderTransportAttempt.Transition.SETTLED),
+                    lifecycle.stream()
+                            .map(ProviderResponseCapture.TransportLifecycleEvent::transition)
+                            .toList());
+            assertEquals(ProviderTransportAttempt.Settlement.COMPLETED_PROVIDER_TERMINAL,
+                    lifecycle.getLast().settlement());
+            scope.close();
+            ProviderResponseCapture.clear();
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void nonStreamingResponseRejectsTrailingJsonRoot() throws Exception {
+        HttpServer server = responseServer(
+                "/api/generate",
+                "{\"response\":\"unsafe\",\"done\":true} {\"done\":false}");
+        try {
+            OllamaChatClient client = client(server);
+            ChatRequest request = new ChatRequest(
+                    "ollama", "qwen2.5-coder:14b", "system", "user",
+                    List.of(), Duration.ofSeconds(5), List.of(), List.of());
+
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> client.chat(request));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void streamingResponseRejectsTrailingBytesAfterJsonRoot() throws Exception {
+        HttpServer server = responseServer(
+                "/api/generate",
+                "{\"response\":\"unsafe\",\"done\":true} trailing-script\n");
+        try {
+            OllamaChatClient client = client(server);
+            ChatRequest request = new ChatRequest(
+                    "ollama", "qwen2.5-coder:14b", "system", "user",
+                    List.of(), Duration.ofSeconds(5), List.of(), List.of());
+
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> client.chatStream(request).toList());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void generateStreamRejectsNonterminalObjectWithoutResponsePayload() throws Exception {
+        HttpServer server = responseServer("/api/generate", "{\"unexpected\":\"shape\"}\n");
+        try {
+            ChatRequest request = new ChatRequest(
+                    "ollama", "qwen2.5-coder:14b", "system", "user",
+                    List.of(), Duration.ofSeconds(5), List.of(), List.of());
+
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> client(server).chatStream(request).toList());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void chatStreamRejectsNonterminalObjectWithoutMessagePayload() throws Exception {
+        HttpServer server = responseServer("/api/chat", "{\"unexpected\":\"shape\"}\n");
+        try {
+            ChatRequest request = new ChatRequest(
+                    "ollama", "qwen2.5-coder:14b", "", "",
+                    List.of(), Duration.ofSeconds(5),
+                    List.of(ChatMessage.user("hello")), List.of());
+
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> client(server).chatStream(request).toList());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void nestedDoneTrueCannotBecomeProviderTerminal() throws Exception {
+        HttpServer server = responseServer(
+                "/api/generate",
+                "{\"response\":\"text\",\"metadata\":{\"done\":true}}\n");
+        try {
+            OllamaChatClient client = client(server);
+            ChatRequest request = new ChatRequest(
+                    "ollama", "qwen2.5-coder:14b", "system", "user",
+                    List.of(), Duration.ofSeconds(5), List.of(), List.of());
+
+            List<dev.talos.spi.types.TokenChunk> chunks =
+                    client.chatStream(request).toList();
+
+            assertTrue(chunks.stream().noneMatch(chunk ->
+                    chunk.terminalSignal()
+                            == dev.talos.spi.types.TokenChunk.TerminalSignal.PROVIDER_SENTINEL));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static OllamaChatClient client(HttpServer server) {
+        return new OllamaChatClient(
+                "http://127.0.0.1:" + server.getAddress().getPort(),
+                "qwen2.5-coder:14b",
+                true,
+                HttpClient.newHttpClient(),
+                new ObjectMapper());
+    }
+
+    private static HttpServer responseServer(String path, String response) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext(path, exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        return server;
     }
 
     private static HttpServer startServer(AtomicReference<String> bodyRef) throws IOException {

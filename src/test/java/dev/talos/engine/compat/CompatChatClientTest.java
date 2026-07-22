@@ -10,6 +10,7 @@ import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
 import dev.talos.spi.types.RequestMessageLayout;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -478,6 +480,98 @@ class CompatChatClientTest {
             assertEquals(sha256Utf8(bodyRef.get()),
                     handoff.evidence.getFirst().providerBodyHash());
             assertEquals(List.of(), handoff.evidence.getFirst().nativeTools());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void nonStreamingResponseRejectsTrailingJsonRoot() throws Exception {
+        AtomicReference<String> pathRef = new AtomicReference<>("");
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(pathRef, bodyRef, """
+                {"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}
+                {"choices":[]}
+                """, "application/json");
+        try {
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> client(server).chat(requestForStream()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void nonStreamingSuccessPublishesTheObservedTransportLifecycle() throws Exception {
+        HttpServer server = startServer(
+                new AtomicReference<>(""),
+                new AtomicReference<>(""),
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\","
+                        + "\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}",
+                "application/json");
+        try {
+            List<ProviderResponseCapture.TransportLifecycleEvent> lifecycle =
+                    new CopyOnWriteArrayList<>();
+            ProviderResponseCapture.Scope scope = ProviderResponseCapture.begin(
+                    new ProviderResponseCapture.Listener() {
+                        @Override
+                        public void transportLifecycle(
+                                ProviderResponseCapture.TransportLifecycleEvent event) {
+                            lifecycle.add(event);
+                        }
+                    },
+                    "compat-nonstream-transport");
+            ProviderResponseCapture.Generation generation = scope.openGeneration(
+                    ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                    ProviderResponseCapture.Purpose.TURN_RESPONSE);
+            ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                    ProviderResponseCapture.AttemptKind.PRIMARY,
+                    ProviderResponseCapture.RetryReason.NONE);
+            ProviderTransportHandoff handoff = new ProviderTransportHandoff() {
+                @Override
+                public void requestDispatched() { }
+
+                @Override
+                public ProviderTransportAttempt admitTransport(DispatchEvidence evidence) {
+                    return attempt.admitTransport(evidence);
+                }
+            };
+
+            assertEquals("ok", client(server).chat(
+                    requestForStream(), RequestMessageLayout.PRESERVE_AS_WRITTEN, handoff));
+
+            assertEquals(List.of(
+                            ProviderTransportAttempt.Transition.HANDOFF_ADMITTED,
+                            ProviderTransportAttempt.Transition.SEND_API_ENTERED,
+                            ProviderTransportAttempt.Transition.RESPONSE_HEADERS_OBSERVED,
+                            ProviderTransportAttempt.Transition.RESPONSE_BODY_OPENED,
+                            ProviderTransportAttempt.Transition.PROVIDER_TERMINAL_OBSERVED,
+                            ProviderTransportAttempt.Transition.RESPONSE_BODY_COMPLETED,
+                            ProviderTransportAttempt.Transition.SETTLED),
+                    lifecycle.stream()
+                            .map(ProviderResponseCapture.TransportLifecycleEvent::transition)
+                            .toList());
+            assertEquals(ProviderTransportAttempt.Settlement.COMPLETED_PROVIDER_TERMINAL,
+                    lifecycle.getLast().settlement());
+            scope.close();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void streamingResponseRejectsTrailingBytesAfterJsonRoot() throws Exception {
+        AtomicReference<String> pathRef = new AtomicReference<>("");
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(pathRef, bodyRef, """
+                data: {"choices":[{"delta":{"content":"unsafe"}}]} trailing-script
+
+                data: [DONE]
+
+                """, "text/event-stream");
+        try {
+            assertThrows(EngineException.MalformedResponse.class,
+                    () -> client(server).chatStream(requestForStream()).toList());
         } finally {
             server.stop(0);
         }

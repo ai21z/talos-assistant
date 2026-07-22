@@ -5,6 +5,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.TokenChunk;
 
 import java.util.ArrayList;
@@ -316,8 +317,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -377,8 +378,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -449,8 +450,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -498,8 +499,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -511,8 +512,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStreamNonStreaming(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStreamNonStreaming(request);
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStreamNonStreaming(request));
         }
 
         @Override
@@ -593,8 +594,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -658,8 +659,8 @@ public final class ScriptedNativeLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            markDispatch(request, handoff);
-            return chatStream(request);
+            return ObservedProviderTransportFixture.dispatch(
+                    request, handoff, () -> chatStream(request));
         }
 
         @Override
@@ -684,19 +685,4 @@ public final class ScriptedNativeLlmClient {
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, 0), false);
     }
 
-    private static void markDispatch(
-            ChatRequest request,
-            ProviderTransportHandoff handoff) {
-        String providerBody = String.join(
-                "\n",
-                request.backend,
-                request.model,
-                request.systemPrompt,
-                request.userPrompt,
-                request.snippets.toString(),
-                request.messages.toString(),
-                request.tools.toString(),
-                request.controls.toString());
-        ProviderTransportHandoff.mark(handoff, providerBody, request.tools);
-    }
 }

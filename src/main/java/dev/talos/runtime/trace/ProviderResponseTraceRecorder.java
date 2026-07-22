@@ -50,6 +50,30 @@ final class ProviderResponseTraceRecorder {
         emit(builder, "GENERATION_TRANSPORT_UNOBSERVED", attemptData(event));
     }
 
+    static void transportLifecycle(
+            LocalTurnTrace.Builder builder,
+            ProviderResponseCapture.TransportLifecycleEvent event) {
+        if (event == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("transportLedgerVersion", event.transportLedgerVersion());
+        data.put("transportSequence", event.transportSequence());
+        data.put("generationId", event.generationId());
+        data.put("attemptId", event.attemptId());
+        data.put("attemptOrdinal", event.attemptOrdinal());
+        data.put("transportOperationId", event.transportOperationId());
+        data.put("transition", event.transition().name());
+        data.put("observationMode", event.observationMode().name());
+        data.put("settlement", event.settlement().name());
+        data.put("transportFailure", event.failure().name());
+        data.put("cancellationState", event.cancellationState().name());
+        data.put("cancellationReason", event.cancellationReason().name());
+        data.put("wireDisposition", event.wireDisposition().name());
+        data.put("quarantineRequired", event.quarantineRequired());
+        data.put("lateAfterGenerationTerminal", event.lateAfterGenerationTerminal());
+        data.put("processBinding", event.processBinding().name());
+        emit(builder, "PROVIDER_TRANSPORT_LIFECYCLE", data);
+    }
+
     static void responseReturned(
             LocalTurnTrace.Builder builder,
             ProviderResponseCapture.AttemptResponse returned) {
@@ -74,6 +98,9 @@ final class ProviderResponseTraceRecorder {
                 && response.completedNormally());
         data.put("normalized", response.normalized());
         data.put("truncated", response.truncated());
+        if (!returned.receipt().transportOperationId().isBlank()) {
+            data.put("transportOperationId", returned.receipt().transportOperationId());
+        }
         emit(builder, "GENERATION_RESPONSE_CAPTURED", data);
 
         List<ChatMessage.NativeToolCall> calls = response.nativeToolCalls();
@@ -126,6 +153,9 @@ final class ProviderResponseTraceRecorder {
         data.put("assistantHash", receipt.assistantHash());
         data.put("providerTerminalEligible", receipt.providerTerminalEligible());
         data.put("providerToolCallEligible", receipt.providerToolCallEligible());
+        if (!receipt.transportOperationId().isBlank()) {
+            data.put("transportOperationId", receipt.transportOperationId());
+        }
         emit(builder, "GENERATION_COMPLETED", data);
     }
 

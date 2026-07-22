@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.NoFollowPathPolicy;
@@ -117,6 +118,33 @@ class QualificationPreResultEvidenceTest {
         assertFalse(document.evidenceComplete());
         assertTrue(document.causalLedger().stream()
                 .noneMatch(QualificationRecords.CausalLedgerEntry::firstCause));
+    }
+
+    @Test
+    void protocolV6TransportGapsFailClosedBeforeComparativeScoring() throws Exception {
+        QualificationScenarioBank.Catalog catalog = QualificationTestPacket.protocol6Catalog();
+        QualificationProtocol.Scenario scenario = catalog.admission().scenarios().getFirst();
+
+        QualificationTestPacket missing = QualificationTestPacket.create(
+                temp.resolve("transport-missing"), catalog, scenario);
+        mutateJson(missing.runRoot().resolve("trace.json"), trace ->
+                removeEvents(trace, "PROVIDER_TRANSPORT_LIFECYCLE"));
+        assertIncompleteTransportFinding(
+                missing, scenario, catalog, "PROVIDER_TRANSPORT_LIFECYCLE_UNAVAILABLE");
+
+        QualificationTestPacket unobserved = QualificationTestPacket.create(
+                temp.resolve("transport-unobserved"), catalog, scenario);
+        mutateJson(unobserved.runRoot().resolve("trace.json"),
+                QualificationPreResultEvidenceTest::makeTransportUnobserved);
+        assertIncompleteTransportFinding(
+                unobserved, scenario, catalog, "PROVIDER_TRANSPORT_LIFECYCLE_UNOBSERVED");
+
+        QualificationTestPacket quarantined = QualificationTestPacket.create(
+                temp.resolve("transport-quarantine"), catalog, scenario);
+        mutateJson(quarantined.runRoot().resolve("trace.json"),
+                QualificationPreResultEvidenceTest::makeTransportQuarantined);
+        assertIncompleteTransportFinding(
+                quarantined, scenario, catalog, "PROVIDER_TRANSPORT_QUARANTINE_REQUIRED");
     }
 
     @Test
@@ -504,6 +532,145 @@ class QualificationPreResultEvidenceTest {
         ObjectNode json = (ObjectNode) QualificationJson.readTree(path);
         mutation.apply(json);
         QualificationJson.write(path, json);
+    }
+
+    private static void assertIncompleteTransportFinding(
+            QualificationTestPacket packet,
+            QualificationProtocol.Scenario scenario,
+            QualificationScenarioBank.Catalog catalog,
+            String finding) throws Exception {
+        QualificationPreResultEvidence.Snapshot snapshot =
+                QualificationPreResultEvidence.capture(
+                        packet.root(), packet.runRoot(), scenario.id(), catalog);
+        QualificationCausalFinalizer.Document document =
+                QualificationCausalFinalizer.deriveFromSnapshot(snapshot);
+
+        assertTrue(snapshot.findings().contains(finding), snapshot.findings()::toString);
+        assertFalse(snapshot.complete());
+        assertEquals(QualificationRecords.CausalOwner.UNKNOWN, document.causalOwner());
+        assertEquals(QualificationRecords.FailureClass.INCOMPLETE_EVIDENCE,
+                document.failureClass());
+        assertFalse(document.evidenceComplete());
+        assertFalse(document.comparativeScoreEligible());
+    }
+
+    private static void makeTransportUnobserved(ObjectNode trace) {
+        ArrayNode events = (ArrayNode) trace.path("events");
+        ObjectNode handoff = eventByTransition(trace, "HANDOFF_ADMITTED").deepCopy();
+        ObjectNode settled = eventByTransition(trace, "SETTLED").deepCopy();
+        removeEvents(trace, "PROVIDER_TRANSPORT_LIFECYCLE");
+
+        ObjectNode handoffData = (ObjectNode) handoff.path("data");
+        handoffData.put("observationMode", "LEGACY_UNOBSERVED");
+        handoffData.put("wireDisposition", "UNKNOWN");
+        ObjectNode settledData = (ObjectNode) settled.path("data");
+        settledData.put("transportSequence", 2);
+        settledData.put("observationMode", "LEGACY_UNOBSERVED");
+        settledData.put("settlement", "LIFECYCLE_UNOBSERVED");
+        settledData.put("wireDisposition", "UNKNOWN");
+
+        int responseIndex = eventIndex(trace, "GENERATION_RESPONSE_CAPTURED");
+        events.insert(responseIndex, handoff);
+        events.insert(responseIndex + 1, settled);
+        eventData(trace, "GENERATION_COMPLETED")
+                .put("providerTerminalEligible", false)
+                .put("providerToolCallEligible", false);
+    }
+
+    private static void makeTransportQuarantined(ObjectNode trace) {
+        ArrayNode events = (ArrayNode) trace.path("events");
+        ObjectNode handoff = eventByTransition(trace, "HANDOFF_ADMITTED").deepCopy();
+        ObjectNode send = eventByTransition(trace, "SEND_API_ENTERED").deepCopy();
+        ObjectNode cancellation = send.deepCopy();
+        ObjectNode settled = eventByTransition(trace, "SETTLED").deepCopy();
+        removeEvents(trace, "PROVIDER_TRANSPORT_LIFECYCLE");
+
+        ObjectNode response = eventByType(trace, "GENERATION_RESPONSE_CAPTURED");
+        response.put("type", "GENERATION_ATTEMPT_ABANDONED");
+        ObjectNode responseData = (ObjectNode) response.path("data");
+        retainProviderAttemptKeys(responseData);
+        responseData.put("abandonment", "SCOPE_CLOSED");
+
+        ObjectNode completion = eventByType(trace, "GENERATION_COMPLETED");
+        completion.put("type", "GENERATION_ABANDONED");
+        ObjectNode completionData = (ObjectNode) completion.path("data");
+        retainProviderGenerationKeys(completionData);
+        completionData.put("abandonment", "SCOPE_CLOSED");
+
+        int dispatchIndex = eventIndex(trace, "GENERATION_REQUEST_DISPATCHED");
+        events.insert(dispatchIndex + 1, handoff);
+        events.insert(dispatchIndex + 2, send);
+
+        ObjectNode cancellationData = (ObjectNode) cancellation.path("data");
+        cancellationData.put("transportSequence", 3);
+        cancellationData.put("transition", "CANCELLATION_REQUESTED");
+        cancellationData.put("cancellationState", "REQUESTED");
+        cancellationData.put("cancellationReason", "SCOPE_CLOSED");
+        cancellationData.put("lateAfterGenerationTerminal", true);
+
+        ObjectNode settledData = (ObjectNode) settled.path("data");
+        settledData.put("transportSequence", 4);
+        settledData.put("settlement", "QUARANTINE_REQUIRED");
+        settledData.put("transportFailure", "UNKNOWN");
+        settledData.put("cancellationState", "UNACKNOWLEDGED");
+        settledData.put("cancellationReason", "SCOPE_CLOSED");
+        settledData.put("quarantineRequired", true);
+        settledData.put("lateAfterGenerationTerminal", true);
+
+        int generationTerminalIndex = eventIndex(trace, "GENERATION_ABANDONED");
+        events.insert(generationTerminalIndex + 1, cancellation);
+        events.insert(generationTerminalIndex + 2, settled);
+    }
+
+    private static void retainProviderAttemptKeys(ObjectNode data) {
+        List<String> keys = List.of(
+                "providerLedgerVersion", "ledgerSequence", "generationId", "source",
+                "purpose", "toolAuthorityMode", "attemptId", "attemptOrdinal",
+                "attemptKind", "retryReason", "requestDispatched");
+        data.properties().removeIf(entry -> !keys.contains(entry.getKey()));
+    }
+
+    private static void retainProviderGenerationKeys(ObjectNode data) {
+        List<String> keys = List.of(
+                "providerLedgerVersion", "ledgerSequence", "generationId", "source",
+                "purpose", "toolAuthorityMode");
+        data.properties().removeIf(entry -> !keys.contains(entry.getKey()));
+    }
+
+    private static void removeEvents(ObjectNode trace, String type) {
+        ArrayNode events = (ArrayNode) trace.path("events");
+        List<JsonNode> retained = new ArrayList<>();
+        for (JsonNode event : events) {
+            if (!type.equals(event.path("type").asText())) retained.add(event);
+        }
+        events.removeAll();
+        retained.forEach(events::add);
+    }
+
+    private static ObjectNode eventByType(ObjectNode trace, String type) {
+        return (ObjectNode) trace.path("events").get(eventIndex(trace, type));
+    }
+
+    private static ObjectNode eventByTransition(ObjectNode trace, String transition) {
+        for (JsonNode event : trace.path("events")) {
+            if ("PROVIDER_TRANSPORT_LIFECYCLE".equals(event.path("type").asText())
+                    && transition.equals(event.path("data").path("transition").asText())) {
+                return (ObjectNode) event;
+            }
+        }
+        throw new IllegalArgumentException("transport transition not found: " + transition);
+    }
+
+    private static ObjectNode eventData(ObjectNode trace, String type) {
+        return (ObjectNode) eventByType(trace, type).path("data");
+    }
+
+    private static int eventIndex(ObjectNode trace, String type) {
+        ArrayNode events = (ArrayNode) trace.path("events");
+        for (int index = 0; index < events.size(); index++) {
+            if (type.equals(events.get(index).path("type").asText())) return index;
+        }
+        throw new IllegalArgumentException("trace event not found: " + type);
     }
 
     private record Case(String id, PacketMutation mutation) {}

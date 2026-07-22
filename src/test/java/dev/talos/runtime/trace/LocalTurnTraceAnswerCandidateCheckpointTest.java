@@ -2,6 +2,8 @@ package dev.talos.runtime.trace;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -103,7 +105,8 @@ class LocalTurnTraceAnswerCandidateCheckpointTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(
                 new ProviderResponseCapture.Response(
                         fallback,

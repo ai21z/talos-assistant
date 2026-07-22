@@ -51,4 +51,39 @@ class SafeTerminalTraceProjectorTest {
         assertTrue(projection.providerLifecyclePreserved());
         assertEquals(List.of(response), projection.events());
     }
+
+    @Test
+    void transportSettlementPreservesTheExactQuarantineDecision() {
+        String traceId = "trc-projector-transport";
+        String generationId = traceId + "-generation-1";
+        String attemptId = generationId + "-attempt-1";
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("transportLedgerVersion", 1);
+        data.put("transportSequence", 5);
+        data.put("generationId", generationId);
+        data.put("attemptId", attemptId);
+        data.put("attemptOrdinal", 1);
+        data.put("transportOperationId", attemptId + "-transport-1");
+        data.put("transition", "SETTLED");
+        data.put("observationMode", "OBSERVED");
+        data.put("settlement", "CANCELLED_IN_FLIGHT");
+        data.put("transportFailure", "BODY_IO");
+        data.put("cancellationState", "BODY_CLOSE_ACKNOWLEDGED");
+        data.put("cancellationReason", "SCOPE_CLOSED");
+        data.put("wireDisposition", "UNKNOWN");
+        data.put("quarantineRequired", true);
+        data.put("lateAfterGenerationTerminal", false);
+        data.put("processBinding", "UNAVAILABLE");
+        TurnTraceEvent settlement = TurnTraceEvent.simple(
+                "PROVIDER_TRANSPORT_LIFECYCLE",
+                "2026-07-22T00:00:00Z",
+                data);
+
+        SafeTerminalTraceProjector.Projection projection =
+                SafeTerminalTraceProjector.project(List.of(settlement), traceId);
+
+        assertTrue(projection.providerLifecycleObserved());
+        assertTrue(projection.providerLifecyclePreserved());
+        assertEquals(List.of(settlement), projection.events());
+    }
 }

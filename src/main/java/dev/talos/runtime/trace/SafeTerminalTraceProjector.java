@@ -4,6 +4,7 @@ import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.TurnSettlement;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.tools.ToolAliasPolicy;
 
@@ -47,6 +48,12 @@ final class SafeTerminalTraceProjector {
     private static final Set<String> AUTHORITY_SURFACE = Set.of(
             "schemaVersion", "bound", "toolChoiceMode", "namedToolNameHash",
             "selectedToolNameHashes", "authorizedToolNameHashes");
+    private static final Set<String> TRANSPORT = Set.of(
+            "transportLedgerVersion", "transportSequence", "generationId",
+            "attemptId", "attemptOrdinal", "transportOperationId", "transition",
+            "observationMode", "settlement", "transportFailure", "cancellationState",
+            "cancellationReason", "wireDisposition", "quarantineRequired",
+            "lateAfterGenerationTerminal", "processBinding");
 
     private SafeTerminalTraceProjector() {}
 
@@ -190,6 +197,38 @@ final class SafeTerminalTraceProjector {
             boolean completedNormally = Boolean.TRUE.equals(data.get("completedNormally"));
             if ((providerBacked || completedNormally) && !dispatched) return false;
         }
+        if (("GENERATION_RESPONSE_CAPTURED".equals(type)
+                || "GENERATION_COMPLETED".equals(type))
+                && data.containsKey("transportOperationId")) {
+            String attemptId = "GENERATION_COMPLETED".equals(type)
+                    ? text(data, "selectedAttemptId")
+                    : text(data, "attemptId");
+            if (!text(data, "transportOperationId").equals(
+                    attemptId + "-transport-1")) {
+                return false;
+            }
+        }
+        if ("PROVIDER_TRANSPORT_LIFECYCLE".equals(type)) {
+            String generationId = text(data, "generationId");
+            long ordinal = number(data, "attemptOrdinal");
+            String attemptId = text(data, "attemptId");
+            String operationId = text(data, "transportOperationId");
+            ProviderTransportAttempt.Transition transition = enumValue(
+                    ProviderTransportAttempt.Transition.class, text(data, "transition"));
+            ProviderTransportAttempt.Settlement settlement = enumValue(
+                    ProviderTransportAttempt.Settlement.class, text(data, "settlement"));
+            if (!validGenerationId(generationId, traceId)
+                    || ordinal <= 0
+                    || !attemptId.equals(generationId + "-attempt-" + ordinal)
+                    || !operationId.equals(attemptId + "-transport-1")
+                    || transition == null || settlement == null) {
+                return false;
+            }
+            if ((transition == ProviderTransportAttempt.Transition.SETTLED)
+                    != (settlement != ProviderTransportAttempt.Settlement.NONE)) {
+                return false;
+            }
+        }
         if ("TURN_SETTLED".equals(type)) return validSettlement(data);
         if ("TRACE_STARTED".equals(type)) return validTraceStarted(data);
         return true;
@@ -279,16 +318,19 @@ final class SafeTerminalTraceProjector {
                 "foreground", "completedNormally", "normalized", "truncated",
                 "textualToolCallPresent",
                 "nativeToolProposalsTruncated", "argumentNameHashesTruncated",
-                "providerTerminalEligible", "providerToolCallEligible", "bound")
+                "providerTerminalEligible", "providerToolCallEligible", "bound",
+                "quarantineRequired", "lateAfterGenerationTerminal")
                 .contains(key) && !"dispatchedNativeTools".equals(key);
     }
 
     private static boolean validNumber(String key, long value) {
         if (value < 0) return false;
         return switch (key) {
-            case "schemaVersion", "providerLedgerVersion" -> value == 1;
+            case "schemaVersion", "providerLedgerVersion", "transportLedgerVersion" ->
+                    value == 1;
             case "turnNumber", "ledgerSequence", "attemptOrdinal",
-                    "selectedAttemptOrdinal", "proposalOrdinal" -> value > 0;
+                    "selectedAttemptOrdinal", "proposalOrdinal", "transportSequence" ->
+                    value > 0;
             case "errorCode" -> value <= 599;
             case "runtimeArtifactSizeBytes", "runtimeClasspathSizeBytes",
                     "runtimeClasspathEntryCount", "assistantChars",
@@ -301,7 +343,8 @@ final class SafeTerminalTraceProjector {
     private static boolean validText(String key, String value) {
         if (value == null || value.length() > 256) return false;
         return switch (key) {
-            case "generationId", "attemptId", "selectedAttemptId" -> safeToken(value, 192);
+            case "generationId", "attemptId", "selectedAttemptId",
+                    "transportOperationId" -> safeToken(value, 256);
             case "runtimeArtifactSha256", "runtimeClasspathSha256" -> bareHashOrBlank(value);
             case "assistantHash", "providerBodyHash", "providerCallIdHash",
                     "toolNameHash", "argumentsHash", "namedToolNameHash" -> providerHash(value);
@@ -314,6 +357,22 @@ final class SafeTerminalTraceProjector {
             case "completion" -> enumValue(ProviderResponseCapture.Completion.class, value) != null;
             case "failure" -> enumValue(ProviderResponseCapture.Failure.class, value) != null;
             case "abandonment" -> enumValue(ProviderResponseCapture.Abandonment.class, value) != null;
+            case "transition" -> enumValue(
+                    ProviderTransportAttempt.Transition.class, value) != null;
+            case "observationMode" -> enumValue(
+                    ProviderTransportAttempt.ObservationMode.class, value) != null;
+            case "settlement" -> enumValue(
+                    ProviderTransportAttempt.Settlement.class, value) != null;
+            case "transportFailure" -> enumValue(
+                    ProviderTransportAttempt.Failure.class, value) != null;
+            case "cancellationState" -> enumValue(
+                    ProviderTransportAttempt.CancellationState.class, value) != null;
+            case "cancellationReason" -> enumValue(
+                    ProviderTransportAttempt.CancellationReason.class, value) != null;
+            case "wireDisposition" -> enumValue(
+                    ProviderTransportAttempt.WireDisposition.class, value) != null;
+            case "processBinding" -> enumValue(
+                    ProviderTransportAttempt.ProcessBinding.class, value) != null;
             case "toolChoiceMode" -> enumValue(ToolChoiceMode.class, value) != null;
             case "toolNameClassification" -> "BLANK".equals(value)
                     || enumValue(ToolAliasPolicy.AliasDecisionStatus.class, value) != null;
@@ -404,7 +463,9 @@ final class SafeTerminalTraceProjector {
                     union(ATTEMPT, Set.of(
                             "providerBodyHash", "dispatchedNativeTools",
                             "toolAuthoritySurface")));
-            case "GENERATION_RESPONSE_CAPTURED" -> new EventSpec(RESPONSE, RESPONSE);
+            case "GENERATION_RESPONSE_CAPTURED" -> new EventSpec(
+                    RESPONSE,
+                    union(RESPONSE, Set.of("transportOperationId")));
             case "GENERATION_ATTEMPT_FAILED" -> new EventSpec(
                     union(ATTEMPT, Set.of("failure")),
                     union(ATTEMPT, Set.of("failure")));
@@ -425,9 +486,11 @@ final class SafeTerminalTraceProjector {
                     union(GENERATION, Set.of(
                             "selectedAttemptId", "selectedAttemptOrdinal", "completion",
                             "assistantHash", "providerTerminalEligible",
-                            "providerToolCallEligible")));
+                            "providerToolCallEligible", "transportOperationId")));
             case "PROVIDER_TOOL_PROPOSAL_CAPTURED" ->
                     new EventSpec(PROPOSAL, PROPOSAL);
+            case "PROVIDER_TRANSPORT_LIFECYCLE" ->
+                    new EventSpec(TRANSPORT, TRANSPORT);
             default -> null;
         };
     }

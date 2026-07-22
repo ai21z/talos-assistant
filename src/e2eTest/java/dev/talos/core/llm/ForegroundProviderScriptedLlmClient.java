@@ -78,22 +78,22 @@ public final class ForegroundProviderScriptedLlmClient {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(
-                    handoff,
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
                     physicalProviderBody(request),
-                    request.tools);
-            return responseChunks();
+                    request.tools,
+                    handoff,
+                    this::responseChunks);
         }
 
         @Override
         public Stream<TokenChunk> chatStreamNonStreaming(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(
-                    handoff,
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
                     physicalProviderBody(request),
-                    request.tools);
-            return responseChunks();
+                    request.tools,
+                    handoff,
+                    this::responseChunks);
         }
 
         private Stream<TokenChunk> responseChunks() {

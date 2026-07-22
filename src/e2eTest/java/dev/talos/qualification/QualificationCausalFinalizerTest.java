@@ -1,5 +1,6 @@
 package dev.talos.qualification;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.runtime.TurnPolicyTrace;
@@ -1300,7 +1301,7 @@ class QualificationCausalFinalizerTest {
                 QualificationCausalFinalizer.derive(
                         scenario.id(), "r1", modelFacts(false, decisionEvidence));
 
-        assertEquals(QualificationRecords.AnswerOrigin.MODEL_PROVIDER, origin);
+        assertEquals(QualificationRecords.AnswerOrigin.NONE, origin);
         assertEquals(QualificationRecords.CausalOwner.UNKNOWN,
                 decisionEvidence.observations().getFirst().owner());
         assertFalse(decisionEvidence.complete());
@@ -2345,13 +2346,14 @@ class QualificationCausalFinalizerTest {
             QualificationTestPacket packet,
             String failure) throws Exception {
         ObjectNode trace = trace(packet);
+        replaceTransportWithAttemptFailure(trace);
         ObjectNode response = event(trace, "GENERATION_RESPONSE_CAPTURED");
         ObjectNode responseData = ((ObjectNode) response.path("data")).deepCopy();
         responseData.remove(List.of(
                 "assistantHash", "assistantChars", "nativeToolCallCount",
                 "capturedNativeToolProposalCount", "nativeToolProposalsTruncated",
                 "textualToolCallPresent", "completion", "providerBacked", "foreground",
-                "completedNormally", "normalized", "truncated"));
+                "completedNormally", "normalized", "truncated", "transportOperationId"));
         responseData.put("failure", failure);
         response.put("type", "GENERATION_ATTEMPT_FAILED");
         response.set("data", responseData);
@@ -2360,7 +2362,8 @@ class QualificationCausalFinalizerTest {
         ObjectNode completedData = ((ObjectNode) completed.path("data")).deepCopy();
         completedData.remove(List.of(
                 "selectedAttemptId", "selectedAttemptOrdinal", "completion",
-                "assistantHash", "providerTerminalEligible", "providerToolCallEligible"));
+                "assistantHash", "providerTerminalEligible", "providerToolCallEligible",
+                "transportOperationId"));
         completedData.put("failure", failure);
         completed.put("type", "GENERATION_FAILED");
         completed.set("data", completedData);
@@ -2380,13 +2383,14 @@ class QualificationCausalFinalizerTest {
             QualificationTestPacket packet,
             String abandonment) throws Exception {
         ObjectNode trace = trace(packet);
+        List<ObjectNode> abandonmentTransport = abandonmentTransport(trace, abandonment);
         ObjectNode response = event(trace, "GENERATION_RESPONSE_CAPTURED");
         ObjectNode responseData = ((ObjectNode) response.path("data")).deepCopy();
         responseData.remove(List.of(
                 "assistantHash", "assistantChars", "nativeToolCallCount",
                 "capturedNativeToolProposalCount", "nativeToolProposalsTruncated",
                 "textualToolCallPresent", "completion", "providerBacked", "foreground",
-                "completedNormally", "normalized", "truncated"));
+                "completedNormally", "normalized", "truncated", "transportOperationId"));
         responseData.put("abandonment", abandonment);
         response.put("type", "GENERATION_ATTEMPT_ABANDONED");
         response.set("data", responseData);
@@ -2395,15 +2399,92 @@ class QualificationCausalFinalizerTest {
         ObjectNode completedData = ((ObjectNode) completed.path("data")).deepCopy();
         completedData.remove(List.of(
                 "selectedAttemptId", "selectedAttemptOrdinal", "completion",
-                "assistantHash", "providerTerminalEligible", "providerToolCallEligible"));
+                "assistantHash", "providerTerminalEligible", "providerToolCallEligible",
+                "transportOperationId"));
         completedData.put("abandonment", abandonment);
         completed.put("type", "GENERATION_ABANDONED");
         completed.set("data", completedData);
+
+        ArrayNode events = trace.withArray("events");
+        int generationTerminalIndex = eventIndex(events, "GENERATION_ABANDONED");
+        events.insert(generationTerminalIndex + 1, abandonmentTransport.get(0));
+        events.insert(generationTerminalIndex + 2, abandonmentTransport.get(1));
 
         Files.writeString(packet.runRoot().resolve("answer.txt"), "\n",
                 StandardCharsets.UTF_8);
         setTerminalAnswer(trace, "", "NONE");
         QualificationJson.write(packet.runRoot().resolve("trace.json"), trace);
+    }
+
+    private static void replaceTransportWithAttemptFailure(ObjectNode trace) {
+        ObjectNode handoff = transportEvent(trace, "HANDOFF_ADMITTED").deepCopy();
+        ObjectNode send = transportEvent(trace, "SEND_API_ENTERED").deepCopy();
+        ObjectNode settled = transportEvent(trace, "SETTLED").deepCopy();
+        removeTransportEvents(trace);
+
+        ObjectNode settledData = (ObjectNode) settled.path("data");
+        settledData.put("transportSequence", 3);
+        settledData.put("settlement", "QUARANTINE_REQUIRED");
+        settledData.put("transportFailure", "UNKNOWN");
+        settledData.put("quarantineRequired", true);
+
+        ArrayNode events = trace.withArray("events");
+        int dispatchIndex = eventIndex(events, "GENERATION_REQUEST_DISPATCHED");
+        events.insert(dispatchIndex + 1, handoff);
+        events.insert(dispatchIndex + 2, send);
+        events.insert(dispatchIndex + 3, settled);
+    }
+
+    private static List<ObjectNode> abandonmentTransport(
+            ObjectNode trace,
+            String abandonment) {
+        ObjectNode handoff = transportEvent(trace, "HANDOFF_ADMITTED").deepCopy();
+        ObjectNode send = transportEvent(trace, "SEND_API_ENTERED").deepCopy();
+        ObjectNode cancellation = send.deepCopy();
+        ObjectNode settled = transportEvent(trace, "SETTLED").deepCopy();
+        removeTransportEvents(trace);
+
+        ObjectNode cancellationData = (ObjectNode) cancellation.path("data");
+        cancellationData.put("transportSequence", 3);
+        cancellationData.put("transition", "CANCELLATION_REQUESTED");
+        cancellationData.put("cancellationState", "REQUESTED");
+        cancellationData.put("cancellationReason", abandonment);
+        cancellationData.put("lateAfterGenerationTerminal", true);
+
+        ObjectNode settledData = (ObjectNode) settled.path("data");
+        settledData.put("transportSequence", 4);
+        settledData.put("settlement", "QUARANTINE_REQUIRED");
+        settledData.put("transportFailure", "UNKNOWN");
+        settledData.put("cancellationState", "UNACKNOWLEDGED");
+        settledData.put("cancellationReason", abandonment);
+        settledData.put("quarantineRequired", true);
+        settledData.put("lateAfterGenerationTerminal", true);
+
+        ArrayNode events = trace.withArray("events");
+        int dispatchIndex = eventIndex(events, "GENERATION_REQUEST_DISPATCHED");
+        events.insert(dispatchIndex + 1, handoff);
+        events.insert(dispatchIndex + 2, send);
+        return List.of(cancellation, settled);
+    }
+
+    private static ObjectNode transportEvent(ObjectNode trace, String transition) {
+        for (JsonNode candidate : trace.withArray("events")) {
+            if ("PROVIDER_TRANSPORT_LIFECYCLE".equals(candidate.path("type").asText(""))
+                    && transition.equals(candidate.path("data").path("transition").asText(""))) {
+                return (ObjectNode) candidate;
+            }
+        }
+        throw new IllegalArgumentException("missing transport transition " + transition);
+    }
+
+    private static void removeTransportEvents(ObjectNode trace) {
+        ArrayNode events = trace.withArray("events");
+        for (int index = events.size() - 1; index >= 0; index--) {
+            if ("PROVIDER_TRANSPORT_LIFECYCLE".equals(
+                    events.get(index).path("type").asText(""))) {
+                events.remove(index);
+            }
+        }
     }
 
     private static void markOutputCap(QualificationTestPacket packet) throws Exception {

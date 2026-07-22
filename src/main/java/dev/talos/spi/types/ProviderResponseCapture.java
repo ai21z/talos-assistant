@@ -1,9 +1,12 @@
 package dev.talos.spi.types;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.ArrayList;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
+import java.net.ConnectException;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
@@ -11,7 +14,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Explicit, turn-scoped provenance ledger for local-model generations.
@@ -28,6 +36,10 @@ public final class ProviderResponseCapture {
     public static final int MAX_TRACE_TOOL_PROPOSALS = 64;
     /** Hard bound on provider-authored argument-key hashes persisted for one proposal. */
     public static final int MAX_TRACE_ARGUMENT_NAME_HASHES = 32;
+    /** Current independent transport-operation ledger revision. */
+    public static final int TRANSPORT_LEDGER_VERSION = 1;
+    /** Bounded cooperative-cancellation drain before conservative quarantine. */
+    public static final long TRANSPORT_SETTLEMENT_GRACE_MS = 1_000L;
 
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<Attempt> LEGACY_ATTEMPT = new ThreadLocal<>();
@@ -378,6 +390,54 @@ public final class ProviderResponseCapture {
         }
     }
 
+    /** Safe, path-free fact from one independent provider transport owner. */
+    public record TransportLifecycleEvent(
+            int transportLedgerVersion,
+            long transportSequence,
+            String generationId,
+            String attemptId,
+            int attemptOrdinal,
+            String transportOperationId,
+            ProviderTransportAttempt.Transition transition,
+            ProviderTransportAttempt.ObservationMode observationMode,
+            ProviderTransportAttempt.Settlement settlement,
+            ProviderTransportAttempt.Failure failure,
+            ProviderTransportAttempt.CancellationState cancellationState,
+            ProviderTransportAttempt.CancellationReason cancellationReason,
+            ProviderTransportAttempt.WireDisposition wireDisposition,
+            boolean quarantineRequired,
+            boolean lateAfterGenerationTerminal,
+            ProviderTransportAttempt.ProcessBinding processBinding) {
+        public TransportLifecycleEvent {
+            if (transportLedgerVersion != TRANSPORT_LEDGER_VERSION) {
+                throw new IllegalArgumentException("unsupported transport ledger version");
+            }
+            if (transportSequence < 1) {
+                throw new IllegalArgumentException("transport sequence must be positive");
+            }
+            generationId = requireSafeIdentifier(generationId, "generationId");
+            attemptId = requireSafeIdentifier(attemptId, "attemptId");
+            transportOperationId = requireSafeIdentifier(
+                    transportOperationId, "transportOperationId");
+            if (attemptOrdinal < 1) {
+                throw new IllegalArgumentException("attempt ordinal must be positive");
+            }
+            transition = Objects.requireNonNull(transition, "transport transition");
+            observationMode = Objects.requireNonNull(
+                    observationMode, "transport observation mode");
+            settlement = Objects.requireNonNull(settlement, "transport settlement");
+            failure = Objects.requireNonNull(failure, "transport failure");
+            cancellationState = Objects.requireNonNull(
+                    cancellationState, "transport cancellation state");
+            cancellationReason = Objects.requireNonNull(
+                    cancellationReason, "transport cancellation reason");
+            wireDisposition = Objects.requireNonNull(
+                    wireDisposition, "transport wire disposition");
+            processBinding = Objects.requireNonNull(
+                    processBinding, "transport process binding");
+        }
+    }
+
     public record AttemptResponse(AttemptEvent attempt, Response response, Receipt receipt) {
         public AttemptResponse(AttemptEvent attempt, Response response) {
             this(attempt, response, Receipt.none());
@@ -412,6 +472,8 @@ public final class ProviderResponseCapture {
         }
 
         default void transportUnobserved(AttemptEvent event) {}
+
+        default void transportLifecycle(TransportLifecycleEvent event) {}
 
         default Receipt responseReturned(AttemptResponse event) {
             return responseReturned(event.response());
@@ -564,6 +626,7 @@ public final class ProviderResponseCapture {
         private final ToolAuthorityMode toolAuthorityMode;
         private final ToolAuthorityContract toolAuthorityContract;
         private final ToolAuthorityBinding toolAuthorityBinding;
+        private final String transportOperationId;
         private final String assistantHash;
         private final List<ToolProposalReceipt> toolProposals;
         private final Generation ownerGeneration;
@@ -578,7 +641,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, false, ToolAuthorityMode.NONE,
                     ToolAuthorityContract.none(), ToolAuthorityBinding.NOT_APPLICABLE,
-                    "", List.of(), null, null);
+                    "", "", List.of(), null, null);
         }
 
         public Receipt(
@@ -590,7 +653,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
-                    ToolAuthorityBinding.NOT_APPLICABLE, "",
+                    ToolAuthorityBinding.NOT_APPLICABLE, "", "",
                     List.of(), null, null);
         }
 
@@ -604,7 +667,7 @@ public final class ProviderResponseCapture {
             this(generationId, "", 0, source, purposeFor(source), completion,
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
-                    ToolAuthorityBinding.NOT_APPLICABLE, assistantHash,
+                    ToolAuthorityBinding.NOT_APPLICABLE, "", assistantHash,
                     List.of(), null, null);
         }
 
@@ -621,7 +684,7 @@ public final class ProviderResponseCapture {
             this(generationId, attemptId, attemptOrdinal, source, purpose, completion,
                     providerTerminalEligible, providerToolCallEligible,
                     ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
-                    ToolAuthorityBinding.NOT_APPLICABLE, assistantHash,
+                    ToolAuthorityBinding.NOT_APPLICABLE, "", assistantHash,
                     List.of(), null, null);
         }
 
@@ -637,6 +700,7 @@ public final class ProviderResponseCapture {
                 ToolAuthorityMode toolAuthorityMode,
                 ToolAuthorityContract toolAuthorityContract,
                 ToolAuthorityBinding toolAuthorityBinding,
+                String transportOperationId,
                 String assistantHash,
                 List<ToolProposalReceipt> toolProposals,
                 Generation ownerGeneration,
@@ -654,6 +718,7 @@ public final class ProviderResponseCapture {
             this.toolAuthorityBinding = toolAuthorityBinding == null
                     ? ToolAuthorityBinding.NOT_APPLICABLE
                     : toolAuthorityBinding;
+            this.transportOperationId = safe(transportOperationId);
             this.terminalEligibilityClaim = providerTerminalEligible
                     && !this.generationId.isBlank()
                     && !this.attemptId.isBlank()
@@ -681,6 +746,7 @@ public final class ProviderResponseCapture {
         public ToolAuthorityMode toolAuthorityMode() { return toolAuthorityMode; }
         public ToolAuthorityContract toolAuthorityContract() { return toolAuthorityContract; }
         public ToolAuthorityBinding toolAuthorityBinding() { return toolAuthorityBinding; }
+        public String transportOperationId() { return transportOperationId; }
         public String assistantHash() { return assistantHash; }
 
         /** True only after the owning generation selected this exact receipt. */
@@ -723,7 +789,7 @@ public final class ProviderResponseCapture {
             return new Receipt("", "", 0, source, purposeFor(source), completion,
                     false, false, ToolAuthorityMode.NONE, ToolAuthorityContract.none(),
                     ToolAuthorityBinding.NOT_APPLICABLE,
-                    "", List.of(), null, null);
+                    "", "", List.of(), null, null);
         }
 
         public static Receipt none() {
@@ -749,6 +815,9 @@ public final class ProviderResponseCapture {
         private int generationSequence;
         private boolean closed;
         private final List<Generation> openGenerations = new ArrayList<>();
+        private final Set<OwnedProviderTransportAttempt> liveTransports =
+                ConcurrentHashMap.newKeySet();
+        private volatile boolean transportQuarantineRequired;
 
         private Scope(Listener listener, String scopeIdentity) {
             this.listener = Objects.requireNonNull(listener, "provider response listener");
@@ -795,6 +864,12 @@ public final class ProviderResponseCapture {
                     return Generation.detached(
                             source, typedPurpose, typedToolAuthorityContract);
                 }
+                if ((source == Source.FOREGROUND_PROVIDER
+                        || source == Source.BACKGROUND_PROVIDER)
+                        && (!liveTransports.isEmpty() || transportQuarantineRequired)) {
+                    throw new IllegalStateException(
+                            "provider transport predecessor is live or quarantine-required");
+                }
                 String generationId = idPrefix + "-generation-" + (++generationSequence);
                 Generation generation = new Generation(
                         this,
@@ -809,12 +884,37 @@ public final class ProviderResponseCapture {
         }
 
         public void close() {
+            List<Generation> generations;
             synchronized (this) {
-                for (Generation generation : List.copyOf(openGenerations)) {
-                    generation.abandon(Abandonment.SCOPE_CLOSED);
-                }
                 closed = true;
+                generations = List.copyOf(openGenerations);
             }
+            for (Generation generation : generations) {
+                generation.abandon(Abandonment.SCOPE_CLOSED);
+                generation.awaitOrQuarantineTransport(TRANSPORT_SETTLEMENT_GRACE_MS);
+            }
+            // A generation can already be terminal while its independently
+            // owned transport is still draining. Trace completion must retain
+            // that late settlement or freeze an explicit quarantine receipt;
+            // openGenerations alone cannot find this case.
+            for (OwnedProviderTransportAttempt transport : List.copyOf(liveTransports)) {
+                if (!transport.awaitSettlement(TRANSPORT_SETTLEMENT_GRACE_MS)) {
+                    transport.quarantine();
+                }
+            }
+        }
+
+        private void transportOpened(OwnedProviderTransportAttempt transport) {
+            liveTransports.add(transport);
+        }
+
+        private void transportSettled(
+                OwnedProviderTransportAttempt transport,
+                boolean quarantineRequired) {
+            if (quarantineRequired) transportQuarantineRequired = true;
+            // Publish quarantine before removing the live predecessor. An
+            // admission racing this pair must observe at least one blocker.
+            liveTransports.remove(transport);
         }
 
         private long nextSequence() {
@@ -915,6 +1015,14 @@ public final class ProviderResponseCapture {
                 if (activeAttempt != null && !activeAttempt.terminal) {
                     throw new IllegalStateException("physical provider attempt already active");
                 }
+                if (activeAttempt != null && activeAttempt.transportLive()) {
+                    throw new IllegalStateException(
+                            "provider retry cannot overlap a live transport operation");
+                }
+                if (owner.transportQuarantineRequired) {
+                    throw new IllegalStateException(
+                            "provider retry is blocked by a quarantine-required transport");
+                }
                 selectableReceipt = null;
                 int ordinal = ++attemptSequence;
                 Attempt attempt = new Attempt(
@@ -949,6 +1057,7 @@ public final class ProviderResponseCapture {
                 }
                 receipt.markSelected();
                 terminal = true;
+                activeAttempt.generationTerminalized();
                 owner.openGenerations.remove(this);
                 owner.listener.generationCompleted(new GenerationCompletion(
                         event(owner.nextSequence()), receipt));
@@ -968,6 +1077,7 @@ public final class ProviderResponseCapture {
                 }
                 selectableReceipt = null;
                 terminal = true;
+                if (activeAttempt != null) activeAttempt.generationTerminalized();
                 owner.openGenerations.remove(this);
                 owner.listener.generationFailed(new GenerationFailure(
                         event(owner.nextSequence()), typed));
@@ -985,19 +1095,40 @@ public final class ProviderResponseCapture {
          */
         public boolean tryAbandon(Abandonment abandonment) {
             if (owner == null) return false;
+            Attempt cancellationOwner;
             synchronized (owner) {
                 if (terminal) return false;
                 Abandonment typed = abandonment == null ? Abandonment.SCOPE_CLOSED : abandonment;
-                if (activeAttempt != null && !activeAttempt.terminal) {
-                    activeAttempt.abandonLocked(typed);
+                Attempt terminalAttempt = activeAttempt;
+                Runnable terminalPublication = () -> {
+                    if (terminalAttempt != null && !terminalAttempt.terminal) {
+                        terminalAttempt.abandonLocked(typed, false);
+                    }
+                    selectableReceipt = null;
+                    terminal = true;
+                    owner.openGenerations.remove(this);
+                    owner.listener.generationAbandoned(new GenerationAbandonment(
+                            event(owner.nextSequence()), typed));
+                };
+                // The transport monitor is the publication gate: the late bit
+                // and both abandonment records become visible atomically with
+                // respect to every transport callback. No event marked late
+                // can precede either terminal record.
+                if (terminalAttempt == null) {
+                    terminalPublication.run();
+                } else {
+                    terminalAttempt.publishGenerationTerminal(terminalPublication);
                 }
-                selectableReceipt = null;
-                terminal = true;
-                owner.openGenerations.remove(this);
-                owner.listener.generationAbandoned(new GenerationAbandonment(
-                        event(owner.nextSequence()), typed));
-                return true;
+                cancellationOwner = terminalAttempt;
             }
+            // Persist the attempt and generation terminal facts before any
+            // independently owned cancellation acknowledgement or settlement.
+            // A transport that settles after this point is therefore both
+            // mechanically late and ordered after the terminal trace event.
+            if (cancellationOwner != null) {
+                cancellationOwner.requestTransportCancellation(abandonment);
+            }
+            return true;
         }
 
         public boolean terminal() {
@@ -1005,6 +1136,31 @@ public final class ProviderResponseCapture {
             synchronized (owner) {
                 return terminal;
             }
+        }
+
+        /** Waits for the independent transport owner without changing its fact. */
+        public boolean awaitTransportSettlement(long timeoutMs) {
+            Attempt attempt;
+            if (owner == null) return true;
+            synchronized (owner) {
+                attempt = activeAttempt;
+            }
+            return attempt == null || attempt.awaitTransportSettlement(timeoutMs);
+        }
+
+        /**
+         * Bounds cancellation drain, then freezes one conservative quarantine
+         * receipt before turn evidence can be made immutable.
+         */
+        public boolean awaitOrQuarantineTransport(long timeoutMs) {
+            Attempt attempt;
+            if (owner == null) return true;
+            synchronized (owner) {
+                attempt = activeAttempt;
+            }
+            if (attempt == null || attempt.awaitTransportSettlement(timeoutMs)) return true;
+            attempt.quarantineTransport();
+            return false;
         }
 
         private GenerationEvent event(long sequence) {
@@ -1023,6 +1179,7 @@ public final class ProviderResponseCapture {
         private boolean requestDispatched;
         private ProviderTransportHandoff.DispatchEvidence dispatchEvidence =
                 ProviderTransportHandoff.DispatchEvidence.unbound();
+        private OwnedProviderTransportAttempt transport;
         private boolean transportUnobserved;
         private boolean terminal;
         private Failure failure;
@@ -1056,6 +1213,21 @@ public final class ProviderResponseCapture {
             }
         }
 
+        /** Admits the exact cooperative transport owner used by production engines. */
+        public ProviderTransportAttempt admitTransport(
+                ProviderTransportHandoff.DispatchEvidence evidence) {
+            Scope owner = generation.owner;
+            if (owner == null) return ProviderTransportAttempt.unobservedAttempt();
+            synchronized (owner) {
+                if (terminal || generation.terminal || requestDispatched
+                        || transportUnobserved) {
+                    throw new ProviderTransportHandoff.DispatchRejected();
+                }
+                return admitTransportLocked(
+                        evidence, ProviderTransportAttempt.ObservationMode.OBSERVED);
+            }
+        }
+
         /**
          * Atomically admits the local transport handoff. Detached attempts
          * remain admitted so the no-capture runtime path is behavior-neutral.
@@ -1075,14 +1247,33 @@ public final class ProviderResponseCapture {
             synchronized (owner) {
                 if (terminal || generation.terminal || requestDispatched
                         || transportUnobserved) return false;
-                dispatchEvidence = evidence == null
-                        ? ProviderTransportHandoff.DispatchEvidence.unbound()
-                        : evidence;
-                requestDispatched = true;
-                owner.listener.requestDispatched(new RequestDispatch(
-                        event(owner.nextSequence()), dispatchEvidence));
+                admitTransportLocked(
+                        evidence, ProviderTransportAttempt.ObservationMode.LEGACY_UNOBSERVED);
                 return true;
             }
+        }
+
+        private OwnedProviderTransportAttempt admitTransportLocked(
+                ProviderTransportHandoff.DispatchEvidence evidence,
+                ProviderTransportAttempt.ObservationMode observationMode) {
+            Scope owner = generation.owner;
+            if ((generation.source == Source.FOREGROUND_PROVIDER
+                    || generation.source == Source.BACKGROUND_PROVIDER)
+                    && (!owner.liveTransports.isEmpty()
+                        || owner.transportQuarantineRequired)) {
+                throw new IllegalStateException(
+                        "provider transport predecessor is live or quarantine-required");
+            }
+            dispatchEvidence = evidence == null
+                    ? ProviderTransportHandoff.DispatchEvidence.unbound()
+                    : evidence;
+            requestDispatched = true;
+            transport = new OwnedProviderTransportAttempt(this, observationMode);
+            owner.transportOpened(transport);
+            owner.listener.requestDispatched(new RequestDispatch(
+                    event(owner.nextSequence()), dispatchEvidence));
+            transport.handoffAdmitted();
+            return transport;
         }
 
         /** Records a legacy path whose physical provider handoff cannot be observed. */
@@ -1123,6 +1314,22 @@ public final class ProviderResponseCapture {
                     throw new IllegalStateException(
                             "response cannot close an undispatched provider attempt");
                 }
+                if (requestDispatched && transport != null) {
+                    transport.settleLegacyIfNeeded();
+                    if (!transport.settled()) {
+                        transport.quarantine();
+                        throw new IllegalStateException(
+                                "provider response arrived before transport settlement");
+                    }
+                    if (!transport.responseCompatible(response)) {
+                        throw new IllegalStateException(
+                                "provider response completion " + response.completion()
+                                        + " contradicts transport "
+                                        + transport.settlementSummary()
+                                        + " for " + response.assistantText().length()
+                                        + " assistant chars");
+                    }
+                }
                 terminal = true;
                 AttemptEvent event = event(owner.nextSequence());
                 boolean responseMatchesToolAuthorityMode = switch (
@@ -1134,6 +1341,8 @@ public final class ProviderResponseCapture {
                 };
                 ToolAuthorityBinding toolAuthorityBinding =
                         generation.toolAuthorityContract.bindDispatch(dispatchEvidence);
+                boolean providerTerminalTransport = transport != null
+                        && transport.provesProviderTerminal();
                 Receipt receipt = new Receipt(
                         generation.generationId,
                         attemptId,
@@ -1141,12 +1350,15 @@ public final class ProviderResponseCapture {
                         response.source(),
                         generation.purpose,
                         response.completion(),
-                        requestDispatched && response.completedNormally(),
+                        requestDispatched && providerTerminalTransport
+                                && response.completedNormally(),
                         requestDispatched && response.foreground()
+                                && providerTerminalTransport
                                 && responseMatchesToolAuthorityMode,
                         generation.toolAuthorityMode,
                         generation.toolAuthorityContract,
                         toolAuthorityBinding,
+                        transport == null ? "" : transport.operationId(),
                         sha256(response.assistantText()),
                         proposalReceipts(response.nativeToolCalls()),
                         generation,
@@ -1169,6 +1381,7 @@ public final class ProviderResponseCapture {
         private void failLocked(Failure failure) {
             Scope owner = generation.owner;
             if (terminal || generation.terminal || owner == null) return;
+            if (transport != null) transport.settleFromAttemptFailure();
             terminal = true;
             this.failure = failure;
             owner.listener.attemptFailed(new AttemptFailure(
@@ -1179,16 +1392,28 @@ public final class ProviderResponseCapture {
             Scope owner = generation.owner;
             if (owner == null) return;
             synchronized (owner) {
-                abandonLocked(abandonment == null ? Abandonment.SCOPE_CLOSED : abandonment);
+                abandonLocked(
+                        abandonment == null ? Abandonment.SCOPE_CLOSED : abandonment,
+                        true);
             }
         }
 
-        private void abandonLocked(Abandonment abandonment) {
+        private void abandonLocked(Abandonment abandonment, boolean requestCancellation) {
             Scope owner = generation.owner;
             if (terminal || generation.terminal || owner == null) return;
+            if (requestCancellation && transport != null) {
+                transport.requestCancellation(transportCancellationReason(abandonment));
+            }
             terminal = true;
             owner.listener.attemptAbandoned(new AttemptAbandonment(
                     event(owner.nextSequence()), abandonment));
+        }
+
+        private void requestTransportCancellation(Abandonment abandonment) {
+            if (transport != null) {
+                transport.requestCancellation(transportCancellationReason(
+                        abandonment == null ? Abandonment.SCOPE_CLOSED : abandonment));
+            }
         }
 
         private AttemptEvent event(long sequence) {
@@ -1204,6 +1429,424 @@ public final class ProviderResponseCapture {
                     requestDispatched,
                     generation.toolAuthorityMode,
                     generation.toolAuthorityContract);
+        }
+
+        private boolean transportLive() {
+            return transport != null && !transport.settled();
+        }
+
+        private boolean awaitTransportSettlement(long timeoutMs) {
+            return transport == null || transport.awaitSettlement(timeoutMs);
+        }
+
+        private void quarantineTransport() {
+            if (transport != null) transport.quarantine();
+        }
+
+        private void generationTerminalized() {
+            if (transport != null) transport.generationTerminalized();
+        }
+
+        private void publishGenerationTerminal(Runnable terminalPublication) {
+            Objects.requireNonNull(terminalPublication, "generation terminal publication");
+            if (transport == null) {
+                terminalPublication.run();
+                return;
+            }
+            transport.publishGenerationTerminal(terminalPublication);
+        }
+    }
+
+    /** Transport owner deliberately remains live after its generation terminalizes. */
+    private static final class OwnedProviderTransportAttempt
+            implements ProviderTransportAttempt {
+        private final Attempt attempt;
+        private final String operationId;
+        private final ObservationMode observationMode;
+        private final CountDownLatch settledSignal = new CountDownLatch(1);
+        private long transportSequence;
+        private boolean sendEntered;
+        private boolean headersObserved;
+        private boolean bodyOpened;
+        private boolean providerTerminalObserved;
+        private boolean bodyCompleted;
+        private boolean quarantineRequired;
+        private boolean cancellationRequested;
+        private boolean bodyCancellationInvoked;
+        private boolean generationTerminal;
+        private boolean settled;
+        private Settlement settlement = Settlement.NONE;
+        private Failure failure = Failure.NONE;
+        private CancellationState cancellationState = CancellationState.NOT_REQUESTED;
+        private CancellationReason cancellationReason = CancellationReason.NONE;
+        private WireDisposition wireDisposition;
+        private Thread sendThread;
+        private AutoCloseable responseBody;
+
+        private OwnedProviderTransportAttempt(
+                Attempt attempt,
+                ObservationMode observationMode) {
+            this.attempt = Objects.requireNonNull(attempt, "provider response attempt");
+            this.observationMode = Objects.requireNonNull(
+                    observationMode, "transport observation mode");
+            this.operationId = attempt.attemptId + "-transport-1";
+            this.wireDisposition = observationMode == ObservationMode.OBSERVED
+                    ? WireDisposition.SEND_API_NOT_ENTERED
+                    : WireDisposition.UNKNOWN;
+        }
+
+        private synchronized void handoffAdmitted() {
+            emit(Transition.HANDOFF_ADMITTED);
+        }
+
+        private String operationId() {
+            return operationId;
+        }
+
+        @Override
+        public <T> T invokeSend(SendOperation<T> operation) throws Exception {
+            Objects.requireNonNull(operation, "provider send operation");
+            synchronized (this) {
+                if (observationMode != ObservationMode.OBSERVED) {
+                    throw new IllegalStateException(
+                            "legacy transport lifecycle cannot claim send entry");
+                }
+                if (settled) {
+                    if (settlement == Settlement.CANCELLED_BEFORE_SEND) {
+                        throw new ProviderTransportAttempt.CancelledBeforeSend();
+                    }
+                    throw new IllegalStateException(
+                            "settled provider transport cannot enter send again");
+                }
+                if (cancellationRequested) {
+                    cancellationState = CancellationState.PRE_SEND_PREVENTED;
+                    settle(Settlement.CANCELLED_BEFORE_SEND, Failure.NONE, false);
+                    throw new ProviderTransportAttempt.CancelledBeforeSend();
+                }
+                if (sendEntered) {
+                    throw new IllegalStateException("provider send operation entered twice");
+                }
+                sendEntered = true;
+                wireDisposition = WireDisposition.UNKNOWN;
+                sendThread = Thread.currentThread();
+                emit(Transition.SEND_API_ENTERED);
+            }
+
+            try {
+                return operation.invoke();
+            } catch (Throwable sendFailure) {
+                synchronized (this) {
+                    if (!settled) {
+                        Failure classified = classifyTransportFailure(
+                                sendFailure, headersObserved);
+                        if (cancellationRequested
+                                && (classified == Failure.INTERRUPTION
+                                    || classified == Failure.CANCELLATION
+                                    || classified == Failure.BODY_IO)) {
+                            cancellationState = CancellationState.SEND_ABORT_ACKNOWLEDGED;
+                            emit(Transition.CANCELLATION_ACKNOWLEDGED);
+                            settle(Settlement.CANCELLED_IN_FLIGHT, classified, true);
+                        } else {
+                            settle(headersObserved
+                                            ? Settlement.FAILED_DURING_BODY
+                                            : Settlement.FAILED_BEFORE_HEADERS,
+                                    classified,
+                                    true);
+                        }
+                    }
+                }
+                if (sendFailure instanceof Error error) throw error;
+                if (sendFailure instanceof Exception exception) throw exception;
+                throw new RuntimeException(sendFailure);
+            } finally {
+                synchronized (this) {
+                    if (sendThread == Thread.currentThread()) sendThread = null;
+                }
+            }
+        }
+
+        @Override
+        public synchronized void responseHeadersObserved() {
+            if (settled) return;
+            if (!sendEntered || headersObserved) {
+                throw new IllegalStateException("invalid provider response-header transition");
+            }
+            headersObserved = true;
+            emit(Transition.RESPONSE_HEADERS_OBSERVED);
+        }
+
+        @Override
+        public void responseBodyOpened(AutoCloseable body) {
+            boolean invokeCancellation = false;
+            boolean rejectLateBody = false;
+            AutoCloseable exactBody = Objects.requireNonNull(
+                    body, "provider response body");
+            synchronized (this) {
+                if (settled) {
+                    rejectLateBody = true;
+                } else {
+                    if (sendThread != null || !headersObserved || bodyOpened || bodyCompleted
+                            || providerTerminalObserved) {
+                        throw new IllegalStateException(
+                                "invalid provider response-body open transition");
+                    }
+                    responseBody = exactBody;
+                    bodyOpened = true;
+                    emit(Transition.RESPONSE_BODY_OPENED);
+                    if (cancellationRequested && !bodyCancellationInvoked) {
+                        bodyCancellationInvoked = true;
+                        invokeCancellation = true;
+                    }
+                }
+            }
+            if (rejectLateBody) {
+                ProviderTransportAttempt.ResponseBodyRejectedAfterSettlement rejection =
+                        new ProviderTransportAttempt.ResponseBodyRejectedAfterSettlement();
+                try {
+                    exactBody.close();
+                } catch (Exception closeFailure) {
+                    rejection.addSuppressed(closeFailure);
+                }
+                throw rejection;
+            }
+            if (invokeCancellation) invokeBodyCancellationHandle(responseBody);
+        }
+
+        @Override
+        public synchronized void providerTerminalObserved() {
+            if (settled) return;
+            if (sendThread != null || !bodyOpened || providerTerminalObserved) {
+                throw new IllegalStateException("invalid provider-terminal transition");
+            }
+            providerTerminalObserved = true;
+            emit(Transition.PROVIDER_TERMINAL_OBSERVED);
+        }
+
+        @Override
+        public synchronized void responseBodyCompleted() {
+            if (settled) return;
+            if (sendThread != null || !bodyOpened || bodyCompleted) {
+                throw new IllegalStateException("invalid provider response-body completion");
+            }
+            bodyCompleted = true;
+            emit(Transition.RESPONSE_BODY_COMPLETED);
+            settle(providerTerminalObserved
+                            ? Settlement.COMPLETED_PROVIDER_TERMINAL
+                            : Settlement.COMPLETED_BODY_EOF,
+                    Failure.NONE,
+                    false);
+        }
+
+        @Override
+        public synchronized void responseBodyFailed(Throwable bodyFailure) {
+            if (settled) return;
+            if (sendThread != null || !bodyOpened) {
+                throw new IllegalStateException(
+                        "provider response body cannot fail before it opens");
+            }
+            Failure classified = classifyTransportFailure(bodyFailure, true);
+            if (cancellationRequested
+                    && (classified == Failure.INTERRUPTION
+                        || classified == Failure.CANCELLATION
+                        || classified == Failure.BODY_IO)) {
+                cancellationState = CancellationState.BODY_CLOSE_ACKNOWLEDGED;
+                emit(Transition.CANCELLATION_ACKNOWLEDGED);
+                settle(Settlement.CANCELLED_IN_FLIGHT, classified,
+                        !providerTerminalObserved);
+                return;
+            }
+            settle(Settlement.FAILED_DURING_BODY, classified,
+                    !providerTerminalObserved);
+        }
+
+        @Override
+        public synchronized void responseBodyClosed() {
+            if (settled) return;
+            if (sendThread != null || !bodyOpened) {
+                throw new IllegalStateException(
+                        "provider response body cannot close before it opens");
+            }
+            if (providerTerminalObserved) {
+                if (cancellationRequested) {
+                    cancellationState = CancellationState.BODY_CLOSE_ACKNOWLEDGED;
+                    emit(Transition.CANCELLATION_ACKNOWLEDGED);
+                }
+                settle(Settlement.COMPLETED_PROVIDER_TERMINAL, Failure.NONE, false);
+            } else if (cancellationRequested) {
+                cancellationState = CancellationState.BODY_CLOSE_ACKNOWLEDGED;
+                emit(Transition.CANCELLATION_ACKNOWLEDGED);
+                settle(Settlement.CANCELLED_IN_FLIGHT, Failure.NONE, true);
+            } else {
+                settle(Settlement.CLOSED_BEFORE_PROVIDER_TERMINAL, Failure.NONE, true);
+            }
+        }
+
+        private void requestCancellation(CancellationReason reason) {
+            boolean invokeCancellation = false;
+            synchronized (this) {
+                if (settled || cancellationRequested) return;
+                cancellationRequested = true;
+                cancellationReason = reason == null ? CancellationReason.NONE : reason;
+                cancellationState = CancellationState.REQUESTED;
+                emit(Transition.CANCELLATION_REQUESTED);
+                if (observationMode != ObservationMode.OBSERVED) {
+                    cancellationState = CancellationState.UNACKNOWLEDGED;
+                    settle(Settlement.QUARANTINE_REQUIRED, Failure.NONE, true);
+                    return;
+                }
+                if (!sendEntered) {
+                    cancellationState = CancellationState.PRE_SEND_PREVENTED;
+                    settle(Settlement.CANCELLED_BEFORE_SEND, Failure.NONE, false);
+                    return;
+                }
+                if (sendThread != null) sendThread.interrupt();
+                if (responseBody != null && !bodyCancellationInvoked) {
+                    bodyCancellationInvoked = true;
+                    invokeCancellation = true;
+                }
+            }
+            if (invokeCancellation) invokeBodyCancellationHandle(responseBody);
+        }
+
+        private void invokeBodyCancellationHandle(AutoCloseable cancellationHandle) {
+            if (cancellationHandle == null) return;
+            Thread.ofVirtual().name("talos-provider-transport-cancel").start(() -> {
+                try {
+                    cancellationHandle.close();
+                } catch (Exception closeFailure) {
+                    // A failed or merely returned local close does not prove
+                    // transport settlement. The consumer callback must settle;
+                    // otherwise the bounded owner freezes quarantine.
+                }
+            });
+        }
+
+        private synchronized void settleLegacyIfNeeded() {
+            if (!settled && observationMode == ObservationMode.LEGACY_UNOBSERVED) {
+                settle(Settlement.LIFECYCLE_UNOBSERVED, Failure.NONE, false);
+            }
+        }
+
+        private synchronized void settleFromAttemptFailure() {
+            if (settled) return;
+            if (observationMode == ObservationMode.LEGACY_UNOBSERVED) {
+                settle(Settlement.LIFECYCLE_UNOBSERVED, Failure.NONE, false);
+            } else if (!sendEntered) {
+                settle(Settlement.FAILED_BEFORE_HEADERS, Failure.RUNTIME, false);
+            } else {
+                settle(Settlement.QUARANTINE_REQUIRED, Failure.UNKNOWN, true);
+            }
+        }
+
+        private synchronized void quarantine() {
+            if (settled) return;
+            if (cancellationRequested) cancellationState = CancellationState.UNACKNOWLEDGED;
+            settle(Settlement.QUARANTINE_REQUIRED, Failure.UNKNOWN, true);
+        }
+
+        private synchronized boolean settled() {
+            return settled;
+        }
+
+        private synchronized boolean provesProviderTerminal() {
+            return observationMode == ObservationMode.OBSERVED
+                    && settled
+                    && settlement == Settlement.COMPLETED_PROVIDER_TERMINAL
+                    && providerTerminalObserved
+                    && (bodyCompleted || bodyOpened);
+        }
+
+        private synchronized boolean responseCompatible(Response response) {
+            if (observationMode != ObservationMode.OBSERVED) {
+                // Legacy engines remain readable, but cannot mint terminal or
+                // tool eligibility because provesProviderTerminal() is false.
+                return true;
+            }
+            if (settlement != Settlement.COMPLETED_PROVIDER_TERMINAL
+                    && settlement != Settlement.COMPLETED_BODY_EOF
+                    && settlement != Settlement.CLOSED_BEFORE_PROVIDER_TERMINAL) {
+                return false;
+            }
+            return switch (response.completion()) {
+                case PROVIDER_EOS, PROVIDER_LENGTH, UNRECOGNIZED_PROVIDER_STOP ->
+                        provesProviderTerminal();
+                case STREAM_WITHOUT_EOS ->
+                        settlement != Settlement.COMPLETED_PROVIDER_TERMINAL
+                                && !providerTerminalObserved;
+                default -> true;
+            };
+        }
+
+        private synchronized String settlementSummary() {
+            return settlement.name();
+        }
+
+        private boolean awaitSettlement(long timeoutMs) {
+            if (settledSignal.getCount() == 0) return true;
+            boolean interrupted = false;
+            try {
+                long remaining = Math.max(0L, timeoutMs);
+                long deadline = System.nanoTime()
+                        + TimeUnit.MILLISECONDS.toNanos(remaining);
+                while (settledSignal.getCount() != 0) {
+                    try {
+                        return settledSignal.await(remaining, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException ignored) {
+                        interrupted = true;
+                        long nanos = deadline - System.nanoTime();
+                        if (nanos <= 0) return settledSignal.getCount() == 0;
+                        remaining = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(nanos));
+                    }
+                }
+                return true;
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
+        }
+
+        private synchronized void generationTerminalized() {
+            generationTerminal = true;
+        }
+
+        private synchronized void publishGenerationTerminal(Runnable terminalPublication) {
+            generationTerminal = true;
+            terminalPublication.run();
+        }
+
+        private void settle(
+                Settlement terminalSettlement,
+                Failure terminalFailure,
+                boolean quarantineRequired) {
+            if (settled) return;
+            settlement = Objects.requireNonNull(terminalSettlement, "transport settlement");
+            failure = terminalFailure == null ? Failure.UNKNOWN : terminalFailure;
+            this.quarantineRequired = quarantineRequired;
+            settled = true;
+            emit(Transition.SETTLED);
+            attempt.generation.owner.transportSettled(this, quarantineRequired);
+            settledSignal.countDown();
+        }
+
+        private void emit(Transition transition) {
+            Scope owner = attempt.generation.owner;
+            if (owner == null) return;
+            owner.listener.transportLifecycle(new TransportLifecycleEvent(
+                    TRANSPORT_LEDGER_VERSION,
+                    ++transportSequence,
+                    attempt.generation.generationId,
+                    attempt.attemptId,
+                    attempt.ordinal,
+                    operationId,
+                    transition,
+                    observationMode,
+                    settlement,
+                    failure,
+                    cancellationState,
+                    cancellationReason,
+                    wireDisposition,
+                    quarantineRequired,
+                    generationTerminal,
+                    ProcessBinding.UNAVAILABLE));
         }
     }
 
@@ -1338,6 +1981,72 @@ public final class ProviderResponseCapture {
                     "bound provider tool authority is valid only for a foreground turn response");
         }
         return typed;
+    }
+
+    private static ProviderTransportAttempt.CancellationReason transportCancellationReason(
+            Abandonment abandonment) {
+        Abandonment typed = abandonment == null ? Abandonment.SCOPE_CLOSED : abandonment;
+        return switch (typed) {
+            case OPERATOR_CANCELLED ->
+                    ProviderTransportAttempt.CancellationReason.OPERATOR_CANCELLED;
+            case WALL_CLOCK_TIMEOUT ->
+                    ProviderTransportAttempt.CancellationReason.WALL_CLOCK_TIMEOUT;
+            case IDLE_TIMEOUT -> ProviderTransportAttempt.CancellationReason.IDLE_TIMEOUT;
+            case REPETITION_LOOP -> ProviderTransportAttempt.CancellationReason.REPETITION_LOOP;
+            case INTERRUPTION_CAUSE_UNPROVEN ->
+                    ProviderTransportAttempt.CancellationReason.INTERRUPTION_CAUSE_UNPROVEN;
+            case RUNTIME_STREAM_CLOSED ->
+                    ProviderTransportAttempt.CancellationReason.RUNTIME_STREAM_CLOSED;
+            case SCOPE_CLOSED -> ProviderTransportAttempt.CancellationReason.SCOPE_CLOSED;
+        };
+    }
+
+    private static ProviderTransportAttempt.Failure classifyTransportFailure(
+            Throwable throwable,
+            boolean bodyPhase) {
+        ControlFlowFailure.Kind control = ControlFlowFailure.classify(throwable);
+        if (control == ControlFlowFailure.Kind.CANCELLATION) {
+            return ProviderTransportAttempt.Failure.CANCELLATION;
+        }
+        if (control == ControlFlowFailure.Kind.INTERRUPTION) {
+            return ProviderTransportAttempt.Failure.INTERRUPTION;
+        }
+        Throwable current = throwable;
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+        for (int depth = 0; current != null && depth < 64 && seen.add(current); depth++) {
+            if (current instanceof HttpTimeoutException) {
+                return ProviderTransportAttempt.Failure.TIMEOUT;
+            }
+            if (current instanceof ConnectException) {
+                return ProviderTransportAttempt.Failure.CONNECTION;
+            }
+            if (current instanceof CancellationException) {
+                return ProviderTransportAttempt.Failure.CANCELLATION;
+            }
+            if (current instanceof InterruptedException) {
+                return ProviderTransportAttempt.Failure.INTERRUPTION;
+            }
+            if (current instanceof IOException) {
+                return bodyPhase
+                        ? ProviderTransportAttempt.Failure.BODY_IO
+                        : ProviderTransportAttempt.Failure.CONNECTION;
+            }
+            current = current.getCause();
+        }
+        if (throwable instanceof RuntimeException) {
+            return ProviderTransportAttempt.Failure.RUNTIME;
+        }
+        return ProviderTransportAttempt.Failure.UNKNOWN;
+    }
+
+    private static String requireSafeIdentifier(String value, String label) {
+        String exact = Objects.toString(value, "");
+        if (!exact.equals(exact.strip())
+                || !exact.matches("[A-Za-z0-9._-]{1,512}")) {
+            throw new IllegalArgumentException(label + " is not a safe bounded identifier");
+        }
+        return exact;
     }
 
     private static String safe(String value) {

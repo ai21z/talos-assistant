@@ -97,11 +97,11 @@ public final class ProviderCanonicalAnswerLineageFixture {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            ProviderTransportHandoff.mark(
-                    handoff,
+            return ObservedProviderTransportFixture.dispatchCompletedTerminal(
                     "canonical-answer-lineage-provider-body",
-                    request.tools);
-            return chatStream(request);
+                    request.tools,
+                    handoff,
+                    () -> chatStream(request));
         }
 
         @Override

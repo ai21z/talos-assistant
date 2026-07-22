@@ -762,6 +762,15 @@ final class QualificationPreResultEvidence {
             return;
         }
         QualificationProviderAttemptLedger.Ledger ledger = trace.providerAttempts();
+        if (ledger.dispatchedAttemptPresent() && !ledger.transportLifecycleComplete()) {
+            findings.add("PROVIDER_TRANSPORT_LIFECYCLE_UNAVAILABLE");
+        }
+        if (ledger.transportUnobservedPresent()) {
+            findings.add("PROVIDER_TRANSPORT_LIFECYCLE_UNOBSERVED");
+        }
+        if (ledger.transportQuarantinePresent()) {
+            findings.add("PROVIDER_TRANSPORT_QUARANTINE_REQUIRED");
+        }
         if (ledger.toolProposalTruncationPresent()) {
             findings.add("PROVIDER_TOOL_PROPOSAL_TRACE_TRUNCATED");
         }

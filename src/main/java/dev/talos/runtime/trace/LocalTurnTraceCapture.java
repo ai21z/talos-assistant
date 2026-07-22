@@ -378,6 +378,12 @@ public final class LocalTurnTraceCapture {
             }
 
             @Override
+            public void transportLifecycle(
+                    ProviderResponseCapture.TransportLifecycleEvent event) {
+                recordProviderTransportLifecycle(providerBag, event);
+            }
+
+            @Override
             public ProviderResponseCapture.Receipt responseReturned(
                     ProviderResponseCapture.AttemptResponse response) {
                 return recordProviderResponse(providerBag, response);
@@ -665,6 +671,15 @@ public final class LocalTurnTraceCapture {
         if (bag == null || event == null) return;
         synchronized (bag) {
             ProviderResponseTraceRecorder.transportUnobserved(bag.builder, event);
+        }
+    }
+
+    private static void recordProviderTransportLifecycle(
+            Bag bag,
+            ProviderResponseCapture.TransportLifecycleEvent event) {
+        if (bag == null || event == null) return;
+        synchronized (bag) {
+            ProviderResponseTraceRecorder.transportLifecycle(bag.builder, event);
         }
     }
 

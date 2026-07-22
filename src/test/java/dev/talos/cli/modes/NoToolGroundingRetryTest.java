@@ -13,7 +13,9 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ObservedProviderTransportFixture;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportHandoff;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -362,7 +364,8 @@ class NoToolGroundingRetryTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        ObservedProviderTransportFixture.completeTerminal(
+                attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(new ProviderResponseCapture.Response(
                 text,
                 List.of(),

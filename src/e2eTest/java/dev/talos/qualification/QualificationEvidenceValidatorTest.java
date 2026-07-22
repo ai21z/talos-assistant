@@ -1305,6 +1305,7 @@ class QualificationEvidenceValidatorTest {
                 String type = event.path("type").asText("");
                 if (!type.startsWith("GENERATION_")
                         && !"PROVIDER_TOOL_PROPOSAL_CAPTURED".equals(type)
+                        && !"PROVIDER_TRANSPORT_LIFECYCLE".equals(type)
                         && !"MODEL_RESPONSE_RECEIVED".equals(type)
                         && !"PROVIDER_GENERATION_RECEIVED".equals(type)) {
                     retained.add(event.deepCopy());

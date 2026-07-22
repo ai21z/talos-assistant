@@ -29,7 +29,7 @@ class ProviderResponseCaptureOwnershipTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        completeObservedTransport(attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt issued = attempt.respond(response("exact answer"));
         ProviderResponseCapture.Receipt forged = new ProviderResponseCapture.Receipt(
                 issued.generationId(),
@@ -64,7 +64,7 @@ class ProviderResponseCaptureOwnershipTest {
         ProviderResponseCapture.Attempt first = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        first.requestDispatched();
+        completeObservedTransport(first, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt stale = first.respond(response("first"));
         ProviderResponseCapture.Attempt retry = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.TRANSIENT_RETRY,
@@ -87,7 +87,7 @@ class ProviderResponseCaptureOwnershipTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        completeObservedTransport(attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(response("late"));
 
         generation.abandon(ProviderResponseCapture.Abandonment.WALL_CLOCK_TIMEOUT);
@@ -108,7 +108,7 @@ class ProviderResponseCaptureOwnershipTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched();
+        completeObservedTransport(attempt, ProviderTransportHandoff.DispatchEvidence.unbound());
         ProviderResponseCapture.Receipt receipt = attempt.respond(response("winner"));
         generation.complete(receipt);
 
@@ -156,7 +156,7 @@ class ProviderResponseCaptureOwnershipTest {
         ProviderResponseCapture.Attempt attempt = generation.startAttempt(
                 ProviderResponseCapture.AttemptKind.PRIMARY,
                 ProviderResponseCapture.RetryReason.NONE);
-        attempt.requestDispatched(new ProviderTransportHandoff.DispatchEvidence(
+        completeObservedTransport(attempt, new ProviderTransportHandoff.DispatchEvidence(
                 "sha256:" + "a".repeat(64), List.of("talos.read_file")));
         Map<String, Object> firstOrder = new LinkedHashMap<>();
         firstOrder.put("z", List.of(Map.of("b", 2, "a", 1)));
@@ -335,7 +335,10 @@ class ProviderResponseCaptureOwnershipTest {
                 ProviderTransportHandoff.DispatchEvidence.fromProviderBody(
                         "{\"messages\":[]}",
                         List.of(new ToolSpec("talos.read_file", "Read", "{}")));
-        firstAttempt.requestDispatched(exact);
+        completeObservedTransport(firstAttempt, exact);
+        ProviderResponseCapture.Receipt firstReceipt =
+                firstAttempt.respond(response("first answer"));
+        firstGeneration.complete(firstReceipt);
 
         ProviderResponseCapture.Generation secondGeneration = scope.openGeneration(
                 ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
@@ -380,6 +383,21 @@ class ProviderResponseCaptureOwnershipTest {
                 ProviderResponseCapture.Completion.PROVIDER_EOS,
                 false,
                 false);
+    }
+
+    private static void completeObservedTransport(
+            ProviderResponseCapture.Attempt attempt,
+            ProviderTransportHandoff.DispatchEvidence evidence) {
+        ProviderTransportAttempt transport = attempt.admitTransport(evidence);
+        try {
+            transport.invokeSend(() -> null);
+        } catch (Exception impossible) {
+            throw new AssertionError(impossible);
+        }
+        transport.responseHeadersObserved();
+        transport.responseBodyOpened(() -> { });
+        transport.providerTerminalObserved();
+        transport.responseBodyCompleted();
     }
 
     private static final class Capture implements ProviderResponseCapture.Listener {

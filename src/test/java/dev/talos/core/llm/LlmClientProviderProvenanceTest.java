@@ -10,7 +10,9 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.ProviderTransportAttempt;
 import dev.talos.spi.types.ProviderTransportHandoff;
+import dev.talos.spi.types.ProviderTransportTokenStream;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolChoiceMode;
@@ -25,8 +27,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
@@ -130,6 +134,55 @@ class LlmClientProviderProvenanceTest {
         assertEquals(
                 List.of(ProviderResponseCapture.Abandonment.OPERATOR_CANCELLED),
                 capture.abandonments);
+        assertOperatorCancellationOwnsStreamSettlement(capture);
+    }
+
+    @Test
+    void emptyTextStreamCannotHideInitialOperatorCancellation() throws Exception {
+        Capture capture = new Capture();
+        ProviderResponseCapture.begin(capture);
+        try (LlmClient client = new LlmClient(
+                engineConfig(1_000), new FixedResolver(List.of()))) {
+            String answer = client.chatStream(
+                    "system",
+                    "user",
+                    List.of(),
+                    null,
+                    Duration.ofSeconds(5),
+                    () -> true);
+            assertEquals("", answer);
+        }
+
+        assertTrue(capture.responses.isEmpty());
+        assertEquals(List.of(ProviderResponseCapture.Abandonment.OPERATOR_CANCELLED),
+                capture.abandonments);
+        assertEquals(List.of(ProviderResponseCapture.Abandonment.OPERATOR_CANCELLED),
+                capture.generationAbandonments);
+        assertOperatorCancellationOwnsStreamSettlement(capture);
+    }
+
+    @Test
+    void structuredWorkerCancellationIsRecordedBeforeTrackedStreamClose() {
+        Capture capture = new Capture();
+        ProviderResponseCapture.begin(capture);
+        AtomicInteger cancellationChecks = new AtomicInteger();
+        try (LlmClient client = new LlmClient(
+                engineConfig(1_000),
+                new FixedResolver(List.of(TokenChunk.of("unconsumed"), TokenChunk.eos())))) {
+            client.setCancelSupplier(() -> cancellationChecks.incrementAndGet() >= 2);
+            LlmClient.StreamResult result = client.chatFull(
+                    List.of(ChatMessage.user("inspect")), 5_000L);
+
+            assertTrue(result.aborted());
+            assertEquals(ProviderResponseCapture.AbortOrigin.OPERATOR_EXTERNAL,
+                    result.abortOrigin());
+        }
+
+        assertEquals(List.of(ProviderResponseCapture.Abandonment.OPERATOR_CANCELLED),
+                capture.abandonments);
+        assertEquals(List.of(ProviderResponseCapture.Abandonment.OPERATOR_CANCELLED),
+                capture.generationAbandonments);
+        assertOperatorCancellationOwnsStreamSettlement(capture);
     }
 
     @Test
@@ -314,35 +367,31 @@ class LlmClientProviderProvenanceTest {
     }
 
     @Test
-    void transient_retry_is_two_closed_physical_attempts_in_one_logical_generation() {
+    void observedTransientAfterSendQuarantinesAndBlocksSameProcessRetry() {
         beginTrace("trace-transient-retry-ledger");
         TransientOnceResolver resolver = new TransientOnceResolver();
         try (LlmClient client = new LlmClient(engineConfig(1_000), resolver)) {
-            LlmClient.StreamResult result = client.chatFull(List.of(ChatMessage.user("inspect")));
-            assertEquals("recovered", result.text());
+            EngineException.ResponseError blocked = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> client.chatFull(List.of(ChatMessage.user("inspect"))));
+            assertTrue(blocked.getCause() instanceof IllegalStateException);
         }
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
         List<TurnTraceEvent> starts = events(trace, "GENERATION_ATTEMPT_STARTED");
         List<TurnTraceEvent> dispatched = events(trace, "GENERATION_REQUEST_DISPATCHED");
-        assertEquals(2, starts.size());
-        assertEquals(2, dispatched.size());
+        assertEquals(1, starts.size());
+        assertEquals(1, dispatched.size());
         assertEquals(1, events(trace, "GENERATION_ATTEMPT_FAILED").size());
-        assertEquals(1, events(trace, "GENERATION_RESPONSE_CAPTURED").size());
-        assertEquals(1, events(trace, "GENERATION_COMPLETED").size());
-        assertEquals(starts.get(0).data().get("generationId"), starts.get(1).data().get("generationId"));
-        assertNotEquals(starts.get(0).data().get("attemptId"), starts.get(1).data().get("attemptId"));
+        assertTrue(events(trace, "GENERATION_RESPONSE_CAPTURED").isEmpty());
+        assertTrue(events(trace, "GENERATION_COMPLETED").isEmpty());
         assertEquals(1, starts.get(0).data().get("attemptOrdinal"));
-        assertEquals(2, starts.get(1).data().get("attemptOrdinal"));
         assertEquals("PRIMARY", starts.get(0).data().get("attemptKind"));
-        assertEquals("TRANSIENT_RETRY", starts.get(1).data().get("attemptKind"));
-        assertEquals("TRANSIENT_ENGINE_FAILURE", starts.get(1).data().get("retryReason"));
         assertEquals(
                 "PROVIDER_TRANSIENT",
                 events(trace, "GENERATION_ATTEMPT_FAILED").getFirst().data().get("failure"));
-        assertEquals(
-                starts.get(1).data().get("attemptId"),
-                events(trace, "GENERATION_COMPLETED").getFirst().data().get("selectedAttemptId"));
+        assertTransportSettlement(
+                trace, "FAILED_BEFORE_HEADERS", true);
     }
 
     @Test
@@ -366,19 +415,23 @@ class LlmClientProviderProvenanceTest {
     }
 
     @Test
-    void legacy_text_api_uses_the_same_physical_retry_ledger() {
+    void textApiAlsoBlocksRetryAfterObservedUnknownSettlement() {
         beginTrace("trace-text-api-retry-ledger");
         TransientOnceResolver resolver = new TransientOnceResolver();
         try (LlmClient client = new LlmClient(engineConfig(1_000), resolver)) {
-            assertEquals("recovered", client.chat("system", "user", List.of()));
+            EngineException.ResponseError blocked = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> client.chat("system", "user", List.of()));
+            assertTrue(blocked.getCause() instanceof IllegalStateException);
         }
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
         List<TurnTraceEvent> starts = events(trace, "GENERATION_ATTEMPT_STARTED");
-        assertEquals(2, starts.size());
-        assertEquals(List.of("PRIMARY", "TRANSIENT_RETRY"), starts.stream()
+        assertEquals(1, starts.size());
+        assertEquals(List.of("PRIMARY"), starts.stream()
                 .map(candidate -> candidate.data().get("attemptKind")).toList());
         assertEquals(1, events(trace, "GENERATION_ATTEMPT_FAILED").size());
-        assertEquals(1, events(trace, "GENERATION_COMPLETED").size());
+        assertTrue(events(trace, "GENERATION_COMPLETED").isEmpty());
+        assertTransportSettlement(trace, "FAILED_BEFORE_HEADERS", true);
     }
 
     @Test
@@ -411,31 +464,39 @@ class LlmClientProviderProvenanceTest {
         assertTrue(trace.events().indexOf(proposal)
                 < trace.events().indexOf(event(trace, "GENERATION_COMPLETED")));
         assertFalse(MAPPER.valueToTree(proposal).toString().contains("<h1>private</h1>"));
+        assertTrue(events(trace, "GENERATION_TRANSPORT_UNOBSERVED").isEmpty());
+        assertEquals(List.of("COMPLETED_PROVIDER_TERMINAL", "COMPLETED_PROVIDER_TERMINAL"),
+                events(trace, "PROVIDER_TRANSPORT_LIFECYCLE").stream()
+                        .filter(candidate -> "SETTLED".equals(
+                                candidate.data().get("transition")))
+                        .map(candidate -> candidate.data().get("settlement"))
+                        .toList());
     }
 
     @Test
-    void malformed_stream_to_nonstream_recovery_has_typed_attempt_chain() {
+    void observedMalformedBodyQuarantinesAndBlocksCompatRetry() {
         beginTrace("trace-compat-retry-ledger");
         CompatRetryResolver resolver = new CompatRetryResolver();
         try (LlmClient client = new LlmClient(engineConfig(4_000), resolver)) {
-            LlmClient.StreamResult result = client.chatFull(
-                    List.of(ChatMessage.user("write index.html")),
-                    5_000L,
-                    List.of(writeSpec()),
-                    requiredControls(0));
-            assertTrue(result.hasToolCalls());
+            EngineException.ResponseError blocked = assertThrows(
+                    EngineException.ResponseError.class,
+                    () -> client.chatFull(
+                            List.of(ChatMessage.user("write index.html")),
+                            5_000L,
+                            List.of(writeSpec()),
+                            requiredControls(0)));
+            assertTrue(blocked.getCause() instanceof IllegalStateException);
         }
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
         List<TurnTraceEvent> starts = events(trace, "GENERATION_ATTEMPT_STARTED");
-        assertEquals(2, starts.size());
-        assertEquals("COMPAT_NON_STREAM_RETRY", starts.get(1).data().get("attemptKind"));
-        assertEquals("MALFORMED_TOOL_ARGUMENTS", starts.get(1).data().get("retryReason"));
+        assertEquals(1, starts.size());
         assertEquals(
                 "PROVIDER_MALFORMED_RESPONSE",
                 event(trace, "GENERATION_ATTEMPT_FAILED").data().get("failure"));
         assertEquals(1, resolver.streamingCalls);
-        assertEquals(1, resolver.nonStreamingCalls);
+        assertEquals(0, resolver.nonStreamingCalls);
+        assertTransportSettlement(trace, "FAILED_DURING_BODY", true);
     }
 
     @Test
@@ -599,7 +660,7 @@ class LlmClientProviderProvenanceTest {
     }
 
     @Test
-    void requestDispatchedEventProvesHandoffCommitButNotPhysicalSendStart()
+    void cancellationWinningTheHandoffSendGapPreventsLateSendEntry()
             throws Exception {
         Capture capture = new Capture();
         ProviderResponseCapture.begin(capture);
@@ -637,10 +698,8 @@ class LlmClientProviderProvenanceTest {
                         "the committed handoff event must not be described as a physical-send fact");
 
                 resolver.releaseHandoff.countDown();
-                assertTrue(resolver.physicalSendStarted.await(2, TimeUnit.SECONDS),
-                        "the current transport can begin physical send after the terminal abort");
-                assertTrue(resolver.responseStreamClosed.await(2, TimeUnit.SECONDS),
-                        "the late response stream must be drained or closed by the worker");
+                assertFalse(resolver.physicalSendStarted.await(250, TimeUnit.MILLISECONDS),
+                        "pre-send cancellation must prevent the transport send invocation");
             }
 
             Thread worker = resolver.workerThread.get();
@@ -656,6 +715,15 @@ class LlmClientProviderProvenanceTest {
             assertTrue(capture.generationCompletions.isEmpty());
             assertEquals(List.of(ProviderResponseCapture.Abandonment.OPERATOR_CANCELLED),
                     capture.generationAbandonments);
+            assertEquals(List.of(
+                            ProviderTransportAttempt.Transition.HANDOFF_ADMITTED,
+                            ProviderTransportAttempt.Transition.CANCELLATION_REQUESTED,
+                            ProviderTransportAttempt.Transition.SETTLED),
+                    capture.transportEvents.stream()
+                            .map(ProviderResponseCapture.TransportLifecycleEvent::transition)
+                            .toList());
+            assertEquals(ProviderTransportAttempt.Settlement.CANCELLED_BEFORE_SEND,
+                    capture.transportEvents.get(2).settlement());
         } finally {
             resolver.releaseHandoff.countDown();
             canceller.join(2_000L);
@@ -702,6 +770,60 @@ class LlmClientProviderProvenanceTest {
         assertEquals(expectedTruncated, response.truncated());
         assertEquals(expected == ProviderResponseCapture.Completion.PROVIDER_EOS,
                 capture.onlyReceipt().providerTerminalEligible());
+    }
+
+    private static void assertOperatorCancellationOwnsStreamSettlement(Capture capture) {
+        assertEquals(List.of(
+                        ProviderTransportAttempt.Transition.HANDOFF_ADMITTED,
+                        ProviderTransportAttempt.Transition.SEND_API_ENTERED,
+                        ProviderTransportAttempt.Transition.RESPONSE_HEADERS_OBSERVED,
+                        ProviderTransportAttempt.Transition.RESPONSE_BODY_OPENED,
+                        ProviderTransportAttempt.Transition.CANCELLATION_REQUESTED,
+                        ProviderTransportAttempt.Transition.CANCELLATION_ACKNOWLEDGED,
+                        ProviderTransportAttempt.Transition.SETTLED),
+                capture.transportEvents.stream()
+                        .map(ProviderResponseCapture.TransportLifecycleEvent::transition)
+                        .toList());
+        ProviderResponseCapture.TransportLifecycleEvent settled =
+                capture.transportEvents.getLast();
+        assertEquals(ProviderTransportAttempt.Settlement.CANCELLED_IN_FLIGHT,
+                settled.settlement());
+        assertEquals(ProviderTransportAttempt.CancellationReason.OPERATOR_CANCELLED,
+                settled.cancellationReason());
+        assertEquals(ProviderTransportAttempt.CancellationState.BODY_CLOSE_ACKNOWLEDGED,
+                settled.cancellationState());
+        assertTrue(settled.lateAfterGenerationTerminal());
+    }
+
+    private static void assertTransportSettlement(
+            LocalTurnTrace trace,
+            String expectedSettlement,
+            boolean expectedQuarantine) {
+        List<TurnTraceEvent> settlements = events(trace, "PROVIDER_TRANSPORT_LIFECYCLE")
+                .stream()
+                .filter(candidate -> "SETTLED".equals(candidate.data().get("transition")))
+                .toList();
+        assertEquals(1, settlements.size());
+        assertEquals(expectedSettlement, settlements.getFirst().data().get("settlement"));
+        assertEquals(expectedQuarantine,
+                settlements.getFirst().data().get("quarantineRequired"));
+    }
+
+    private static Stream<TokenChunk> observedTransport(
+            ProviderTransportHandoff handoff,
+            ProviderTransportAttempt.SendOperation<Stream<TokenChunk>> operation) {
+        ProviderTransportAttempt transport = handoff.admitTransport(
+                ProviderTransportHandoff.DispatchEvidence.unbound());
+        try {
+            Stream<TokenChunk> source = transport.invokeSend(operation);
+            transport.responseHeadersObserved();
+            transport.responseBodyOpened(source::close);
+            return ProviderTransportTokenStream.track(source, transport);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new RuntimeException(failure);
+        }
     }
 
     private static Config engineConfig(int responseCap) {
@@ -785,8 +907,18 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            return chatStream(request);
+            ProviderTransportAttempt transport = handoff.admitTransport(
+                    ProviderTransportHandoff.DispatchEvidence.unbound());
+            try {
+                Stream<TokenChunk> source = transport.invokeSend(() -> chatStream(request));
+                transport.responseHeadersObserved();
+                transport.responseBodyOpened(source::close);
+                return ProviderTransportTokenStream.track(source, transport);
+            } catch (RuntimeException failure) {
+                throw failure;
+            } catch (Exception failure) {
+                throw new IllegalStateException(failure);
+            }
         }
 
         @Override
@@ -814,8 +946,7 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            return chatStream(request);
+            return observedTransport(handoff, () -> chatStream(request));
         }
 
         @Override
@@ -843,8 +974,7 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            return chatStream(request);
+            return observedTransport(handoff, () -> chatStream(request));
         }
 
         @Override
@@ -892,8 +1022,8 @@ class LlmClientProviderProvenanceTest {
             if (++calls == 1) {
                 throw new EngineException.Transient("local preparation retry", 0);
             }
-            handoff.requestDispatched();
-            return Stream.of(TokenChunk.of("recovered"), TokenChunk.eos());
+            return observedTransport(handoff, () ->
+                    Stream.of(TokenChunk.of("recovered"), TokenChunk.eos()));
         }
 
         @Override
@@ -926,8 +1056,7 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            return chatStream(request);
+            return observedTransport(handoff, () -> chatStream(request));
         }
 
         @Override
@@ -949,16 +1078,17 @@ class LlmClientProviderProvenanceTest {
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             streamingCalls++;
-            throw new EngineException.MalformedResponse(
-                    "compat chat stream tool arguments", "{\"path\":");
+            return Stream.generate(() -> {
+                throw new EngineException.MalformedResponse(
+                        "compat chat stream tool arguments", "{\"path\":");
+            });
         }
 
         @Override
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            return chatStream(request);
+            return observedTransport(handoff, () -> chatStream(request));
         }
 
         @Override
@@ -974,8 +1104,7 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStreamNonStreaming(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            return chatStreamNonStreaming(request);
+            return observedTransport(handoff, () -> chatStreamNonStreaming(request));
         }
 
         @Override
@@ -1085,8 +1214,10 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            throw new EngineException.ContextBudgetExceeded(3_390, 3_072, 3_072, 0, 400);
+            return observedTransport(handoff, () -> {
+                throw new EngineException.ContextBudgetExceeded(
+                        3_390, 3_072, 3_072, 0, 400);
+            });
         }
 
         @Override
@@ -1111,8 +1242,10 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) {
-            handoff.requestDispatched();
-            throw new IllegalStateException("local parser invariant failed after dispatch");
+            return observedTransport(handoff, () -> {
+                throw new IllegalStateException(
+                        "local parser invariant failed after dispatch");
+            });
         }
 
         @Override
@@ -1137,8 +1270,10 @@ class LlmClientProviderProvenanceTest {
         public Stream<TokenChunk> chatStream(
                 ChatRequest request,
                 ProviderTransportHandoff handoff) throws InterruptedException {
-            handoff.requestDispatched();
-            throw new InterruptedException("transport operation interrupted without owned cause");
+            return observedTransport(handoff, () -> {
+                throw new InterruptedException(
+                        "transport operation interrupted without owned cause");
+            });
         }
 
         @Override
@@ -1149,7 +1284,6 @@ class LlmClientProviderProvenanceTest {
         private final CountDownLatch handoffCommitted = new CountDownLatch(1);
         private final CountDownLatch releaseHandoff = new CountDownLatch(1);
         private final CountDownLatch physicalSendStarted = new CountDownLatch(1);
-        private final CountDownLatch responseStreamClosed = new CountDownLatch(1);
         private final AtomicReference<Thread> workerThread = new AtomicReference<>();
 
         @Override
@@ -1170,12 +1304,21 @@ class LlmClientProviderProvenanceTest {
                 ChatRequest request,
                 ProviderTransportHandoff handoff) throws InterruptedException {
             workerThread.set(Thread.currentThread());
-            handoff.requestDispatched();
+            ProviderTransportAttempt transport = handoff.admitTransport(
+                    ProviderTransportHandoff.DispatchEvidence.unbound());
             handoffCommitted.countDown();
             releaseHandoff.await();
-            physicalSendStarted.countDown();
-            return Stream.of(TokenChunk.of("late response"), TokenChunk.eos())
-                    .onClose(responseStreamClosed::countDown);
+            try {
+                return transport.invokeSend(() -> {
+                    physicalSendStarted.countDown();
+                    return Stream.of(TokenChunk.of("late response"), TokenChunk.eos());
+                });
+            } catch (InterruptedException interrupted) {
+                throw interrupted;
+            } catch (Exception failure) {
+                if (failure instanceof RuntimeException runtime) throw runtime;
+                throw new RuntimeException(failure);
+            }
         }
 
         @Override
@@ -1196,6 +1339,8 @@ class LlmClientProviderProvenanceTest {
                 new ArrayList<>();
         private final List<ProviderResponseCapture.GenerationCompletion> generationCompletions =
                 new ArrayList<>();
+        private final List<ProviderResponseCapture.TransportLifecycleEvent> transportEvents =
+                new CopyOnWriteArrayList<>();
 
         @Override
         public void attemptStarted(ProviderResponseCapture.AttemptEvent event) {
@@ -1205,6 +1350,11 @@ class LlmClientProviderProvenanceTest {
         @Override
         public void requestDispatched(ProviderResponseCapture.AttemptEvent event) {
             dispatches.add(event);
+        }
+
+        @Override
+        public void transportLifecycle(ProviderResponseCapture.TransportLifecycleEvent event) {
+            transportEvents.add(event);
         }
 
         @Override
