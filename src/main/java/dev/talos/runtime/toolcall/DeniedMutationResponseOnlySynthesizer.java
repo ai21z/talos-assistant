@@ -2,6 +2,9 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
@@ -40,9 +43,13 @@ final class DeniedMutationResponseOnlySynthesizer {
                         + "say exactly what was inspected and what remains unknown."));
         int anchorIndex = state.messages.size() - 1;
 
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
         try {
             LlmClient.StreamResult terminal =
                     state.ctx.llm().chatFull(state.messages, java.util.List.of());
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             String text = terminal.text() == null ? "" : terminal.text();
             if (terminal.hasToolCalls()) {
                 return Result.deterministicStop();
@@ -53,6 +60,11 @@ final class DeniedMutationResponseOnlySynthesizer {
             }
             return new Result(stripped, terminal.provenance(), true);
         } catch (Exception e) {
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LOG.warn("Response-only synthesis after denied mutation failed: {}", SafeLogFormatter.throwableMessage(e));
             return Result.deterministicStop();
         } finally {

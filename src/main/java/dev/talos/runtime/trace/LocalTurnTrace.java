@@ -2,6 +2,7 @@ package dev.talos.runtime.trace;
 
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnSettlement;
 import dev.talos.core.context.ContextLedgerSummary;
 
 import java.util.ArrayList;
@@ -61,6 +62,127 @@ public record LocalTurnTrace(
 
     public static Builder builder(String traceId, String sessionId, int turnNumber, String timestamp) {
         return new Builder(traceId, sessionId, turnNumber, timestamp);
+    }
+
+    /**
+     * Produce the bounded trace persisted for a non-conversational settlement.
+     *
+     * <p>Failure and no-result records retain only stable identity, typed
+     * provider lifecycle events, terminal state, internal contract flags, and
+     * redaction hashes. Ordinary policy clauses, paths, prompt audit fields,
+     * tool summaries, verifier prose, and warnings are deliberately omitted.
+     */
+    public LocalTurnTrace safeTerminalProjection(
+            TurnSettlement.Kind kind,
+            boolean retrievalSummaryPresent
+    ) {
+        if (kind == null || kind == TurnSettlement.Kind.COMPLETED) return this;
+        SafeTerminalTraceProjector.Projection projected =
+                SafeTerminalTraceProjector.project(events, traceId);
+        String safeTimestamp = terminalToken(timestamp, 64, "");
+        TurnTraceEvent projectionMarker = TurnEvidenceProjectionTraceEvent.create(
+                safeTimestamp,
+                projected.terminalizationRecovery(),
+                projected.providerLifecycleObserved(),
+                projected.providerLifecyclePreserved(),
+                retrievalSummaryPresent);
+        List<TurnTraceEvent> safeEvents = new ArrayList<>();
+        boolean markerAdded = false;
+        for (TurnTraceEvent event : projected.events()) {
+            if (!markerAdded && "TURN_SETTLED".equals(event.type())) {
+                safeEvents.add(projectionMarker);
+                markerAdded = true;
+            }
+            safeEvents.add(event);
+        }
+        if (!markerAdded) {
+            int completed = safeEvents.size();
+            if (completed > 0
+                    && "TRACE_COMPLETED".equals(safeEvents.getLast().type())) {
+                completed--;
+            }
+            safeEvents.add(completed, projectionMarker);
+        }
+        String terminalStatus = switch (kind) {
+            case CANCELLED -> "ABORTED";
+            case FAILED -> "ERROR";
+            case NO_RESULT -> "NO_RESULT";
+            case COMPLETED -> outcome.status();
+        };
+        String terminalClassification = switch (kind) {
+            case CANCELLED -> "TURN_CANCELLED";
+            case FAILED -> "TURN_FAILED";
+            case NO_RESULT -> "NO_MODE_RESULT";
+            case COMPLETED -> outcome.classification();
+        };
+        TaskContractSummary safeContract = new TaskContractSummary(
+                taskContract.type(),
+                taskContract.mutationAllowed(),
+                taskContract.verificationRequired(),
+                taskContract.mutationRequested(),
+                List.of(),
+                List.of(),
+                "",
+                List.of());
+        RedactionSummary safeRedaction = new RedactionSummary(
+                redaction.mode(),
+                false,
+                false,
+                false,
+                terminalHash(redaction.promptHash()),
+                terminalHash(redaction.assistantHash()),
+                terminalTextSummary(redaction.prompt()),
+                terminalTextSummary(redaction.assistant()));
+        return new LocalTurnTrace(
+                schemaVersion,
+                terminalToken(traceId, 128, ""),
+                terminalToken(sessionId, 128, ""),
+                turnNumber,
+                safeTimestamp,
+                terminalToken(workspaceHash, 128, ""),
+                terminalToken(mode, 64, "unknown"),
+                new ModelSummary("", ""),
+                safeContract,
+                List.of(),
+                ToolSurface.empty(),
+                PromptAuditSnapshot.empty(),
+                safeEvents,
+                VerificationSummary.empty(),
+                RepairSummary.empty(),
+                CheckpointSummary.empty(),
+                new OutcomeSummary(
+                        terminalStatus,
+                        "NOT_RUN",
+                        "UNKNOWN",
+                        "UNKNOWN",
+                        terminalClassification),
+                List.of(),
+                ContextLedgerSummary.empty(),
+                safeRedaction);
+    }
+
+    private static String terminalToken(String value, int maxChars, String fallback) {
+        return value != null
+                && value.length() <= maxChars
+                && value.matches("[A-Za-z0-9._:$+\\-]*")
+                ? value
+                : fallback;
+    }
+
+    private static String terminalHash(String value) {
+        return value != null
+                && value.matches("sha256:(?:[0-9a-f]{64}|unavailable)")
+                ? value
+                : "";
+    }
+
+    private static TextSummary terminalTextSummary(TextSummary summary) {
+        if (summary == null) return TextSummary.empty();
+        return new TextSummary(
+                terminalHash(summary.hash()),
+                Math.max(0, summary.chars()),
+                Math.max(0, summary.bytes()),
+                Math.max(0, summary.lines()));
     }
 
     public record ModelSummary(String backend, String model) {

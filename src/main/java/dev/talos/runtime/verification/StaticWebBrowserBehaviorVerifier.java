@@ -1,6 +1,7 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.core.security.NoFollowPathPolicy;
+import dev.talos.runtime.TurnFailureClassifier;
 import org.htmlunit.BrowserVersion;
 import org.htmlunit.HttpHeader;
 import org.htmlunit.WebClient;
@@ -107,8 +108,10 @@ final class StaticWebBrowserBehaviorVerifier {
                     List.of(),
                     List.of("Browser behavior verification could not inspect the static web surface.")));
         }
+        propagateObservedInterruption();
         BrowserRunResult result = (runner == null ? new HtmlUnitBrowserRunner() : runner)
                 .run(root.toAbsolutePath().normalize(), facts.htmlFile(), facts.js(), binding);
+        propagateObservedInterruption();
         ClaimResult claimResult = new ClaimResult(
                 claim,
                 obligation,
@@ -219,8 +222,7 @@ final class StaticWebBrowserBehaviorVerifier {
                         limitations);
                 }
             } catch (IOException | RuntimeException e) {
-                return BrowserRunResult.unavailable(
-                        "Browser behavior verifier could not execute the static page: " + safeMessage(e));
+                return browserFailureResult(e);
             }
         }
 
@@ -446,6 +448,23 @@ final class StaticWebBrowserBehaviorVerifier {
         if (url == null || url.isBlank()) return "<unknown>";
         int colon = url.indexOf(':');
         return colon > 0 ? url.substring(0, colon) + "://<redacted>" : "<redacted>";
+    }
+
+    static BrowserRunResult browserFailureResult(Throwable failure) {
+        if (TurnFailureClassifier.isCancellation(failure)
+                || TurnFailureClassifier.isInterruption(failure)) {
+            throw TurnFailureClassifier.propagateControlFlow(failure);
+        }
+        return BrowserRunResult.unavailable(
+                "Browser behavior verifier could not execute the static page: "
+                        + safeMessage(failure));
+    }
+
+    private static void propagateObservedInterruption() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw TurnFailureClassifier.propagateControlFlow(
+                    new InterruptedException("browser verification interrupted"));
+        }
     }
 
     private static String safeMessage(Throwable throwable) {

@@ -48,6 +48,8 @@ final class NoToolGroundingRetry {
 
         LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
         try {
             LlmClient.StreamResult retry = chat.chat(messages);
             String retryText = retry.text();
@@ -65,6 +67,8 @@ final class NoToolGroundingRetry {
             LOG.warn("Grounding retry did not produce a substantive new answer. "
                     + "Annotating original.");
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             restoreOriginalCandidate(
                     originalCandidate,
                     answer,
@@ -76,6 +80,12 @@ final class NoToolGroundingRetry {
                 annotated,
                 LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
         return annotated;
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
     private static void restoreOriginalCandidate(

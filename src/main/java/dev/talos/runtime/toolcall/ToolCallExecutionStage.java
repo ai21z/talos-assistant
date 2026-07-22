@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextLedgerCapture;
@@ -381,6 +382,10 @@ public final class ToolCallExecutionStage {
             try {
                 progressSink.onToolProgress(toolName, action, detail);
             } catch (Exception e) {
+                if (TurnFailureClassifier.isCancellation(e)
+                        || TurnFailureClassifier.isInterruption(e)) {
+                    throw TurnFailureClassifier.propagateControlFlow(e);
+                }
                 LOG.debug("Progress sink error (ignored): {}", SafeLogFormatter.throwableMessage(e));
             }
         }

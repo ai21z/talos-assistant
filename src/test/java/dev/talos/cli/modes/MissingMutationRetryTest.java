@@ -35,9 +35,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MissingMutationRetryTest {
@@ -219,6 +222,31 @@ class MissingMutationRetryTest {
         LocalTurnTraceCapture.recordRoutedAnswerCaptured(result.answer());
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
         assertRuntimeTerminalOwner(trace);
+    }
+
+    @Test
+    void wrappedCancellationEscapesMissingMutationRetry() {
+        String request = "Create notes.md with a single line of text.";
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request)));
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel missing-mutation retry"));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                MissingMutationRetry.retryIfNeeded(
+                        "I will create notes.md.",
+                        messages,
+                        mutationPlan(request),
+                        retryableMutationLoop(messages),
+                        workspace,
+                        testContext(),
+                        (retryMessages, plan, specs) -> {
+                            throw wrapped;
+                        }));
+
+        assertSame(wrapped, thrown,
+                "retry cancellation must preserve the caller-owned runtime wrapper");
     }
 
     @Test

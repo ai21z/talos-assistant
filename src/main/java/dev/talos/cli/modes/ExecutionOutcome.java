@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.CommandOutputTruthfulnessGuard;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
@@ -373,6 +374,9 @@ record ExecutionOutcome(
         boolean embeddedPositiveVerificationSanitized = !Objects.equals(current, shaped);
         current = shaped;
 
+        TurnExecutionStage priorVerificationStage =
+                LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.VERIFICATION);
         TaskVerificationResult embeddedVerification = EmbeddedStaticVerificationResultParser.parse(current);
         TaskVerificationEvidence embeddedEvidence = TaskVerificationEvidence.embeddedAssistant(embeddedVerification);
         boolean usingEmbeddedVerification = embeddedEvidence.compatibilityResult().status()
@@ -396,6 +400,7 @@ record ExecutionOutcome(
         TaskVerificationResult taskVerification = taskVerificationEvidence.compatibilityResult();
         VerificationReport verificationReport = taskVerificationEvidence.report();
         VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
+        LocalTurnTraceCapture.enterExecutionStage(priorVerificationStage);
         if (verificationStatus == VerificationStatus.FAILED) {
             if (usingEmbeddedVerification) {
                 // The tool loop already rendered the static-verification failure alongside

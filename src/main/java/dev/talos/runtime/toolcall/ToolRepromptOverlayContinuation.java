@@ -1,19 +1,16 @@
 package dev.talos.runtime.toolcall;
 
-import dev.talos.core.util.UiChrome;
-import dev.talos.safety.SafeLogFormatter;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ToolSpec;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
 final class ToolRepromptOverlayContinuation {
-    private static final Logger LOG = LoggerFactory.getLogger(ToolRepromptOverlayContinuation.class);
-
     private ToolRepromptOverlayContinuation() {
     }
 
@@ -26,6 +23,7 @@ final class ToolRepromptOverlayContinuation {
             List<ToolSpec> repromptToolSpecs
     ) {
         List<ChatMessage> requestMessages = List.of();
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(
                 state,
                 remainingRepairTargets,
@@ -44,50 +42,46 @@ final class ToolRepromptOverlayContinuation {
                     ToolRepromptRequestBuilder.controls(state),
                     "(no answer from model after tool execution)");
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             return ToolRepromptContextBudgetHandler.handle(state, budget, "tool-call loop continuation");
-        } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Model engine not reachable during tool-call loop iteration {}: {}",
-                    state.iterations, SafeLogFormatter.throwableMessage(cf));
-            state.finishWithAnswer(ToolRepromptChatExecutor.connectionFailedAnswer(cf));
-            return false;
-        } catch (EngineException.ModelNotFound mnf) {
-            LOG.warn("Model not found during tool-call loop iteration {}: {}",
-                    state.iterations, SafeLogFormatter.value(mnf.model()));
-            state.finishWithAnswer(UiChrome.MODEL_NOT_FOUND_OPEN + mnf.model() + UiChrome.MODEL_NOT_FOUND_MARKER
-                    + " - tool loop aborted. " + mnf.guidance() + "]");
-            return false;
         } catch (EngineException.Transient tr) {
-            LOG.warn("Transient error during tool-call loop iteration {}: {}",
-                    state.iterations, SafeLogFormatter.throwableMessage(tr));
             try {
                 Thread.sleep(400);
-                return ToolRepromptChatExecutor.executeRetryResult(
+                boolean result = ToolRepromptChatExecutor.executeRetryResult(
                         state,
                         requestMessages,
                         repromptToolSpecs,
                         ToolRepromptRequestBuilder.controls(state),
                         "(no answer from model after retry)");
+                LocalTurnTraceCapture.enterExecutionStage(priorStage);
+                return result;
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                state.finishWithAnswer("[Interrupted during tool-call loop]");
-                return false;
+                throw new RuntimeException(ie);
             } catch (Exception retryEx) {
                 if (retryEx instanceof EngineException.ContextBudgetExceeded budget) {
+                    LocalTurnTraceCapture.enterExecutionStage(priorStage);
                     return ToolRepromptContextBudgetHandler.handle(state, budget, "transient retry continuation");
                 }
-                state.finishWithAnswer("[" + tr.guidance() + "]");
-                return false;
+                if (TurnFailureClassifier.isCancellation(retryEx)
+                        || TurnFailureClassifier.isInterruption(retryEx)) {
+                    throw TurnFailureClassifier.propagateControlFlow(retryEx);
+                }
+                if (retryEx instanceof RuntimeException runtime) throw runtime;
+                throw new RuntimeException(retryEx);
             }
-        } catch (EngineException ee) {
-            LOG.warn("Engine error during tool-call loop iteration {}: {}",
-                    state.iterations, SafeLogFormatter.throwableMessage(ee));
-            state.finishWithAnswer(UiChrome.ENGINE_ERROR_PREFIX + " during tool loop: " + ee.getMessage() + "]");
-            return false;
+        } catch (RuntimeException failure) {
+            if (TurnFailureClassifier.isCancellation(failure)
+                    || TurnFailureClassifier.isInterruption(failure)) {
+                throw TurnFailureClassifier.propagateControlFlow(failure);
+            }
+            throw failure;
         } catch (Exception e) {
-            LOG.warn("LLM call failed during tool-call loop iteration {}: {}",
-                    state.iterations, SafeLogFormatter.throwableMessage(e));
-            state.finishWithAnswer("(error during follow-up LLM call: " + e.getMessage() + ")");
-            return false;
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            throw new RuntimeException(e);
         }
     }
 }

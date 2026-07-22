@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
@@ -99,7 +100,10 @@ public final class AskMode implements Mode {
         // System prompt - composed from sections, tool-aware, history-aware
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
         boolean nativeTools = ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forAsk()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                 .withVisibleToolNames(visibleTools)

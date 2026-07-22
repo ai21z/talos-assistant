@@ -4,6 +4,7 @@ import dev.talos.core.Config;
 import dev.talos.runtime.ApprovalResponse;
 import dev.talos.runtime.policy.ArtifactCanaryScanner;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.spi.types.PromptDebugCapture;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -478,6 +479,50 @@ class SynchronizedApprovalAuditRunnerTest {
                 error.partialResult().finalAnswer());
         assertTrue(error.partialResult().approvals().isEmpty(), error.partialResult().approvals().toString());
         assertFalse(error.partialResult().traceText().isBlank());
+    }
+
+    @Test
+    void successful_run_releases_prompt_debug_scope() {
+        PromptDebugCapture.clear();
+        try {
+            SynchronizedApprovalAuditRunner.runScripted(
+                    new SynchronizedApprovalAuditRunner.Request(
+                            "prompt debug success scope",
+                            workspace,
+                            new Config(null),
+                            "Answer without tools.",
+                            List.of("No tool is needed."),
+                            List.of()));
+
+            assertTrue(PromptDebugCapture.latest().isPresent());
+            assertFalse(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            assertFreshPromptDebugScopeCanBeOwned();
+        } finally {
+            PromptDebugCapture.clear();
+        }
+    }
+
+    @Test
+    void failed_run_releases_prompt_debug_scope() {
+        PromptDebugCapture.clear();
+        try {
+            assertThrows(SynchronizedApprovalAuditRunner.AuditFailure.class, () ->
+                    SynchronizedApprovalAuditRunner.runScripted(
+                            new SynchronizedApprovalAuditRunner.Request(
+                                    "prompt debug failure scope",
+                                    workspace,
+                                    new Config(null),
+                                    "Answer without tools.",
+                                    List.of("No tool is needed."),
+                                    List.of(ScriptedApprovalGate.Step.remember(
+                                            "talos.edit_file", "never-used.md")))));
+
+            assertTrue(PromptDebugCapture.latest().isPresent());
+            assertFalse(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            assertFreshPromptDebugScopeCanBeOwned();
+        } finally {
+            PromptDebugCapture.clear();
+        }
     }
 
     @Test
@@ -1492,6 +1537,13 @@ class SynchronizedApprovalAuditRunnerTest {
         assertFalse(Files.readString(workspace.resolve("script.js")).contains(".missing-button"));
         assertEquals("document.querySelector('.similar-but-forbidden');\n",
                 Files.readString(workspace.resolve("scripts.js")));
+    }
+
+    private static void assertFreshPromptDebugScopeCanBeOwned() {
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            assertTrue(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            assertTrue(PromptDebugCapture.latest().isEmpty());
+        }
     }
 
     private static Map<String, Object> privateModeSendToModelPrivacy() {

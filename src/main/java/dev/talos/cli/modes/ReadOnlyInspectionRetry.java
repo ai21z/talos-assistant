@@ -65,6 +65,8 @@ final class ReadOnlyInspectionRetry {
 
         LocalTurnTraceCapture.AnswerCandidateCheckpoint originalCandidate =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
         try {
             LlmClient.StreamResult retry = chat.chat(retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
@@ -109,6 +111,8 @@ final class ReadOnlyInspectionRetry {
                             ? LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_EMPTY
                             : LocalTurnTraceCapture.AnswerCandidateRestorationReason.SPECULATIVE_RETRY_REJECTED);
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             restoreOriginalCandidate(
                     originalCandidate,
                     answer,
@@ -116,6 +120,12 @@ final class ReadOnlyInspectionRetry {
             LOG.warn("Read-only inspection retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return new Result(answer, null, null);
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
     private static void restoreOriginalCandidate(

@@ -2,6 +2,7 @@ package dev.talos.engine.ollama;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.spi.types.Capabilities;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.spi.types.Health;
 
 import java.net.URI;
@@ -69,7 +70,10 @@ final class OllamaHealthProbe {
                     return ctx;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception failure) {
+            if (ControlFlowFailure.classify(failure) != ControlFlowFailure.Kind.NONE) {
+                throw ControlFlowFailure.propagate(failure);
+            }
         }
 
         int fallback = 8192;

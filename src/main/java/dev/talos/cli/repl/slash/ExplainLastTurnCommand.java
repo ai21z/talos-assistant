@@ -8,6 +8,8 @@ import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.runtime.trace.TurnTraceEvent;
+import dev.talos.runtime.trace.TurnSettlementTraceEvent;
+import dev.talos.runtime.trace.TurnEvidenceProjectionTraceEvent;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 
 import java.nio.file.Path;
@@ -26,6 +28,7 @@ public final class ExplainLastTurnCommand implements Command {
 
     private final SessionStore store;
     private final String sessionId;
+    private final String traceWorkspaceId;
     private final java.time.Instant activeSessionStartedAt;
 
     public ExplainLastTurnCommand(Path workspace, SessionStore store) {
@@ -57,6 +60,7 @@ public final class ExplainLastTurnCommand implements Command {
         this.sessionId = sessionId == null || sessionId.isBlank()
                 ? JsonSessionStore.sessionIdFor(resolvedWorkspace)
                 : sessionId;
+        this.traceWorkspaceId = JsonSessionStore.sessionIdFor(resolvedWorkspace);
         this.activeSessionStartedAt = activeSessionStartedAt;
     }
 
@@ -97,7 +101,8 @@ public final class ExplainLastTurnCommand implements Command {
         if (latest == null) {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
         }
-        return new Result.TrustedInfo(renderView(latest, view, store, sessionId));
+        return new Result.TrustedInfo(renderView(
+                latest, view, store, sessionId, traceWorkspaceId));
     }
 
     private List<TurnRecord> filterActiveTurns(List<TurnRecord> turns) {
@@ -109,11 +114,24 @@ public final class ExplainLastTurnCommand implements Command {
                 .toList();
     }
 
-    private static String renderView(TurnRecord latest, String view, SessionStore store, String sessionId) {
+    private static String renderView(
+            TurnRecord latest,
+            String view,
+            SessionStore store,
+            String sessionId,
+            String traceWorkspaceId
+    ) {
+        LocalTurnTrace localTrace = loadLocalTrace(store, sessionId, latest).orElse(null);
+        if (requiresTerminalOnlyRendering(latest, localTrace)) {
+            return renderTerminalOnly(latest, localTrace, view, traceWorkspaceId);
+        }
+        LocalTurnTrace pairedTrace = validTracePair(latest, localTrace, traceWorkspaceId)
+                ? localTrace
+                : null;
         return switch (view) {
             case "tools" -> renderTools(latest);
             case "sources" -> renderSources(latest);
-            case "trace" -> renderTrace(latest, loadLocalTrace(store, sessionId, latest).orElse(null));
+            case "trace" -> renderTrace(latest, pairedTrace);
             default -> render(latest);
         };
     }
@@ -123,6 +141,9 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String render(TurnRecord turn, LocalTurnTrace localTrace) {
+        if (requiresTerminalOnlyRendering(turn, localTrace)) {
+            return renderTerminalOnly(turn, localTrace, "summary", null);
+        }
         StringBuilder sb = new StringBuilder();
         sb.append("Last Turn\n\n");
         sb.append("  Turn:      ").append(turn.turnNumber()).append('\n');
@@ -133,6 +154,7 @@ public final class ExplainLastTurnCommand implements Command {
                 .append(" granted=").append(turn.approvalsGranted())
                 .append(" denied=").append(turn.approvalsDenied())
                 .append("\n");
+        appendSettlementSummary(sb, localTrace);
 
         if (turn.retrievalTraceSummary() != null && !turn.retrievalTraceSummary().isBlank()) {
             sb.append("  Retrieval: ").append(turn.retrievalTraceSummary()).append('\n');
@@ -219,6 +241,9 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String renderTrace(TurnRecord turn, LocalTurnTrace localTrace) {
+        if (requiresTerminalOnlyRendering(turn, localTrace)) {
+            return renderTerminalOnly(turn, localTrace, "trace", null);
+        }
         StringBuilder sb = new StringBuilder();
         sb.append(render(turn, localTrace));
         sb.append("\nTrace Detail\n");
@@ -239,12 +264,161 @@ public final class ExplainLastTurnCommand implements Command {
         return store.loadTrace(sessionId, turn.traceId());
     }
 
+    /**
+     * Any terminal-settlement artifact is rendered through one closed view,
+     * before the requested summary/tools/sources/trace view can inspect the
+     * ordinary row. The row status fallback covers a missing or mismatched
+     * trace counterpart for failed/cancelled settlements and the deliberately
+     * blank row shape used by no-result settlements.
+     */
+    private static boolean requiresTerminalOnlyRendering(
+            TurnRecord turn,
+            LocalTurnTrace trace
+    ) {
+        if (trace != null && trace.events().stream()
+                .filter(java.util.Objects::nonNull)
+                .map(TurnTraceEvent::type)
+                .anyMatch(type -> "TURN_SETTLED".equals(type)
+                        || TurnEvidenceProjectionTraceEvent.TYPE.equals(type))) {
+            return true;
+        }
+        if (turn == null) return false;
+        String status = turn.status() == null
+                ? ""
+                : turn.status().strip().toLowerCase(Locale.ROOT);
+        if ("failed".equals(status) || "cancelled".equals(status)
+                || "no_result".equals(status)) {
+            return true;
+        }
+        return !turn.traceId().isBlank()
+                && turn.userInput().isBlank()
+                && turn.assistantText().isBlank()
+                && (status.isBlank() || "info".equals(status));
+    }
+
+    private static String renderTerminalOnly(
+            TurnRecord turn,
+            LocalTurnTrace trace,
+            String view,
+            String expectedSessionId
+    ) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(switch (view) {
+            case "tools" -> "Last Turn Tools";
+            case "sources" -> "Last Turn Sources";
+            case "trace" -> "Last Turn Trace";
+            default -> "Last Turn";
+        }).append("\n\n");
+
+        boolean paired = validTracePair(turn, trace, expectedSessionId);
+        TurnSettlementTraceEvent.Decoded settlement = paired
+                ? TurnSettlementTraceEvent.decode(trace)
+                : null;
+        TurnEvidenceProjectionTraceEvent.Decoded projection = paired
+                ? TurnEvidenceProjectionTraceEvent.decode(trace)
+                : null;
+        boolean settlementValid = settlement != null && settlement.valid();
+        boolean rowRetrievalObserved = turn != null
+                && !turn.retrievalTraceSummary().isBlank();
+        boolean retrievalConsistent = projection != null
+                && projection.valid()
+                && ("CAPTURE_OBSERVED_UNBOUND".equals(projection.retrieval())
+                        == rowRetrievalObserved);
+        boolean projectionValid = projection != null
+                && projection.valid()
+                && retrievalConsistent;
+
+        sb.append("  Turn:      ").append(turn == null ? 0 : turn.turnNumber()).append('\n');
+        sb.append("  Trace pair: ").append(paired ? "VALID" : "INVALID/UNKNOWN").append('\n');
+        if (settlementValid) {
+            sb.append("  Status:    ").append(terminalStatus(settlement)).append('\n');
+            sb.append("  Outcome:   ").append(terminalOutcome(settlement)).append('\n');
+            sb.append("  Settlement: ").append(settlement.kind().name())
+                    .append(" at ").append(settlement.stage().name()).append('\n');
+            sb.append("    error: ").append(settlement.errorKind().name())
+                    .append(" code=").append(settlement.errorCode());
+            if (!settlement.exceptionClass().isBlank()) {
+                sb.append(" class=").append(settlement.exceptionClass());
+            }
+            sb.append('\n');
+            sb.append("    causal owner: UNKNOWN\n");
+        } else {
+            sb.append("  Status:    UNKNOWN\n");
+            sb.append("  Outcome:   UNKNOWN\n");
+            sb.append("  Settlement: INVALID/UNKNOWN\n");
+            sb.append("    causal owner: UNKNOWN\n");
+        }
+
+        if (projectionValid) {
+            sb.append("  Evidence projection: ").append(projection.completeness()).append('\n');
+            sb.append("    reason: ").append(projection.reason()).append('\n');
+            sb.append("    provider lifecycle: ")
+                    .append(projection.providerLifecycle()).append('\n');
+            sb.append("    retrieval: ").append(projection.retrieval()).append('\n');
+            sb.append("    capture finalizers: ")
+                    .append(projection.captureFinalizers()).append('\n');
+        } else {
+            sb.append("  Evidence projection: INVALID/UNKNOWN\n");
+            sb.append("    retrieval: INVALID/UNKNOWN\n");
+        }
+        sb.append("  Tools: unavailable in terminal projection\n");
+        sb.append("  Sources: unavailable in terminal projection\n");
+        return sb.toString();
+    }
+
+    private static boolean validTracePair(
+            TurnRecord turn,
+            LocalTurnTrace trace,
+            String expectedSessionId
+    ) {
+        return turn != null
+                && trace != null
+                && !turn.traceId().isBlank()
+                && turn.traceId().equals(trace.traceId())
+                && turn.turnNumber() == trace.turnNumber()
+                && (expectedSessionId == null
+                        || expectedSessionId.equals(trace.sessionId()));
+    }
+
+    private static String terminalStatus(TurnSettlementTraceEvent.Decoded settlement) {
+        return switch (settlement.kind()) {
+            case FAILED -> "ERROR";
+            case CANCELLED -> "ABORTED";
+            case NO_RESULT -> "NO_RESULT";
+            case COMPLETED -> "UNKNOWN";
+        };
+    }
+
+    private static String terminalOutcome(TurnSettlementTraceEvent.Decoded settlement) {
+        return switch (settlement.kind()) {
+            case FAILED -> "TURN_FAILED";
+            case CANCELLED -> "TURN_CANCELLED";
+            case NO_RESULT -> "NO_RESULT";
+            case COMPLETED -> "UNKNOWN";
+        };
+    }
+
     private static void appendLocalTrace(StringBuilder sb, LocalTurnTrace trace) {
+        TurnEvidenceProjectionTraceEvent.Decoded projection =
+                TurnEvidenceProjectionTraceEvent.decode(trace);
         sb.append("\nLocal Trace\n");
-        sb.append("  Local trace: ").append(trace.traceId()).append('\n');
+        sb.append("  Local trace: ").append(safeTraceToken(
+                trace.traceId(), 128, "invalid identity")).append('\n');
         sb.append("  Schema: ").append(trace.schemaVersion()).append('\n');
-        sb.append("  Mode: ").append(blankDefault(trace.mode(), "none recorded")).append('\n');
-        sb.append("  Redaction: ").append(trace.redaction().mode()).append('\n');
+        sb.append("  Mode: ").append(safeTraceToken(
+                trace.mode(), 64, "none recorded")).append('\n');
+        sb.append("  Redaction: ").append(safeTraceToken(
+                trace.redaction().mode().name(), 32, "UNKNOWN")).append('\n');
+        if (projection.present()) {
+            // A terminal projection deliberately omits ordinary task, prompt,
+            // tool, checkpoint, verification, and repair bodies. Render only
+            // its closed decoders; never fall through to generic fields that a
+            // tampered local trace could populate with free-form text.
+            sb.append("  Events: ").append(trace.events().size()).append('\n');
+            appendEvidenceProjection(sb, trace);
+            appendSettlementDetail(sb, trace);
+            return;
+        }
         if (trace.taskContract() != null && !trace.taskContract().type().isBlank()) {
             sb.append("  Task contract: ").append(trace.taskContract().type())
                     .append(" mutationAllowed=").append(trace.taskContract().mutationAllowed())
@@ -275,6 +449,8 @@ public final class ExplainLastTurnCommand implements Command {
             sb.append('\n');
         });
         sb.append("  Events: ").append(trace.events().size()).append('\n');
+        appendEvidenceProjection(sb, trace);
+        appendSettlementDetail(sb, trace);
         if (trace.checkpoint() != null && !trace.checkpoint().status().isBlank()) {
             sb.append("  Checkpoint: ").append(trace.checkpoint().status());
             if (!trace.checkpoint().checkpointId().isBlank()) {
@@ -388,6 +564,53 @@ public final class ExplainLastTurnCommand implements Command {
         return Optional.empty();
     }
 
+    private static void appendSettlementSummary(StringBuilder sb, LocalTurnTrace trace) {
+        TurnSettlementTraceEvent.Decoded settlement = TurnSettlementTraceEvent.decode(trace);
+        if (!settlement.present()) return;
+        if (!settlement.valid()) {
+            sb.append("  Settlement: INVALID\n");
+            return;
+        }
+        sb.append("  Settlement: ").append(settlement.kind().name())
+                .append(" at ").append(settlement.stage().name()).append('\n');
+    }
+
+    private static void appendSettlementDetail(StringBuilder sb, LocalTurnTrace trace) {
+        TurnSettlementTraceEvent.Decoded settlement = TurnSettlementTraceEvent.decode(trace);
+        if (!settlement.present()) return;
+        if (!settlement.valid()) {
+            sb.append("  Terminal settlement: INVALID\n");
+            sb.append("    causal owner: UNKNOWN\n");
+            return;
+        }
+        sb.append("  Terminal settlement: ").append(settlement.kind().name()).append('\n');
+        sb.append("    stage: ").append(settlement.stage().name()).append('\n');
+        sb.append("    error: ").append(settlement.errorKind().name())
+                .append(" code=").append(settlement.errorCode());
+        if (!settlement.exceptionClass().isBlank()) {
+            sb.append(" class=").append(settlement.exceptionClass());
+        }
+        sb.append('\n');
+        sb.append("    causal owner: UNKNOWN\n");
+    }
+
+    private static void appendEvidenceProjection(StringBuilder sb, LocalTurnTrace trace) {
+        TurnEvidenceProjectionTraceEvent.Decoded projection =
+                TurnEvidenceProjectionTraceEvent.decode(trace);
+        if (!projection.present()) return;
+        if (!projection.valid()) {
+            sb.append("  Evidence projection: INVALID/UNKNOWN\n");
+            return;
+        }
+        sb.append("  Evidence projection: ").append(projection.completeness()).append('\n');
+        sb.append("    reason: ").append(projection.reason()).append('\n');
+        sb.append("    provider lifecycle: ")
+                .append(projection.providerLifecycle()).append('\n');
+        sb.append("    retrieval: ").append(projection.retrieval()).append('\n');
+        sb.append("    capture finalizers: ")
+                .append(projection.captureFinalizers()).append('\n');
+    }
+
     private static String eventValue(TurnTraceEvent event, String key) {
         Object value = event == null ? null : event.data().get(key);
         return value == null ? "" : value.toString();
@@ -450,6 +673,18 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String inferOutcome(TurnRecord turn, LocalTurnTrace localTrace) {
+        TurnSettlementTraceEvent.Decoded settlement = TurnSettlementTraceEvent.decode(localTrace);
+        if (settlement.valid()) {
+            return switch (settlement.kind()) {
+                case FAILED -> "TURN_FAILED";
+                case CANCELLED -> "TURN_CANCELLED";
+                case NO_RESULT -> "NO_RESULT";
+                case COMPLETED -> inferOutcomeFromTurn(turn);
+            };
+        }
+        if (settlement.present()) {
+            return inferOutcomeFromTurn(turn);
+        }
         if (localTrace != null
                 && localTrace.outcome() != null
                 && !localTrace.outcome().classification().isBlank()) {
@@ -464,6 +699,18 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     private static String effectiveStatus(TurnRecord turn, LocalTurnTrace localTrace) {
+        TurnSettlementTraceEvent.Decoded settlement = TurnSettlementTraceEvent.decode(localTrace);
+        if (settlement.valid()) {
+            return switch (settlement.kind()) {
+                case FAILED -> "ERROR";
+                case CANCELLED -> "ABORTED";
+                case NO_RESULT -> "NO_RESULT";
+                case COMPLETED -> blankDefault(turn == null ? null : turn.status(), "unknown");
+            };
+        }
+        if (settlement.present()) {
+            return blankDefault(turn == null ? null : turn.status(), "unknown");
+        }
         if (localTrace != null
                 && localTrace.outcome() != null
                 && !localTrace.outcome().status().isBlank()) {
@@ -475,8 +722,8 @@ public final class ExplainLastTurnCommand implements Command {
     private static String inferOutcomeFromTurn(TurnRecord turn) {
         if (turn == null) return "UNKNOWN";
         String status = turn.status() == null ? "" : turn.status().toLowerCase(Locale.ROOT);
-        if ("error".equals(status)) return "ERROR";
-        if ("aborted".equals(status)) return "ABORTED";
+        if ("error".equals(status) || "failed".equals(status)) return "ERROR";
+        if ("aborted".equals(status) || "cancelled".equals(status)) return "ABORTED";
         if ("info".equals(status)) return "INFO_ONLY";
         if ("stream".equals(status)) return "STREAM_EVENT";
         if (turn.approvalsDenied() > 0) return "BLOCKED_BY_APPROVAL";
@@ -518,6 +765,13 @@ public final class ExplainLastTurnCommand implements Command {
 
     private static String blankDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String safeTraceToken(String value, int maxChars, String fallback) {
+        return value != null && value.length() <= maxChars
+                && value.matches("[A-Za-z0-9._:$+\\-]*")
+                ? blankDefault(value, fallback)
+                : fallback;
     }
 
     private static String normalizeView(String args) {

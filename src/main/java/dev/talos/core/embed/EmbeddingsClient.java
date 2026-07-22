@@ -9,6 +9,7 @@ import dev.talos.core.cache.CacheDb;
 import dev.talos.core.util.Hash;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
+import dev.talos.spi.types.ControlFlowFailure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +25,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
     private static final Logger LOG = LoggerFactory.getLogger(EmbeddingsClient.class);
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient http;
 
     private final String host;      // e.g. http://127.0.0.1:11434
     private final String model;     // e.g. bge-m3
@@ -36,7 +37,12 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
     }
 
     public EmbeddingsClient(Config cfg, CacheDb cache) {
+        this(cfg, cache, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
+    }
+
+    EmbeddingsClient(Config cfg, CacheDb cache, HttpClient http) {
         this.cache = cache;
+        this.http = Objects.requireNonNull(http, "http");
         Map<String,Object> oll = CfgUtil.map(cfg.data.get("ollama"));
         this.host  = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
         this.model = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
@@ -165,6 +171,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                             SafeLogFormatter.value(ep.path), SafeLogFormatter.value(ep.param));
                 }
             } catch (Exception e) {
+                propagateControlFlow(e);
                 lastErr = e;
                 attemptFailures.add(ep.path + " " + ep.param + " -> " + e.getClass().getSimpleName()
                         + " " + contentDigestSummary("message", e.getMessage()));
@@ -267,6 +274,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         try {
             return embedBatchInternal(texts);
         } catch (Exception e) {
+            propagateControlFlow(e);
             LOG.debug("Batch embedding failed ({}), falling back to individual requests",
                     SafeLogFormatter.throwableMessage(e));
 
@@ -342,6 +350,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             } catch (BatchTooLargeException e) {
                 throw e; // Re-throw to trigger individual fallback
             } catch (Exception e) {
+                propagateControlFlow(e);
                 lastErr = e;
                 LOG.debug("batch embed attempt failed at {} {} : {}", SafeLogFormatter.value(ep.path),
                         SafeLogFormatter.value(ep.param), SafeLogFormatter.throwableMessage(e));
@@ -350,6 +359,12 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
 
         if (lastErr != null) throw lastErr;
         throw new IllegalStateException("No batch embedding returned from Ollama");
+    }
+
+    private static void propagateControlFlow(Exception failure) {
+        if (ControlFlowFailure.classify(failure) != ControlFlowFailure.Kind.NONE) {
+            throw ControlFlowFailure.propagate(failure);
+        }
     }
 
     private List<float[]> parseBatchEmbeddingFlexible(Map<String, Object> root, int expectedSize) {

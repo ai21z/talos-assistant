@@ -17,6 +17,7 @@ public final class PromptDebugCapture {
             new AtomicReference<>(false);
     private static final AtomicReference<Map<String, String>> TURN_DIAGNOSTICS =
             new AtomicReference<>(Map.of());
+    private static final ThreadLocal<Boolean> TURN_ACTIVE = new ThreadLocal<>();
 
     private PromptDebugCapture() {}
 
@@ -47,6 +48,37 @@ public final class PromptDebugCapture {
         USER_FACING_HISTORY.set(List.of());
         LAST_TURN_WITHOUT_PROVIDER_REQUEST.set(true);
         TURN_DIAGNOSTICS.set(Map.of());
+        TURN_ACTIVE.set(true);
+    }
+
+    /** Opens a direct-executor scope without resetting a runtime-owned outer turn. */
+    public static TurnScope openTurnIfAbsent() {
+        boolean owned = !Boolean.TRUE.equals(TURN_ACTIVE.get());
+        if (owned) beginTurn();
+        return new TurnScope(owned);
+    }
+
+    /** Ends mutable turn diagnostics while retaining the inspectable snapshot. */
+    public static void endTurn() {
+        TURN_DIAGNOSTICS.set(Map.of());
+        TURN_ACTIVE.remove();
+    }
+
+    public static final class TurnScope implements AutoCloseable {
+        private final boolean owned;
+        private boolean closed;
+
+        private TurnScope(boolean owned) {
+            this.owned = owned;
+        }
+
+        @Override
+        public void close() {
+            if (!closed && owned) {
+                closed = true;
+                endTurn();
+            }
+        }
     }
 
     /** Adds turn-scoped prompt-debug metadata to the next user-facing capture. */
@@ -91,6 +123,7 @@ public final class PromptDebugCapture {
         USER_FACING_HISTORY.set(List.of());
         LAST_TURN_WITHOUT_PROVIDER_REQUEST.set(false);
         TURN_DIAGNOSTICS.set(Map.of());
+        TURN_ACTIVE.remove();
     }
 
     private static boolean isBackgroundMaintenance(PromptDebugSnapshot snapshot) {

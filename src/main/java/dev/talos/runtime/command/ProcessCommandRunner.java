@@ -1,5 +1,6 @@
 package dev.talos.runtime.command;
 
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.safety.SafeLogFormatter;
 
@@ -16,6 +17,21 @@ import java.util.concurrent.TimeUnit;
 
 /** Bounded argv-only process runner. This class is internal and not a tool surface. */
 public final class ProcessCommandRunner implements CommandRunner {
+    @FunctionalInterface
+    interface ProcessStarter {
+        Process start(ProcessBuilder builder) throws Exception;
+    }
+
+    private final ProcessStarter processStarter;
+
+    public ProcessCommandRunner() {
+        this(ProcessBuilder::start);
+    }
+
+    ProcessCommandRunner(ProcessStarter processStarter) {
+        this.processStarter = processStarter == null ? ProcessBuilder::start : processStarter;
+    }
+
     @Override
     public CommandResult run(CommandPlan plan) {
         long start = System.nanoTime();
@@ -37,7 +53,7 @@ public final class ProcessCommandRunner implements CommandRunner {
             builder.directory(plan.cwd().toFile());
             configureEnvironment(builder.environment());
 
-            process = builder.start();
+            process = processStarter.start(builder);
             Process started = process;
             var stdoutFuture = executor.submit(captureTask(
                     started.getInputStream(), plan.outputLimits().stdoutLimitBytes()));
@@ -49,8 +65,7 @@ public final class ProcessCommandRunner implements CommandRunner {
             int exitCode;
             if (!finished) {
                 killed = true;
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
+                destroyProcessTree(process);
                 process.waitFor(5, TimeUnit.SECONDS);
                 exitCode = -1;
             } else {
@@ -73,9 +88,10 @@ public final class ProcessCommandRunner implements CommandRunner {
                     stdout.redacted() || stderr.redacted(),
                     "");
         } catch (Exception e) {
-            if (process != null && process.isAlive()) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly();
+            destroyProcessTree(process);
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
             }
             return CommandResult.internalFailure(
                     plan,
@@ -85,6 +101,30 @@ public final class ProcessCommandRunner implements CommandRunner {
         } finally {
             executor.shutdownNow();
         }
+        }
+    }
+
+    private static void destroyProcessTree(Process process) {
+        if (process == null) return;
+        List<ProcessHandle> descendants;
+        try {
+            descendants = process.descendants().toList();
+        } catch (RuntimeException ignored) {
+            descendants = List.of();
+        }
+        descendants.forEach(ProcessCommandRunner::destroyForcibly);
+        try {
+            if (process.isAlive()) process.destroyForcibly();
+        } catch (RuntimeException ignored) {
+            // Do not replace the original command failure with cleanup failure.
+        }
+    }
+
+    private static void destroyForcibly(ProcessHandle handle) {
+        try {
+            if (handle != null && handle.isAlive()) handle.destroyForcibly();
+        } catch (RuntimeException ignored) {
+            // Best effort continues across the remaining captured descendants.
         }
     }
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.HostLocalityPolicy;
+import dev.talos.spi.types.ControlFlowFailure;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -139,9 +140,11 @@ public final class LlamaCppPropsClient {
         } catch (java.net.http.HttpTimeoutException error) {
             return Result.unavailable("llama.cpp /props timed out");
         } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            return Result.unavailable("llama.cpp /props was interrupted");
+            throw ControlFlowFailure.propagate(error);
         } catch (Exception error) {
+            if (ControlFlowFailure.classify(error) != ControlFlowFailure.Kind.NONE) {
+                throw ControlFlowFailure.propagate(error);
+            }
             return Result.unavailable("llama.cpp /props could not be read");
         }
     }

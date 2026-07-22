@@ -2494,10 +2494,9 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.assistant("Proposal: update README.md with a clearer heading."));
             messages.add(ChatMessage.user("Apply that proposal now."));
 
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
-
-            assertTrue(out.text().contains("Context budget exceeded"), out.text());
+            assertThrows(EngineException.ContextBudgetExceeded.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages, workspace, ctx, new AssistantTurnExecutor.Options()));
             assertTrue(recorded.requests().isEmpty(),
                     "non-literal/deictic mutation requests must not use the exact-write compact fallback");
         }
@@ -4944,29 +4943,18 @@ class AssistantTurnExecutorTest {
                     "qwen2.5-coder-14b.gguf",
                     "Overwrite scripts.js with exactly console.log('new');");
             try {
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                EngineException.MalformedResponse thrown = assertThrows(
+                        EngineException.MalformedResponse.class,
+                        () -> AssistantTurnExecutor.execute(
+                                messages, workspace, ctx, new AssistantTurnExecutor.Options()));
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("Malformed engine response for compat chat stream tool arguments"),
-                        out.text());
-                assertFalse(out.text().contains("SHOULD_NOT_APPEAR"), out.text());
-                assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"), out.text());
+                assertEquals("compat chat stream tool arguments", thrown.context());
+                assertEquals(malformedPayload.length(), thrown.bodyChars());
                 assertEquals("console.log('old');\n", Files.readString(script),
                         "malformed tool arguments must not mutate files");
-                assertEquals("BACKEND_MALFORMED_RESPONSE", trace.outcome().classification());
-                var malformedEvent = trace.events().stream()
-                        .filter(event -> "BACKEND_MALFORMED_RESPONSE_CAPTURED".equals(event.type()))
-                        .findFirst()
-                        .orElseThrow();
-                assertEquals("compat chat stream tool arguments", malformedEvent.data().get("context"));
-                assertEquals(malformedPayload.length(), malformedEvent.data().get("bodyChars"));
-                assertTrue(String.valueOf(malformedEvent.data().get("bodyHash")).startsWith("sha256:"));
-                assertFalse(malformedEvent.data().containsKey("bodyPreview"), malformedEvent.data().toString());
-                assertFalse(malformedEvent.data().toString().contains("SHOULD_NOT_APPEAR"),
-                        malformedEvent.data().toString());
-                assertFalse(malformedEvent.data().toString().contains("Eleni Nikolaou"),
-                        malformedEvent.data().toString());
+                assertFalse(trace.toString().contains("SHOULD_NOT_APPEAR"), trace.toString());
+                assertFalse(trace.toString().contains("Eleni Nikolaou"), trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -5588,10 +5576,7 @@ class AssistantTurnExecutorTest {
     class ErrorHandling {
 
         /**
-         * Verifies the execute method catches exceptions without propagating.
-         * Since LlmClient is final and PLACEHOLDER mode doesn't throw,
-         * we verify error-path behavior by wrapping execute in a context
-         * where the CompletableFuture times out (very short timeout).
+         * Verifies the successful path remains usable with the minimum timeout.
          */
         @Test
         void extremely_short_timeout_triggers_timeout_handling() {
@@ -5601,21 +5586,20 @@ class AssistantTurnExecutorTest {
             // but verifies the timeout wiring exists without errors
             var opts = new AssistantTurnExecutor.Options().llmTimeoutMs(1L);
 
-            // Should not throw - errors are caught internally
+            // A fast successful provider still completes normally.
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
             assertNotNull(out.text(), "Should always return non-null text");
         }
 
         @Test
-        void execute_never_throws_to_caller() {
-            // Even with a minimal context, execute should never propagate exceptions
+        void successful_execute_does_not_throw_to_caller() {
             var ctx = scriptedContext("no throw");
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options();
 
             assertDoesNotThrow(
                     () -> AssistantTurnExecutor.execute(messages, WS, ctx, opts),
-                    "Execute must catch all exceptions internally");
+                    "a successful provider result must return normally");
         }
 
         @Test
@@ -5640,14 +5624,14 @@ class AssistantTurnExecutorTest {
                     "qwen2.5-coder-14b",
                     "Overwrite index.html with exactly AFTER. Use talos.write_file.");
             try {
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                EngineException.ResponseError thrown = assertThrows(
+                        EngineException.ResponseError.class,
+                        () -> AssistantTurnExecutor.execute(
+                                messages, WS, ctx, new AssistantTurnExecutor.Options()));
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("Engine error"), out.text());
-                assertNoSuccessProse(out.text());
-                assertEquals("FAILED", trace.outcome().status());
-                assertEquals("BACKEND_RESPONSE_ERROR", trace.outcome().classification());
+                assertEquals(400, thrown.httpStatus());
+                assertFalse(trace.toString().contains("invalid request payload"), trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -5675,14 +5659,14 @@ class AssistantTurnExecutorTest {
                     "qwen2.5-coder-14b",
                     "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.");
             try {
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                EngineException.ResponseError thrown = assertThrows(
+                        EngineException.ResponseError.class,
+                        () -> AssistantTurnExecutor.execute(
+                                messages, WS, ctx, new AssistantTurnExecutor.Options()));
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("Engine error"), out.text());
-                assertNoSuccessProse(out.text());
-                assertEquals("FAILED", trace.outcome().status());
-                assertEquals("CONTEXT_BUDGET_EXCEEDED", trace.outcome().classification());
+                assertTrue(thrown.bodyLooksContextBudgetExceeded());
+                assertFalse(trace.toString().contains("4383 tokens"), trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -5709,15 +5693,14 @@ class AssistantTurnExecutorTest {
                     "qwen2.5-coder-14b",
                     "Overwrite index.html with exactly AFTER. Use talos.write_file.");
             try {
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                EngineException.ContextBudgetExceeded thrown = assertThrows(
+                        EngineException.ContextBudgetExceeded.class,
+                        () -> AssistantTurnExecutor.execute(
+                                messages, WS, ctx, new AssistantTurnExecutor.Options()));
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("Context budget exceeded"), out.text());
-                assertFalse(out.text().contains("Engine error"), out.text());
-                assertNoSuccessProse(out.text());
-                assertEquals("FAILED", trace.outcome().status());
-                assertEquals("CONTEXT_BUDGET_EXCEEDED", trace.outcome().classification());
+                assertEquals(8500, thrown.estimatedTokens());
+                assertFalse(trace.toString().contains("8500"), trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -5745,14 +5728,15 @@ class AssistantTurnExecutorTest {
                     "gpt-oss-20b",
                     "Overwrite index.html with exactly AFTER. Use talos.write_file.");
             try {
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                EngineException.ConnectionFailed thrown = assertThrows(
+                        EngineException.ConnectionFailed.class,
+                        () -> AssistantTurnExecutor.execute(
+                                messages, WS, ctx, new AssistantTurnExecutor.Options()));
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("Model engine not reachable"), out.text());
-                assertNoSuccessProse(out.text());
-                assertEquals("FAILED", trace.outcome().status());
-                assertEquals("BACKEND_CONNECTION_FAILED", trace.outcome().classification());
+                assertTrue(thrown.getMessage().contains("llama.cpp server exited before readiness"));
+                assertFalse(trace.toString().contains("llama.cpp server exited before readiness"),
+                        trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -5782,17 +5766,14 @@ class AssistantTurnExecutorTest {
                     "gpt-oss-20b",
                     "Overwrite index.html with exactly AFTER. Use talos.write_file.");
             try {
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                EngineException.ConnectionFailed thrown = assertThrows(
+                        EngineException.ConnectionFailed.class,
+                        () -> AssistantTurnExecutor.execute(
+                                messages, WS, ctx, new AssistantTurnExecutor.Options()));
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-                assertTrue(out.text().contains("unsupported GGUF architecture 'gptoss'"), out.text());
-                assertTrue(out.text().contains("gpt-oss-20b"), out.text());
-                assertTrue(out.text().contains("C:\\models\\gpt-oss.gguf"), out.text());
-                assertTrue(out.text().contains("No fallback model was selected"), out.text());
-                assertNoSuccessProse(out.text());
-                assertEquals("FAILED", trace.outcome().status());
-                assertEquals("BACKEND_CONNECTION_FAILED", trace.outcome().classification());
+                assertTrue(thrown.getMessage().contains("unsupported GGUF architecture 'gptoss'"));
+                assertFalse(trace.toString().contains("C:\\models\\gpt-oss.gguf"), trace.toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }

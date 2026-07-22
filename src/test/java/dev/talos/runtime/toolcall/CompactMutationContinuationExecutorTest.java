@@ -19,9 +19,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompactMutationContinuationExecutorTest {
@@ -76,6 +79,26 @@ class CompactMutationContinuationExecutorTest {
                 state.failureDecision.reason());
         assertTrue(state.currentText.contains("no file was changed"), state.currentText);
         assertTrue(state.currentNativeCalls.isEmpty());
+    }
+
+    @Test
+    void wrappedCancellationEscapesCompactMutationContinuation() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Old\n");
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel compact mutation continuation"));
+        LoopState state = mutationState(
+                "Rewrite README.md with a short project note.",
+                LlmClient.scriptedFailure(wrapped));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                CompactMutationContinuationExecutor.tryExecute(
+                        state,
+                        baseTools(),
+                        "tool-call loop continuation",
+                        "exceeded context budget"));
+
+        assertSame(wrapped, thrown,
+                "continuation cancellation must preserve the caller-owned runtime wrapper");
     }
 
     private LoopState mutationState(String request, LlmClient llm) {

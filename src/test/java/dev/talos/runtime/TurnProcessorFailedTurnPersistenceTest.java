@@ -1,0 +1,1142 @@
+package dev.talos.runtime;
+
+import dev.talos.cli.repl.Context;
+import dev.talos.cli.modes.AssistantTurnExecutor;
+import dev.talos.cli.repl.slash.ExplainLastTurnCommand;
+import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.core.security.Sandbox;
+import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnEvidenceProjectionTraceEvent;
+import dev.talos.spi.types.ProviderResponseCapture;
+import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.EngineException;
+import dev.talos.tools.TalosTool;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolContext;
+import dev.talos.tools.ToolDescriptor;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.ToolResult;
+import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.IOException;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class TurnProcessorFailedTurnPersistenceTest {
+
+    @AfterEach
+    void clearTurnState() {
+        TurnTraceCapture.consume();
+        TurnUserRequestCapture.clear();
+        TurnTaskContractCapture.clear();
+        TurnSourceEvidenceCapture.clear();
+        LocalTurnTraceCapture.clear();
+        PromptDebugCapture.clear();
+        if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+    }
+
+    @Test
+    void routeFailurePersistsOneBoundedFailedTurnAndTerminalTrace(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sessionId = "failed-route";
+        TurnRouter router = (raw, workspace, ctx) -> {
+            throw new IllegalStateException("T1190_EXCEPTION_PROSE_MUST_NOT_PERSIST");
+        };
+        TurnProcessor processor = processor(router, store, sessionId);
+
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect the workspace", context()));
+
+        assertEquals("T1190_EXCEPTION_PROSE_MUST_NOT_PERSIST", failure.getMessage());
+        List<TurnRecord> turns = store.loadTurns(sessionId);
+        assertEquals(1, turns.size());
+        TurnRecord turn = turns.getFirst();
+        assertEquals("failed", turn.status());
+        assertEquals("", turn.assistantText());
+        assertFalse(turn.traceId().isBlank());
+
+        LocalTurnTrace trace = store.loadTrace(sessionId, turn.traceId()).orElseThrow();
+        assertEquals(turn.traceId(), trace.traceId());
+        assertEquals("ERROR", trace.outcome().status());
+        assertTrue(trace.events().stream().noneMatch(event ->
+                event.type().startsWith("GENERATION_")));
+        var terminal = trace.events().stream()
+                .filter(event -> "TURN_SETTLED".equals(event.type()))
+                .toList();
+        assertEquals(1, terminal.size());
+        assertEquals("FAILED", terminal.getFirst().data().get("settlementKind"));
+        assertEquals("MODE_ROUTING", terminal.getFirst().data().get("stage"));
+        assertEquals("java.lang.IllegalStateException",
+                terminal.getFirst().data().get("exceptionClass"));
+        assertEquals("UNKNOWN", terminal.getFirst().data().get("causalOwner"));
+        assertFalse(trace.events().toString().contains("T1190_EXCEPTION_PROSE_MUST_NOT_PERSIST"));
+        assertEquals("UNAVAILABLE", projection(trace).data().get("retrieval"));
+        assertEquals("NOT_OBSERVED", projection(trace).data().get("providerLifecycle"));
+        assertEquals("TRACE_COMPLETED", trace.events().getLast().type());
+        assertEquals("TURN_SETTLED", trace.events().get(trace.events().size() - 2).type());
+    }
+
+    @Test
+    void generatedFailureSurvivesStoreRestartAndEveryLastView(@TempDir Path dir) {
+        Path workspace = dir.resolve("workspace");
+        Path storeRoot = dir.resolve("store");
+        String storageSessionId = JsonSessionStore.sessionIdFor(workspace)
+                + "-20260721T000000Z-entropy";
+        String promptCanary = "T1190_RESTART_PROMPT_MUST_NOT_RENDER";
+        String failureCanary = "T1190_RESTART_FAILURE_MUST_NOT_RENDER";
+        JsonSessionStore writer = new JsonSessionStore(storeRoot);
+        TurnProcessor processor = processor((raw, ignoredWorkspace, ignoredContext) -> {
+            throw new IllegalStateException(failureCanary);
+        }, writer, storageSessionId);
+
+        assertThrows(IllegalStateException.class, () ->
+                processor.process(session(workspace), promptCanary, context()));
+
+        JsonSessionStore reader = new JsonSessionStore(storeRoot);
+        TurnRecord row = reader.loadTurns(storageSessionId).getFirst();
+        String traceId = row.traceId();
+        for (String view : List.of("", "tools", "sources", "trace")) {
+            ExplainLastTurnCommand command = new ExplainLastTurnCommand(
+                    workspace, reader, null, storageSessionId);
+            Result.TrustedInfo rendered = (Result.TrustedInfo) command.execute(
+                    view, Context.builder(new Config()).build());
+            assertTrue(rendered.text.contains("Trace pair: VALID"), rendered.text);
+            assertTrue(rendered.text.contains(
+                    "Settlement: FAILED at MODE_ROUTING"), rendered.text);
+            assertTrue(rendered.text.contains(
+                    "class=java.lang.IllegalStateException"), rendered.text);
+            assertFalse(rendered.text.contains(promptCanary), rendered.text);
+            assertFalse(rendered.text.contains(failureCanary), rendered.text);
+        }
+        assertEquals(traceId, reader.loadTrace(storageSessionId, traceId)
+                .orElseThrow().traceId());
+    }
+
+    @Test
+    void providerAbortSettlesOnceWithoutPersistingPartialAssistantBytes(
+            @TempDir Path dir
+    ) throws IOException {
+        String partialCanary = "T1190_PARTIAL_PROVIDER_BYTES_MUST_NOT_PERSIST";
+        JsonSessionStore store = new JsonSessionStore(dir.resolve("store"));
+        LlmClient llm = ScriptedNativeLlmClient.transientAfterPartialOutput(partialCanary);
+        Context routeContext = Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(dir.resolve("workspace"), java.util.Map.of()))
+                .build();
+        TurnRouter router = (raw, workspace, ignored) -> {
+            AssistantTurnExecutor.execute(
+                    new java.util.ArrayList<>(List.of(
+                            ChatMessage.system("system"), ChatMessage.user(raw))),
+                    workspace,
+                    routeContext,
+                    new AssistantTurnExecutor.Options());
+            return Optional.of(new Result.Ok("unreachable"));
+        };
+        AtomicInteger legacyCompletionCalls = new AtomicInteger();
+        TurnProcessor processor = processor(router, store, "provider-abort");
+        processor.addListener(new SessionListener() {
+            @Override public void onTurnComplete(TurnResult result, String userInput) {
+                legacyCompletionCalls.incrementAndGet();
+            }
+        });
+
+        RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                processor.process(
+                        session(dir.resolve("workspace")),
+                        "explain briefly",
+                        routeContext));
+
+        assertEquals("turn generation ended without a completed response", failure.getMessage());
+        assertEquals(0, legacyCompletionCalls.get());
+        List<TurnRecord> turns = store.loadTurns("provider-abort");
+        assertEquals(1, turns.size());
+        TurnRecord row = turns.getFirst();
+        assertEquals("failed", row.status());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        LocalTurnTrace trace = store.loadTrace(
+                "provider-abort", row.traceId()).orElseThrow();
+        assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+        assertEquals("GENERATION_COORDINATION", terminal(trace).data().get("stage"));
+        assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+        assertEquals("PRESERVED_TYPED", projection(trace).data().get("providerLifecycle"));
+        assertFalse(persistedText(dir.resolve("store")).contains(partialCanary));
+    }
+
+    @Test
+    void contextBudgetFailureHasTypedNonConversationalSettlement(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir.resolve("store"));
+        EngineException.ContextBudgetExceeded contextFailure =
+                new EngineException.ContextBudgetExceeded(9_001, 8_000, 8_192, 4);
+        Context routeContext = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(contextFailure))
+                .sandbox(new Sandbox(dir.resolve("workspace"), java.util.Map.of()))
+                .build();
+        TurnRouter router = (raw, workspace, ignored) -> {
+            AssistantTurnExecutor.execute(
+                    new java.util.ArrayList<>(List.of(
+                            ChatMessage.system("system"), ChatMessage.user(raw))),
+                    workspace,
+                    routeContext,
+                    new AssistantTurnExecutor.Options());
+            return Optional.of(new Result.Ok("unreachable"));
+        };
+        TurnProcessor processor = processor(router, store, "context-budget");
+
+        assertSame(contextFailure, assertThrows(
+                EngineException.ContextBudgetExceeded.class,
+                () -> processor.process(
+                        session(dir.resolve("workspace")),
+                        "inspect",
+                        routeContext)));
+
+        TurnRecord row = store.loadTurns("context-budget").getFirst();
+        assertEquals("failed", row.status());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        LocalTurnTrace trace = store.loadTrace(
+                "context-budget", row.traceId()).orElseThrow();
+        assertEquals("GENERATION_COORDINATION", terminal(trace).data().get("stage"));
+        assertEquals("ENGINE_CONTEXT_BUDGET", terminal(trace).data().get("errorKind"));
+        assertEquals(400, terminal(trace).data().get("errorCode"));
+        assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+        assertTrue(trace.events().stream().noneMatch(event ->
+                "GENERATION_REQUEST_DISPATCHED".equals(event.type())));
+        assertFalse(trace.toString().contains("9001"), trace.toString());
+    }
+
+    @Test
+    void mandatoryPostToolProviderFailureCannotBecomeAssistantAnswer(@TempDir Path dir)
+            throws Exception {
+        Path workspace = dir.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("README.md"), "trusted workspace evidence\n");
+        String failureCanary = "T1190_POST_TOOL_PROVIDER_SECRET_PATH_C:\\private\\model.gguf";
+        EngineException.ConnectionFailed providerFailure =
+                new EngineException.ConnectionFailed(failureCanary, null);
+        CountingSuccessfulTool readTool = new CountingSuccessfulTool(new ReadFileTool());
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(readTool);
+        ToolSpec readSpec = new ToolSpec(
+                readTool.descriptor().name(),
+                readTool.descriptor().description(),
+                readTool.descriptor().parametersSchema());
+        LlmClient llm = ScriptedNativeLlmClient.ofThenFailure(
+                List.of(new LlmClient.StreamResult("", List.of(
+                        new ChatMessage.NativeToolCall(
+                                "call-read",
+                                "talos.read_file",
+                                java.util.Map.of("path", "README.md"))))),
+                providerFailure);
+        llm.setToolSpecs(List.of(readSpec));
+        TurnProcessor toolProcessor = new TurnProcessor(
+                null, new NoOpApprovalGate(), registry);
+        Context routeContext = Context.builder(new Config())
+                .llm(llm)
+                .sandbox(new Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(new ToolCallLoop(toolProcessor, 3))
+                .nativeToolSpecs(List.of(readSpec))
+                .build();
+        TurnRouter router = (raw, ignoredWorkspace, ignoredContext) -> {
+            AssistantTurnExecutor.execute(
+                    new java.util.ArrayList<>(List.of(
+                            ChatMessage.system("system"), ChatMessage.user(raw))),
+                    workspace,
+                    routeContext,
+                    new AssistantTurnExecutor.Options());
+            return Optional.of(new Result.Ok("unreachable"));
+        };
+        JsonSessionStore store = new JsonSessionStore(dir.resolve("store"));
+        TurnProcessor processor = processor(router, store, "post-tool-failure");
+
+        assertSame(providerFailure, assertThrows(
+                EngineException.ConnectionFailed.class,
+                () -> processor.process(
+                        session(workspace),
+                        "Read README.md and summarize it.",
+                        routeContext)));
+        assertEquals(1, readTool.successfulExecutions());
+        assertTrue(readTool.lastSuccessfulOutput().contains("trusted workspace evidence"));
+
+        List<TurnRecord> rows = store.loadTurns("post-tool-failure");
+        assertEquals(1, rows.size());
+        TurnRecord row = rows.getFirst();
+        assertEquals("failed", row.status());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        assertTrue(row.toolCalls().isEmpty());
+        LocalTurnTrace trace = store.loadTrace(
+                "post-tool-failure", row.traceId()).orElseThrow();
+        assertEquals("GENERATION_COORDINATION", terminal(trace).data().get("stage"));
+        assertEquals("ENGINE_CONNECTION_FAILED", terminal(trace).data().get("errorKind"));
+        assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+        assertEquals("PRESERVED_TYPED", projection(trace).data().get("providerLifecycle"));
+        assertTrue(trace.events().stream().anyMatch(event ->
+                "GENERATION_RESPONSE_CAPTURED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event ->
+                "GENERATION_ATTEMPT_FAILED".equals(event.type())));
+        assertFalse(persistedText(dir.resolve("store")).contains(failureCanary));
+    }
+
+    @Test
+    void evidenceOnlyRetrievalIsCountedWithoutLeakingDetailsOrTheNextTurn(
+            @TempDir Path dir)
+            throws Exception {
+        Path storeRoot = dir.resolve("store");
+        JsonSessionStore store = new JsonSessionStore(storeRoot);
+        String sessionId = "failed-retrieval";
+        String privatePath = "C:/private/T1190_RETRIEVAL_PATH_CANARY.txt";
+        String privateLabel = "T1190_RETRIEVAL_LABEL_CANARY";
+        String privateNote = "T1190_RETRIEVAL_NOTE_CANARY";
+        int[] calls = {0};
+        TurnRouter router = (raw, workspace, ctx) -> {
+            calls[0]++;
+            if (calls[0] == 1) {
+                RetrievalTrace retrieval = new RetrievalTrace();
+                retrieval.recordEvidence(
+                        "FILE", privatePath, privateLabel, 73, privateNote);
+                TurnTraceCapture.capture(retrieval);
+                throw new IllegalStateException("retrieval failure");
+            }
+            return Optional.of(new Result.Ok("second turn"));
+        };
+        TurnProcessor processor = processor(router, store, sessionId);
+        Session session = session(dir);
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session, "first", context()));
+        JsonSessionStore restarted = new JsonSessionStore(storeRoot);
+        List<TurnRecord> afterRestart = restarted.loadTurns(sessionId);
+        assertEquals(1, afterRestart.size());
+        TurnRecord failedRow = afterRestart.getFirst();
+        assertEquals("failed", failedRow.status());
+        assertEquals("0 stages, evidence=1", failedRow.retrievalTraceSummary());
+        assertTrue(failedRow.retrievalTraceSummary().length() <= 32);
+        assertFalse(failedRow.traceId().isBlank());
+        LocalTurnTrace failedTrace = restarted.loadTrace(
+                sessionId, failedRow.traceId()).orElseThrow();
+        assertEquals(failedRow.traceId(), failedTrace.traceId());
+        assertEquals("CAPTURE_OBSERVED_UNBOUND",
+                projection(failedTrace).data().get("retrieval"));
+        String persisted = persistedText(storeRoot);
+        assertFalse(persisted.contains(privatePath));
+        assertFalse(persisted.contains(privateLabel));
+        assertFalse(persisted.contains(privateNote));
+
+        TurnResult second = processor.process(session, "second", context());
+
+        assertNotNull(second);
+        assertNull(second.trace(), "the successful turn must not consume failed-turn retrieval");
+        List<TurnRecord> turns = restarted.loadTurns(sessionId);
+        assertEquals(2, turns.size());
+        assertEquals("ok", turns.get(1).status());
+        assertEquals("", turns.get(1).retrievalTraceSummary());
+        LocalTurnTrace secondTrace = restarted.loadTrace(
+                sessionId, turns.get(1).traceId()).orElseThrow();
+        assertTrue(secondTrace.events().stream().noneMatch(event ->
+                TurnEvidenceProjectionTraceEvent.TYPE.equals(event.type())));
+        assertFalse(persistedText(storeRoot).contains(privatePath));
+        assertFalse(persistedText(storeRoot).contains(privateLabel));
+        assertFalse(persistedText(storeRoot).contains(privateNote));
+    }
+
+    @Test
+    void preDispatchProviderFailureLedgerSurvivesRouteException(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sessionId = "failed-provider";
+        TurnRouter router = (raw, workspace, ctx) -> {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE);
+            ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                    ProviderResponseCapture.AttemptKind.PRIMARY,
+                    ProviderResponseCapture.RetryReason.NONE);
+            attempt.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
+            generation.fail(ProviderResponseCapture.Failure.RUNTIME_PRE_DISPATCH);
+            throw new IllegalStateException("after typed provider failure");
+        };
+        TurnProcessor processor = processor(router, store, sessionId);
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), "run", context()));
+
+        TurnRecord turn = store.loadTurns(sessionId).getFirst();
+        LocalTurnTrace trace = store.loadTrace(sessionId, turn.traceId()).orElseThrow();
+        var started = trace.events().stream()
+                .filter(event -> "GENERATION_ATTEMPT_STARTED".equals(event.type()))
+                .findFirst().orElseThrow();
+        String generationId = String.valueOf(started.data().get("generationId"));
+        String attemptId = String.valueOf(started.data().get("attemptId"));
+        assertFalse(generationId.isBlank());
+        assertFalse(attemptId.isBlank());
+        assertEquals(1, trace.events().stream().filter(event ->
+                "GENERATION_ATTEMPT_FAILED".equals(event.type())
+                        && generationId.equals(event.data().get("generationId"))
+                        && attemptId.equals(event.data().get("attemptId"))
+                        && "RUNTIME_PRE_DISPATCH".equals(event.data().get("failure"))).count());
+        assertEquals(1, trace.events().stream().filter(event ->
+                "GENERATION_FAILED".equals(event.type())
+                        && generationId.equals(event.data().get("generationId"))
+                        && "RUNTIME_PRE_DISPATCH".equals(event.data().get("failure"))).count());
+        assertTrue(trace.events().stream().noneMatch(event ->
+                "GENERATION_REQUEST_DISPATCHED".equals(event.type())));
+    }
+
+    @Test
+    void noResultSurvivesEarlierAssertionErrorAndSkipsLegacyListeners(@TempDir Path dir)
+            throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> Optional.empty());
+        AtomicInteger legacyCalls = new AtomicInteger();
+        processor.addListener(new SessionListener() {
+            @Override
+            public TurnPublicationReceipt onTurnSettled(
+                    TurnSettlement settlement,
+                    String userInput
+            ) {
+                throw new AssertionError("T1190_LISTENER_ASSERTION_CANARY");
+            }
+        });
+        processor.addListener(new SessionListener() {
+            @Override public void onTurnComplete(TurnResult result, String userInput) {
+                legacyCalls.incrementAndGet();
+            }
+        });
+        processor.addListener(new JsonTurnLogAppender(store, "no-result"));
+
+        TurnResult returned = processor.process(session(dir), "unhandled", context());
+
+        assertNull(returned);
+        assertEquals(0, legacyCalls.get());
+        List<TurnRecord> rows = store.loadTurns("no-result");
+        assertEquals(1, rows.size());
+        TurnRecord row = rows.getFirst();
+        assertEquals("no_result", row.status());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        LocalTurnTrace trace = store.loadTrace("no-result", row.traceId()).orElseThrow();
+        assertEquals("NO_RESULT", terminal(trace).data().get("settlementKind"));
+        assertEquals(1, trace.events().stream()
+                .filter(event -> "TURN_SETTLED".equals(event.type()))
+                .count());
+        TurnPublicationHealth health = processor.consumePublicationHealth();
+        assertNotNull(health);
+        assertEquals(1, health.completedListeners());
+        assertEquals(1, health.skippedListeners());
+        assertEquals(1, health.degradedListeners());
+        assertEquals(List.of(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION),
+                health.reasons());
+        assertEquals(List.of(AssertionError.class.getName()), health.exceptionClasses());
+        assertFalse(persistedText(dir).contains("T1190_LISTENER_ASSERTION_CANARY"));
+    }
+
+    @Test
+    void noResultPartialPersistenceRetainsUnambiguousTerminalRow(@TempDir Path dir)
+            throws Exception {
+        Path storeRoot = dir.resolve("store");
+        String sessionId = "no-result-partial";
+        JsonSessionStore store = new JsonSessionStore(storeRoot);
+        Files.createDirectories(storeRoot.resolve("traces"));
+        Files.writeString(storeRoot.resolve("traces").resolve(sessionId), "blocked");
+        TurnProcessor processor = new TurnProcessor(
+                (raw, workspace, ctx) -> Optional.empty());
+        processor.addListener(new JsonTurnLogAppender(store, sessionId));
+
+        assertNull(processor.process(session(dir.resolve("workspace")), "unhandled", context()));
+
+        TurnRecord row = store.loadTurns(sessionId).getFirst();
+        assertEquals("no_result", row.status());
+        assertEquals("", row.traceId());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        TurnPublicationHealth health = processor.consumePublicationHealth();
+        assertNotNull(health);
+        assertTrue(health.reasons().contains(
+                TurnPublicationReceipt.Reason.PERSISTENCE_PARTIAL));
+    }
+
+    @Test
+    void listenerFailureCannotReplacePrimaryFailureOrBlockLaterPersistence(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        IllegalStateException primary = new IllegalStateException("primary route failure");
+        TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> {
+            throw primary;
+        });
+        processor.addListener(new SessionListener() {
+            @Override
+            public TurnPublicationReceipt onTurnSettled(
+                    TurnSettlement settlement,
+                    String userInput
+            ) {
+                throw new AssertionError("listener failure");
+            }
+        });
+        processor.addListener(new JsonTurnLogAppender(store, "listener-failure"));
+
+        IllegalStateException observed = assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        assertSame(primary, observed);
+        assertEquals(1, store.loadTurns("listener-failure").size());
+        TurnPublicationHealth health = processor.consumePublicationHealth();
+        assertNotNull(health);
+        assertFalse(health.healthy());
+        assertEquals(1, health.degradedListeners());
+        assertTrue(health.reasons().contains(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION));
+        assertEquals(List.of("java.lang.AssertionError"), health.exceptionClasses());
+    }
+
+    @Test
+    void cancellationWinsOneBoundedTerminalSettlement(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            throw new CancellationException("operator cancelled");
+        }, store, "cancelled");
+
+        assertThrows(CancellationException.class,
+                () -> processor.process(session(dir), "stop", context()));
+
+        List<TurnRecord> rows = store.loadTurns("cancelled");
+        assertEquals(1, rows.size());
+        assertEquals("cancelled", rows.getFirst().status());
+        LocalTurnTrace trace = store.loadTrace(
+                "cancelled", rows.getFirst().traceId()).orElseThrow();
+        assertEquals(1, trace.events().stream()
+                .filter(event -> "TURN_SETTLED".equals(event.type())).count());
+        assertEquals("CANCELLED", terminal(trace).data().get("settlementKind"));
+        assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+    }
+
+    @Test
+    void handoffAdmissionSurvivesWithoutBecomingPhysicalSendProof(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            ProviderResponseCapture.Generation generation =
+                    ProviderResponseCapture.openGeneration(
+                            ProviderResponseCapture.Source.FOREGROUND_PROVIDER,
+                            ProviderResponseCapture.Purpose.TURN_RESPONSE);
+            ProviderResponseCapture.Attempt attempt = generation.startAttempt(
+                    ProviderResponseCapture.AttemptKind.PRIMARY,
+                    ProviderResponseCapture.RetryReason.NONE);
+            attempt.requestDispatched();
+            throw new IllegalStateException("after handoff admission");
+        }, store, "handoff");
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        TurnRecord row = store.loadTurns("handoff").getFirst();
+        LocalTurnTrace trace = store.loadTrace("handoff", row.traceId()).orElseThrow();
+        var dispatch = trace.events().stream()
+                .filter(event -> "GENERATION_REQUEST_DISPATCHED".equals(event.type()))
+                .findFirst().orElseThrow();
+        assertFalse(dispatch.data().containsKey("physicalSendStarted"));
+        assertTrue(trace.events().stream().anyMatch(event ->
+                "GENERATION_ATTEMPT_ABANDONED".equals(event.type())));
+        assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+    }
+
+    @Test
+    void priorTaskOutcomeCannotHideLaterFailedSettlement(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            LocalTurnTraceCapture.recordOutcome(
+                    "OK", "PASSED", "NOT_REQUIRED", "NONE", "EARLIER_TASK_OUTCOME");
+            throw new IllegalStateException("late runtime failure");
+        }, store, "late-failure");
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        TurnRecord row = store.loadTurns("late-failure").getFirst();
+        assertEquals("failed", row.status());
+        LocalTurnTrace trace = store.loadTrace("late-failure", row.traceId()).orElseThrow();
+        assertEquals("ERROR", trace.outcome().status(),
+                "the persisted terminal projection must not retain stale success");
+        assertEquals("TURN_FAILED", trace.outcome().classification());
+        assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+        assertEquals("TURN_SETTLED", trace.events().get(trace.events().size() - 2).type());
+    }
+
+    @Test
+    void abnormalEnvelopeAndFilesOmitOrdinaryPolicyToolAndRetrievalProse(@TempDir Path dir)
+            throws Exception {
+        String privatePath = "C:/Users/alice/T1190_PRIVATE_PATH/secret.txt";
+        String privateClause = "T1190_RAW_CLAUSE_CANARY";
+        String privateReason = "T1190_TOOL_REASON_CANARY";
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> {
+            TurnAuditCapture.recordPolicyTrace(new TurnPolicyTrace(
+                    "READ_ONLY",
+                    false,
+                    true,
+                    List.of(privatePath),
+                    List.of(),
+                    "PLAN",
+                    "PLAN",
+                    List.of("talos.read_file"),
+                    List.of(),
+                    List.of(privateReason),
+                    privateClause,
+                    List.of(new TurnPolicyTrace.RolefulTarget(
+                            privatePath,
+                            "MUST_READ",
+                            "USER_PROMPT",
+                            privateReason,
+                            privateClause,
+                            1.0))));
+            TurnAuditCapture.recordToolCall(
+                    "talos.read_file", privatePath, false, privateReason);
+            LocalTurnTraceCapture.warning("T1190_WARNING", privateClause);
+            RetrievalTrace retrieval = new RetrievalTrace();
+            retrieval.record("source-selection", 1_000, 1, 0, privateReason);
+            retrieval.recordEvidence("FILE", privatePath, privateClause, 1, privateReason);
+            TurnTraceCapture.capture(retrieval);
+            throw new IllegalStateException("T1190_EXCEPTION_CANARY");
+        });
+        AtomicReference<String> listenerInput = new AtomicReference<>();
+        processor.addListener(new SessionListener() {
+            @Override
+            public TurnPublicationReceipt onTurnSettled(
+                    TurnSettlement settlement,
+                    String userInput
+            ) {
+                listenerInput.set(userInput);
+                return TurnPublicationReceipt.complete();
+            }
+        });
+        processor.addListener(new JsonTurnLogAppender(store, "safe-abnormal"));
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), privateClause, context()));
+
+        TurnRecord row = store.loadTurns("safe-abnormal").getFirst();
+        assertEquals("", listenerInput.get());
+        assertEquals(List.of(), row.toolCalls());
+        assertEquals(TurnPolicyTrace.empty(), row.policyTrace());
+        LocalTurnTrace trace = store.loadTrace(
+                "safe-abnormal", row.traceId()).orElseThrow();
+        assertEquals(List.of(), trace.taskContract().expectedTargets());
+        assertEquals(List.of(), trace.taskContract().rolefulTargets());
+        assertEquals(List.of(), trace.warnings());
+        assertEquals("ERROR", trace.outcome().status());
+
+        String persisted = persistedText(dir);
+        assertFalse(persisted.contains(privatePath));
+        assertFalse(persisted.contains(privateClause));
+        assertFalse(persisted.contains(privateReason));
+        assertFalse(persisted.contains("T1190_EXCEPTION_CANARY"));
+    }
+
+    @Test
+    void listenerCannotMutateSettledRetrievalSnapshotBeforePersistence(@TempDir Path dir)
+            throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = new TurnProcessor((raw, workspace, ctx) -> {
+            RetrievalTrace retrieval = new RetrievalTrace();
+            retrieval.record("owned-stage", 1_000, 2, 1);
+            TurnTraceCapture.capture(retrieval);
+            return Optional.of(new Result.Ok("done"));
+        });
+        processor.addListener(new SessionListener() {
+            @Override
+            public TurnPublicationReceipt onTurnSettled(
+                    TurnSettlement settlement,
+                    String userInput
+            ) {
+                assertThrows(UnsupportedOperationException.class, () ->
+                        settlement.result().trace().record("forged-stage", 1, 1, 0));
+                return TurnPublicationReceipt.complete();
+            }
+        });
+        processor.addListener(new JsonTurnLogAppender(store, "immutable-retrieval"));
+
+        processor.process(session(dir), "inspect", context());
+
+        TurnRecord row = store.loadTurns("immutable-retrieval").getFirst();
+        assertTrue(row.retrievalTraceSummary().startsWith("1 stages,"));
+        assertFalse(row.retrievalTraceSummary().contains("forged-stage"));
+    }
+
+    @Test
+    void terminalizerFactoryThrowPersistsInitializationFailureAndNextTurnIsClean(
+            @TempDir Path dir
+    ) throws Exception {
+        Path storeRoot = dir.resolve("store");
+        String sessionId = "factory-throw";
+        String failureCanary = "T1190_TERMINALIZER_FACTORY_THROW_CANARY";
+        IllegalStateException factoryFailure = new IllegalStateException(failureCanary);
+        AtomicInteger factoryCalls = new AtomicInteger();
+        JsonSessionStore store = new JsonSessionStore(storeRoot);
+        TurnProcessor processor = processorWithTerminalizerFactory(
+                (raw, workspace, ctx) -> Optional.of(new Result.Ok("clean answer")),
+                (turn, startNanos) -> {
+                    if (factoryCalls.getAndIncrement() == 0) throw factoryFailure;
+                    return new TurnTerminalizer(turn, startNanos);
+                });
+        processor.addListener(new JsonTurnLogAppender(store, sessionId));
+        Session session = session(dir.resolve("workspace"));
+
+        IllegalStateException observed = assertThrows(
+                IllegalStateException.class,
+                () -> processor.process(session, "first", context()));
+
+        assertSame(factoryFailure, observed);
+        assertOneInitializationFailure(store, sessionId, IllegalStateException.class);
+        assertFalse(persistedText(storeRoot).contains(failureCanary));
+
+        TurnResult clean = processor.process(session, "second", context());
+
+        assertTrue(clean.result() instanceof Result.Ok ok && "clean answer".equals(ok.text));
+        assertCleanSecondTurn(store, sessionId);
+        assertFalse(persistedText(storeRoot).contains(failureCanary));
+    }
+
+    @Test
+    void nullTerminalizerFactoryResultPersistsInitializationFailureAndNextTurnIsClean(
+            @TempDir Path dir
+    ) throws Exception {
+        Path storeRoot = dir.resolve("store");
+        String sessionId = "factory-null";
+        String nullFailureMessage = "turn terminalizer factory returned null";
+        AtomicInteger factoryCalls = new AtomicInteger();
+        JsonSessionStore store = new JsonSessionStore(storeRoot);
+        TurnProcessor processor = processorWithTerminalizerFactory(
+                (raw, workspace, ctx) -> Optional.of(new Result.Ok("clean answer")),
+                (turn, startNanos) -> factoryCalls.getAndIncrement() == 0
+                        ? null
+                        : new TurnTerminalizer(turn, startNanos));
+        processor.addListener(new JsonTurnLogAppender(store, sessionId));
+        Session session = session(dir.resolve("workspace"));
+
+        NullPointerException observed = assertThrows(
+                NullPointerException.class,
+                () -> processor.process(session, "first", context()));
+
+        assertEquals(nullFailureMessage, observed.getMessage());
+        assertOneInitializationFailure(store, sessionId, NullPointerException.class);
+        assertFalse(persistedText(storeRoot).contains(nullFailureMessage));
+
+        TurnResult clean = processor.process(session, "second", context());
+
+        assertTrue(clean.result() instanceof Result.Ok ok && "clean answer".equals(ok.text));
+        assertCleanSecondTurn(store, sessionId);
+        assertFalse(persistedText(storeRoot).contains(nullFailureMessage));
+    }
+
+    @Test
+    void terminalizationFailureFallsBackToOneDurableDegradedSettlement(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        IllegalStateException terminalFailure =
+                new IllegalStateException("T1190_TERMINALIZATION_FAILURE");
+        TurnProcessor processor = processorWithTerminalFreezeFailure(
+                (raw, workspace, ctx) -> Optional.of(new Result.Ok("must not be committed")),
+                terminalFailure);
+        processor.addListener(new JsonTurnLogAppender(store, "terminal-recovery"));
+
+        IllegalStateException observed = assertThrows(
+                IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        assertSame(terminalFailure, observed);
+        List<TurnRecord> rows = store.loadTurns("terminal-recovery");
+        assertEquals(1, rows.size());
+        assertEquals("failed", rows.getFirst().status());
+        assertEquals("", rows.getFirst().assistantText());
+        LocalTurnTrace trace = store.loadTrace(
+                "terminal-recovery", rows.getFirst().traceId()).orElseThrow();
+        assertEquals(1, trace.events().stream().filter(event ->
+                "TURN_TERMINALIZATION_RECOVERED".equals(event.type())).count());
+        assertEquals(1, trace.events().stream().filter(event ->
+                "TURN_SETTLED".equals(event.type())).count());
+        assertEquals("UNKNOWN", projection(trace).data().get("providerLifecycle"));
+        assertEquals("NOT_RETRIED", projection(trace).data().get("captureFinalizers"));
+        assertEquals("TURN_FINALIZATION", terminal(trace).data().get("stage"));
+        assertFalse(trace.toString().contains("T1190_TERMINALIZATION_FAILURE"));
+
+        TurnPublicationHealth health = processor.consumePublicationHealth();
+        assertNotNull(health);
+        assertFalse(health.healthy());
+        assertTrue(health.reasons().contains(
+                TurnPublicationReceipt.Reason.TURN_SETTLEMENT_FAILED));
+        assertTrue(health.exceptionClasses().contains(
+                IllegalStateException.class.getName()));
+        assertEquals(1, health.completedListeners());
+    }
+
+    @Test
+    void terminalizationRecoveryPreservesOriginalRouteFailure(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        IllegalArgumentException primary = new IllegalArgumentException("primary route failure");
+        TurnProcessor processor = processorWithTerminalFreezeFailure(
+                (raw, workspace, ctx) -> {
+                    throw primary;
+                },
+                new IllegalStateException("secondary terminalization failure"));
+        processor.addListener(new JsonTurnLogAppender(store, "terminal-primary"));
+
+        IllegalArgumentException observed = assertThrows(
+                IllegalArgumentException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        assertSame(primary, observed);
+        TurnRecord row = store.loadTurns("terminal-primary").getFirst();
+        LocalTurnTrace trace = store.loadTrace(
+                "terminal-primary", row.traceId()).orElseThrow();
+        assertEquals("MODE_ROUTING", terminal(trace).data().get("stage"));
+        assertEquals("VALIDATION", terminal(trace).data().get("errorKind"));
+        assertEquals(400, terminal(trace).data().get("errorCode"));
+    }
+
+    @Test
+    void terminalizationRecoveryRetainsAlreadyConsumedRetrieval(@TempDir Path dir)
+            throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        AtomicInteger calls = new AtomicInteger();
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            if (calls.getAndIncrement() == 0) {
+                RetrievalTrace retrieval = new RetrievalTrace();
+                retrieval.record("owned-before-finalization", 1_000, 2, 1);
+                TurnTraceCapture.capture(retrieval);
+            }
+            return Optional.of(new Result.Ok("answer"));
+        }, store, "post-consume");
+        IllegalStateException phaseFailure =
+                new IllegalStateException("final phase unavailable");
+
+        assertThrows(IllegalStateException.class, () -> processor.process(
+                session(dir), "first", finalPhaseFailureContext(phaseFailure)));
+        TurnResult second = processor.process(session(dir), "second", context());
+
+        List<TurnRecord> rows = store.loadTurns("post-consume");
+        assertEquals(2, rows.size());
+        assertEquals("failed", rows.get(0).status());
+        assertTrue(rows.get(0).retrievalTraceSummary().startsWith("1 stages,"));
+        assertEquals("ok", rows.get(1).status());
+        assertEquals("", rows.get(1).retrievalTraceSummary());
+        assertNull(second.trace());
+        LocalTurnTrace trace = store.loadTrace(
+                "post-consume", rows.get(0).traceId()).orElseThrow();
+        assertEquals(1, trace.events().stream().filter(event ->
+                "TURN_TERMINALIZATION_RECOVERED".equals(event.type())).count());
+    }
+
+    @Test
+    void failedPersistenceDoesNotStoreRawRequestOrExceptionProse(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String secret = "api_key=T1190_SUPER_SECRET";
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            throw new IllegalStateException("T1190_PRIVATE_EXCEPTION");
+        }, store, "redacted-failure");
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), secret, context()));
+
+        TurnRecord row = store.loadTurns("redacted-failure").getFirst();
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        LocalTurnTrace trace = store.loadTrace(
+                "redacted-failure", row.traceId()).orElseThrow();
+        String serialized = trace.toString();
+        assertFalse(serialized.contains("T1190_SUPER_SECRET"));
+        assertFalse(serialized.contains("T1190_PRIVATE_EXCEPTION"));
+        assertTrue(PromptDebugCapture.lastTurnHadNoProviderRequest());
+    }
+
+    @Test
+    void nullRouterResultIsAFailedTurnRatherThanNoResult(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = processor((raw, workspace, ctx) -> null, store, "null-route");
+
+        assertThrows(NullPointerException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        TurnRecord row = store.loadTurns("null-route").getFirst();
+        assertEquals("failed", row.status());
+        LocalTurnTrace trace = store.loadTrace("null-route", row.traceId()).orElseThrow();
+        assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+        assertEquals("MODE_ROUTING", terminal(trace).data().get("stage"));
+    }
+
+    @Test
+    void traceMetadataFailureSettlesAtTurnInitialization(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnRouter router = new TurnRouter() {
+            @Override
+            public Optional<Result> route(String raw, Path workspace, RuntimeTurnContext ctx) {
+                return Optional.of(new Result.Ok("must not route"));
+            }
+
+            @Override
+            public String traceMode(String rawLine) {
+                throw new IllegalStateException("trace mode unavailable");
+            }
+        };
+        TurnProcessor processor = processor(router, store, "initialization");
+
+        assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        TurnRecord row = store.loadTurns("initialization").getFirst();
+        LocalTurnTrace trace = store.loadTrace("initialization", row.traceId()).orElseThrow();
+        assertEquals("TURN_INITIALIZATION", terminal(trace).data().get("stage"));
+    }
+
+    @Test
+    void interruptionRemainsFailedAndCausalOwnerUnknown(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            throw new InterruptedException("cause unproven");
+        }, store, "interrupted");
+
+        assertThrows(InterruptedException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        TurnRecord row = store.loadTurns("interrupted").getFirst();
+        LocalTurnTrace trace = store.loadTrace("interrupted", row.traceId()).orElseThrow();
+        assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+        assertEquals("INTERRUPTION", terminal(trace).data().get("errorKind"));
+        assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+    }
+
+    @Test
+    void ownedInterruptedFlagSurvivesTerminalPublicationAndPersistence(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            Thread.currentThread().interrupt();
+            throw new InterruptedException("owned interrupt");
+        }, store, "owned-interrupt");
+
+        try {
+            assertThrows(InterruptedException.class,
+                    () -> processor.process(session(dir), "inspect", context()));
+
+            assertTrue(Thread.currentThread().isInterrupted());
+            TurnRecord row = store.loadTurns("owned-interrupt").getFirst();
+            LocalTurnTrace trace = store.loadTrace(
+                    "owned-interrupt", row.traceId()).orElseThrow();
+            assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+            assertEquals("INTERRUPTION", terminal(trace).data().get("errorKind"));
+            assertEquals("UNKNOWN", terminal(trace).data().get("causalOwner"));
+            assertEquals(1, trace.events().stream()
+                    .filter(event -> "TURN_SETTLED".equals(event.type()))
+                    .count());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void persistenceFailureIsVisibleWithoutReplacingPrimaryFailure(@TempDir Path dir)
+            throws Exception {
+        Files.createDirectories(dir.resolve("traces"));
+        Files.writeString(dir.resolve("traces").resolve("blocked"), "not a directory");
+        Files.createDirectory(dir.resolve("blocked.turns.jsonl"));
+        JsonSessionStore store = new JsonSessionStore(dir);
+        IllegalStateException primary = new IllegalStateException("primary");
+        TurnProcessor processor = processor((raw, workspace, ctx) -> {
+            throw primary;
+        }, store, "blocked");
+
+        IllegalStateException observed = assertThrows(IllegalStateException.class,
+                () -> processor.process(session(dir), "inspect", context()));
+
+        assertSame(primary, observed);
+        TurnPublicationHealth health = processor.consumePublicationHealth();
+        assertNotNull(health);
+        assertFalse(health.healthy());
+        assertTrue(health.reasons().contains(
+                TurnPublicationReceipt.Reason.PERSISTENCE_FAILED));
+        assertTrue(store.loadTurns("blocked").isEmpty());
+    }
+
+    private static dev.talos.runtime.trace.TurnTraceEvent terminal(LocalTurnTrace trace) {
+        return trace.events().stream()
+                .filter(event -> "TURN_SETTLED".equals(event.type()))
+                .findFirst().orElseThrow();
+    }
+
+    private static dev.talos.runtime.trace.TurnTraceEvent projection(LocalTurnTrace trace) {
+        return trace.events().stream()
+                .filter(event -> TurnEvidenceProjectionTraceEvent.TYPE.equals(event.type()))
+                .findFirst().orElseThrow();
+    }
+
+    private static TurnProcessor processor(
+            TurnRouter router,
+            SessionStore store,
+            String sessionId) {
+        TurnProcessor processor = new TurnProcessor(router);
+        processor.addListener(new JsonTurnLogAppender(store, sessionId));
+        return processor;
+    }
+
+    private static TurnProcessor processorWithTerminalFreezeFailure(
+            TurnRouter router,
+            RuntimeException failure
+    ) {
+        return new TurnProcessor(
+                router,
+                new NoOpApprovalGate(),
+                new dev.talos.tools.ToolRegistry(),
+                ApprovalPolicy.ALWAYS_ASK,
+                new dev.talos.runtime.checkpoint.CheckpointService(),
+                dev.talos.runtime.command.CommandProfileRegistry.defaultRegistry(),
+                (turn, startNanos) -> new TurnTerminalizer(
+                        turn, startNanos, () -> { throw failure; }));
+    }
+
+    private static TurnProcessor processorWithTerminalizerFactory(
+            TurnRouter router,
+            TurnProcessor.TerminalizerFactory factory
+    ) {
+        return new TurnProcessor(
+                router,
+                new NoOpApprovalGate(),
+                new dev.talos.tools.ToolRegistry(),
+                ApprovalPolicy.ALWAYS_ASK,
+                new dev.talos.runtime.checkpoint.CheckpointService(),
+                dev.talos.runtime.command.CommandProfileRegistry.defaultRegistry(),
+                factory);
+    }
+
+    private static void assertOneInitializationFailure(
+            JsonSessionStore store,
+            String sessionId,
+            Class<? extends Throwable> failureType
+    ) {
+        List<TurnRecord> rows = store.loadTurns(sessionId);
+        assertEquals(1, rows.size());
+        TurnRecord row = rows.getFirst();
+        assertEquals("failed", row.status());
+        assertEquals("", row.userInput());
+        assertEquals("", row.assistantText());
+        assertFalse(row.traceId().isBlank());
+        LocalTurnTrace trace = store.loadTrace(sessionId, row.traceId()).orElseThrow();
+        assertEquals(row.traceId(), trace.traceId());
+        assertEquals(1, trace.events().stream()
+                .filter(event -> "TURN_SETTLED".equals(event.type()))
+                .count());
+        assertEquals("FAILED", terminal(trace).data().get("settlementKind"));
+        assertEquals("TURN_INITIALIZATION", terminal(trace).data().get("stage"));
+        assertEquals(failureType.getName(), terminal(trace).data().get("exceptionClass"));
+    }
+
+    private static void assertCleanSecondTurn(JsonSessionStore store, String sessionId) {
+        List<TurnRecord> rows = store.loadTurns(sessionId);
+        assertEquals(2, rows.size());
+        TurnRecord cleanRow = rows.get(1);
+        assertEquals("ok", cleanRow.status());
+        assertEquals("second", cleanRow.userInput());
+        assertEquals("clean answer", cleanRow.assistantText());
+        assertEquals("", cleanRow.retrievalTraceSummary());
+        LocalTurnTrace cleanTrace = store.loadTrace(
+                sessionId, cleanRow.traceId()).orElseThrow();
+        assertEquals("OK", cleanTrace.outcome().status());
+        assertTrue(cleanTrace.events().stream().noneMatch(event ->
+                "TURN_SETTLED".equals(event.type())));
+    }
+
+    private static Session session(Path workspace) {
+        return new Session(workspace, new Config());
+    }
+
+    private static Context context() {
+        return Context.builder(new Config()).build();
+    }
+
+    private static RuntimeTurnContext finalPhaseFailureContext(RuntimeException failure) {
+        return new RuntimeTurnContext() {
+            @Override public Config cfg() { return new Config(); }
+            @Override public dev.talos.core.llm.LlmClient llm() { return null; }
+            @Override public dev.talos.core.security.Sandbox sandbox() { return null; }
+            @Override
+            public dev.talos.runtime.phase.ExecutionPhaseState executionPhaseState() {
+                throw failure;
+            }
+            @Override
+            public List<dev.talos.spi.types.ToolSpec> nativeToolSpecs() {
+                return List.of();
+            }
+        };
+    }
+
+    private static String persistedText(Path dir) throws IOException {
+        StringBuilder out = new StringBuilder();
+        try (var paths = Files.walk(dir)) {
+            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+                out.append(Files.readString(path));
+            }
+        }
+        return out.toString();
+    }
+
+    private static final class CountingSuccessfulTool implements TalosTool {
+        private final TalosTool delegate;
+        private final AtomicInteger successfulExecutions = new AtomicInteger();
+        private final AtomicReference<String> lastSuccessfulOutput =
+                new AtomicReference<>("");
+
+        private CountingSuccessfulTool(TalosTool delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public String name() {
+            return delegate.name();
+        }
+
+        @Override
+        public String description() {
+            return delegate.description();
+        }
+
+        @Override
+        public ToolDescriptor descriptor() {
+            return delegate.descriptor();
+        }
+
+        @Override
+        public ToolResult execute(ToolCall call, ToolContext context) {
+            ToolResult result = delegate.execute(call, context);
+            if (result.success()) {
+                successfulExecutions.incrementAndGet();
+                lastSuccessfulOutput.set(result.output());
+            }
+            return result;
+        }
+
+        private int successfulExecutions() {
+            return successfulExecutions.get();
+        }
+
+        private String lastSuccessfulOutput() {
+            return lastSuccessfulOutput.get();
+        }
+    }
+}

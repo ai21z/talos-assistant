@@ -239,6 +239,7 @@ public final class SynchronizedApprovalAuditRunner {
             if (TurnAuditCapture.isActive()) {
                 TurnAuditCapture.end();
             }
+            PromptDebugCapture.endTurn();
         }
     }
 

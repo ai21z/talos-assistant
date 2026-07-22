@@ -1,5 +1,6 @@
 package dev.talos.runtime.verification;
 
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.task.TaskContract;
 
 import java.nio.file.Path;
@@ -146,7 +147,11 @@ final class StaticWebRenderVerifier {
         RenderRunResult result;
         try {
             result = safeRunner.run(root.toAbsolutePath().normalize(), input);
-        } catch (RuntimeException e) {
+        } catch (Exception e) {
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
             result = RenderRunResult.unavailable(
                     "First-viewport render verification was unavailable: " + safeMessage(e));
         }

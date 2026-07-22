@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -170,6 +171,28 @@ class InspectCompletenessRetryTest {
                 trace,
                 originalProviderResult.provenance(),
                 fallbackKind.restorationReason());
+    }
+
+    @Test
+    void wrappedCancellationEscapesInspectCompletenessRetry() throws Exception {
+        InspectLineageFixture fixture = inspectLineageFixture(lineageWorkspace);
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel inspect-completeness retry"));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                InspectCompletenessRetry.retryIfNeeded(
+                        fixture.answer(),
+                        messages(fixture.request()),
+                        plan(fixture.request()),
+                        fixture.originalLoop(),
+                        lineageWorkspace,
+                        context(lineageWorkspace, "unused scripted answer"),
+                        ignored -> {
+                            throw wrapped;
+                        }));
+
+        assertSame(wrapped, thrown,
+                "retry cancellation must preserve the caller-owned runtime wrapper");
     }
 
     @Test

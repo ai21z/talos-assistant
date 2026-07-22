@@ -32,6 +32,7 @@ import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.spi.types.ChunkMetadata;
+import dev.talos.spi.types.ControlFlowFailure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -211,6 +212,7 @@ public class RagService {
                              EmbeddingsFactory.forQuery(cfg), cache, "query/" + profile.cacheNamespace())) {
                     qvec = emb.embed(query);
                 } catch (Exception e) {
+                    rethrowControlFlow(e);
                     // If embeddings fail, proceed BM25-only but record why
                     embedFailReason = SafeLogFormatter.throwableMessage(e);
                     LOG.debug("Embedding failed, proceeding BM25-only: {}", embedFailReason);
@@ -271,6 +273,7 @@ public class RagService {
             // Build rich citations using the same metadata-aware formatting as ContextPacker
             citations.addAll(ContextPacker.buildCitations(snippets));
         } catch (Exception e) {
+            rethrowControlFlow(e);
             // Log the failure so it's visible in debug/audit, but don't explode the CLI
             String reason = SafeLogFormatter.throwableMessage(e);
             LOG.warn("Retrieval pipeline failed: {}", reason);
@@ -380,6 +383,7 @@ public class RagService {
                 return new Answer(text, packed.citations(), prepared, packed);
             }
         } catch (Exception e) {
+            rethrowControlFlow(e);
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
             return new Answer(msg, List.of());
         }
@@ -411,6 +415,7 @@ public class RagService {
                         sidecar.status());
                 indexer.invalidateIndex(workspace);
             } catch (Exception e) {
+                rethrowControlFlow(e);
                 // Index exists but is corrupted - log and proceed to rebuild
                 LOG.warn("Index directory exists but appears corrupted, will rebuild: {}",
                         SafeLogFormatter.throwableMessage(e));
@@ -435,6 +440,7 @@ public class RagService {
             System.out.println();
 
         } catch (Exception e) {
+            rethrowControlFlow(e);
             LOG.error("Lazy indexing failed: {}", SafeLogFormatter.throwableMessage(e));
             System.err.println("\rIndexing failed: " + SafeLogFormatter.throwableMessage(e));
         } finally {
@@ -468,5 +474,11 @@ public class RagService {
                     new ChunkMetadata(null, hit.lineStart(), hit.lineEnd(), "Symbol signature match")));
         }
         return snippets;
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!ControlFlowFailure.isCancellation(failure)
+                && !ControlFlowFailure.isInterruption(failure)) return;
+        throw ControlFlowFailure.propagate(failure);
     }
 }

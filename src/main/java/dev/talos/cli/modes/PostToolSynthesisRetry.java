@@ -89,6 +89,8 @@ final class PostToolSynthesisRetry {
         messages.add(ChatMessage.user(retryPrompt));
         LocalTurnTraceCapture.AnswerCandidateCheckpoint checkpoint =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
 
         try {
             LlmClient.StreamResult retry = chatFull.chat(messages);
@@ -110,6 +112,8 @@ final class PostToolSynthesisRetry {
                     ? "Synthesis retry was empty. Returning original answer."
                     : "Synthesis retry still deflected. Returning original answer.");
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.restoreExactAnswerCandidate(
                     checkpoint,
                     answer,
@@ -118,6 +122,12 @@ final class PostToolSynthesisRetry {
             LOG.warn("Synthesis retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return answer;
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
     /**

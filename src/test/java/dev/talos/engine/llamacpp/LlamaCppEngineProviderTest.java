@@ -7,7 +7,9 @@ import dev.talos.core.engine.EngineRegistry;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.spi.types.ModelRef;
+import dev.talos.testsupport.InterruptingHttpClient;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -160,6 +162,50 @@ class LlamaCppEngineProviderTest {
         assertEquals(8192, caps.contextWindow());
         assertEquals("QUALIFIED", engine.modelIdentity().resolution());
         assertEquals("qwen3-8b", engine.modelIdentity().resolvedProfile());
+    }
+
+    @Test
+    void capabilityPreparationPropagatesPropsTransportInterruption() throws Exception {
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "host", "http://127.0.0.1",
+                "port", 18115,
+                "model", "qwen3-8b"));
+        LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
+        InterruptingHttpClient propsHttp = new InterruptingHttpClient(
+                "stop capability preparation");
+        LlamaCppPropsClient propsClient = new LlamaCppPropsClient(
+                propsHttp, new ObjectMapper(), Duration.ofSeconds(1), 16 * 1024);
+        var service = new LlamaCppResolvedProfileService(
+                llamaCfg,
+                java.nio.file.Files.createTempDirectory("talos-interrupted-profile-service"),
+                (path, alias, expected, home, verify) -> {
+                    throw new AssertionError("artifact resolution must not follow interruption");
+                },
+                propsClient::fetch,
+                (config, declared, observed, verify) -> {
+                    throw new AssertionError("engine-fact resolution must not follow interruption");
+                });
+        LlamaCppEngine engine = new LlamaCppEngine(
+                llamaCfg,
+                new LlamaCppServerManager(llamaCfg, (command, logPath) -> {
+                    throw new AssertionError("connect-only must not launch");
+                }, HttpClient.newHttpClient()),
+                HttpClient.newHttpClient(),
+                service);
+        Thread.interrupted();
+        try {
+            RuntimeException thrown = assertThrows(RuntimeException.class,
+                    engine::prepareCapabilities);
+
+            assertEquals(ControlFlowFailure.Kind.INTERRUPTION,
+                    ControlFlowFailure.classify(thrown));
+            assertSame(propsHttp.interruption(), thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, propsHttp.sendCalls());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

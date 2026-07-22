@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Health;
+import dev.talos.testsupport.InterruptingHttpClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -527,6 +528,75 @@ class LlamaCppServerManagerTest {
             assertTrue(healthCalls.get() >= 3, "managed startup must wait until health is ready");
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void interruptedHttpHealthStopsReadinessImmediatelyAndRestoresInterrupt() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString(),
+                "host", "http://127.0.0.1",
+                "port", 18080));
+        FakeLauncher launcher = new FakeLauncher();
+        InterruptingHttpClient http = new InterruptingHttpClient(
+                "interrupt llama.cpp health request");
+        LlamaCppServerManager manager = new LlamaCppServerManager(
+                LlamaCppConfig.from(cfg),
+                launcher,
+                http,
+                Duration.ofSeconds(1),
+                Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    manager::ensureStarted);
+
+            assertSame(http.interruption(), thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, http.sendCalls(),
+                    "an interrupted health request must not be converted into another readiness poll");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void wrappedInterruptedHttpHealthStopsReadinessImmediatelyAndRestoresInterrupt()
+            throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "server_path", exe.toString(),
+                "model_path", model.toString(),
+                "host", "http://127.0.0.1",
+                "port", 18080));
+        InterruptingHttpClient http = InterruptingHttpClient.wrapped(
+                "wrapped llama.cpp health interruption");
+        LlamaCppServerManager manager = new LlamaCppServerManager(
+                LlamaCppConfig.from(cfg),
+                new FakeLauncher(),
+                http,
+                Duration.ofSeconds(1),
+                Duration.ofMillis(1),
+                tempDir.resolve("logs"));
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    manager::ensureStarted);
+
+            assertSame(http.wrappedFailure(), thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, http.sendCalls());
+        } finally {
+            Thread.interrupted();
         }
     }
 

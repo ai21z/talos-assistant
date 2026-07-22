@@ -1,6 +1,9 @@
 package dev.talos.engine.llamacpp;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import dev.talos.spi.types.ControlFlowFailure;
+import dev.talos.testsupport.InterruptingHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +15,8 @@ import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlamaCppPropsClientTest {
@@ -70,6 +75,46 @@ class LlamaCppPropsClientTest {
 
         assertEquals(LlamaCppPropsClient.State.UNAVAILABLE, result.state());
         assertTrue(result.reason().contains("timed out"), result.reason());
+    }
+
+    @Test
+    void propagatesSynchronousTransportInterruptionWithOriginalCauseAndStatus() {
+        InterruptingHttpClient http = new InterruptingHttpClient("stop props preparation");
+        LlamaCppPropsClient client = new LlamaCppPropsClient(
+                http, new ObjectMapper(), Duration.ofSeconds(1), 16 * 1024);
+        Thread.interrupted();
+        try {
+            RuntimeException thrown = assertThrows(RuntimeException.class,
+                    () -> client.fetch(URI.create("http://127.0.0.1:18115")));
+
+            assertEquals(ControlFlowFailure.Kind.INTERRUPTION,
+                    ControlFlowFailure.classify(thrown));
+            assertSame(http.interruption(), thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, http.sendCalls());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void propagatesWrappedTransportInterruptionWithoutUnavailableFallback() {
+        InterruptingHttpClient http = InterruptingHttpClient.wrapped(
+                "wrapped props interruption");
+        LlamaCppPropsClient client = new LlamaCppPropsClient(
+                http, new ObjectMapper(), Duration.ofSeconds(1), 16 * 1024);
+        try {
+            RuntimeException thrown = assertThrows(RuntimeException.class,
+                    () -> client.fetch(URI.create("http://127.0.0.1:18115")));
+
+            assertSame(http.wrappedFailure(), thrown);
+            assertEquals(ControlFlowFailure.Kind.INTERRUPTION,
+                    ControlFlowFailure.classify(thrown));
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, http.sendCalls());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

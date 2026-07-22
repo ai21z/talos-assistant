@@ -10,10 +10,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StaticWebBrowserBehaviorVerifierTest {
@@ -21,6 +25,81 @@ class StaticWebBrowserBehaviorVerifierTest {
     Path workspace;
     @TempDir
     Path outsideWorkspace;
+
+    @Test
+    void browserFailureBoundaryPropagatesTypedControlFlowAndRetainsOrdinaryFallback() {
+        CancellationException cancellation = new CancellationException("stop browser verifier");
+        assertSame(cancellation, assertThrows(CancellationException.class, () ->
+                StaticWebBrowserBehaviorVerifier.browserFailureResult(cancellation)));
+
+        InterruptedException interruption = new InterruptedException("interrupt browser verifier");
+        RuntimeException wrapped = new RuntimeException(interruption);
+        try {
+            RuntimeException observed = assertThrows(RuntimeException.class, () ->
+                    StaticWebBrowserBehaviorVerifier.browserFailureResult(wrapped));
+            assertSame(wrapped, observed);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+
+        StaticWebBrowserBehaviorVerifier.BrowserRunResult unavailable =
+                StaticWebBrowserBehaviorVerifier.browserFailureResult(
+                        new IOException("ordinary browser failure"));
+        assertEquals(VerificationVerdict.UNAVAILABLE, unavailable.verdict());
+
+        StaticWebBrowserBehaviorVerifier.BrowserRunResult runtimeUnavailable =
+                StaticWebBrowserBehaviorVerifier.browserFailureResult(
+                        new RuntimeException("ordinary browser runtime failure"));
+        assertEquals(VerificationVerdict.UNAVAILABLE, runtimeUnavailable.verdict());
+    }
+
+    @Test
+    void interruptedStatusCannotBecomeACompletedBrowserVerification() throws Exception {
+        writeWebFixture("""
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Teaser ready';
+                });
+                """);
+        AtomicInteger runnerCalls = new AtomicInteger();
+
+        try {
+            Thread.currentThread().interrupt();
+            RuntimeException beforeRun = assertThrows(RuntimeException.class, () ->
+                    StaticWebBrowserBehaviorVerifier.verify(
+                            workspace,
+                            "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                            selectors(),
+                            (root, htmlFile, linkedJavaScript, binding) -> {
+                                runnerCalls.incrementAndGet();
+                                return StaticWebBrowserBehaviorVerifier.BrowserRunResult.unavailable("not reached");
+                            }));
+            assertTrue(beforeRun.getCause() instanceof InterruptedException);
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(0, runnerCalls.get());
+        } finally {
+            Thread.interrupted();
+        }
+
+        try {
+            RuntimeException afterRun = assertThrows(RuntimeException.class, () ->
+                    StaticWebBrowserBehaviorVerifier.verify(
+                            workspace,
+                            "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                            selectors(),
+                            (root, htmlFile, linkedJavaScript, binding) -> {
+                                runnerCalls.incrementAndGet();
+                                Thread.currentThread().interrupt();
+                                return StaticWebBrowserBehaviorVerifier.BrowserRunResult.unavailable(
+                                        "dependency swallowed interruption");
+                            }));
+            assertTrue(afterRun.getCause() instanceof InterruptedException);
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(1, runnerCalls.get());
+        } finally {
+            Thread.interrupted();
+        }
+    }
 
     @Test
     void clickUpdatingOutputTextProducesAuthoritativeBrowserBehaviorProof() throws Exception {

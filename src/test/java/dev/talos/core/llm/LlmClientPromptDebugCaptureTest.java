@@ -196,6 +196,39 @@ class LlmClientPromptDebugCaptureTest {
     }
 
     @Test
+    void consecutiveOwnedPromptScopesResetWithoutEndingAnOuterRuntimeScope() {
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            PromptDebugCapture.putTurnDiagnostic("first", "one");
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                    new ChatRequest("ollama", "model", "", "", List.of(), null), false));
+            assertEquals("one", PromptDebugCapture.latest().orElseThrow()
+                    .diagnostics().get("first"));
+        }
+
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            assertTrue(PromptDebugCapture.history().isEmpty());
+            assertTrue(PromptDebugCapture.lastTurnHadNoProviderRequest());
+            PromptDebugCapture.putTurnDiagnostic("second", "two");
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                    new ChatRequest("ollama", "model", "", "", List.of(), null), false));
+            assertFalse(PromptDebugCapture.latest().orElseThrow().diagnostics()
+                    .containsKey("first"));
+            assertEquals("two", PromptDebugCapture.latest().orElseThrow()
+                    .diagnostics().get("second"));
+        }
+
+        PromptDebugCapture.beginTurn();
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            PromptDebugCapture.putTurnDiagnostic("outer", "retained");
+        }
+        PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(
+                new ChatRequest("ollama", "model", "", "", List.of(), null), false));
+        assertEquals("retained", PromptDebugCapture.latest().orElseThrow()
+                .diagnostics().get("outer"));
+        PromptDebugCapture.endTurn();
+    }
+
+    @Test
     void exposesSelectedBackendRequiredToolChoiceCapability() {
         LlmClient required = new LlmClient(engineConfig(), new RecordingResolver(Capabilities.of(
                 true, true, false, 8192,

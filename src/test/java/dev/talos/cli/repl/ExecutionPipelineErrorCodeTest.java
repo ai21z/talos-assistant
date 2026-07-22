@@ -7,6 +7,7 @@ import dev.talos.spi.EngineException;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.TimeoutException;
+import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,8 +33,31 @@ class ExecutionPipelineErrorCodeTest {
     }
 
     @Test
+    void classifyError_preservesCauseBearingEngineType() {
+        EngineException.ConnectionFailed failure = new EngineException.ConnectionFailed(
+                "h", new IOException("socket detail"));
+        assertEquals(503, ExecutionPipeline.classifyError(failure));
+    }
+
+    @Test
+    void classifyError_boundsCyclicRuntimeCauses() {
+        RuntimeException first = new RuntimeException("first");
+        RuntimeException second = new RuntimeException("second");
+        first.initCause(second);
+        second.initCause(first);
+
+        assertEquals(500, ExecutionPipeline.classifyError(first));
+    }
+
+    @Test
     void classifyError_transient_returns_503() {
         assertEquals(503, ExecutionPipeline.classifyError(new EngineException.Transient("t", 503)));
+    }
+
+    @Test
+    void classifyError_contextBudget_returns_stable_400() {
+        assertEquals(400, ExecutionPipeline.classifyError(
+                new EngineException.ContextBudgetExceeded(9_000, 8_000, 8_192, 0)));
     }
 
     @Test

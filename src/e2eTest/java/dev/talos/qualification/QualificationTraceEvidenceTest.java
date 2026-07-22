@@ -1059,6 +1059,23 @@ class QualificationTraceEvidenceTest {
                 () -> QualificationTraceEvidence.read(orphanBlock, scenario));
     }
 
+    @Test
+    void incompleteTerminalProjectionCannotBecomeScoreBearingEvidence() throws Exception {
+        QualificationProtocol.Scenario scenario = QualificationScenarioBank.loadDefault()
+                .scenario("F08-contradictory-similar-file-names");
+        Path trace = writeTrace(List.of(physicalEvent(
+                "TURN_EVIDENCE_PROJECTION",
+                Map.of(
+                        "schemaVersion", 1,
+                        "completeness", "INCOMPLETE"))));
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> QualificationTraceEvidence.read(trace, scenario));
+
+        assertTrue(failure.getMessage().contains("explicitly incomplete"));
+    }
+
     private Path writeTrace(List<Map<String, Object>> events) throws Exception {
         return writeTrace(events, List.of());
     }

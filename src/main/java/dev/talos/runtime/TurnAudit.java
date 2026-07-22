@@ -59,5 +59,23 @@ public record TurnAudit(
     public TurnAudit withLocalTrace(LocalTurnTrace trace) {
         return new TurnAudit(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied, policyTrace, trace);
     }
+
+    /** Remove ordinary prompt/tool/path evidence from a non-conversational settlement. */
+    public TurnAudit safeTerminalProjection(
+            TurnSettlement.Kind kind,
+            boolean retrievalSummaryPresent
+    ) {
+        if (kind == null || kind == TurnSettlement.Kind.COMPLETED) return this;
+        LocalTurnTrace safeTrace = localTrace == null
+                ? null
+                : localTrace.safeTerminalProjection(kind, retrievalSummaryPresent);
+        return new TurnAudit(
+                List.of(),
+                approvalsRequired,
+                approvalsGranted,
+                approvalsDenied,
+                TurnPolicyTrace.empty(),
+                safeTrace);
+    }
 }
 

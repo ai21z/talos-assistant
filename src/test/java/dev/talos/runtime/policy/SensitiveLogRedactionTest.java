@@ -201,11 +201,13 @@ class SensitiveLogRedactionTest {
         assertTrue(lucene.contains("SafeLogFormatter.value(path)"), lucene);
         assertFalse(lucene.contains("Skip vector for {} (have={}, expected={})\", path"), lucene);
 
-        assertTrue(executor.contains("SafeLogFormatter.value(mnf.model())"), executor);
+        // Failed generations now propagate to typed turn settlement instead of
+        // logging provider-supplied model identifiers from this executor.
+        assertFalse(executor.contains("mnf.model()"), executor);
         assertFalse(executor.contains("LOG.warn(\"Model not found: {}\", mnf.model())"), executor);
 
         assertFalse(reprompt.contains("mnf.model()"), reprompt);
-        assertTrue(overlayContinuation.contains("SafeLogFormatter.value(mnf.model())"), overlayContinuation);
+        assertFalse(overlayContinuation.contains("mnf.model()"), overlayContinuation);
         assertFalse(reprompt.contains("state.iterations, mnf.model()"), reprompt);
         assertFalse(reprompt.contains("retryName, mnf.model()"), reprompt);
 

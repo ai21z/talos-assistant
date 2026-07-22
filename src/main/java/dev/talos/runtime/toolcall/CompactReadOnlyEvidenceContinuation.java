@@ -3,6 +3,8 @@ package dev.talos.runtime.toolcall;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
@@ -28,11 +30,15 @@ final class CompactReadOnlyEvidenceContinuation {
         if (evidence.isEmpty()) return false;
         ReadOnlyEvidenceAnswer answer = evidence.get();
         List<ChatMessage> messages = answerMessages(answer);
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
         try {
             LlmClient.StreamResult result = state.ctx.llm().chatFull(
                     messages,
                     List.of(),
                     ChatRequestControls.defaults());
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             String text = result.text() == null ? "" : result.text().strip();
             if (result.hasToolCalls() || ToolCallParser.containsToolCalls(text)) {
                 LocalTurnTraceCapture.warning(
@@ -55,16 +61,23 @@ final class CompactReadOnlyEvidenceContinuation {
                     "used compact evidence-only answer for " + answer.target() + " after " + retryName);
             return true;
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "READ_ONLY_EVIDENCE_COMPACT_CONTEXT_BUDGET_EXCEEDED",
                     ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget));
             return false;
         } catch (EngineException ee) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "READ_ONLY_EVIDENCE_COMPACT_FAILED",
                     ee.getMessage() == null ? ee.getClass().getSimpleName() : ee.getMessage());
             return false;
         } catch (Exception e) {
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LocalTurnTraceCapture.warning(
                     "READ_ONLY_EVIDENCE_COMPACT_FAILED",
                     e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());

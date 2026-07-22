@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -104,6 +105,21 @@ class CompactReadOnlyEvidenceContinuationTest {
     }
 
     @Test
+    void wrappedCancellationEscapesCompactReadOnlyEvidenceContinuation() {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel compact read-only continuation"));
+        LoopState state = readOnlyEvidenceState(LlmClient.scriptedFailure(wrapped));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                CompactReadOnlyEvidenceContinuation.tryAnswer(
+                        state,
+                        "tool-call loop continuation"));
+
+        assertSame(wrapped, thrown,
+                "continuation cancellation must preserve the caller-owned runtime wrapper");
+    }
+
+    @Test
     void repromptStageDelegatesCompactReadOnlyEvidenceContinuationToOwner() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
@@ -127,5 +143,38 @@ class CompactReadOnlyEvidenceContinuationTest {
                 "test",
                 "model",
                 "review README.md");
+    }
+
+    private static LoopState readOnlyEvidenceState(LlmClient llm) {
+        String request = "Review README.md and propose one wording improvement, but do not edit it.";
+        var ctx = Context.builder(new Config())
+                .llm(llm)
+                .build();
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user(request)));
+        LoopState state = new LoopState(
+                "",
+                List.of(),
+                messages,
+                Path.of("."),
+                ctx,
+                null,
+                5,
+                0);
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.read_file",
+                "README.md",
+                true,
+                false,
+                false,
+                "read README.md",
+                ""));
+        ReadEvidenceStateAccounting.recordSuccessfulToolResult(
+                state,
+                new ToolCall("talos.read_file", java.util.Map.of("path", "README.md")),
+                "README.md",
+                ToolResult.ok("1 | # Fixture\n2 | Evidence for a wording proposal."));
+        return state;
     }
 }

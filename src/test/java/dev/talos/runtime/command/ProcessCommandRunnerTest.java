@@ -1,5 +1,6 @@
 package dev.talos.runtime.command;
 
+import dev.talos.spi.types.ControlFlowFailure;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -7,6 +8,9 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -55,6 +59,124 @@ class ProcessCommandRunnerTest {
         assertTrue(result.timedOut());
         assertTrue(result.killed());
         assertEquals(-1, result.exitCode());
+    }
+
+    @Test
+    void callerInterruptionKillsChildAndPropagatesWithInterruptFlag(@TempDir Path workspace) throws Exception {
+        Path pidFile = workspace.resolve("child.pid");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        Thread caller = new Thread(() -> {
+            try {
+                new ProcessCommandRunner().run(plan(
+                        javaExecutable(),
+                        List.of("-cp", classPath(), BlockingChild.class.getName(), pidFile.toString()),
+                        workspace,
+                        20_000,
+                        CommandOutputLimits.defaults()));
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+                interrupted.set(Thread.currentThread().isInterrupted());
+            }
+        }, "process-command-interruption-test");
+
+        long pid = -1;
+        try {
+            caller.start();
+            pid = awaitPid(pidFile);
+            caller.interrupt();
+            caller.join(10_000);
+
+            assertFalse(caller.isAlive(), "interrupted runner must terminate promptly");
+            assertNotNull(failure.get(), "interruption must propagate instead of becoming CommandResult");
+            assertEquals(ControlFlowFailure.Kind.INTERRUPTION,
+                    ControlFlowFailure.classify(failure.get()));
+            assertTrue(interrupted.get(), "caller interrupt status must be restored before propagation");
+            assertFalse(awaitNotAlive(pid), "child process must be forcibly terminated");
+        } finally {
+            if (pid > 0) ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+            if (caller.isAlive()) {
+                caller.interrupt();
+                caller.join(5_000);
+            }
+        }
+    }
+
+    @Test
+    void directCancellationFromProcessStartupPropagates(@TempDir Path workspace) {
+        CancellationException cancellation = new CancellationException("stop command");
+        ProcessCommandRunner runner = new ProcessCommandRunner(builder -> { throw cancellation; });
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> runner.run(plan(
+                        javaExecutable(),
+                        List.of("-version"),
+                        workspace,
+                        20_000,
+                        CommandOutputLimits.defaults())));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void wrappedInterruptionFromProcessStartupPropagatesAndRestoresFlag(@TempDir Path workspace) {
+        RuntimeException wrapper = new RuntimeException(new InterruptedException("stop command"));
+        ProcessCommandRunner runner = new ProcessCommandRunner(builder -> { throw wrapper; });
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> runner.run(plan(
+                            javaExecutable(),
+                            List.of("-version"),
+                            workspace,
+                            20_000,
+                            CommandOutputLimits.defaults())));
+
+            assertSame(wrapper, thrown);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void directInterruptionFromProcessStartupPropagatesAndRestoresFlag(@TempDir Path workspace) {
+        InterruptedException interruption = new InterruptedException("stop command");
+        ProcessCommandRunner runner = new ProcessCommandRunner(builder -> { throw interruption; });
+
+        try {
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> runner.run(plan(
+                            javaExecutable(),
+                            List.of("-version"),
+                            workspace,
+                            20_000,
+                            CommandOutputLimits.defaults())));
+
+            assertSame(interruption, thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void ordinaryProcessStartupFailureRemainsInternalResult(@TempDir Path workspace) {
+        ProcessCommandRunner runner = new ProcessCommandRunner(
+                builder -> { throw new java.io.IOException("ordinary startup failure"); });
+
+        CommandResult result = runner.run(plan(
+                javaExecutable(),
+                List.of("-version"),
+                workspace,
+                20_000,
+                CommandOutputLimits.defaults()));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("IOException"), result.errorMessage());
     }
 
     @Test
@@ -254,5 +376,35 @@ class ProcessCommandRunnerTest {
                     "-----END " + "PRIVATE KEY-----"));
             System.out.println("jdbc:postgresql://user:supersecret@localhost/db");
         }
+    }
+
+    public static final class BlockingChild {
+        public static void main(String[] args) throws Exception {
+            java.nio.file.Files.writeString(Path.of(args[0]), Long.toString(ProcessHandle.current().pid()));
+            Thread.sleep(30_000);
+        }
+    }
+
+    private static long awaitPid(Path pidFile) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (java.nio.file.Files.isRegularFile(pidFile)) {
+                String value = java.nio.file.Files.readString(pidFile).strip();
+                if (!value.isBlank()) return Long.parseLong(value);
+            }
+            Thread.sleep(20);
+        }
+        fail("child process did not publish its pid");
+        return -1;
+    }
+
+    private static boolean awaitNotAlive(long pid) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            boolean alive = ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+            if (!alive) return false;
+            Thread.sleep(20);
+        }
+        return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
     }
 }

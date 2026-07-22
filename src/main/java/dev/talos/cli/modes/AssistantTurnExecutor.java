@@ -11,6 +11,8 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
 import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
@@ -24,7 +26,6 @@ import dev.talos.runtime.policy.CapabilityPosture;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
-import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -174,7 +175,18 @@ public final class AssistantTurnExecutor {
      */
     public static TurnOutput execute(List<ChatMessage> messages, Path workspace,
                               Context ctx, Options opts) {
-        PromptDebugCapture.beginTurn();
+        try (PromptDebugCapture.TurnScope ignored = PromptDebugCapture.openTurnIfAbsent()) {
+            return executeWithinPromptDebugScope(messages, workspace, ctx, opts);
+        }
+    }
+
+    private static TurnOutput executeWithinPromptDebugScope(
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx,
+            Options opts
+    ) {
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.ASSISTANT_PREPARATION);
         recordModelIdentityDiagnostics(ctx == null || ctx.llm() == null
                 ? ModelIdentitySnapshot.empty()
                 : ctx.llm().modelIdentity());
@@ -197,6 +209,7 @@ public final class AssistantTurnExecutor {
                 opts == null ? CapabilityPosture.AGENT : opts.capabilityPosture());
         ctx = preparedTurn.ctx();
         CurrentTurnPlan currentTurnPlan = preparedTurn.plan();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.ASSISTANT_EXECUTION);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(
                 messages, currentTurnPlan.taskContract(), workspace, ctx);
@@ -241,7 +254,7 @@ public final class AssistantTurnExecutor {
                 // the tool-call loop (and approval gate) execute - making it look
                 // like Talos is still "thinking" when it's actually waiting for input.
                 if (ctx.onStreamComplete() != null) {
-                    try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
+                    runStreamCompletion(ctx.onStreamComplete());
                 }
 
                 if (answer != null) {
@@ -255,7 +268,7 @@ public final class AssistantTurnExecutor {
                         streamed = true;
                         recordLlmAbortOutcome(streamResult, answer);
                         emitStreamingAbortNotice(answer, ctx);
-                        out.append(answer);
+                        throw abortedGenerationFailure(streamResult);
                     } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             BlockedSmallTalkAnswer blocked =
@@ -310,13 +323,13 @@ public final class AssistantTurnExecutor {
                         opts.llmTimeoutMs);
                 recordOutputLimitIfNeeded(streamResult);
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
-                    try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
+                    runStreamCompletion(ctx.onStreamComplete());
                 }
                 String answer = streamResult.text();
                 if (answer != null) {
                     if (isAbortedGeneration(streamResult, answer)) {
                         recordLlmAbortOutcome(streamResult, answer);
-                        answer = withOutputLimitNotice(answer, streamResult, ctx, false);
+                        throw abortedGenerationFailure(streamResult);
                     } else if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
                         if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             BlockedSmallTalkAnswer blocked =
@@ -356,26 +369,20 @@ public final class AssistantTurnExecutor {
                     out.append("(no answer)");
                 }
             }
+        } catch (java.util.concurrent.CancellationException cancellation) {
+            throw cancellation;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(interrupted);
         } catch (java.util.concurrent.TimeoutException te) {
-            recordBackendFailureOutcome("LLM_TIMEOUT");
-            out.append("\n[Timeout: LLM response took too long]\n");
+            throw new RuntimeException(te);
         } catch (java.util.concurrent.ExecutionException ex) {
             Throwable cause = ex.getCause();
-            if (cause instanceof EngineException engineException) {
-                appendEngineException(out, engineException);
-            } else {
-                appendGenericLlmFailure(out, cause == null ? ex : cause);
-            }
-        } catch (EngineException.ConnectionFailed cf) {
-            appendEngineException(out, cf);
-        } catch (EngineException.ModelNotFound mnf) {
-            appendEngineException(out, mnf);
-        } catch (EngineException.Transient tr) {
-            appendEngineException(out, tr);
+            throw propagateGenerationFailure(cause == null ? ex : cause);
         } catch (EngineException ee) {
-            appendEngineException(out, ee);
+            throw ee;
         } catch (Exception e) {
-            appendGenericLlmFailure(out, e);
+            throw propagateGenerationFailure(e);
         } finally {
             TurnTaskContractCapture.clear();
             TurnSourceEvidenceCapture.clear();
@@ -384,74 +391,44 @@ public final class AssistantTurnExecutor {
         return completeTurnOutput(out.toString(), streamed);
     }
 
+    private static RuntimeException propagateGenerationFailure(Throwable failure) {
+        if (TurnFailureClassifier.isCancellation(failure)
+                || TurnFailureClassifier.isInterruption(failure)) {
+            return TurnFailureClassifier.propagateControlFlow(failure);
+        }
+        if (failure instanceof Error error) throw error;
+        if (failure instanceof RuntimeException runtime) return runtime;
+        return new RuntimeException(failure);
+    }
+
+    private static RuntimeException abortedGenerationFailure(
+            LlmClient.StreamResult result
+    ) {
+        ProviderResponseCapture.AbortOrigin origin = result == null
+                ? ProviderResponseCapture.AbortOrigin.NONE
+                : result.abortOrigin();
+        return switch (origin) {
+            case OPERATOR_EXTERNAL -> new java.util.concurrent.CancellationException(
+                    "turn generation cancelled");
+            case RUNTIME_WATCHDOG -> new RuntimeException(
+                    new java.util.concurrent.TimeoutException("turn generation timed out"));
+            case RUNTIME_THREAD_INTERRUPT -> new RuntimeException(
+                    new InterruptedException("turn generation interrupted"));
+            case NONE, RUNTIME_STREAM_CLOSE, PROVIDER_TRANSPORT ->
+                    new GenerationAbortedException();
+        };
+    }
+
+    private static final class GenerationAbortedException extends RuntimeException {
+        private GenerationAbortedException() {
+            super("turn generation ended without a completed response");
+        }
+    }
+
     static void recordModelIdentityDiagnostics(ModelIdentitySnapshot identity) {
         if (identity == null || !identity.available()) return;
         identity.diagnostics().forEach(PromptDebugCapture::putTurnDiagnostic);
         LocalTurnTraceCapture.recordModelIdentity(identity);
-    }
-
-    private static void appendEngineException(StringBuilder out, EngineException ex) {
-        if (ex instanceof EngineException.ContextBudgetExceeded budget) {
-            recordBackendFailureOutcome("CONTEXT_BUDGET_EXCEEDED");
-            LOG.warn("Context budget exceeded: estimatedTokens={}, inputBudgetTokens={}, contextWindowTokens={}, removedMessages={}",
-                    budget.estimatedTokens(), budget.inputBudgetTokens(),
-                    budget.contextWindowTokens(), budget.removedMessages());
-            out.append("\n[Context budget exceeded: Talos could not safely fit this turn into the selected model context. ")
-                    .append(budget.guidance()).append("]\n");
-            return;
-        }
-        if (ex instanceof EngineException.ConnectionFailed cf) {
-            recordBackendFailureOutcome("BACKEND_CONNECTION_FAILED");
-            LOG.warn("Model engine not reachable: {}", SafeLogFormatter.throwableMessage(cf));
-            String detail = actionableConnectionFailureDetail(cf);
-            out.append("\n[Model engine not reachable - ");
-            if (!detail.isBlank()) {
-                out.append(detail).append(' ');
-            }
-            out.append(cf.guidance()).append("]\n");
-            return;
-        }
-        if (ex instanceof EngineException.ModelNotFound mnf) {
-            recordBackendFailureOutcome("BACKEND_MODEL_NOT_FOUND");
-            LOG.warn("Model not found: {}", SafeLogFormatter.value(mnf.model()));
-            out.append("\n").append(UiChrome.MODEL_NOT_FOUND_OPEN).append(mnf.model())
-                    .append(UiChrome.MODEL_NOT_FOUND_MARKER).append(". ")
-                    .append(mnf.guidance()).append("]\n");
-            return;
-        }
-        if (ex instanceof EngineException.Transient tr) {
-            recordBackendFailureOutcome("BACKEND_TRANSIENT_ERROR");
-            LOG.warn("Transient engine error: {}", SafeLogFormatter.throwableMessage(tr));
-            out.append("\n[").append(tr.guidance()).append("]\n");
-            return;
-        }
-        if (ex instanceof EngineException.MalformedResponse malformed) {
-            recordBackendFailureOutcome("BACKEND_MALFORMED_RESPONSE");
-            LocalTurnTraceCapture.recordBackendMalformedResponse(
-                    malformed.context(),
-                    malformed.bodyHash(),
-                    malformed.bodyChars());
-            LOG.warn("Malformed engine response: context={}, bodyHash={}, bodyChars={}",
-                    malformed.context(), malformed.bodyHash(), malformed.bodyChars());
-            out.append("\n").append(UiChrome.ENGINE_ERROR_PREFIX).append(": Malformed engine response");
-            if (!malformed.context().isBlank()) {
-                out.append(" for ").append(malformed.context());
-            }
-            out.append(". ").append(malformed.guidance()).append("]\n");
-            return;
-        }
-        recordBackendFailureOutcome(engineFailureClassification(ex));
-        LOG.warn("Engine error: {}", SafeLogFormatter.throwableMessage(ex));
-        out.append("\n").append(UiChrome.ENGINE_ERROR_PREFIX).append(": ").append(ex.getMessage()).append("]\n");
-    }
-
-    private static void appendGenericLlmFailure(StringBuilder out, Throwable e) {
-        recordBackendFailureOutcome("LLM_CALL_FAILED");
-        String detail = e == null ? null : e.getMessage();
-        LOG.warn("LLM call failed: {}", SafeLogFormatter.text(detail));
-        out.append("\n[Error during LLM call")
-                .append(detail != null && !detail.isBlank() ? ": " + detail : "")
-                .append("]\n");
     }
 
     private static void recordOutputLimitIfNeeded(LlmClient.StreamResult result) {
@@ -518,7 +495,7 @@ public final class AssistantTurnExecutor {
      * metadata. A plain startsWith is NOT enough - a transport abort after
      * partial output appends the marker AFTER the partial text.
      */
-    private static boolean isAbortedGeneration(LlmClient.StreamResult result, String answer) {
+    static boolean isAbortedGeneration(LlmClient.StreamResult result, String answer) {
         if (result != null && result.aborted()) return true;
         if (result != null && (result.hasToolCalls() || ToolProtocolText.containsToolCalls(result.text()))) {
             return false;
@@ -545,46 +522,6 @@ public final class AssistantTurnExecutor {
         }
     }
 
-    private static String engineFailureClassification(EngineException ex) {
-        if (ex instanceof EngineException.ContextBudgetExceeded) {
-            return "CONTEXT_BUDGET_EXCEEDED";
-        }
-        if (ex instanceof EngineException.ResponseError) {
-            if (isContextBudgetFailure(ex)) {
-                return "CONTEXT_BUDGET_EXCEEDED";
-            }
-            return "BACKEND_RESPONSE_ERROR";
-        }
-        if (ex instanceof EngineException.MalformedResponse) {
-            return "BACKEND_MALFORMED_RESPONSE";
-        }
-        return "BACKEND_ENGINE_ERROR";
-    }
-
-    private static boolean isContextBudgetFailure(EngineException ex) {
-        if (ex instanceof EngineException.ResponseError responseError
-                && responseError.bodyLooksContextBudgetExceeded()) {
-            return true;
-        }
-        String message = ex == null ? "" : Objects.toString(ex.getMessage(), "").toLowerCase(Locale.ROOT);
-        return message.contains("exceeds")
-                && (message.contains("available context size")
-                || message.contains("context size")
-                || message.contains("context window")
-                || message.contains("context budget"));
-    }
-
-    private static String actionableConnectionFailureDetail(EngineException.ConnectionFailed ex) {
-        String message = ex == null ? "" : Objects.toString(ex.getMessage(), "");
-        String lower = message.toLowerCase(Locale.ROOT);
-        if (!lower.contains("unsupported gguf architecture")
-                && !lower.contains("no fallback model was selected")) {
-            return "";
-        }
-        String prefix = "Cannot connect to backend at ";
-        return message.startsWith(prefix) ? message.substring(prefix.length()) : message;
-    }
-
     /** Apply mode-specific sanitization then truncate if over budget. */
     private static String sanitizeAndTruncate(String answer, Options opts) {
         answer = opts.answerSanitizer.apply(answer);
@@ -601,7 +538,7 @@ public final class AssistantTurnExecutor {
         if (streamed) {
             ctx.streamSink().accept(shaped);
             if (ctx.onStreamComplete() != null) {
-                try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
+                runStreamCompletion(ctx.onStreamComplete());
             }
         }
         return completeTurnOutput(shaped, streamed);
@@ -613,6 +550,27 @@ public final class AssistantTurnExecutor {
                 safe,
                 LocalTurnTraceCapture.AnswerTransformationReason.EXECUTOR_POLICY_SHAPING);
         return new TurnOutput(safe, streamed);
+    }
+
+    static void runStreamCompletion(Runnable completion) {
+        if (completion == null) return;
+        propagateObservedStreamCompletionInterruption();
+        try {
+            completion.run();
+        } catch (RuntimeException failure) {
+            if (TurnFailureClassifier.isCancellation(failure)
+                    || TurnFailureClassifier.isInterruption(failure)) {
+                throw TurnFailureClassifier.propagateControlFlow(failure);
+            }
+        }
+        propagateObservedStreamCompletionInterruption();
+    }
+
+    private static void propagateObservedStreamCompletionInterruption() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw TurnFailureClassifier.propagateControlFlow(
+                    new InterruptedException("stream completion interrupted"));
+        }
     }
 
     record ToolLoopAnswerResolution(String answer, String extraSummary) {}

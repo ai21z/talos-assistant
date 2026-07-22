@@ -12,11 +12,13 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PostToolSynthesisRetryTest {
@@ -72,6 +74,41 @@ class PostToolSynthesisRetryTest {
         assertEquals("How can I help?", noToolResult);
         assertSame(substantive, substantiveResult);
         assertEquals(1, messages.size(), "non-retry paths must not append messages");
+    }
+
+    @Test
+    void directCancellationFromSynthesisRetryPropagatesUnchanged() {
+        CancellationException cancellation = new CancellationException("stop synthesis retry");
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> PostToolSynthesisRetry.synthesizeIfNeeded(
+                        "How can I help?",
+                        1,
+                        synthesisMessages(),
+                        ignored -> {
+                            throw cancellation;
+                        }));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void genericWrappedCancellationFromSynthesisRetryPropagatesUnchanged() {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("stop synthesis retry"));
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> PostToolSynthesisRetry.synthesizeIfNeeded(
+                        "How can I help?",
+                        1,
+                        synthesisMessages(),
+                        ignored -> {
+                            throw wrapped;
+                        }));
+
+        assertSame(wrapped, thrown);
     }
 
     @Test

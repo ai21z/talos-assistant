@@ -28,6 +28,28 @@ public final class ScriptedNativeLlmClient {
         return scripted(responses, false);
     }
 
+    /** Provider fixture that returns the supplied responses, then throws once exhausted. */
+    public static LlmClient ofThenFailure(
+            List<LlmClient.StreamResult> responses,
+            RuntimeException terminalFailure
+    ) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent(
+                "llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        return new LlmClient(config, new Resolver(
+                responses,
+                false,
+                terminalFailure == null
+                        ? new RuntimeException("scripted terminal failure")
+                        : terminalFailure));
+    }
+
     /**
      * Foreground provider fixture with an authoritative non-native tool
      * capability, used to exercise the explicit JSON-text fallback surface.
@@ -235,16 +257,26 @@ public final class ScriptedNativeLlmClient {
     private static final class Resolver implements LlmEngineResolver {
         private final List<LlmClient.StreamResult> responses;
         private final boolean authoritativeNonNative;
+        private final RuntimeException terminalFailure;
         private final AtomicInteger cursor = new AtomicInteger();
 
         private Resolver(
                 List<LlmClient.StreamResult> responses,
                 boolean authoritativeNonNative
         ) {
+            this(responses, authoritativeNonNative, null);
+        }
+
+        private Resolver(
+                List<LlmClient.StreamResult> responses,
+                boolean authoritativeNonNative,
+                RuntimeException terminalFailure
+        ) {
             this.responses = responses == null || responses.isEmpty()
                     ? List.of(new LlmClient.StreamResult("", List.of()))
                     : List.copyOf(responses);
             this.authoritativeNonNative = authoritativeNonNative;
+            this.terminalFailure = terminalFailure;
         }
 
         @Override
@@ -263,7 +295,11 @@ public final class ScriptedNativeLlmClient {
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
-            int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
+            int next = cursor.getAndIncrement();
+            if (terminalFailure != null && next >= responses.size()) {
+                throw terminalFailure;
+            }
+            int index = Math.min(next, responses.size() - 1);
             LlmClient.StreamResult response = responses.get(index);
             List<TokenChunk> chunks = new ArrayList<>();
             if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {

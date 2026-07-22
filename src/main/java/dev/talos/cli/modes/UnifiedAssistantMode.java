@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.AtFilePins;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
@@ -97,7 +98,10 @@ public final class UnifiedAssistantMode implements Mode {
 
         // System prompt - unified mode: tools + workspace + retrieval guidance
         boolean hasHistory = !history.isEmpty();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
         boolean nativeTools = ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
                 TaskContractResolver.fromMessages(contractMessages),
                 workspace);

@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * File-backed {@link SessionStore} that persists session state as JSON
@@ -39,6 +40,8 @@ public final class JsonSessionStore implements SessionStore {
 
     private static final Logger LOG = LoggerFactory.getLogger(JsonSessionStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Pattern OBSERVED_TRACE_ID =
+            Pattern.compile("[A-Za-z0-9._-]{1,128}");
 
     private final Path sessionsDir;
 
@@ -148,40 +151,42 @@ public final class JsonSessionStore implements SessionStore {
     public void appendTurn(String sessionId, TurnRecord record) {
         if (sessionId == null || sessionId.isBlank() || record == null) return;
         try {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("turnNumber", record.turnNumber());
-            row.put("timestamp", record.timestamp().toString());
-            row.put("durationMs", record.durationMs());
-            row.put("userInput", record.userInput());
-            row.put("assistantText", record.assistantText());
-            row.put("approvalsRequired", record.approvalsRequired());
-            row.put("approvalsGranted", record.approvalsGranted());
-            row.put("approvalsDenied", record.approvalsDenied());
-            row.put("retrievalTraceSummary", record.retrievalTraceSummary());
-            row.put("status", record.status());
-            row.put("traceId", record.traceId());
-            row.put("policyTrace", policyTraceToMap(record.policyTrace()));
-            List<Map<String, Object>> calls = new java.util.ArrayList<>();
-            for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
-                Map<String, Object> c = new LinkedHashMap<>();
-                c.put("name", s.name());
-                c.put("pathHint", s.pathHint());
-                c.put("success", s.success());
-                c.put("reason", s.reason());
-                calls.add(c);
-            }
-            row.put("toolCalls", calls);
-
-            // JSONL: one compact JSON object per line.
-            String line = sanitizedCompactJson(row) + System.lineSeparator();
-            Path file = turnsFileFor(sessionId);
-            Files.writeString(file, line,
-                    java.nio.file.StandardOpenOption.CREATE,
-                    java.nio.file.StandardOpenOption.APPEND);
+            writeTurn(sessionId, record);
         } catch (Exception e) {
             LOG.warn("Failed to append turn record for {}: {}",
                     SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
         }
+    }
+
+    private void writeTurn(String sessionId, TurnRecord record) throws IOException {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("turnNumber", record.turnNumber());
+        row.put("timestamp", record.timestamp().toString());
+        row.put("durationMs", record.durationMs());
+        row.put("userInput", record.userInput());
+        row.put("assistantText", record.assistantText());
+        row.put("approvalsRequired", record.approvalsRequired());
+        row.put("approvalsGranted", record.approvalsGranted());
+        row.put("approvalsDenied", record.approvalsDenied());
+        row.put("retrievalTraceSummary", record.retrievalTraceSummary());
+        row.put("status", record.status());
+        row.put("traceId", record.traceId());
+        row.put("policyTrace", policyTraceToMap(record.policyTrace()));
+        List<Map<String, Object>> calls = new java.util.ArrayList<>();
+        for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
+            Map<String, Object> c = new LinkedHashMap<>();
+            c.put("name", s.name());
+            c.put("pathHint", s.pathHint());
+            c.put("success", s.success());
+            c.put("reason", s.reason());
+            calls.add(c);
+        }
+        row.put("toolCalls", calls);
+
+        String line = sanitizedCompactJson(row) + System.lineSeparator();
+        Files.writeString(turnsFileFor(sessionId), line,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.APPEND);
     }
 
     @Override
@@ -385,14 +390,98 @@ public final class JsonSessionStore implements SessionStore {
     public void saveTrace(String sessionId, LocalTurnTrace trace) {
         if (sessionId == null || sessionId.isBlank() || trace == null || trace.traceId().isBlank()) return;
         try {
-            Path dir = traceDirFor(sessionId);
-            Files.createDirectories(dir);
-            String json = sanitizedPrettyJson(trace);
-            Files.writeString(dir.resolve(traceFileName(trace)), json);
+            writeTrace(sessionId, trace);
         } catch (Exception e) {
             LOG.warn("Failed to save local turn trace for {}: {}",
                     SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
         }
+    }
+
+    private void writeTrace(String sessionId, LocalTurnTrace trace) throws IOException {
+        Path dir = traceDirFor(sessionId);
+        Files.createDirectories(dir);
+        String json = sanitizedPrettyJson(trace);
+        Files.writeString(dir.resolve(traceFileName(trace)), json);
+    }
+
+    @Override
+    public TurnEnvelopePersistenceReceipt persistTurnEnvelope(
+            String sessionId,
+            TurnRecord record,
+            LocalTurnTrace trace
+    ) {
+        if (sessionId == null || sessionId.isBlank() || record == null) {
+            return new TurnEnvelopePersistenceReceipt(
+                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
+        }
+        String recordTraceId = record.traceId();
+        boolean invalidIdentity = record.turnNumber() <= 0
+                || (!recordTraceId.isBlank()
+                    && !OBSERVED_TRACE_ID.matcher(recordTraceId).matches())
+                || (trace == null && !recordTraceId.isBlank())
+                || (trace != null && (trace.turnNumber() <= 0
+                    || trace.turnNumber() != record.turnNumber()
+                    || trace.traceId().isBlank()
+                    || !OBSERVED_TRACE_ID.matcher(trace.traceId()).matches()
+                    || !trace.traceId().equals(recordTraceId)));
+        if (invalidIdentity) {
+            LOG.warn("Rejected mismatched turn envelope for {}",
+                    SafeLogFormatter.value(sessionId));
+            return new TurnEnvelopePersistenceReceipt(
+                    TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED);
+        }
+
+        boolean traceWritten = false;
+        if (trace != null) {
+            try {
+                writeTrace(sessionId, trace);
+                traceWritten = true;
+            } catch (Exception e) {
+                LOG.warn("Failed to save local turn trace for {}: {}",
+                        SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
+            }
+        }
+
+        TurnRecord row = traceWritten || trace == null
+                ? record
+                : withTraceId(record, "");
+        boolean turnWritten = false;
+        try {
+            writeTurn(sessionId, row);
+            turnWritten = true;
+        } catch (Exception e) {
+            LOG.warn("Failed to append turn record for {}: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
+        }
+
+        TurnEnvelopePersistenceReceipt.State state;
+        if (traceWritten && turnWritten) {
+            state = TurnEnvelopePersistenceReceipt.State.BOTH_WRITES_OBSERVED;
+        } else if (traceWritten) {
+            state = TurnEnvelopePersistenceReceipt.State.TRACE_WRITE_ONLY;
+        } else if (turnWritten) {
+            state = TurnEnvelopePersistenceReceipt.State.TURN_WRITE_ONLY;
+        } else {
+            state = TurnEnvelopePersistenceReceipt.State.NO_WRITES_OBSERVED;
+        }
+        return new TurnEnvelopePersistenceReceipt(state);
+    }
+
+    private static TurnRecord withTraceId(TurnRecord record, String traceId) {
+        return new TurnRecord(
+                record.turnNumber(),
+                record.timestamp(),
+                record.durationMs(),
+                record.userInput(),
+                record.assistantText(),
+                record.toolCalls(),
+                record.approvalsRequired(),
+                record.approvalsGranted(),
+                record.approvalsDenied(),
+                record.retrievalTraceSummary(),
+                record.status(),
+                record.policyTrace(),
+                traceId);
     }
 
     @Override
@@ -406,7 +495,11 @@ public final class JsonSessionStore implements SessionStore {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith("-" + sanitizeTraceId(traceId) + ".json"))
                     .sorted()
-                    .map(this::readTrace)
+                    .map(path -> readTrace(path).filter(trace ->
+                            traceId.equals(trace.traceId())
+                                    && trace.turnNumber() > 0
+                                    && path.getFileName().toString().equals(
+                                            traceFileName(trace))))
                     .filter(Optional::isPresent)
                     .map(Optional::get)
                     .findFirst();
@@ -427,7 +520,11 @@ public final class JsonSessionStore implements SessionStore {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith(".json"))
                     .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
-                    .map(this::readTrace)
+                    .map(path -> readTrace(path).filter(trace ->
+                            !trace.traceId().isBlank()
+                                    && trace.turnNumber() > 0
+                                    && path.getFileName().toString().equals(
+                                            traceFileName(trace))))
                     .filter(Optional::isPresent)
                     .map(Optional::get)
                     .findFirst();

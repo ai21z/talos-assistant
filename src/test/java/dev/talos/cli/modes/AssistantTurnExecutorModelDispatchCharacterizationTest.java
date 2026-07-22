@@ -30,10 +30,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("AssistantTurnExecutor model dispatch characterization")
@@ -230,19 +235,59 @@ class AssistantTurnExecutorModelDispatchCharacterizationTest {
                 "test-model",
                 "Answer slowly.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Answer slowly."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options().llmTimeoutMs(150L));
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages("Answer slowly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options().llmTimeoutMs(150L)));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.text().contains("[turn aborted"), out.text());
+            assertInstanceOf(TimeoutException.class, failure.getCause());
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
         } finally {
             LocalTurnTraceCapture.clear();
         }
+    }
+
+    @Test
+    void directProviderCancellationPropagatesUnchanged(@TempDir Path workspace) {
+        CancellationException cancellation = new CancellationException("stop provider request");
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(cancellation))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> AssistantTurnExecutor.execute(
+                        messages("Answer briefly with the number four."),
+                        workspace,
+                        ctx,
+                        new AssistantTurnExecutor.Options()));
+
+        assertSame(cancellation, thrown);
+    }
+
+    @Test
+    void genericWrappedProviderCancellationPropagatesUnchanged(@TempDir Path workspace) {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("stop provider request"));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(wrapped))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> AssistantTurnExecutor.execute(
+                        messages("Answer briefly with the number four."),
+                        workspace,
+                        ctx,
+                        new AssistantTurnExecutor.Options()));
+
+        assertSame(wrapped, thrown);
     }
 
     private static List<ChatMessage> messages(String request) {

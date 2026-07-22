@@ -21,6 +21,7 @@ import dev.talos.core.privacy.PrivateDocumentIndexingPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.spi.Embeddings;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.core.util.Hash;
 import org.slf4j.Logger;
@@ -38,10 +39,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public class Indexer {
@@ -51,6 +54,8 @@ public class Indexer {
     private static final int INDEX_METADATA_SCHEMA_VERSION = 3;
 
     private final Config cfg;
+    private final Supplier<Embeddings> documentEmbeddingsFactory;
+    private final Supplier<CacheDb> cacheFactory;
     private volatile IndexingStats lastRunStats;
 
     private static final class PrivacyIndexingSkip extends IOException {
@@ -60,7 +65,18 @@ public class Indexer {
     }
 
     public Indexer(Config cfg) {
-        this.cfg = cfg;
+        this(cfg, () -> EmbeddingsFactory.forDocument(cfg), CacheDb::new);
+    }
+
+    Indexer(
+            Config cfg,
+            Supplier<Embeddings> documentEmbeddingsFactory,
+            Supplier<CacheDb> cacheFactory
+    ) {
+        this.cfg = Objects.requireNonNull(cfg, "cfg");
+        this.documentEmbeddingsFactory = Objects.requireNonNull(
+                documentEmbeddingsFactory, "documentEmbeddingsFactory");
+        this.cacheFactory = Objects.requireNonNull(cacheFactory, "cacheFactory");
     }
 
     public Path indexDirFor(Path root) {
@@ -193,9 +209,9 @@ public class Indexer {
 
         // Resolve embedding profile and build a document embedder (cached)
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        Embeddings rawEmb = EmbeddingsFactory.forDocument(cfg);
+        Embeddings rawEmb = documentEmbeddingsFactory.get();
 
-        try (CacheDb cache = new CacheDb();
+        try (CacheDb cache = cacheFactory.get();
              CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, profile.cacheNamespace())) {
 
             int dim = 0;
@@ -204,6 +220,7 @@ public class Indexer {
                 try {
                     dim = cachedEmb.dimension();
                 } catch (Exception e) {
+                    propagateControlFlow(e);
                     LOG.warn("Embeddings dimension probe failed; falling back to BM25-only: {}",
                             SafeLogFormatter.throwableMessage(e));
                     useVectors = false;
@@ -268,6 +285,7 @@ public class Indexer {
                                 try {
                                     vectors = embForTasks.embedBatch(chunkTexts);
                                 } catch (Exception ex) {
+                                    propagateControlFlow(ex);
                                     LOG.debug("Batch embedding failed for {}: {} (falling back to individual)",
                                             SafeLogFormatter.value(rel), SafeLogFormatter.throwableMessage(ex));
                                     // Fallback to individual processing
@@ -277,6 +295,7 @@ public class Indexer {
                                             float[] vec = embForTasks.embed(chunkText);
                                             vectors.add(vec);
                                         } catch (Exception e) {
+                                            propagateControlFlow(e);
                                             LOG.debug("Individual embedding failed: {}", SafeLogFormatter.throwableMessage(e));
                                             vectors.add(null);
                                         }
@@ -316,6 +335,7 @@ public class Indexer {
                             stats.incrementFilesSkippedByPrivacy();
                             LOG.info("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } catch (Exception ex) {
+                            propagateControlFlow(ex);
                             LOG.warn("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } finally {
                             listener.onFileComplete(filesCompleted.incrementAndGet(), totalFiles, rel);
@@ -348,12 +368,12 @@ public class Indexer {
                     for (Future<Void> f : futures) {
                         try { f.get(); }
                         catch (ExecutionException ee) {
+                            propagateControlFlow(ee.getCause());
                             LOG.warn("task failed: {}", SafeLogFormatter.throwableMessage(ee.getCause()));
                         }
                     }
                 } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    LOG.warn("Indexing interrupted");
+                    throw ControlFlowFailure.propagate(ie);
                 }
 
                 long commitStart = System.currentTimeMillis();
@@ -375,11 +395,19 @@ public class Indexer {
                 LOG.info("Performance - {}", stats.getDetailedTimings());
 
             } catch (Exception e) {
+                propagateControlFlow(e);
                 throw new RuntimeException(e);
             }
         } catch (Exception e) {
+            propagateControlFlow(e);
             throw new RuntimeException("Caching embeddings setup failed", e);
         }
+    }
+
+    private static void propagateControlFlow(Throwable failure) {
+        if (!ControlFlowFailure.isCancellation(failure)
+                && !ControlFlowFailure.isInterruption(failure)) return;
+        throw ControlFlowFailure.propagate(failure);
     }
 
     private static List<String> firstNonEmptyStrList(List<String> a, List<String> b) {

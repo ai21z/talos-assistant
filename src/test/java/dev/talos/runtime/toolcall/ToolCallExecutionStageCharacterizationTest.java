@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -49,6 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolCallExecutionStageCharacterizationTest {
@@ -89,6 +92,60 @@ class ToolCallExecutionStageCharacterizationTest {
                 () -> assertEquals("user", result.role()),
                 () -> assertTrue(result.content().contains("[tool_result: talos.echo]"), result.content()),
                 () -> assertTrue(result.content().contains("echo: text"), result.content()));
+    }
+
+    @Test
+    void progressCancellationStopsBeforeToolExecution() {
+        AtomicInteger invocations = new AtomicInteger();
+        ToolRegistry registry = registry(new StubTool(
+                "talos.echo",
+                ToolRiskLevel.READ_ONLY,
+                call -> {
+                    invocations.incrementAndGet();
+                    return ToolResult.ok("must not execute");
+                }));
+        CancellationException cancellation = new CancellationException("cancel progress rendering");
+        StageHarness harness = harness(
+                textToolCall("talos.echo", "\"input\":\"text\""),
+                List.of(),
+                registry,
+                new NoOpApprovalGate(),
+                new Config(null),
+                (toolName, action, detail) -> { throw cancellation; });
+
+        assertSame(cancellation, assertThrows(CancellationException.class, () -> execute(harness)));
+        assertEquals(0, invocations.get());
+        assertEquals(0, harness.state().totalToolsInvoked);
+    }
+
+    @Test
+    void progressInterruptionStopsBeforeToolExecutionAndRestoresStatus() {
+        AtomicInteger invocations = new AtomicInteger();
+        ToolRegistry registry = registry(new StubTool(
+                "talos.echo",
+                ToolRiskLevel.READ_ONLY,
+                call -> {
+                    invocations.incrementAndGet();
+                    return ToolResult.ok("must not execute");
+                }));
+        RuntimeException interruption = new RuntimeException(
+                new InterruptedException("interrupt progress rendering"));
+        StageHarness harness = harness(
+                textToolCall("talos.echo", "\"input\":\"text\""),
+                List.of(),
+                registry,
+                new NoOpApprovalGate(),
+                new Config(null),
+                (toolName, action, detail) -> { throw interruption; });
+
+        try {
+            assertSame(interruption, assertThrows(RuntimeException.class, () -> execute(harness)));
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(0, invocations.get());
+            assertEquals(0, harness.state().totalToolsInvoked);
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test
@@ -353,6 +410,17 @@ class ToolCallExecutionStageCharacterizationTest {
             ApprovalGate approvalGate,
             Config cfg
     ) {
+        return harness(currentText, nativeCalls, registry, approvalGate, cfg, null);
+    }
+
+    private StageHarness harness(
+            String currentText,
+            List<NativeToolCall> nativeCalls,
+            ToolRegistry registry,
+            ApprovalGate approvalGate,
+            Config cfg,
+            dev.talos.tools.ToolProgressSink progressSink
+    ) {
         List<ChatMessage> messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
                 ChatMessage.user("Run the tool.")));
@@ -371,7 +439,7 @@ class ToolCallExecutionStageCharacterizationTest {
                 session,
                 5,
                 0);
-        return new StageHarness(new ToolCallExecutionStage(processor, null, false), state);
+        return new StageHarness(new ToolCallExecutionStage(processor, progressSink, false), state);
     }
 
     private static String textToolCall(String toolName, String argumentsJson) {

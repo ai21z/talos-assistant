@@ -4,6 +4,8 @@ import dev.talos.spi.EngineException;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -111,6 +113,66 @@ class LlmRetryExecutorTest {
         );
         assertNotNull(thrown.getCause());
         assertTrue(thrown.getCause() instanceof IllegalStateException);
+    }
+
+    @Test
+    void cancellation_is_never_wrapped_as_provider_response_error() {
+        assertThrows(CancellationException.class,
+                () -> LlmRetryExecutor.execute(3, () -> {
+                    throw new CancellationException("cancelled");
+                }));
+    }
+
+    @Test
+    void interrupted_attempt_restores_flag_and_escapes_retry_wrapper() {
+        try {
+            RuntimeException thrown = assertThrows(RuntimeException.class,
+                    () -> LlmRetryExecutor.execute(3, () -> {
+                        throw new InterruptedException("interrupted");
+                    }));
+            assertInstanceOf(InterruptedException.class, thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void wrapped_interrupted_attempt_is_not_reclassified_as_response_error() {
+        AtomicInteger calls = new AtomicInteger();
+        try {
+            RuntimeException failure = new CompletionException(
+                    new InterruptedException("interrupted"));
+            RuntimeException thrown = assertThrows(RuntimeException.class,
+                    () -> LlmRetryExecutor.execute(3, () -> {
+                        calls.incrementAndGet();
+                        throw failure;
+                    }));
+
+            assertSame(failure, thrown);
+            assertEquals(1, calls.get());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void interrupted_backoff_stops_before_retry_attempt() {
+        AtomicInteger calls = new AtomicInteger();
+        try {
+            RuntimeException thrown = assertThrows(RuntimeException.class,
+                    () -> LlmRetryExecutor.execute(1, () -> {
+                        calls.incrementAndGet();
+                        Thread.currentThread().interrupt();
+                        throw new EngineException.Transient("retry", 503);
+                    }));
+            assertInstanceOf(InterruptedException.class, thrown.getCause());
+            assertEquals(1, calls.get());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 }
 

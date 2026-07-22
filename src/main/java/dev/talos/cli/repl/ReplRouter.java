@@ -5,6 +5,7 @@ import dev.talos.runtime.Result;
 import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.modes.PromptClassifier;
+import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.core.Config;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.TurnProcessor;
@@ -147,6 +148,7 @@ public final class ReplRouter {
      * template expansions (which bypass classification by design).
      */
     private void processPrompt(String rawLine) {
+        LastPromptCapture.clear();
         // Show routing indicator in auto mode (dimmed, one line)
         if ("auto".equals(modes.getActiveName())) {
             PromptClassifier.Route preview = PromptClassifier.route(rawLine, modes.lastRoute(),
@@ -180,7 +182,19 @@ public final class ReplRouter {
                 ctx, "(prompt)"
         );
 
+        var publicationHealth = turnProcessor.consumePublicationHealth();
+
         render.render(r);
+        if (publicationHealth != null && !publicationHealth.healthy()) {
+            String reasons = publicationHealth.reasons().stream()
+                    .map(Enum::name)
+                    .distinct()
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(", "));
+            render.render(new Result.TrustedInfo(
+                    "Local turn evidence is degraded"
+                            + (reasons.isBlank() ? "." : " (" + reasons + ").")));
+        }
 
         // Show turn stats (timing) after the answer
         if (lastTurnResult != null) {

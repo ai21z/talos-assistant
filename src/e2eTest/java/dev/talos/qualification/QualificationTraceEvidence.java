@@ -434,6 +434,7 @@ final class QualificationTraceEvidence {
             throw new IllegalArgumentException(
                     "trace must be a Talos schemaVersion 2, 3, or 4 object");
         }
+        rejectIncompleteTerminalProjection(root.path("events"));
         boolean exactToolLineage = traceSchemaVersion
                 >= QualificationProviderAttemptLedger.PRE_AUTHORITY_TRACE_SCHEMA_VERSION;
         boolean exactExecutionAuthority = traceSchemaVersion
@@ -756,6 +757,19 @@ final class QualificationTraceEvidence {
                 providerAttempts,
                 runtimeAnswerTransformed,
                 providerToolSurface);
+    }
+
+    private static void rejectIncompleteTerminalProjection(JsonNode events) {
+        if (!events.isArray()) return;
+        for (JsonNode event : events) {
+            if (event != null
+                    && "TURN_EVIDENCE_PROJECTION".equals(
+                            QualificationJson.optionalText(
+                                    event.get("type"), "trace events[].type"))) {
+                throw new IllegalArgumentException(
+                        "trace carries an explicitly incomplete terminal evidence projection");
+            }
+        }
     }
 
     private static void validateAuthoritySurfacesWithinPlan(

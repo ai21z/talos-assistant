@@ -291,7 +291,10 @@ public final class RenderEngine {
             // within one frame; the 200ms cap guarantees stopSpinner never blocks the
             // single writer thread for long (the JLine status-row path caps at 300ms).
             try { spinnerThread.join(200); }
-            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
         }
     }
 

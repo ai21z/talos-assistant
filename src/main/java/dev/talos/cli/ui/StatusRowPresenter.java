@@ -104,8 +104,10 @@ public final class StatusRowPresenter implements AutoCloseable {
                 ticker.join(300);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } finally {
+                ticker = null;
             }
-            ticker = null;
         }
     }
 

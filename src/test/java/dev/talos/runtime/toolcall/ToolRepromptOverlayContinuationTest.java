@@ -78,24 +78,24 @@ class ToolRepromptOverlayContinuationTest {
     }
 
     @Test
-    void connectionFailureUsesGenericEngineWordingNotOllama() {
+    void connectionFailurePropagatesWithoutManufacturingAssistantText() {
         EngineException.ConnectionFailed failure = new EngineException.ConnectionFailed(
                 "http://127.0.0.1:18115",
                 new ConnectException("connection refused"));
         LoopState state = state(LlmClient.scriptedFailure(failure));
 
-        boolean continueLoop = ToolRepromptOverlayContinuation.execute(
-                state,
-                List.of(),
-                List.of("scripts.js"),
-                "Create index.html, styles.css, and scripts.js.",
-                false,
-                tools());
+        EngineException.ConnectionFailed thrown = assertThrows(
+                EngineException.ConnectionFailed.class,
+                () -> ToolRepromptOverlayContinuation.execute(
+                        state,
+                        List.of(),
+                        List.of("scripts.js"),
+                        "Create index.html, styles.css, and scripts.js.",
+                        false,
+                        tools()));
 
-        assertFalse(continueLoop);
-        assertEquals("[Model engine not reachable - tool loop aborted. "
-                + failure.guidance() + "]", state.currentText);
-        assertFalse(state.currentText.contains("Ollama"), state.currentText);
+        assertSame(failure, thrown);
+        assertTrue(state.currentText.isEmpty());
     }
 
     @Test
@@ -118,28 +118,23 @@ class ToolRepromptOverlayContinuationTest {
 
         try {
             Thread.currentThread().interrupt();
-            boolean continueLoop = ToolRepromptOverlayContinuation.execute(
-                    state,
-                    List.of(),
-                    List.of("scripts.js"),
-                    "Create scripts.js.",
-                    false,
-                    tools());
+            RuntimeException thrown = assertThrows(
+                    RuntimeException.class,
+                    () -> ToolRepromptOverlayContinuation.execute(
+                            state,
+                            List.of(),
+                            List.of("scripts.js"),
+                            "Create scripts.js.",
+                            false,
+                            tools()));
 
-            assertFalse(continueLoop);
-            assertEquals("[Interrupted during tool-call loop]", state.currentText);
-            LocalTurnTraceCapture.recordRoutedAnswerCaptured(state.currentText);
+            assertInstanceOf(InterruptedException.class, thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertTrue(state.currentText.isEmpty());
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
-            var terminal = trace.events().stream()
-                    .filter(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type()))
-                    .findFirst()
-                    .orElseThrow();
-            var selection = trace.events().stream()
-                    .filter(event -> "DETERMINISTIC_ANSWER_SELECTED".equals(event.type()))
-                    .findFirst()
-                    .orElseThrow();
-            assertEquals("RUNTIME_DETERMINISTIC", selection.data().get("origin"));
-            assertEquals("RUNTIME_DETERMINISTIC", terminal.data().get("origin"));
+            assertTrue(trace.events().stream()
+                    .noneMatch(event -> "TERMINAL_ANSWER_SELECTED".equals(event.type())
+                            || "DETERMINISTIC_ANSWER_SELECTED".equals(event.type())));
         } finally {
             Thread.interrupted();
             LocalTurnTraceCapture.clear();

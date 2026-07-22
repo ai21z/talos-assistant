@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Limits;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
@@ -78,7 +79,9 @@ public final class RagMode implements Mode {
         boolean isTwoFileComparison = pinnedBaseFiles.size() == 2;
 
         // Prepare RAG context once (BM25F + vectors if enabled)
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.RETRIEVAL_PREPARATION);
         RagService.Prepared prepared = ctx.rag().prepare(workspace, q, topK);
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
 
         // Capture trace for runtime visibility (TurnProcessor reads this after dispatch)
         TurnTraceCapture.capture(prepared.trace());
@@ -98,7 +101,10 @@ public final class RagMode implements Mode {
         // Load system prompt - composed from sections, tool-aware, history-aware
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
         boolean nativeTools = ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         String system = SystemPromptBuilder.forRag()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry()))
                 .withWorkspace(workspace)

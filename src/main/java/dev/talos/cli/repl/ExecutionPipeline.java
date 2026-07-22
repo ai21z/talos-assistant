@@ -1,11 +1,11 @@
 package dev.talos.cli.repl;
 
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnFailureClassifier;
 
 import dev.talos.spi.EngineException;
 
 import java.util.Map;
-import java.util.concurrent.TimeoutException;
 
 /**
  * ExecutionPipeline
@@ -83,26 +83,11 @@ public final class ExecutionPipeline {
      * </ul>
      */
     static int classifyError(Throwable ex) {
-        if (ex instanceof EngineException.ModelNotFound)    return 404;
-        if (ex instanceof EngineException.ConnectionFailed) return 503;
-        if (ex instanceof EngineException.Transient)        return 503;
-        if (ex instanceof EngineException.MalformedResponse) return 502;
-        if (ex instanceof EngineException.ResponseError re) return re.httpStatus() > 0 ? re.httpStatus() : 500;
-        if (ex instanceof TimeoutException)                 return 408;
-        if (ex instanceof IllegalArgumentException)         return 400;
-        return 500;
+        return TurnFailureClassifier.classify(ex).code();
     }
 
     private static Throwable unwrap(Throwable t) {
-        // Preserve Errors; unwrap typical wrapper exceptions
-        if (t instanceof Error) return t;
-        Throwable cur = t;
-        while (cur.getCause() != null
-                && (cur instanceof RuntimeException
-                || cur.getClass().getName().endsWith("InvocationTargetException"))) {
-            cur = cur.getCause();
-        }
-        return cur;
+        return TurnFailureClassifier.unwrap(t);
     }
 
     /** Simple 1-second token bucket; rate<=0 disables limiting. */

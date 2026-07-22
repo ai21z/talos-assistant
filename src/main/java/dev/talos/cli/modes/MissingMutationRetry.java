@@ -156,6 +156,8 @@ final class MissingMutationRetry {
                 messages, safePlan, retryInstruction, retryToolSpecs, retryToolNames);
         LocalTurnTraceCapture.AnswerCandidateCheckpoint fallbackCheckpoint =
                 LocalTurnTraceCapture.checkpointExactAnswerCandidate(answer);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
 
         try {
             LlmClient.StreamResult retry = chat.chat(retryMessages, safePlan, retryToolSpecs);
@@ -303,6 +305,7 @@ final class MissingMutationRetry {
                         0, null, null, true);
             }
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             String detail = ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget);
             LOG.info("Skipping missing-mutation retry because it exceeded the local context budget.");
             LocalTurnTraceCapture.warning("CONTEXT_BUDGET_RETRY_SKIPPED", detail);
@@ -321,6 +324,8 @@ final class MissingMutationRetry {
                     null,
                     true);
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LOG.warn("Missing-mutation retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         LocalTurnTraceCapture.recordActionObligation(
@@ -518,6 +523,8 @@ final class MissingMutationRetry {
         List<ChatMessage> continuationMessages = remainingExpectedTargetContinuationMessages(
                 plan,
                 remainingTargets);
+        dev.talos.runtime.TurnExecutionStage priorStage =
+                LocalTurnTraceCapture.currentExecutionStage();
         try {
             LlmClient.StreamResult continuation =
                     chat.chat(continuationMessages, plan, continuationToolSpecs);
@@ -534,10 +541,18 @@ final class MissingMutationRetry {
                     ctx);
             return mergeEvidence(retryLoop, continuationLoop);
         } catch (Exception e) {
+            rethrowControlFlow(e);
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             LOG.warn("Remaining expected-target continuation after missing-mutation retry failed: {}",
                     SafeLogFormatter.throwableMessage(e));
             return retryLoop;
         }
+    }
+
+    private static void rethrowControlFlow(Exception failure) {
+        if (!dev.talos.runtime.TurnFailureClassifier.isCancellation(failure)
+                && !dev.talos.runtime.TurnFailureClassifier.isInterruption(failure)) return;
+        throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(failure);
     }
 
     private static List<ChatMessage> remainingExpectedTargetContinuationMessages(

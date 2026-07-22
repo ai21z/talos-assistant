@@ -4,6 +4,7 @@ import dev.talos.core.rag.RagService;
 import dev.talos.core.index.SymbolHit;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedWorkspacePaths;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.tools.*;
 
 import java.nio.file.Path;
@@ -130,6 +131,9 @@ public final class RetrieveTool implements TalosTool {
                             List.copyOf(sourcePaths),
                             "retrieval result source paths"));
         } catch (Exception e) {
+            if (ControlFlowFailure.classify(e) != ControlFlowFailure.Kind.NONE) {
+                throw ControlFlowFailure.propagate(e);
+            }
             return ToolResult.fail(ToolError.internal(
                     "Retrieval failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())));
         }
@@ -173,5 +177,6 @@ public final class RetrieveTool implements TalosTool {
         int chunk = path.indexOf('#');
         return chunk < 0 ? path : path.substring(0, chunk);
     }
+
 }
 

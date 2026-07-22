@@ -6,6 +6,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.CapabilityPosture;
@@ -81,7 +82,10 @@ public final class PlanMode implements Mode {
                 NativeToolSpecPolicy.select(effectiveContract, effectivePhase, ctx.toolRegistry(), ctx.cfg());
         List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
 
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.ENGINE_CAPABILITY_PREPARATION);
         boolean nativeTools = ctx.llm().prepareNativeTools();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forPlan()
                 .withPromptTools(PromptToolDescriptors.fromRegistry(ctx.toolRegistry(), plannedNativeToolSpecs))
                 .withVisibleToolNames(plannedNativeToolNames)

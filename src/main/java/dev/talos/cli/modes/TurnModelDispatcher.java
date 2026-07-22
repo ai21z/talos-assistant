@@ -2,7 +2,9 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.TurnExecutionStage;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -24,8 +26,10 @@ final class TurnModelDispatcher {
             List<ChatMessage> messages,
             CurrentTurnPlan plan
     ) {
+        TurnExecutionStage priorStage = enterGenerationStage();
         try {
-            return chatStreamFull(ctx, messages, plan);
+            return restoreStageAfterSuccess(
+                    chatStreamFull(ctx, messages, plan), priorStage);
         } catch (EngineException.ContextBudgetExceeded budget) {
             Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
                     ctx,
@@ -36,11 +40,13 @@ final class TurnModelDispatcher {
             }
             ExactWriteContextFallback.record(plan, budget);
             ExactWriteContextFallback.Request request = fallback.get();
-            return ctx.llm().chatStreamFull(
-                    request.messages(),
-                    ctx.streamSink(),
-                    request.toolSpecs(),
-                    request.controls());
+            return restoreStageAfterSuccess(
+                    ctx.llm().chatStreamFull(
+                            request.messages(),
+                            ctx.streamSink(),
+                            request.toolSpecs(),
+                            request.controls()),
+                    priorStage);
         }
     }
 
@@ -50,8 +56,10 @@ final class TurnModelDispatcher {
             CurrentTurnPlan plan,
             long timeoutMs
     ) throws TimeoutException, ExecutionException, InterruptedException {
+        TurnExecutionStage priorStage = enterGenerationStage();
         try {
-            return dispatchBuffered(ctx, messages, plan, timeoutMs);
+            return restoreStageAfterSuccess(
+                    dispatchBuffered(ctx, messages, plan, timeoutMs), priorStage);
         } catch (EngineException.ContextBudgetExceeded budget) {
             Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
                     ctx,
@@ -61,7 +69,9 @@ final class TurnModelDispatcher {
                 throw budget;
             }
             ExactWriteContextFallback.record(plan, budget);
-            return dispatchExactWriteContextFallback(ctx, fallback.get(), timeoutMs);
+            return restoreStageAfterSuccess(
+                    dispatchExactWriteContextFallback(ctx, fallback.get(), timeoutMs),
+                    priorStage);
         }
     }
 
@@ -70,7 +80,10 @@ final class TurnModelDispatcher {
             List<ChatMessage> messages,
             CurrentTurnPlan plan
     ) {
-        return dispatchBuffered(ctx, messages, plan, ctx.nativeToolSpecs(), null);
+        TurnExecutionStage priorStage = enterGenerationStage();
+        return restoreStageAfterSuccess(
+                dispatchBuffered(ctx, messages, plan, ctx.nativeToolSpecs(), null),
+                priorStage);
     }
 
     static LlmClient.StreamResult dispatchEscalatedRetry(
@@ -79,13 +92,17 @@ final class TurnModelDispatcher {
             CurrentTurnPlan plan,
             List<ToolSpec> requestToolSpecs
     ) {
+        TurnExecutionStage priorStage = enterGenerationStage();
         ChatRequestControls controls = chatControlsForTurn(
                 ctx,
                 plan,
                 requestToolSpecsForControls(ctx, requestToolSpecs));
         SamplingControls escalated = new SamplingControls(0.0, null, null, null)
                 .mergedWithFallback(controls.sampling());
-        return ctx.llm().chatFull(messages, requestToolSpecs, controls.withSampling(escalated));
+        return restoreStageAfterSuccess(
+                ctx.llm().chatFull(
+                        messages, requestToolSpecs, controls.withSampling(escalated)),
+                priorStage);
     }
 
     static ChatRequestControls chatControlsForTurn(
@@ -173,5 +190,25 @@ final class TurnModelDispatcher {
         if (ctx != null && ctx.nativeToolSpecs() != null) return ctx.nativeToolSpecs();
         if (ctx != null && ctx.llm() != null) return ctx.llm().getToolSpecs();
         return List.of();
+    }
+
+    private static TurnExecutionStage enterGenerationStage() {
+        TurnExecutionStage prior = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
+        return prior;
+    }
+
+    private static LlmClient.StreamResult restoreStageAfterSuccess(
+            LlmClient.StreamResult result,
+            TurnExecutionStage prior
+    ) {
+        if (!AssistantTurnExecutor.isAbortedGeneration(
+                result,
+                result == null ? "" : result.text())) {
+            LocalTurnTraceCapture.enterExecutionStage(
+                    prior == null ? TurnExecutionStage.UNKNOWN : prior);
+        }
+        return result;
     }
 }

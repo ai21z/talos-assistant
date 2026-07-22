@@ -5,7 +5,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * Minimal, turn-centric, durable record of a single completed turn.
+ * Minimal, turn-centric, durable record of one terminal turn settlement.
  *
  * <p>Persisted per-turn (append-only, one JSON object per line) alongside
  * the existing session snapshot file. Designed to capture enough runtime
@@ -16,22 +16,27 @@ import java.util.List;
  * instead of {@code null}, so JSON round-tripping is lossless.
  *
  * @param turnNumber              1-based turn index within the session
- * @param timestamp               when the turn completed
+ * @param timestamp               when the turn settled
  * @param durationMs              wall-clock elapsed milliseconds for the turn (may be 0)
- * @param userInput               the raw user prompt
- * @param assistantText           the assistant prose committed to history
- *                                (already stripped of UI chrome)
+ * @param userInput               raw user prompt for ordinary completions;
+ *                                blank for non-conversational settlements
+ * @param assistantText           assistant prose committed to history for an
+ *                                ordinary completion (UI chrome stripped);
+ *                                blank otherwise
  * @param toolCalls               per-call summaries recorded during the turn
  * @param approvalsRequired       number of tool calls that reached the approval gate
  * @param approvalsGranted        number of approvals granted (including remembered)
  * @param approvalsDenied         number of approvals denied
  * @param retrievalTraceSummary   short human-readable retrieval trace summary (may be blank)
- * @param status                  compact outcome tag derived from the turn's {@code Result}:
- *                                {@code "ok"} (Ok / Streamed), {@code "error"} (Error),
- *                                {@code "info"} (Info / TrustedInfo / Table), or {@code ""}
- *                                (unknown / not-applicable). Makes errored turns
- *                                distinguishable from silent turns on audit.
- * @param policyTrace             compact task contract / phase / tool-surface trace
+ * @param status                  compact outcome tag: {@code "failed"},
+ *                                {@code "cancelled"}, or {@code "no_result"} for
+ *                                abnormal/non-conversational settlements; ordinary
+ *                                results retain {@code "ok"}, {@code "error"},
+ *                                {@code "aborted"}, {@code "info"}, or {@code ""}.
+ *                                This distinguishes terminal state without relying
+ *                                on assistant prose.
+ * @param policyTrace             compact task contract / phase / tool-surface trace;
+ *                                empty for non-conversational settlements
  * @param traceId                 optional id of the richer local turn trace artifact
  */
 public record TurnRecord(

@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -56,6 +57,36 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
         assertEquals("README summary after deterministic handoff.", result.answer());
         assertEquals(List.of("README.md"), result.loopResult().readPaths());
         assertTrue(result.extraSummary().contains("talos.read_file"), result.extraSummary());
+    }
+
+    @Test
+    void wrappedCancellationEscapesReadEvidenceHandoff(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "README evidence from disk.\n");
+        String request = "Read README.md and summarize it.";
+        CurrentTurnPlan plan = plan(
+                new TaskContract(
+                        TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        Set.of("README.md"),
+                        Set.of(),
+                        request),
+                EvidenceObligation.READ_TARGET_REQUIRED);
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel read-evidence handoff"));
+        Context ctx = context(workspace, LlmClient.scriptedFailure(wrapped));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
+                        "unverified answer",
+                        messages(request),
+                        plan,
+                        workspace,
+                        ctx));
+
+        assertSame(wrapped, thrown,
+                "handoff cancellation must preserve the caller-owned runtime wrapper");
     }
 
     @Test
@@ -237,11 +268,15 @@ class ReadEvidenceHandoffTest extends ActiveToolAuthorityTraceTest {
     }
 
     private static Context context(Path workspace, String finalAnswer) {
+        return context(workspace, LlmClient.scripted(List.of(finalAnswer)));
+    }
+
+    private static Context context(Path workspace, LlmClient llm) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
         return Context.builder(new Config())
-                .llm(LlmClient.scripted(List.of(finalAnswer)))
+                .llm(llm)
                 .sandbox(new Sandbox(workspace, java.util.Map.of()))
                 .toolRegistry(registry)
                 .toolCallLoop(new ToolCallLoop(processor, 5))

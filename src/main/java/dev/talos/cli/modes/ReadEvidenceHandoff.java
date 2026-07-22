@@ -114,6 +114,10 @@ final class ReadEvidenceHandoff {
                     loop,
                     loop.summary());
         } catch (Exception e) {
+            if (dev.talos.runtime.TurnFailureClassifier.isCancellation(e)
+                    || dev.talos.runtime.TurnFailureClassifier.isInterruption(e)) {
+                throw dev.talos.runtime.TurnFailureClassifier.propagateControlFlow(e);
+            }
             LOG.warn("Read evidence handoff failed: {}", SafeLogFormatter.throwableMessage(e));
             return new Result(answer, null, null);
         }

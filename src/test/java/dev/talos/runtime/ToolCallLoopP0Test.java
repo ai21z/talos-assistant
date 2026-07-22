@@ -28,8 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * emit a deterministic action summary built from the tool output.
  *
  * <p>Proof-of-skip technique: build the loop with a {@link Context} whose
-     * {@code llm()} is an unavailable scripted client. If the loop tried to re-prompt,
-     * the final answer would come from the handled failure path instead of the mutation summary.
+     * {@code llm()} is an unavailable scripted client. If the loop tries to re-prompt,
+     * that provider failure propagates instead of being converted into assistant text.
  * Therefore a passing test is direct evidence that the re-prompt was skipped.
  */
 class ToolCallLoopP0Test {
@@ -101,9 +101,9 @@ class ToolCallLoopP0Test {
         @Test
         void noSkipWhenBatchIsOnlyReadOnly() {
             // No mutations → the existing re-prompt path must still run.
-            // With an unavailable scripted LLM this SHOULD hit the handled
-            // re-prompt failure path, which proves the skip is
-            // correctly gated on the presence of successful mutations.
+            // With an unavailable scripted LLM this must propagate the
+            // provider failure, which proves the skip is correctly gated
+            // on the presence of successful mutations.
             var loop = createLoop(readOnlyEchoTool());
             var messages = new ArrayList<>(List.of(
                     ChatMessage.system("system"),
@@ -114,14 +114,14 @@ class ToolCallLoopP0Test {
                     {"name": "talos.echo", "parameters": {"input": "probing"}}
                     </tool_call>""";
 
-            // The loop catches Exception around the re-prompt and converts
-            // the error into a textual answer - so this completes without
-            // propagating, but the answer must NOT be a mutation summary.
-            var result = loop.run(llmResponse, messages, WS, ctxWithoutLlm());
+            var failure = assertThrows(IllegalStateException.class,
+                    () -> loop.run(llmResponse, messages, WS, ctxWithoutLlm()));
 
-            assertEquals(0, result.mutatingToolSuccesses());
-            assertFalse(result.finalAnswer().startsWith("✓ "),
-                    "read-only batch must NOT synthesize an action summary");
+            assertEquals("test LLM unavailable", failure.getMessage());
+            assertTrue(messages.stream().anyMatch(message ->
+                            message.content() != null
+                                    && message.content().contains("echo: probing")),
+                    "read-only tool must execute before the provider re-prompt fails");
         }
     }
 
@@ -138,11 +138,9 @@ class ToolCallLoopP0Test {
             // loop to re-prompt so the model can retry the failed edit.
             //
             // With a stub Context (LLM unavailable for real use), the
-            // re-prompt path captures the exception and converts it to an
-            // error string. We assert:
-            //   (a) the loop did NOT emit a "✓ …" mutation summary as the
-            //       final answer (that would indicate the P0 skip fired),
-            //   (b) the final answer reflects the re-prompt branch.
+            // re-prompt path must propagate the provider failure. The
+            // recorded tool-result messages prove both calls ran before
+            // that failure; returning a mutation summary would not throw.
             var loop = createLoop(fakeWriteFileTool(), alwaysFailingEditTool());
             var messages = new ArrayList<>(List.of(
                     ChatMessage.system("system"),
@@ -156,16 +154,18 @@ class ToolCallLoopP0Test {
                     {"name": "talos.edit_file", "parameters": {"path": "style.css", "old_string": "a", "new_string": "b"}}
                     </tool_call>""";
 
-            var result = loop.run(llmResponse, messages, WS, ctxWithoutLlm());
+            var failure = assertThrows(IllegalStateException.class,
+                    () -> loop.run(llmResponse, messages, WS, ctxWithoutLlm()));
 
-            assertEquals(1, result.mutatingToolSuccesses(),
-                    "write_file should have succeeded");
-            assertTrue(result.failedCalls() >= 1,
-                    "edit_file should have failed");
-            assertFalse(result.finalAnswer().startsWith("✓ "),
-                    "partial-success iteration MUST NOT short-circuit to a "
-                            + "plain mutation summary (CCR-020); got: "
-                            + result.finalAnswer());
+            assertEquals("test LLM unavailable", failure.getMessage());
+            assertTrue(messages.stream().anyMatch(message ->
+                            message.content() != null
+                                    && message.content().contains("Created index.html")),
+                    "write_file should succeed before the provider re-prompt fails");
+            assertTrue(messages.stream().anyMatch(message ->
+                            message.content() != null
+                                    && message.content().contains("old_string not found in style.css")),
+                    "edit_file failure must be recorded before the provider re-prompt fails");
         }
 
         @Test
@@ -252,7 +252,7 @@ class ToolCallLoopP0Test {
         return new ToolCallLoop(processor);
     }
 
-    /** A Context with an unavailable scripted LLM; any re-prompt attempt returns an error-stub answer. */
+    /** A Context with an unavailable scripted LLM; any re-prompt attempt propagates its failure. */
     private static Context ctxWithoutLlm() {
         return Context.builder(placeholderConfig())
                 .llm(LlmClient.scriptedFailure(new IllegalStateException("test LLM unavailable")))

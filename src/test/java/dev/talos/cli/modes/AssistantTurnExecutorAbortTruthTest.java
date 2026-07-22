@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -339,23 +340,23 @@ class AssistantTurnExecutorAbortTruthTest {
                 "test-model",
                 "Explain briefly.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Explain briefly."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options());
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages("Explain briefly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options()));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.streamed(), "partial prose was streamed before the abort");
-            assertTrue(out.text().contains(PARTIAL), out.text());
-            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
-            assertFalse(out.text().contains("retry-output"),
-                    "an aborted streaming turn must not silently re-generate");
+            assertEquals("turn generation ended without a completed response", failure.getMessage());
             assertNotNull(trace.outcome(), "a streamed abort must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
+            assertTrue(String.join("", chunks).contains(PARTIAL));
             assertTrue(String.join("", chunks).contains(UiChrome.TURN_ABORTED_PREFIX),
                     "the abort must be visible on the streamed surface, got chunks: " + chunks);
+            assertFalse(String.join("", chunks).contains("retry-output"),
+                    "an aborted streaming turn must not silently re-generate");
         } finally {
             LocalTurnTraceCapture.clear();
         }
@@ -380,17 +381,15 @@ class AssistantTurnExecutorAbortTruthTest {
                 "test-model",
                 "Explain briefly.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Explain briefly."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options());
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages("Explain briefly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options()));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.text().contains(PARTIAL), out.text());
-            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
-            assertFalse(out.text().contains("retry-output"),
-                    "an aborted buffered turn must not silently re-generate");
+            assertEquals("turn generation ended without a completed response", failure.getMessage());
             assertNotNull(trace.outcome(), "a buffered abort must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
@@ -424,14 +423,15 @@ class AssistantTurnExecutorAbortTruthTest {
                 "test-model",
                 "Explain briefly.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Explain briefly."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options());
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages("Explain briefly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options()));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
+            assertEquals("turn generation ended without a completed response", failure.getMessage());
             assertNotNull(trace.outcome(), "a trailing abort marker must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
@@ -464,25 +464,25 @@ class AssistantTurnExecutorAbortTruthTest {
                 "test-model",
                 "Explain briefly.");
         try {
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages("Explain briefly."),
-                    workspace,
-                    ctx,
-                    new AssistantTurnExecutor.Options());
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
+                    AssistantTurnExecutor.execute(
+                            messages("Explain briefly."),
+                            workspace,
+                            ctx,
+                            new AssistantTurnExecutor.Options()));
             LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertTrue(out.streamed(), "safe provider prose was streamed before the abort");
+            assertEquals("turn generation ended without a completed response", failure.getMessage());
             assertTrue(String.join("", chunks).contains("Visible prefix."));
             assertFalse(String.join("", chunks).contains("talos.write_file"),
                     "incomplete provider protocol must remain hidden");
-            assertTrue(out.text().contains(UiChrome.TURN_ABORTED_PREFIX), out.text());
-            assertFalse(out.text().contains("retry-output"),
-                    "an aborted turn must not enter the tool loop or continue generation");
             assertNotNull(trace.outcome(), "an aborted turn with text tool JSON must record a turn outcome");
             assertEquals("FAILED", trace.outcome().status());
             assertEquals("LLM_ABORTED", trace.outcome().classification());
             assertTrue(String.join("", chunks).contains(UiChrome.TURN_ABORTED_PREFIX),
                     "the abort must be visible on the streamed surface, got chunks: " + chunks);
+            assertFalse(String.join("", chunks).contains("retry-output"),
+                    "an aborted turn must not enter the tool loop or continue generation");
         } finally {
             LocalTurnTraceCapture.clear();
         }

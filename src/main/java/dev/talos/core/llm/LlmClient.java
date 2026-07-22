@@ -9,6 +9,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.util.UiChrome;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ControlFlowFailure;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -363,7 +364,8 @@ public final class LlmClient implements AutoCloseable {
         if (current == null) {
             try {
                 current = engineResolver.capabilities();
-            } catch (Exception ignored) {
+            } catch (Exception failure) {
+                rethrowControlFlow(failure);
                 return false;
             }
         }
@@ -378,7 +380,8 @@ public final class LlmClient implements AutoCloseable {
         try {
             ModelIdentitySnapshot identity = engineResolver.modelIdentity();
             return identity == null ? ModelIdentitySnapshot.empty() : identity;
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException failure) {
+            rethrowControlFlow(failure);
             return ModelIdentitySnapshot.empty();
         }
     }
@@ -389,7 +392,8 @@ public final class LlmClient implements AutoCloseable {
         try {
             Capabilities current = effectiveCapabilities();
             return current != null && current.requiredToolChoice();
-        } catch (Exception e) {
+        } catch (Exception failure) {
+            rethrowControlFlow(failure);
             return false;
         }
     }
@@ -400,7 +404,8 @@ public final class LlmClient implements AutoCloseable {
         try {
             Capabilities current = effectiveCapabilities();
             return current != null && current.namedToolChoice();
-        } catch (Exception e) {
+        } catch (Exception failure) {
+            rethrowControlFlow(failure);
             return false;
         }
     }
@@ -1544,7 +1549,7 @@ public final class LlmClient implements AutoCloseable {
             boolean transportDispatched,
             boolean transportUnobserved,
             Throwable failure) {
-        if (failure instanceof InterruptedException) {
+        if (ControlFlowFailure.isInterruption(failure)) {
             return ProviderResponseCapture.Failure.INTERRUPTION_CAUSE_UNPROVEN;
         }
         if (transportUnobserved) {
@@ -1866,6 +1871,7 @@ public final class LlmClient implements AutoCloseable {
                     transportDispatched.get(), transportUnobserved.get(), checkedProviderFailure);
             attempt.fail(classified);
             generation.fail(classified);
+            rethrowControlFlow(checkedProviderFailure);
             throw new EngineException.ResponseError(
                     0, checkedProviderFailure.getMessage(), checkedProviderFailure);
         }
@@ -2265,10 +2271,17 @@ public final class LlmClient implements AutoCloseable {
             if (engineResolver != null && engineResolver.capabilities() != null) {
                 engineWindow = engineResolver.capabilities().contextWindow();
             }
-        } catch (Exception ignored) {
+        } catch (Exception failure) {
+            rethrowControlFlow(failure);
             // engineWindow already 0; capability probe is best-effort
         }
         return engineWindow;
+    }
+
+    private static void rethrowControlFlow(Throwable failure) {
+        if (!ControlFlowFailure.isCancellation(failure)
+                && !ControlFlowFailure.isInterruption(failure)) return;
+        throw ControlFlowFailure.propagate(failure);
     }
 
     private int effectiveContextWindowTokens() {

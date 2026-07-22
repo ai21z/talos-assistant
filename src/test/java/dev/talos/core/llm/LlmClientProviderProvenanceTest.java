@@ -576,9 +576,12 @@ class LlmClientProviderProvenanceTest {
         beginTrace("trace-interrupted-after-handoff");
         try (LlmClient client = new LlmClient(
                 engineConfig(1_000), new PostDispatchInterruptedResolver())) {
-            assertThrows(
-                    EngineException.ResponseError.class,
+            RuntimeException observed = assertThrows(
+                    RuntimeException.class,
                     () -> client.chatFull(List.of(ChatMessage.user("inspect")), 5_000L));
+            assertFalse(observed instanceof EngineException.ResponseError,
+                    "typed interruption must not become a provider response failure");
+            assertTrue(observed.getCause() instanceof InterruptedException);
         }
         LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 

@@ -1,6 +1,7 @@
 package dev.talos.core.llm;
 
 import dev.talos.core.Config;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -11,11 +12,14 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlmClientEffectiveCapabilitiesTest {
@@ -78,6 +82,56 @@ class LlmClientEffectiveCapabilitiesTest {
         LlmClient client = new LlmClient(engineConfig(true), resolver);
 
         assertEquals(identity, client.modelIdentity());
+    }
+
+    @Test
+    void directCancellationEscapesEveryBegunTurnCapabilityFallbackUnchanged() {
+        assertCapabilityFallbacksPropagate(
+                new CancellationException("stop capability inspection"));
+    }
+
+    @Test
+    void genericWrappedCancellationEscapesEveryBegunTurnCapabilityFallbackUnchanged() {
+        assertCapabilityFallbacksPropagate(new RuntimeException(
+                new CancellationException("stop capability inspection")));
+    }
+
+    @Test
+    void typedEngineFailureWithCancellationCauseRetainsBestEffortFallbacks() {
+        RuntimeException failure = new EngineException.ConnectionFailed(
+                "local engine",
+                new CancellationException("transport detail"));
+        LlmClient client = new LlmClient(
+                engineConfig(true),
+                new FailingCapabilityResolver(failure));
+
+        assertFalse(client.nativeToolsCurrentlyEnabled());
+        assertEquals(ModelIdentitySnapshot.empty(), client.modelIdentity());
+        assertFalse(client.supportsRequiredToolChoice());
+        assertFalse(client.supportsNamedToolChoice());
+        assertEquals(0, client.contextWindowDiagnostics().engineWindowTokens());
+    }
+
+    private static void assertCapabilityFallbacksPropagate(RuntimeException failure) {
+        LlmClient client = new LlmClient(
+                engineConfig(true),
+                new FailingCapabilityResolver(failure));
+
+        assertSame(failure, assertThrows(
+                RuntimeException.class,
+                client::nativeToolsCurrentlyEnabled));
+        assertSame(failure, assertThrows(
+                RuntimeException.class,
+                client::modelIdentity));
+        assertSame(failure, assertThrows(
+                RuntimeException.class,
+                client::supportsRequiredToolChoice));
+        assertSame(failure, assertThrows(
+                RuntimeException.class,
+                client::supportsNamedToolChoice));
+        assertSame(failure, assertThrows(
+                RuntimeException.class,
+                client::contextWindowDiagnostics));
     }
 
     private static Capabilities capabilities(boolean nativeTools) {
@@ -150,6 +204,42 @@ class LlmClientEffectiveCapabilitiesTest {
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             lastRequest = request;
             return Stream.of(TokenChunk.of("ok"), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static final class FailingCapabilityResolver implements LlmEngineResolver {
+        private final RuntimeException failure;
+
+        private FailingCapabilityResolver(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public boolean capabilitiesAuthoritative() {
+            return true;
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            throw failure;
+        }
+
+        @Override
+        public ModelIdentitySnapshot modelIdentity() {
+            throw failure;
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            throw new AssertionError("capability tests must not dispatch a provider request");
         }
 
         @Override

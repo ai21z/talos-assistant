@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -246,6 +247,27 @@ class ReadOnlyInspectionRetryTest {
                 trace,
                 originalProviderResult.provenance(),
                 fallbackKind.restorationReason());
+    }
+
+    @Test
+    void wrappedCancellationEscapesReadOnlyInspectionRetry() {
+        String request = "Explain this workspace.";
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel read-only inspection retry"));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                ReadOnlyInspectionRetry.retryIfNeeded(
+                        "I cannot inspect from here.",
+                        messages(request),
+                        plan(TaskContractResolver.fromUserRequest(request), ExecutionPhase.INSPECT),
+                        lineageWorkspace,
+                        context(lineageWorkspace, "unused scripted answer"),
+                        ignored -> {
+                            throw wrapped;
+                        }));
+
+        assertSame(wrapped, thrown,
+                "retry cancellation must preserve the caller-owned runtime wrapper");
     }
 
     @Test

@@ -22,6 +22,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -150,6 +151,91 @@ class NoToolGroundingRetryTest {
                 originalProviderResult.provenance(),
                 fallbackKind.restorationReason(),
                 true);
+    }
+
+    @Test
+    void wrappedCancellationEscapesNoToolGroundingRetry() {
+        Context ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted("unused"))
+                .build();
+        String request = "Use evidence from the actual files.";
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("cancel no-tool grounding retry"));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                NoToolGroundingRetry.retryIfNeeded(
+                        longAnswer(),
+                        plan(TaskContractResolver.fromUserRequest(request)),
+                        messages(request),
+                        ctx,
+                        ignored -> {
+                            throw wrapped;
+                        }));
+
+        assertSame(wrapped, thrown,
+                "retry cancellation must preserve the caller-owned runtime wrapper");
+    }
+
+    @Test
+    void wrappedInterruptionEscapesNoToolGroundingRetryAndRestoresInterruptStatus() {
+        Thread.interrupted();
+        try {
+            Context ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("unused"))
+                    .build();
+            String request = "Use evidence from the actual files.";
+            RuntimeException wrapped = new RuntimeException(
+                    new InterruptedException("interrupt no-tool grounding retry"));
+
+            RuntimeException thrown = assertThrows(RuntimeException.class, () ->
+                    NoToolGroundingRetry.retryIfNeeded(
+                            longAnswer(),
+                            plan(TaskContractResolver.fromUserRequest(request)),
+                            messages(request),
+                            ctx,
+                            ignored -> {
+                                throw wrapped;
+                            }));
+
+            assertSame(wrapped, thrown,
+                    "retry interruption must preserve the caller-owned runtime wrapper");
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "propagated interruption must restore the caller interrupt status");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void semanticBarrierKeepsNestedInterruptionInOrdinaryRetryFailureHandling() {
+        Thread.interrupted();
+        try {
+            Context ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("unused"))
+                    .build();
+            String request = "Use evidence from the actual files.";
+            String answer = longAnswer();
+            RuntimeException semanticallyTyped = new RuntimeException(
+                    new IllegalArgumentException(
+                            "invalid retry request",
+                            new InterruptedException("non-control-flow cause")));
+
+            String result = NoToolGroundingRetry.retryIfNeeded(
+                    answer,
+                    plan(TaskContractResolver.fromUserRequest(request)),
+                    messages(request),
+                    ctx,
+                    ignored -> {
+                        throw semanticallyTyped;
+                    });
+
+            assertEquals(AssistantTurnExecutor.UNGROUNDED_ANNOTATION + answer, result,
+                    "a semantic validation failure must retain the ordinary fallback contract");
+            assertFalse(Thread.currentThread().isInterrupted(),
+                    "an interruption hidden behind a semantic barrier must not alter thread state");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

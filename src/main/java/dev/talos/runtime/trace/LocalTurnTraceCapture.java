@@ -3,6 +3,9 @@ package dev.talos.runtime.trace;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
+import dev.talos.runtime.TurnSettlement;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
@@ -59,6 +62,7 @@ public final class LocalTurnTraceCapture {
         long providerAuthorityEpoch;
         long nextToolCallOrdinal;
         ParsedToolCallPermit activeToolCall;
+        TurnExecutionStage executionStage = TurnExecutionStage.TURN_INITIALIZATION;
 
         Bag(LocalTurnTrace.Builder builder, String traceId, int turnNumber) {
             this.builder = builder;
@@ -419,6 +423,26 @@ public final class LocalTurnTraceCapture {
     public static int currentTurnNumber() {
         Bag bag = HOLDER.get();
         return bag == null ? 0 : bag.turnNumber;
+    }
+
+    /** Updates metadata that can only be resolved after the trace has begun. */
+    public static void updateRuntimeMetadata(String mode, String backend, String model) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.mode(mode).model(backend, model);
+    }
+
+    /** Trace-owned stage marker; it cannot outlive the active trace bag. */
+    public static void enterExecutionStage(TurnExecutionStage stage) {
+        Bag bag = HOLDER.get();
+        if (bag != null) {
+            bag.executionStage = stage == null ? TurnExecutionStage.UNKNOWN : stage;
+        }
+    }
+
+    public static TurnExecutionStage currentExecutionStage() {
+        Bag bag = HOLDER.get();
+        return bag == null ? TurnExecutionStage.UNKNOWN : bag.executionStage;
     }
 
     public static void recordPolicyTrace(TurnPolicyTrace trace) {
@@ -2500,6 +2524,30 @@ public final class LocalTurnTraceCapture {
         if (bag != null) {
             bag.builder.warning(code, message);
         }
+    }
+
+    /**
+     * Closes any open provider generation while the trace bag can still receive
+     * its typed abandonment callbacks.
+     */
+    public static void closeProviderLifecycle() {
+        ProviderResponseCapture.clear();
+    }
+
+    /** Flushes any pending outcome render before the terminal settlement event. */
+    public static void prepareForTerminalSettlement() {
+        renderOutcomeBeforeCompletion(HOLDER.get());
+    }
+
+    /** Records the bounded abnormal settlement immediately before trace completion. */
+    public static void recordTurnSettlement(
+            TurnSettlement.Kind kind,
+            TurnExecutionStage stage,
+            TurnFailureClassifier.Classification failure
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null || kind == null) return;
+        bag.builder.event(TurnSettlementTraceEvent.create(now(), kind, stage, failure));
     }
 
     public static LocalTurnTrace complete() {

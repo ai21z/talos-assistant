@@ -13,7 +13,9 @@ import java.util.Optional;
  * not a silent fallback (CCR-016). Constructors that accept a
  * {@code SessionStore} require a non-null value.
  *
- * <p>Save is fire-and-forget (never throws), load returns empty if absent.
+ * <p>The snapshot {@link #save} contract is fire-and-forget; load returns
+ * empty if absent. Per-turn envelope implementations report only the write
+ * observations explicitly represented by their receipt.
  *
  * <p>Alongside the full-session snapshot ({@link #save}/{@link #load}), stores
  * may implement per-turn append-only durability via {@link #appendTurn} and
@@ -52,9 +54,38 @@ public interface SessionStore {
         return List.of();
     }
 
-    /** Persist the redacted local trace artifact for a completed turn. */
+    /** Persist the redacted local trace artifact for a terminal turn. */
     default void saveTrace(String sessionId, LocalTurnTrace trace) {
         // no-op by default
+    }
+
+    /**
+     * Persists one row and its optional trace through one typed call. The
+     * default preserves legacy store behavior but cannot observe write health.
+     * File stores may report process-observed write outcomes; this is not a
+     * cross-file transaction guarantee.
+     */
+    default TurnEnvelopePersistenceReceipt persistTurnEnvelope(
+            String sessionId,
+            TurnRecord record,
+            LocalTurnTrace trace
+    ) {
+        if (trace != null) {
+            try {
+                saveTrace(sessionId, trace);
+            } catch (Exception ignored) {
+                // Legacy stores expose no write-health signal. Preserve their
+                // fire-and-forget behavior while still attempting the row.
+            }
+        }
+        try {
+            appendTurn(sessionId, record);
+        } catch (Exception ignored) {
+            // The default cannot distinguish a failed write from an
+            // unobservable one, so it must not infer a stronger receipt.
+        }
+        return new TurnEnvelopePersistenceReceipt(
+                TurnEnvelopePersistenceReceipt.State.UNOBSERVED);
     }
 
     /** Load one local trace artifact by id, if available. */

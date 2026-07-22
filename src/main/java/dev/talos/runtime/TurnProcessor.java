@@ -1,6 +1,5 @@
 package dev.talos.runtime;
 
-import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.phase.PhasePolicy;
@@ -18,7 +17,6 @@ import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.intent.TargetRole;
-import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -30,13 +28,14 @@ import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
-import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -63,6 +62,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class TurnProcessor {
 
+    @FunctionalInterface
+    interface TerminalizerFactory {
+        TurnTerminalizer create(int turnNumber, long startNanos);
+    }
+
     private static final Logger LOG = LoggerFactory.getLogger(TurnProcessor.class);
 
     private final TurnRouter modes;
@@ -73,6 +77,8 @@ public final class TurnProcessor {
     private final dev.talos.runtime.command.CommandProfileRegistry commandProfiles;
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
+    private final ThreadLocal<TurnPublicationHealth> publicationHealth = new ThreadLocal<>();
+    private final TerminalizerFactory terminalizerFactory;
 
     /**
      * Primary constructor. All policy parameters are required - the caller
@@ -103,6 +109,25 @@ public final class TurnProcessor {
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy,
                          CheckpointService checkpointService,
                          dev.talos.runtime.command.CommandProfileRegistry commandProfiles) {
+        this(
+                modes,
+                approvalGate,
+                toolRegistry,
+                approvalPolicy,
+                checkpointService,
+                commandProfiles,
+                TurnTerminalizer::new);
+    }
+
+    TurnProcessor(
+            TurnRouter modes,
+            ApprovalGate approvalGate,
+            ToolRegistry toolRegistry,
+            ApprovalPolicy approvalPolicy,
+            CheckpointService checkpointService,
+            dev.talos.runtime.command.CommandProfileRegistry commandProfiles,
+            TerminalizerFactory terminalizerFactory
+    ) {
         this.modes = modes;
         this.approvalGate = Objects.requireNonNull(approvalGate,
                 "approvalGate must not be null - pass NoOpApprovalGate() explicitly "
@@ -116,6 +141,8 @@ public final class TurnProcessor {
                 "checkpointService must not be null");
         this.commandProfiles = Objects.requireNonNullElseGet(commandProfiles,
                 dev.talos.runtime.command.CommandProfileRegistry::defaultRegistry);
+        this.terminalizerFactory = Objects.requireNonNull(
+                terminalizerFactory, "turn terminalizer factory");
     }
 
     public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
@@ -157,23 +184,32 @@ public final class TurnProcessor {
         return false;
     }
 
+    /** Consume process-local evidence-publication health for the calling turn. */
+    public TurnPublicationHealth consumePublicationHealth() {
+        TurnPublicationHealth health = publicationHealth.get();
+        publicationHealth.remove();
+        return health;
+    }
+
     /**
      * Process a single user prompt through the mode system.
      *
-     * <p>After a successful turn, all registered {@link SessionListener}s
-     * receive an {@code onTurnComplete} callback with the result and the
-     * original user input. This centralizes memory updates, audit logging,
-     * and future transcript persistence.
+     * <p>Every allocated turn is terminalized before its thread-local captures
+     * are cleared. Settlement-aware listeners receive the frozen envelope;
+     * legacy completion listeners receive ordinary completions only. Failed
+     * and no-result settlements receive a blank listener input so they cannot
+     * enter conversational memory accidentally.
      *
-     * <p>Exceptions are <em>not</em> caught here - they propagate to the caller
-     * (typically {@code ExecutionPipeline}) which owns the error envelope,
-     * redaction, and audit logging.
+     * <p>Route and terminalization exceptions are rethrown to the caller
+     * (typically {@code ExecutionPipeline}) after bounded local evidence is
+     * published. That caller continues to own the user-facing error envelope,
+     * redaction, and coarse audit logging.
      *
      * @param session   the active session
      * @param userInput raw user input (not a colon-command)
      * @param ctx       runtime context (rag, llm, sandbox, etc.)
      * @return a TurnResult, or null if no mode handled the input
-     * @throws Exception if mode dispatch fails (propagated for envelope handling)
+     * @throws Exception if mode dispatch or terminalization fails after evidence settlement
      */
     @SuppressWarnings("resource") // RuntimeTurnContext-owned LlmClient is borrowed for metadata, not closed per turn.
     public TurnResult process(Session session, String userInput, RuntimeTurnContext ctx) throws Exception {
@@ -181,106 +217,254 @@ public final class TurnProcessor {
             return null;
         }
 
+        publicationHealth.remove();
+        clearCapturedTurnState();
         int turn = session.nextTurn();
         long startNanos = System.nanoTime();
+        Throwable primaryFailure = null;
+        TurnTerminalizer terminalizer;
+        try {
+            terminalizer = Objects.requireNonNull(
+                    terminalizerFactory.create(turn, startNanos),
+                    "turn terminalizer factory returned null");
+        } catch (Throwable constructionFailure) {
+            primaryFailure = constructionFailure;
+            terminalizer = new TurnTerminalizer(turn, startNanos);
+        }
 
-        // Publish the current turn's user request + start the per-turn audit
-        // bag so executeTool(...) (called many times during tool-loop runs)
-        // can consult the request for scope guarding and record its tool
-        // activity without threading extra arguments through every call.
-        TurnUserRequestCapture.set(userInput);
-        TurnAuditCapture.begin();
-        String traceId = LocalTurnTraceCapture.newTraceId();
+        String traceId;
+        try {
+            traceId = LocalTurnTraceCapture.newTraceId();
+        } catch (RuntimeException identityFailure) {
+            if (primaryFailure == null) primaryFailure = identityFailure;
+            traceId = "trc-fallback-" + Integer.toUnsignedString(turn)
+                    + "-" + Long.toUnsignedString(startNanos);
+        }
+        try {
+            TurnUserRequestCapture.set(userInput);
+            TurnAuditCapture.begin();
+            PromptDebugCapture.beginTurn();
+        } catch (RuntimeException captureFailure) {
+            if (primaryFailure == null) primaryFailure = captureFailure;
+        }
+        String traceTimestamp;
+        TurnPublicationHealth terminalizationHealth = null;
+        try {
+            traceTimestamp = java.time.Instant.now().toString();
+        } catch (RuntimeException clockFailure) {
+            traceTimestamp = "";
+            if (primaryFailure == null) primaryFailure = clockFailure;
+        }
+        String sessionId = "";
+
         // Deliberately the bare workspace hash, NOT the per-run session
         // instance id (T799): this value only identifies the workspace
         // inside trace metadata. The storage key for turn logs and trace
         // files is owned by JsonTurnLogAppender's injected id.
-        String sessionId = JsonSessionStore.sessionIdFor(session.workspace());
-        String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
-        String traceMode = modes == null ? "unknown" : modes.traceMode(userInput);
-        LocalTurnTraceCapture.begin(
-                traceId,
-                sessionId,
-                turn,
-                java.time.Instant.now().toString(),
-                sessionId,
-                traceMode,
-                modelBackend(model),
-                modelName(model),
-                userInput);
-        TurnResult turnResult;
+        TurnSettlement settlement = null;
+        TurnExecutionStage failedAt = TurnExecutionStage.TURN_INITIALIZATION;
+        Optional<Result> routed = null;
+        boolean traceStarted = false;
         try {
-            Path ws = session.workspace();
-            Optional<Result> result = modes.route(userInput, ws, ctx);
-
-            if (result.isEmpty()) {
-                return null;
-            }
-
-            long elapsedNanos = System.nanoTime() - startNanos;
-
-            // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
-            // For non-RAG turns (AskMode, DevMode), this returns null - expected and correct.
-            RetrievalTrace trace = TurnTraceCapture.consume();
-            if (ctx != null && ctx.executionPhaseState() != null) {
-                TurnAuditCapture.updateFinalPhase(ctx.executionPhaseState().phase().name());
-            }
-            String assistantText = MemoryUpdateListener.extractText(result.get());
-            String committedAssistantText = assistantText == null
-                    ? ""
-                    : MemoryUpdateListener.assistantTextForPersistence(assistantText, userInput);
-            LocalTurnTraceCapture.recordAnswerTransformedForRouting(
-                    committedAssistantText,
-                    LocalTurnTraceCapture.AnswerTransformationReason.SESSION_COMMIT_NORMALIZATION);
-            LocalTurnTraceCapture.recordRoutedAnswerCaptured(committedAssistantText);
-            String resultStatus = JsonTurnLogAppender.statusOf(result.get())
-                    .toUpperCase(java.util.Locale.ROOT);
-            LocalTurnTraceCapture.recordOutcomeIfAbsent(
-                    resultStatus,
-                    "NOT_RUN",
-                    "UNKNOWN",
-                    "UNKNOWN",
-                    fallbackOutcomeClassification(resultStatus, TurnAuditCapture.currentPolicyTrace()));
-            LocalTurnTrace localTrace = LocalTurnTraceCapture.complete();
-            TurnAudit audit = TurnAuditCapture.end().withLocalTrace(localTrace);
-
-            turnResult = new TurnResult(
-                    result.get(),
-                    trace,
+            // Begin every turn-owned capture before mode/provider preparation.
+            // The local trace owns the stage marker and therefore its lifetime.
+            sessionId = JsonSessionStore.sessionIdFor(session.workspace());
+            LocalTurnTraceCapture.begin(
+                    traceId,
+                    sessionId,
                     turn,
-                    Duration.ofNanos(elapsedNanos),
-                    audit
-            );
-        } finally {
-            TurnUserRequestCapture.clear();
-            LocalTurnTraceCapture.clear();
-            // Defensive: if we hit a return/throw above before end() fired,
-            // ensure the thread-local bag is cleaned up.
-            if (TurnAuditCapture.isActive()) {
-                TurnAuditCapture.end();
+                    traceTimestamp,
+                    sessionId,
+                    "unknown",
+                    "",
+                    "",
+                    userInput);
+            traceStarted = traceId.equals(LocalTurnTraceCapture.currentTraceId());
+            if (!traceStarted) {
+                throw new IllegalStateException("turn trace identity did not bind");
             }
+            if (primaryFailure == null) {
+                String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
+                String traceMode = modes == null ? "unknown" : modes.traceMode(userInput);
+                LocalTurnTraceCapture.updateRuntimeMetadata(
+                        traceMode, modelBackend(model), modelName(model));
+                Path ws = session.workspace();
+                LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.MODE_ROUTING);
+                routed = Objects.requireNonNull(
+                        modes.route(userInput, ws, ctx),
+                        "turn router returned null result");
+            }
+        } catch (Throwable failure) {
+            if (primaryFailure == null) primaryFailure = failure;
+            traceStarted = traceId.equals(LocalTurnTraceCapture.currentTraceId());
+            failedAt = traceStarted
+                    ? LocalTurnTraceCapture.currentExecutionStage()
+                    : TurnExecutionStage.TURN_INITIALIZATION;
         }
 
-        // Fire post-turn hooks on all listeners
-        for (SessionListener listener : listeners) {
+        // Some filesystem and channel operations consume the interrupted bit.
+        // Publish the already-observed failure with the bit temporarily clear,
+        // then restore it for the caller on every terminal path. The bit is
+        // preservation state only; typed causality still comes from the caught
+        // throwable graph.
+        boolean restoreInterruptAfterSettlement = Thread.interrupted();
+        try {
+        try {
+            if (primaryFailure != null) {
+                settlement = traceStarted
+                        && traceId.equals(LocalTurnTraceCapture.currentTraceId())
+                        ? terminalizer.fail(primaryFailure, failedAt, ctx)
+                        : terminalizer.failWithoutActiveTrace(
+                                primaryFailure,
+                                TurnExecutionStage.TURN_INITIALIZATION,
+                                ctx,
+                                traceId,
+                                sessionId,
+                                traceTimestamp,
+                                userInput);
+            } else if (routed.isEmpty()) {
+                settlement = terminalizer.noResult(ctx);
+            } else {
+                LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.TURN_FINALIZATION);
+                settlement = terminalizer.complete(routed.get(), ctx);
+            }
+        } catch (Throwable terminalFailure) {
+            Throwable evidenceFailure = primaryFailure == null
+                    ? terminalFailure
+                    : primaryFailure;
+            TurnExecutionStage evidenceStage = primaryFailure != null
+                    ? failedAt
+                    : routed != null && routed.isEmpty()
+                            ? TurnExecutionStage.MODE_ROUTING
+                            : TurnExecutionStage.TURN_FINALIZATION;
             try {
-                listener.onTurnComplete(turnResult, userInput);
-            } catch (Exception ignored) {
-                // Listener errors must not break the turn pipeline
+                settlement = terminalizer.recoverAfterTerminalizationFailure(
+                        evidenceFailure,
+                        evidenceStage,
+                        terminalFailure,
+                        traceId,
+                        sessionId,
+                        traceTimestamp);
+            } catch (Throwable recoveryFailure) {
+                terminalizationHealth = TurnPublicationHealth.combine(
+                        TurnPublicationHealth.internalFailure(
+                                terminalFailure.getClass().getName()),
+                        TurnPublicationHealth.internalFailure(
+                                recoveryFailure.getClass().getName()));
             }
+            if (primaryFailure == null) {
+                primaryFailure = terminalFailure;
+            }
+            if (terminalizationHealth == null) {
+                terminalizationHealth = TurnPublicationHealth.internalFailure(
+                        terminalFailure.getClass().getName());
+            }
+        } finally {
+            // The terminal settlement is frozen before any thread-local is
+            // cleared; listeners run only after cleanup so their own provider
+            // activity cannot contaminate this turn's trace.
+            clearCapturedTurnState();
         }
 
-        return turnResult;
+        Throwable publicationFailure = null;
+        if (settlement != null) {
+            try {
+                terminalizationHealth = TurnPublicationHealth.combine(
+                        terminalizationHealth,
+                        publishSettlement(
+                                settlement,
+                                userInput,
+                                primaryFailure != null
+                                        || !settlement.ordinaryCompletion()));
+            } catch (Throwable listenerError) {
+                terminalizationHealth = TurnPublicationHealth.combine(
+                        terminalizationHealth,
+                        TurnPublicationHealth.listenerFailure(
+                                listenerError.getClass().getName()));
+                publicationFailure = listenerError;
+            }
+        }
+        if (terminalizationHealth != null) {
+            publicationHealth.set(terminalizationHealth);
+        }
+
+        if (primaryFailure != null) {
+            rethrow(primaryFailure);
+        }
+        if (publicationFailure != null) {
+            rethrow(publicationFailure);
+        }
+        return settlement == null || settlement.kind() == TurnSettlement.Kind.NO_RESULT
+                ? null
+                : settlement.result();
+        } finally {
+            if (restoreInterruptAfterSettlement) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
-    private static String fallbackOutcomeClassification(String resultStatus, TurnPolicyTrace policyTrace) {
-        if ("OK".equals(resultStatus)
-                && policyTrace != null
-                && policyTrace.hasPolicyData()
-                && !policyTrace.mutationAllowed()) {
-            return TaskCompletionStatus.READ_ONLY_ANSWERED.name();
+    private TurnPublicationHealth publishSettlement(
+            TurnSettlement settlement,
+            String userInput,
+            boolean preserveSettledOutcome
+    ) {
+        String listenerInput = settlement.ordinaryCompletion()
+                ? userInput
+                : "";
+        int completed = 0;
+        int skipped = 0;
+        int degraded = 0;
+        List<TurnPublicationReceipt.Reason> reasons = new ArrayList<>();
+        List<String> exceptionClasses = new ArrayList<>();
+        for (SessionListener listener : listeners) {
+            try {
+                TurnPublicationReceipt receipt = listener.onTurnSettled(
+                        settlement, listenerInput);
+                if (receipt == null) {
+                    degraded++;
+                    reasons.add(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION);
+                } else {
+                    switch (receipt.status()) {
+                        case COMPLETE -> completed++;
+                        case SKIPPED -> skipped++;
+                        case DEGRADED -> {
+                            degraded++;
+                            reasons.add(receipt.reason());
+                        }
+                    }
+                }
+            } catch (Exception listenerFailure) {
+                degraded++;
+                reasons.add(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION);
+                exceptionClasses.add(listenerFailure.getClass().getName());
+            } catch (Error listenerError) {
+                if (!preserveSettledOutcome) throw listenerError;
+                degraded++;
+                reasons.add(TurnPublicationReceipt.Reason.LISTENER_EXCEPTION);
+                exceptionClasses.add(listenerError.getClass().getName());
+            }
         }
-        return "TURN_RECORDED";
+        return new TurnPublicationHealth(
+                completed, skipped, degraded, reasons, exceptionClasses);
+    }
+
+    private static void rethrow(Throwable failure) throws Exception {
+        if (failure instanceof Exception exception) throw exception;
+        if (failure instanceof Error error) throw error;
+        throw new RuntimeException(failure);
+    }
+
+    private static void clearCapturedTurnState() {
+        TurnUserRequestCapture.clear();
+        TurnTaskContractCapture.clear();
+        TurnSourceEvidenceCapture.clear();
+        TurnTraceCapture.clear();
+        LocalTurnTraceCapture.clear();
+        if (TurnAuditCapture.isActive()) {
+            TurnAuditCapture.end();
+        }
+        PromptDebugCapture.endTurn();
     }
 
     private static String modelBackend(String model) {
@@ -328,6 +512,15 @@ public final class TurnProcessor {
      * running on this thread.
     */
     public ToolResult executeTool(Session session, ToolCall call, RuntimeTurnContext ctx) {
+        return executeToolWithinStage(() -> executeToolWithDirectAuthority(
+                session, call, ctx));
+    }
+
+    private ToolResult executeToolWithDirectAuthority(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx
+    ) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
         }
@@ -361,6 +554,16 @@ public final class TurnProcessor {
             ToolCall call,
             RuntimeTurnContext ctx,
             LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit) {
+        return executeToolWithinStage(() -> executeToolAfterParsedWithinStage(
+                session, call, ctx, parsedPermit));
+    }
+
+    private ToolResult executeToolAfterParsedWithinStage(
+            Session session,
+            ToolCall call,
+            RuntimeTurnContext ctx,
+            LocalTurnTraceCapture.ParsedToolCallPermit parsedPermit
+    ) {
         if (!LocalTurnTraceCapture.consumeToolCallParsedPermit(parsedPermit, call)) {
             return ToolResult.fail(ToolError.invalidAuthority(
                     ToolFailureReason.TOOL_EXECUTION_AUTHORITY_INVALID,
@@ -863,6 +1066,10 @@ public final class TurnProcessor {
         try {
             result = toolRegistry.execute(call, toolCtx);
         } catch (Exception e) {
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
             LOG.warn("Tool {} threw unexpected exception: {} - returning fail result instead of crashing turn",
                     call.toolName(), SafeLogFormatter.throwableMessage(e));
             LOG.debug("Tool execution exception stack trace suppressed; sanitized reason={}",
@@ -880,6 +1087,23 @@ public final class TurnProcessor {
                 result.success(),
                 result.success() ? "" : toolFailureReason(result));
         return result;
+    }
+
+    private ToolResult executeToolWithinStage(ToolExecution execution) {
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(TurnExecutionStage.TOOL_EXECUTION);
+        try {
+            ToolResult result = execution.run();
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
+            return result;
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        }
+    }
+
+    @FunctionalInterface
+    private interface ToolExecution {
+        ToolResult run();
     }
 
     /** Access the approval gate (for future use by modes/capabilities). */

@@ -1,19 +1,17 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
-import dev.talos.core.util.UiChrome;
-import dev.talos.safety.SafeLogFormatter;
+import dev.talos.runtime.TurnExecutionStage;
+import dev.talos.runtime.TurnFailureClassifier;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 final class ToolRepromptChatExecutor {
-    private static final Logger LOG = LoggerFactory.getLogger(ToolRepromptChatExecutor.class);
     private static final String NO_ANSWER_AFTER_TOOL_EXECUTION = "(no answer from model after tool execution)";
 
     private ToolRepromptChatExecutor() {
@@ -26,6 +24,7 @@ final class ToolRepromptChatExecutor {
             ChatRequestControls controls,
             String retryName
     ) {
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
         try {
             return executeResult(
                     state,
@@ -34,33 +33,21 @@ final class ToolRepromptChatExecutor {
                     controls,
                     NO_ANSWER_AFTER_TOOL_EXECUTION);
         } catch (EngineException.ContextBudgetExceeded budget) {
+            LocalTurnTraceCapture.enterExecutionStage(priorStage);
             return ToolRepromptContextBudgetHandler.handle(state, budget, retryName);
-        } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Model engine not reachable during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
-            state.finishWithAnswer(connectionFailedAnswer(cf));
-            return false;
-        } catch (EngineException.ModelNotFound mnf) {
-            LOG.warn("Model not found during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.value(mnf.model()));
-            state.finishWithAnswer(UiChrome.MODEL_NOT_FOUND_OPEN + mnf.model() + UiChrome.MODEL_NOT_FOUND_MARKER
-                    + " - tool loop aborted. " + mnf.guidance() + "]");
-            return false;
-        } catch (EngineException ee) {
-            LOG.warn("Engine error during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(ee));
-            state.finishWithAnswer(UiChrome.ENGINE_ERROR_PREFIX + " during tool loop: " + ee.getMessage() + "]");
-            return false;
+        } catch (RuntimeException failure) {
+            if (TurnFailureClassifier.isCancellation(failure)
+                    || TurnFailureClassifier.isInterruption(failure)) {
+                throw TurnFailureClassifier.propagateControlFlow(failure);
+            }
+            throw failure;
         } catch (Exception e) {
-            LOG.warn("LLM call failed during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(e));
-            state.finishWithAnswer("(error during follow-up LLM call: " + e.getMessage() + ")");
-            return false;
+            if (TurnFailureClassifier.isCancellation(e)
+                    || TurnFailureClassifier.isInterruption(e)) {
+                throw TurnFailureClassifier.propagateControlFlow(e);
+            }
+            throw new RuntimeException(e);
         }
-    }
-
-    static String connectionFailedAnswer(EngineException.ConnectionFailed cf) {
-        return "[Model engine not reachable - tool loop aborted. " + cf.guidance() + "]";
     }
 
     static boolean executeResult(
@@ -108,11 +95,19 @@ final class ToolRepromptChatExecutor {
                         .withToolAuthorityMode(
                                 state.ctx.llm().toolAuthorityModeForToolSurface(
                                         repromptToolSpecs));
-        LlmClient.StreamResult repromptResult =
-                state.ctx.llm().chatFull(
-                        requestMessages,
-                        repromptToolSpecs,
-                        authorityBoundControls);
+        TurnExecutionStage priorStage = LocalTurnTraceCapture.currentExecutionStage();
+        LocalTurnTraceCapture.enterExecutionStage(
+                TurnExecutionStage.GENERATION_COORDINATION);
+        LlmClient.StreamResult repromptResult;
+        try {
+            repromptResult = state.ctx.llm().chatFull(
+                    requestMessages,
+                    repromptToolSpecs,
+                    authorityBoundControls);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        }
+        LocalTurnTraceCapture.enterExecutionStage(priorStage);
         return applyResult(
                 state,
                 repromptResult,

@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.llm.ScriptedNativeLlmClient;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ProviderResponseCapture;
 import dev.talos.spi.types.ToolSpec;
@@ -18,9 +19,12 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DeniedMutationResponseOnlySynthesizerTest {
@@ -120,6 +124,51 @@ class DeniedMutationResponseOnlySynthesizerTest {
         assertEquals(DeniedMutationResponseOnlySynthesizer.stopMessage(), answer.text());
         assertFalse(answer.capturedGeneration());
         assertEquals(initialMessages, state.messages.size());
+        assertFalse(state.messages.stream().anyMatch(DeniedMutationResponseOnlySynthesizerTest::isPolicyStopPrompt));
+    }
+
+    @Test
+    void directCancellationFromResponseOnlySynthesisPropagatesUnchanged() {
+        CancellationException cancellation = new CancellationException("stop response-only synthesis");
+        LoopState state = state(LlmClient.scriptedFailure(cancellation));
+        int initialMessages = state.messages.size();
+
+        CancellationException thrown = assertThrows(
+                CancellationException.class,
+                () -> DeniedMutationResponseOnlySynthesizer.synthesize(state));
+
+        assertSame(cancellation, thrown);
+        assertEquals(initialMessages, state.messages.size());
+        assertFalse(state.messages.stream().anyMatch(DeniedMutationResponseOnlySynthesizerTest::isPolicyStopPrompt));
+    }
+
+    @Test
+    void genericWrappedCancellationFromResponseOnlySynthesisPropagatesUnchanged() {
+        RuntimeException wrapped = new RuntimeException(
+                new CancellationException("stop response-only synthesis"));
+        LoopState state = state(LlmClient.scriptedFailure(wrapped));
+        int initialMessages = state.messages.size();
+
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> DeniedMutationResponseOnlySynthesizer.synthesize(state));
+
+        assertSame(wrapped, thrown);
+        assertEquals(initialMessages, state.messages.size());
+        assertFalse(state.messages.stream().anyMatch(DeniedMutationResponseOnlySynthesizerTest::isPolicyStopPrompt));
+    }
+
+    @Test
+    void typedEngineFailureWithCancellationCauseStillUsesDeterministicFallback() {
+        CancellationException hiddenCause = new CancellationException("transport detail");
+        LoopState state = state(LlmClient.scriptedFailure(
+                new EngineException.ConnectionFailed("local engine", hiddenCause)));
+
+        DeniedMutationResponseOnlySynthesizer.Result answer =
+                DeniedMutationResponseOnlySynthesizer.synthesize(state);
+
+        assertEquals(DeniedMutationResponseOnlySynthesizer.stopMessage(), answer.text());
+        assertFalse(answer.capturedGeneration());
         assertFalse(state.messages.stream().anyMatch(DeniedMutationResponseOnlySynthesizerTest::isPolicyStopPrompt));
     }
 
